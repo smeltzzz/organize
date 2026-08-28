@@ -62,7 +62,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, IO, List, Optional, Set, Tuple
 
-from common import CoordinationLock
+from common import (
+    EXTERNAL_SRT_CUE_RE,
+    EXTERNAL_SRT_MAX_BYTES,
+    CoordinationLock,
+    decode_srt_bytes,
+    normalize_srt_newlines,
+)
 
 VERSION = "2.5.2"
 
@@ -89,10 +95,8 @@ ORPHAN_MIN_AGE_SECONDS = 60.0
 MIN_OUTPUT_RATIO = 0.50  # remux smaller than 50% of source → reject (likely truncated)
 # Hardlinked movies are always deferred. Replacing one would break the seed
 # link and consume another full movie-sized allocation until seeding ends.
-EXTERNAL_SRT_MAX_BYTES = 4 * 1024 * 1024
-_EXTERNAL_SRT_CUE_RE = re.compile(
-    r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
-)
+# The external-SRT size limit and cue pattern are imported from common.py so
+# this tool cannot drift from the others on what counts as a usable subtitle.
 
 KNOWN_MKVMERGE_PATHS = [
     r"C:\Program Files\MKVToolNix\mkvmerge.exe",
@@ -972,18 +976,12 @@ def validate_exact_external_english_srt(mkv_path: Path) -> Dict[str, Any]:
     except OSError as exc:
         result["reason"] = f"could not read external SRT: {exc}"
         return result
-    text: Optional[str] = None
-    for encoding in ("utf-8-sig", "utf-8", "cp1252"):
-        try:
-            text = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
+    text = decode_srt_bytes(raw)
     if text is None:
         result["reason"] = "external SRT has an unsupported text encoding"
         return result
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    if not _EXTERNAL_SRT_CUE_RE.search(normalized):
+    normalized = normalize_srt_newlines(text)
+    if not EXTERNAL_SRT_CUE_RE.search(normalized):
         result["reason"] = "external SRT does not contain a valid numbered cue"
         return result
     try:

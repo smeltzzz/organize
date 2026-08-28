@@ -44,6 +44,13 @@ EXTERNAL_SRT_CUE_RE = re.compile(
     r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
 )
 
+# The single agreed decode order. Every tool that turns subtitle bytes into
+# text uses this tuple and nothing else, so a tool cannot quietly accept an
+# encoding the others would reject. "utf-8-sig" first so a provider BOM does
+# not make an otherwise valid file look binary; "cp1252" last because it
+# decodes almost any byte sequence and would mask a genuine encoding problem.
+EXTERNAL_SRT_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "cp1252")
+
 __all__ = [
     "STANDARDIZER_LOCK_NAME",
     "LockTimeoutError",
@@ -55,9 +62,32 @@ __all__ = [
     "paths_equal",
     "EXTERNAL_SRT_MAX_BYTES",
     "EXTERNAL_SRT_CUE_RE",
+    "EXTERNAL_SRT_ENCODINGS",
+    "decode_srt_bytes",
+    "normalize_srt_newlines",
     "srt_looks_valid",
     "validate_srt_sidecar",
 ]
+
+
+def normalize_srt_newlines(text: str) -> str:
+    """Collapse CRLF and bare CR to LF so the cue pattern handles one form."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def decode_srt_bytes(raw: bytes) -> str | None:
+    """Decode subtitle bytes in the agreed order, or ``None`` if none applies.
+
+    Callers that need a best-effort string anyway (the fetcher inspects a
+    rejected download to explain why it was rejected) decode with
+    ``errors="replace"`` themselves rather than widening this contract.
+    """
+    for encoding in EXTERNAL_SRT_ENCODINGS:
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return None
 
 
 def srt_looks_valid(text: str) -> bool:
@@ -93,17 +123,10 @@ def validate_srt_sidecar(path: Path) -> tuple[bool, str]:
         raw = path.read_bytes()
     except OSError as exc:
         return False, f"could not read subtitle ({exc.strerror or exc})"
-    text: str | None = None
-    for encoding in ("utf-8-sig", "utf-8", "cp1252"):
-        try:
-            text = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
+    text = decode_srt_bytes(raw)
     if text is None:
         return False, "subtitle has an unsupported text encoding"
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    if not srt_looks_valid(normalized):
+    if not srt_looks_valid(normalize_srt_newlines(text)):
         return False, "subtitle contains no valid SRT cue"
     return True, ""
 

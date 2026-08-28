@@ -14,11 +14,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import common
 from common import (
+    EXTERNAL_SRT_ENCODINGS,
+    EXTERNAL_SRT_MAX_BYTES,
     CoordinationLock,
     LockTimeoutError,
     STANDARDIZER_LOCK_NAME,
     atomic_write_text,
+    decode_srt_bytes,
+    normalize_srt_newlines,
     path_is_within,
     path_norm,
     paths_equal,
@@ -182,6 +187,99 @@ class SrtSidecarContractTests(unittest.TestCase):
                 finally:
                     blocker.release()
             _ = held
+
+
+PLAIN_CUE = "1\n00:00:01,000 --> 00:00:04,000\nDreams are messages.\n"
+INDENTED_CUE = "  1\n00:00:01,000 --> 00:00:04,000\nDreams are messages.\n"
+CRLF_CUE = "1\r\n00:00:01,000 --> 00:00:04,000\r\nDreams are messages.\r\n"
+NOT_A_CUE = "<html>nope</html>"
+
+
+class SharedSrtPrimitiveTests(unittest.TestCase):
+    def test_decode_prefers_utf8_sig(self) -> None:
+        self.assertEqual(decode_srt_bytes("\ufeff1\n".encode("utf-8")), "1\n")
+
+    def test_decode_falls_back_to_cp1252(self) -> None:
+        # 0x92 is a cp1252 right single quote and is invalid UTF-8.
+        self.assertEqual(decode_srt_bytes(b"it\x92s"), "it\u2019s")
+
+    def test_decode_returns_none_when_nothing_applies(self) -> None:
+        # cp1252 accepts almost any byte, so only its five undefined code
+        # positions (0x81, 0x8d, 0x8f, 0x90, 0x9d) are genuinely undecodable.
+        self.assertIsNone(decode_srt_bytes(b"\x81\x8d\x8f\x90\x9d"))
+
+    def test_encoding_order_is_the_documented_one(self) -> None:
+        self.assertEqual(EXTERNAL_SRT_ENCODINGS, ("utf-8-sig", "utf-8", "cp1252"))
+
+    def test_normalize_collapses_crlf_and_bare_cr(self) -> None:
+        self.assertEqual(normalize_srt_newlines("a\r\nb\rc\nd"), "a\nb\nc\nd")
+
+    def test_size_limit_is_four_mebibytes(self) -> None:
+        self.assertEqual(EXTERNAL_SRT_MAX_BYTES, 4 * 1024 * 1024)
+
+
+class SingleSourceContractTests(unittest.TestCase):
+    """No tool may keep a private copy of the subtitle contract.
+
+    ``subtitle_fetcher.looks_like_srt`` used to be a fifth, drifted copy: it
+    anchored the cue number at column 0, so it rejected indented cues that the
+    other four tools accepted, and a perfectly good download was refused at the
+    door. These tests fail if that ever happens again.
+    """
+
+    @staticmethod
+    def _verdicts(text: str) -> dict[str, bool]:
+        import library_auditor  # noqa: F401  (imported so a break there is caught)
+        import mkv_track_cleaner as tc
+        import movie_standardizer as ms
+        import subtitle_fetcher as sf
+
+        normalized = normalize_srt_newlines(text)
+        return {
+            "common": srt_looks_valid(normalized),
+            "movie_standardizer": ms.EXTERNAL_SRT_CUE_RE.search(normalized) is not None,
+            "mkv_track_cleaner": tc.EXTERNAL_SRT_CUE_RE.search(normalized) is not None,
+            "subtitle_fetcher": sf.looks_like_srt(normalized),
+        }
+
+    def test_every_tool_agrees_on_a_plain_cue(self) -> None:
+        verdicts = self._verdicts(PLAIN_CUE)
+        self.assertEqual(set(verdicts.values()), {True}, verdicts)
+
+    def test_every_tool_agrees_on_an_indented_cue(self) -> None:
+        verdicts = self._verdicts(INDENTED_CUE)
+        self.assertEqual(set(verdicts.values()), {True}, verdicts)
+
+    def test_every_tool_agrees_on_crlf_line_endings(self) -> None:
+        verdicts = self._verdicts(CRLF_CUE)
+        self.assertEqual(set(verdicts.values()), {True}, verdicts)
+
+    def test_every_tool_agrees_on_junk(self) -> None:
+        verdicts = self._verdicts(NOT_A_CUE)
+        self.assertEqual(set(verdicts.values()), {False}, verdicts)
+
+    def test_no_tool_keeps_its_own_size_limit(self) -> None:
+        import mkv_track_cleaner as tc
+        import movie_standardizer as ms
+        import subtitle_fetcher as sf
+
+        self.assertEqual(ms.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
+        self.assertEqual(tc.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
+        self.assertEqual(sf.MAX_SUBTITLE_BYTES, EXTERNAL_SRT_MAX_BYTES)
+
+    def test_no_tool_keeps_its_own_cue_pattern(self) -> None:
+        import mkv_track_cleaner as tc
+        import movie_standardizer as ms
+
+        self.assertIs(ms.EXTERNAL_SRT_CUE_RE, common.EXTERNAL_SRT_CUE_RE)
+        self.assertIs(tc.EXTERNAL_SRT_CUE_RE, common.EXTERNAL_SRT_CUE_RE)
+
+    def test_no_tool_keeps_its_own_encoding_list(self) -> None:
+        import subtitle_fetcher as sf
+
+        # cp1252 bytes must decode identically everywhere.
+        raw = b"it\x92s fine"
+        self.assertEqual(decode_srt_bytes(raw), sf.decode_subtitle_bytes(raw))
 
 
 if __name__ == "__main__":

@@ -100,9 +100,13 @@ from functools import lru_cache
 from pathlib import Path
 
 from common import (
+    EXTERNAL_SRT_CUE_RE,
+    EXTERNAL_SRT_MAX_BYTES,
     CoordinationLock,
     LockTimeoutError,
     atomic_write_text,
+    decode_srt_bytes,
+    normalize_srt_newlines,
     path_is_within,
     path_norm,
     paths_equal,
@@ -138,10 +142,8 @@ ARTWORK_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 LOG_FILE = r"E:\torrents\movie_standardizer\movie_standardizer.log"
 REPORT_FILE = r"E:\torrents\movie_standardizer\movie_standardizer_report.txt"
-MAX_EXTERNAL_SRT_BYTES = 4 * 1024 * 1024
-_SRT_CUE_RE = re.compile(
-    r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
-)
+# The external-SRT size limit and cue pattern are imported from common.py so
+# this tool cannot drift from the others on what counts as a usable subtitle.
 
 # Canonical-library contract: output no artwork, extras, cleanup artifacts,
 # or duplicate-management actions—only one MKV and English subtitles.
@@ -1256,7 +1258,7 @@ def is_valid_plain_english_srt(path: Path) -> tuple[bool, str]:
         return False, f"could not stat subtitle: {exc}"
     if path.is_symlink() or not path.is_file():
         return False, "subtitle is not a regular non-symlink file"
-    if st.st_size <= 0 or st.st_size > MAX_EXTERNAL_SRT_BYTES:
+    if st.st_size <= 0 or st.st_size > EXTERNAL_SRT_MAX_BYTES:
         return False, "subtitle size is unsafe"
     suffix_fields = [field.casefold() for field in subtitle_suffix(path.name).split(".") if field]
     if suffix_fields != ["en", "srt"]:
@@ -1265,14 +1267,8 @@ def is_valid_plain_english_srt(path: Path) -> tuple[bool, str]:
         raw = path.read_bytes()
     except OSError as exc:
         return False, f"could not read subtitle: {exc}"
-    text: str | None = None
-    for encoding in ("utf-8-sig", "utf-8", "cp1252"):
-        try:
-            text = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
-    if text is None or not _SRT_CUE_RE.search(text.replace("\r\n", "\n").replace("\r", "\n")):
+    text = decode_srt_bytes(raw)
+    if text is None or not EXTERNAL_SRT_CUE_RE.search(normalize_srt_newlines(text)):
         return False, "subtitle does not contain a valid numbered SRT cue"
     return True, "validated normal English SRT"
 
