@@ -43,7 +43,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Sequence
 
-from common import atomic_write_text, path_is_within, try_file_lock
+from common import MediaProbeCache, atomic_write_text, path_is_within, try_file_lock
 
 # =============================================================================
 # CONFIGURATION  (CLI flags override these)
@@ -53,6 +53,9 @@ SOURCE_DIR = r"E:\torrents\final_organized"
 OUTPUT_DIR = r"E:\torrents\10bit"
 LOG_FILE = r"E:\torrents\10bit\10bit.log"
 REPORT_FILE = r"E:\torrents\10bit\10bit_report.txt"
+# Reused ffprobe output for files whose size and mtime have not changed, so a
+# re-scan of an unchanged library does not respawn ffprobe per movie.
+CACHE_FILE = r"E:\torrents\10bit\10bit_probe_cache.json"
 
 # movie_standardizer.py emits canonical MKV feature files only.
 VIDEO_EXTENSIONS = {".mkv"}
@@ -76,8 +79,10 @@ SKIP_DIR_NAMES = frozenset({
 # CONSTANTS
 # =============================================================================
 
-VERSION = "2.2.0"
-# This inspector is read-only: it writes one append-only log plus one report and never changes media.
+VERSION = "2.3.0"
+# This inspector never changes media. It writes one append-only log, one
+# replaceable report, and (unless --no-cache) one reusable probe cache; all
+# three live outside the media library.
 CREATE_NO_WINDOW = 0x08000000
 LOCK_NAME = ".jellyfin_10bit_inspector.lock"
 
@@ -129,6 +134,8 @@ class Config:
     source_dir: Path = field(default_factory=lambda: Path(SOURCE_DIR))
     log_file: Path = field(default_factory=lambda: Path(LOG_FILE))
     report_file: Path = field(default_factory=lambda: Path(REPORT_FILE))
+    cache_file: Path = field(default_factory=lambda: Path(CACHE_FILE))
+    use_cache: bool = True
     min_file_size_mb: float = MIN_FILE_SIZE_MB
     workers: int = MAX_CPU_WORKERS
     timeout: float = PROBE_TIMEOUT_SEC
@@ -633,9 +640,14 @@ def run_ffprobe(binary: str, file_path: Path, cfg: Config) -> dict[str, Any]:
     return payload
 
 
-def inspect_movie(file_path: Path, cfg: Config) -> ProbeResult:
+def inspect_movie(
+    file_path: Path,
+    cfg: Config,
+    cache: MediaProbeCache | None = None,
+) -> ProbeResult:
     try:
-        size = file_path.stat().st_size
+        file_stat = file_path.stat()
+        size = file_stat.st_size
     except OSError as exc:
         return ProbeResult(
             path=str(file_path),
@@ -645,9 +657,18 @@ def inspect_movie(file_path: Path, cfg: Config) -> ProbeResult:
             error=str(exc),
         )
     try:
-        payload = run_ffprobe(cfg.ffprobe, file_path, cfg)
+        # Only the ffprobe output is cached, never the classification below:
+        # result_from_probe runs on every call so a change in the rules or in
+        # the file is never masked by a stale verdict.
+        payload = cache.get(file_path, size, file_stat.st_mtime_ns) if cache is not None else None
+        if payload is None:
+            payload = run_ffprobe(cfg.ffprobe, file_path, cfg)
+            if cache is not None:
+                cache.put(file_path, size, file_stat.st_mtime_ns, payload)
         return result_from_probe(str(file_path), payload, size_bytes=size)
     except Exception as exc:
+        # Failures are deliberately not cached: a transient ffprobe problem
+        # must not become a sticky verdict for that movie.
         return ProbeResult(
             path=str(file_path),
             status=STATUS_ERROR,
@@ -820,6 +841,8 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append(f"Report path must be outside --source: {cfg.report_file}")
     if path_is_within(cfg.log_file, cfg.source_dir):
         errors.append(f"Log path must be outside --source: {cfg.log_file}")
+    if cfg.use_cache and path_is_within(cfg.cache_file, cfg.source_dir):
+        errors.append(f"Cache path must be outside --source: {cfg.cache_file}")
     if os.path.normcase(os.path.normpath(str(cfg.log_file))) == os.path.normcase(os.path.normpath(str(cfg.report_file))):
         errors.append("--log and --report must be different files")
     return errors
@@ -867,11 +890,15 @@ def scan(cfg: Config) -> int:
     def _store(res: ProbeResult) -> None:
         results.append(res)
 
+    cache = MediaProbeCache(cfg.cache_file, tool="10bit", enabled=cfg.use_cache)
+    if cfg.use_cache:
+        log(f"Probe cache: {cfg.cache_file} ({len(cache)} entries loaded)")
+
     if files:
         workers = max(1, min(cfg.workers, len(files)))
         try:
             with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="probe") as pool:
-                futs = {pool.submit(inspect_movie, p, cfg): p for p in files}
+                futs = {pool.submit(inspect_movie, p, cfg, cache): p for p in files}
                 for fut in as_completed(futs):
                     path = futs[fut]
                     try:
@@ -897,6 +924,10 @@ def scan(cfg: Config) -> int:
                     log(f"[{done}/{total}] {tag:<9} {path.name}")
         except KeyboardInterrupt:
             log("\nInterrupted — writing partial results.")
+
+    cache.save()
+    if cfg.use_cache:
+        log(f"Probe cache: {cache.hits} reused, {cache.misses} probed.")
 
     elapsed = time.perf_counter() - started
     if not write_report(results, cfg, elapsed):
@@ -951,6 +982,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=PROBE_TIMEOUT_SEC, help="ffprobe timeout seconds")
     p.add_argument("--lock-timeout", type=float, default=60.0, metavar="SECONDS", help="Maximum wait for another inspector run")
     p.add_argument("--ffprobe", default="ffprobe", help="ffprobe binary")
+    p.add_argument("--cache", type=Path, default=Path(CACHE_FILE), metavar="PATH",
+                   help="Reusable ffprobe output for unchanged files, outside the media library")
+    p.add_argument("--no-cache", dest="use_cache", action="store_false",
+                   help="Probe every movie again and do not read or write the cache")
+    p.set_defaults(use_cache=True)
     p.add_argument("--fail-if-queue", action="store_true", help="Exit non-zero if known 8-bit SDR movies are queued")
     p.add_argument("--fail-if-review", action="store_true", help="Exit non-zero if a movie requires metadata review")
     p.add_argument("--fail-if-error", action="store_true", help="Exit non-zero if FFprobe cannot inspect a movie")
@@ -976,6 +1012,8 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         dry_run=bool(args.dry_run),
         verbose=bool(args.verbose),
         ffprobe=args.ffprobe,
+        cache_file=args.cache,
+        use_cache=bool(args.use_cache),
     )
 
 
@@ -1137,8 +1175,33 @@ def run_self_tests() -> int:
         report_cfg = Config(source_dir=Path("X:\\lib"), report_file=report_dir / "report.txt")
         _assert(write_report([sdr8], report_cfg, 0.1), "atomic report write", errors)
         _assert(report_cfg.report_file.is_file(), "single report exists", errors)
+        # The default cache lives in the tool's own output dir, so the report
+        # directory still holds exactly one artifact.
         _assert(not list(report_dir.glob("*.json")), "no JSON side output", errors)
         _assert(not list(report_dir.glob("*.tmp")), "no staged report remains", errors)
+
+        # Probe cache: reused only while size and mtime agree, and a cache that
+        # cannot be read is a miss rather than an error.
+        cache_path = report_dir / "probe_cache.json"
+        cache = MediaProbeCache(cache_path, tool="10bit")
+        _assert(cache.get("movie.mkv", 100, 5) is None, "cold cache is a miss", errors)
+        cache.put("movie.mkv", 100, 5, {"streams": []})
+        _assert(cache.get("movie.mkv", 100, 5) == {"streams": []}, "warm cache is a hit", errors)
+        _assert(cache.get("movie.mkv", 101, 5) is None, "size change invalidates", errors)
+        _assert(cache.get("movie.mkv", 100, 6) is None, "mtime change invalidates", errors)
+        cache.save()
+        reloaded = MediaProbeCache(cache_path, tool="10bit")
+        _assert(reloaded.get("movie.mkv", 100, 5) == {"streams": []}, "cache survives a reload", errors)
+        _assert(MediaProbeCache(cache_path, tool="other").get("movie.mkv", 100, 5) is None,
+                "a different tool's cache is not reused", errors)
+        cache_path.write_text("{not json", encoding="utf-8")
+        _assert(MediaProbeCache(cache_path, tool="10bit").get("movie.mkv", 100, 5) is None,
+                "corrupt cache degrades to a miss", errors)
+        disabled = MediaProbeCache(report_dir / "unused.json", tool="10bit", enabled=False)
+        disabled.put("movie.mkv", 1, 1, {"streams": []})
+        _assert(disabled.get("movie.mkv", 1, 1) is None, "--no-cache stores nothing", errors)
+        _assert(not (report_dir / "unused.json").exists(), "--no-cache writes no file", errors)
+        cache_path.unlink()
     finally:
         shutil.rmtree(report_dir, ignore_errors=True)
 

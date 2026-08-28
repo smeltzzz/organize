@@ -6,11 +6,13 @@ import contextlib
 import pathlib
 import datetime
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 import mkv_track_cleaner as tc
+from common import MediaProbeCache
 
 
 class LanguageAndCommentaryTests(unittest.TestCase):
@@ -169,6 +171,100 @@ class RemuxWithoutSrtReportTests(unittest.TestCase):
         text = self._render(_empty_stats())
         self.assertNotIn("REMUXED WITH NO EXTERNAL SRT", text)
         self.assertIn("Remuxed Without SRT       : 0", text)
+
+
+class MetadataCacheWiringTests(unittest.TestCase):
+    """process_mkv must actually consult the cache, not just accept one."""
+
+    INFO = {
+        "container": {"recognized": True, "supported": True,
+                      "properties": {"duration": 6_000_000_000_000}},
+        "tracks": [
+            {"id": 0, "type": "video", "codec": "AVC/H.264/MPEG-4p10", "properties": {
+                "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
+                "display_dimensions": "1920x1080", "tag_number_of_frames": "144000",
+                "flag_default": True}},
+            {"id": 1, "type": "audio", "codec": "AC-3", "properties": {
+                "codec_id": "A_AC3", "language": "eng", "language_ietf": "en",
+                "track_name": "English 5.1", "audio_channels": 6,
+                "audio_sampling_frequency": 48000, "flag_default": True}},
+        ],
+        "attachments": [], "chapters": [],
+    }
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="tc_cache_")
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.movie = self.root / "Film (2020).mkv"
+        self.movie.write_bytes(b"x" * 4096)
+        self.calls: list[str] = []
+
+        def fake_mkvmerge(cmd, on_progress=None):
+            self.calls.append(" ".join(str(part) for part in cmd))
+            if "-J" in cmd:
+                return 0, json.dumps(self.INFO), ""
+            return 1, "", "stub refuses to remux"
+
+        self._real = tc._run_mkvmerge
+        self._real_root = tc._target_root
+        tc._run_mkvmerge = fake_mkvmerge
+        tc._target_root = None  # skip the canonical-layout gate in this unit test
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        tc._run_mkvmerge = self._real
+        tc._target_root = self._real_root
+
+    def _run(self, cache=None) -> dict:
+        stats = {"cleaned": [], "already_clean": [], "skipped_no_english": [],
+                 "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
+                 "total_scanned": 0, "bytes_freed": 0}
+        with contextlib.redirect_stdout(io.StringIO()):
+            tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=True,
+                           log_file_path=None, probe_cache=cache)
+        return stats
+
+    def _cache(self, enabled: bool = True):
+        return MediaProbeCache(self.root / "cache.json", tool="mkv_track_cleaner",
+                               enabled=enabled)
+
+    def test_second_call_reuses_the_metadata(self) -> None:
+        cache = self._cache()
+        self._run(cache)
+        first_calls = len(self.calls)
+        self._run(cache)
+        self.assertEqual(len(self.calls), first_calls, "warm run must not respawn mkvmerge")
+        self.assertGreater(first_calls, 0)
+
+    def test_changed_file_is_reread(self) -> None:
+        cache = self._cache()
+        self._run(cache)
+        before = len(self.calls)
+        self.movie.write_bytes(b"y" * 8192)
+        self._run(cache)
+        self.assertGreater(len(self.calls), before)
+
+    def test_no_cache_rereads_every_time(self) -> None:
+        cache = self._cache(enabled=False)
+        self._run(cache)
+        before = len(self.calls)
+        self._run(cache)
+        self.assertGreater(len(self.calls), before)
+
+    def test_a_deferred_movie_is_never_read_from_cache(self) -> None:
+        # The hardlink gate runs before the metadata read, so a seeded movie
+        # must stay deferred even when its metadata is cached.
+        cache = self._cache()
+        self._run(cache)
+        linked = self.root / "hardlink.mkv"
+        linked.hardlink_to(self.movie)
+        cache.put(self.movie, self.movie.stat().st_size,
+                  self.movie.stat().st_mtime_ns, self.INFO)
+        before = len(self.calls)
+        stats = self._run(cache)
+        self.assertEqual(len(self.calls), before, "deferred movie must not be probed")
+        self.assertEqual(len(stats["deferred_hardlinked"]), 1)
 
 
 if __name__ == "__main__":

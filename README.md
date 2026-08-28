@@ -194,6 +194,42 @@ What `mkv_track_cleaner.py` does to keep that as cheap and safe as possible:
 Because seeding movies are never touched, this only ever happens for a movie you
 have already stopped seeding.
 
+#### The probe cache: why re-runs are cheap
+
+`10bit.py` and `mkv_track_cleaner.py` each spawn one external process per
+movie — `ffprobe` and `mkvmerge -J` respectively — and that, not the filesystem
+walk, is what a maintenance sweep costs. Walking 2,000 movie folders takes
+about 0.15s; probing them does not.
+
+Both tools therefore keep a JSON cache of that probe output, reused only while
+the file's **size and `st_mtime_ns` are both unchanged**:
+
+```
+E:\torrents\10bit\10bit_probe_cache.json
+E:\torrents\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json
+```
+
+Measured on a 30-movie library with a stub `mkvmerge`: a cold run spawned 30
+processes in 2.2s, an unchanged re-run spawned **0** in 0.11s, touching one
+file spawned exactly **1**, and `--no-cache` restored all 30. The reports from
+the cold and warm runs were identical apart from timestamps.
+
+**Only the probe output is cached, never a decision.** This is the part that
+makes it safe. Each tool still re-derives its verdict from live filesystem
+state on every run, so a change the tool must react to is never masked:
+
+- a `.en.srt` appearing beside a movie still makes the cleaner drop embedded
+  subtitle tracks;
+- a hardlink count dropping when seeding stops still releases the deferral;
+- a remux landing still invalidates that entry, because size and mtime changed.
+
+Failures are never cached, so a transient `ffprobe` timeout does not become a
+sticky verdict. The cache is fail-open in both directions: a missing,
+truncated, corrupt or foreign-format cache is a miss rather than an error, and
+a cache that cannot be written costs only the next run's speed. Use
+`--no-cache` to bypass it entirely, or `--cache PATH` to relocate it (it must
+stay outside the media library).
+
 ### Running the manual steps: `pipeline.py`
 
 The standardizer is the qBittorrent hook, so it needs no attention. The other
@@ -376,7 +412,8 @@ py mkv_track_cleaner.py --dry-run
 ```
 
 Key flags: `--dir`, `--only MKV` (repeatable), `--dry-run`, `--mkvmerge PATH`,
-`--log`, `--report`, `--standardizer-lock-timeout SECS`, `--no-color`,
+`--log`, `--report`, `--cache PATH`, `--no-cache`,
+`--standardizer-lock-timeout SECS`, `--no-color`,
 `--nice`, `--min-size MB`, `--limit N`, `--self-test`.
 
 ### 10bit.py
@@ -387,7 +424,7 @@ py 10bit.py --dry-run
 ```
 
 Key flags: `--source`, `--min-size MB`, `--workers N`, `--timeout SECS`,
-`--ffprobe PATH`, `--fail-if-queue`, `--fail-if-review`, `--fail-if-error`,
+`--ffprobe PATH`, `--cache PATH`, `--no-cache`, `--fail-if-queue`, `--fail-if-review`, `--fail-if-error`,
 `--dry-run`, `--verbose`, `--self-test`.
 
 ### library_auditor.py
