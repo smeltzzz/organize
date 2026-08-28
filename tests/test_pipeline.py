@@ -74,15 +74,20 @@ class CommandBuildingTests(unittest.TestCase):
         self.assertNotIn("--limit", pl.build_command(pl.STEPS["auditor"], cfg))
 
     def test_cleaner_specific_flags(self) -> None:
-        cfg = pl.Config(library=self.library, nice=True, allow_hardlinked=True)
-        command = pl.build_command(pl.STEPS["cleaner"], cfg)
+        command = pl.build_command(pl.STEPS["cleaner"],
+                                   pl.Config(library=self.library, nice=True))
         self.assertIn("--nice", command)
-        self.assertIn("--allow-hardlinked", command)
+        self.assertNotIn("--allow-hardlinked", command)
 
     def test_flags_absent_by_default(self) -> None:
         command = pl.build_command(pl.STEPS["cleaner"], pl.Config(library=self.library))
         self.assertNotIn("--nice", command)
         self.assertNotIn("--allow-hardlinked", command)
+
+    def test_no_hardlink_override_exists(self) -> None:
+        """Seeding movies are never remuxed, so the flag must not exist at all."""
+        source = Path(pl.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("--allow-hardlinked", source)
 
 
 class PrerequisiteTests(unittest.TestCase):
@@ -154,8 +159,10 @@ class HintTests(unittest.TestCase):
     """The two silent failure modes get a note at the moment they matter."""
 
     def test_cleaner_warns_about_hardlink_deferral(self) -> None:
-        self.assertIn("DEFERRED", pl.HINTS["cleaner"])
-        self.assertIn("--allow-hardlinked", pl.HINTS["cleaner"])
+        hint = pl.HINTS["cleaner"]
+        self.assertIn("ALWAYS deferred", hint)
+        self.assertNotIn("--allow-hardlinked", hint)
+        self.assertIn("safe - it", hint, "the hint should reassure that deleting is safe")
 
     def test_fetcher_hint_explains_the_ordering(self) -> None:
         self.assertIn("moviehash", pl.HINTS["fetcher"])
@@ -171,21 +178,19 @@ class HintTests(unittest.TestCase):
             seen.append(buf.getvalue())
         finally:
             pl.prerequisite_issue = original
-        self.assertIn("DEFERRED, not cleaned", seen[0])
+        self.assertIn("ALWAYS deferred", seen[0])
 
-    def test_allow_hardlinked_suppresses_the_deferral_hint(self) -> None:
+    def test_deferral_hint_is_always_shown(self) -> None:
+        """No flag can suppress it, because no flag can override the policy."""
         original = pl.prerequisite_issue
         try:
             pl.prerequisite_issue = lambda step: None
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                pl.run_pipeline(
-                    pl.Config(library=pl.HERE, steps=("cleaner",), allow_hardlinked=True),
-                    dry_run=True,
-                )
+                pl.run_pipeline(pl.Config(library=pl.HERE, steps=("cleaner",)), dry_run=True)
         finally:
             pl.prerequisite_issue = original
-        self.assertNotIn("DEFERRED, not cleaned", buf.getvalue())
+        self.assertIn("ALWAYS deferred", buf.getvalue())
 
 
 class SummaryTests(unittest.TestCase):

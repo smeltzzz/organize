@@ -61,7 +61,6 @@ class Step:
     supports_dry_run: bool = True
     supports_limit: bool = True
     supports_nice: bool = False
-    supports_allow_hardlinked: bool = False
 
 
 STEPS: dict[str, Step] = {
@@ -71,7 +70,7 @@ STEPS: dict[str, Step] = {
     ),
     "cleaner": Step(
         key="cleaner", script="mkv_track_cleaner.py", title="Clean MKV tracks (remux)",
-        root_flag="--dir", supports_nice=True, supports_allow_hardlinked=True,
+        root_flag="--dir", supports_nice=True,
     ),
     "10bit": Step(
         key="10bit", script="10bit.py", title="Check 8-bit vs 10-bit / HDR",
@@ -91,7 +90,6 @@ class Config:
     dry_run: bool = False
     limit: int = 0
     nice: bool = False
-    allow_hardlinked: bool = False
     continue_on_error: bool = False
 
 
@@ -99,11 +97,12 @@ class Config:
 # misread as "nothing to do".
 HINTS: dict[str, str] = {
     "cleaner": (
-        "Movies still hardlinked to their qBittorrent source will be DEFERRED, not cleaned. "
-        "If this step cleans nothing, open E:\\torrents\\final: qBittorrent's default "
-        "seed-limit action only pauses the torrent and leaves the file, so the link count "
-        "never drops and the deferral never clears. Delete the source, or re-run with "
-        "--allow-hardlinked."
+        "Movies still hardlinked to their qBittorrent source are ALWAYS deferred, never "
+        "cleaned - there is no override. If this step cleans nothing, open E:\\torrents\\final: "
+        "qBittorrent's default seed-limit action only pauses the torrent and leaves the file, so "
+        "the link count never drops and the deferral never clears. Delete the source (safe - it "
+        "is a hardlink, so your library copy keeps the data) or set qBittorrent to remove the "
+        "content when seeding stops."
     ),
     "fetcher": (
         "Runs before the cleaner on purpose: a remux rewrites the OpenSubtitles moviehash, "
@@ -203,8 +202,6 @@ def build_command(step: Step, cfg: Config) -> list[str]:
         command.extend(["--limit", str(cfg.limit)])
     if cfg.nice and step.supports_nice:
         command.append("--nice")
-    if cfg.allow_hardlinked and step.supports_allow_hardlinked:
-        command.append("--allow-hardlinked")
     return command
 
 
@@ -220,7 +217,7 @@ def run_step(step: Step, cfg: Config, dry_run_pipeline: bool = False) -> StepRes
     command = build_command(step, cfg)
     print(f"\n{'=' * 78}\nSTEP {step.key}: {step.title}\n{'=' * 78}", flush=True)
     hint = HINTS.get(step.key)
-    if hint and not (step.key == "cleaner" and cfg.allow_hardlinked):
+    if hint:
         print(f"  note: {hint}", flush=True)
     if dry_run_pipeline:
         print("  would run: " + " ".join(f'"{part}"' if " " in part else part
@@ -318,9 +315,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Pass --limit N to the steps that support it (0 = all)")
     parser.add_argument("--nice", action="store_true",
                         help="Lower remux priority so track cleaning does not starve Jellyfin")
-    parser.add_argument("--allow-hardlinked", action="store_true",
-                        help=("Allow the cleaner to remux movies still hardlinked to their "
-                              "qBittorrent source (costs disk; seeding is unaffected)"))
     parser.add_argument("--continue-on-error", action="store_true",
                         help="Keep going after a step fails instead of stopping")
     parser.add_argument("--list-steps", action="store_true",
@@ -358,7 +352,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         dry_run=bool(args.dry_run),
         limit=max(0, int(args.limit)),
         nice=bool(args.nice),
-        allow_hardlinked=bool(args.allow_hardlinked),
         continue_on_error=bool(args.continue_on_error),
     )
     if not cfg.library.is_dir():
@@ -411,10 +404,9 @@ def run_self_tests() -> int:
           == base + ["--dry-run"], "dry-run flag")
     check(build_command(STEPS["fetcher"], Config(library=library, limit=5))
           == base + ["--limit", "5"], "limit flag")
-    check(build_command(STEPS["cleaner"],
-                        Config(library=library, nice=True, allow_hardlinked=True))
+    check(build_command(STEPS["cleaner"], Config(library=library, nice=True))
           == [sys.executable, str(HERE / "mkv_track_cleaner.py"), "--dir", str(library),
-              "--nice", "--allow-hardlinked"], "cleaner flags")
+              "--nice"], "cleaner flags")
     # The auditor is already read-only, so it has no --dry-run to forward.
     check("--dry-run" not in build_command(STEPS["auditor"],
                                            Config(library=library, dry_run=True)),

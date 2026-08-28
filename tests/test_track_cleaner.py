@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import pathlib
 import datetime
 import io
 import tempfile
@@ -74,12 +75,13 @@ def _empty_stats() -> dict:
 
 
 class HardlinkDeferralTests(unittest.TestCase):
-    """Hardlinked movies defer by default; --allow-hardlinked overrides that.
+    """A movie being seeded is never touched, and there is no override.
 
     movie_standardizer.py is hardlink-only, so every freshly completed movie
     shares an inode with its qBittorrent source. qBittorrent's default "stop
     seeding" action only pauses the torrent and leaves the file, so that link
-    can persist indefinitely and the cleaner would defer the movie forever.
+    can persist indefinitely - which is why the deferral message and the report
+    have to tell the operator exactly how to release it.
     """
 
     def setUp(self) -> None:
@@ -126,10 +128,16 @@ class HardlinkDeferralTests(unittest.TestCase):
         self.assertEqual(stats["errors"], [])
         self.assertEqual(self.calls, [], "mkvmerge must not be invoked on a deferred movie")
 
-    def test_allow_hardlinked_remuxes_anyway(self) -> None:
-        stats = self._run_it(self._hardlinked_movie("Other (2001)"), allow_hardlinked=True)
-        self.assertEqual(stats["deferred_hardlinked"], [])
-        self.assertTrue(self.calls, "mkvmerge should be reached with --allow-hardlinked")
+    def test_there_is_no_override_flag(self) -> None:
+        """The policy is absolute: no flag may remux a movie being seeded."""
+        import subprocess
+
+        help_text = subprocess.run(
+            [__import__("sys").executable, str(pathlib.Path(tc.__file__)), "--help"],
+            capture_output=True, text=True, check=False,
+        ).stdout
+        self.assertNotIn("--allow-hardlinked", help_text)
+        self.assertNotIn("allow_hardlinked", tc.process_mkv.__code__.co_varnames)
 
 
 class RemuxWithoutSrtReportTests(unittest.TestCase):

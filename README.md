@@ -65,6 +65,14 @@ that can use it.
 
 Two properties make this safe rather than merely preferable:
 
+> **On `.en.srt` vs `.eng.srt`:** the suffix is a *local* naming convention for
+> telling Jellyfin which language a sidecar is in. It has no effect on matching —
+> the fetcher sends OpenSubtitles a moviehash and `languages=en`, and only picks
+> the filename *after* a candidate has been chosen. Supporting a second suffix
+> would therefore add zero extra matches while allowing two files to compete for
+> one movie. Every tool here writes and expects exactly `<Title (Year)>.en.srt`,
+> and `library_auditor.py` flags anything else as `NONCANONICAL_SIDECAR`.
+
 - **External sidecars survive everything downstream.** The `.en.srt` lives
   beside the MKV, not inside it, so it is untouched by the track cleaner's remux
   and by any later 10-bit re-encode. Fetch it once and it stays correct.
@@ -130,7 +138,8 @@ finished more than 24 hours ago. If the file is still there, you are in this
 state. The cleaner's report also lists every deferred movie under
 `DEFERRED (STILL HARDLINKED / SEEDED)`.
 
-Three ways out:
+**This deferral is absolute. There is no flag to override it.** A movie that is
+still being seeded is left completely untouched. Two ways to release it:
 
 1. **Let qBittorrent delete the content when seeding stops.** Options →
    BitTorrent → *When ratio reaches* / *When seeding time reaches* → set the
@@ -140,12 +149,29 @@ Three ways out:
    still above zero. This is the cleanest option.
 2. **Delete the source yourself** from `E:\torrents\final` once seeding is done.
    Same reasoning, same safety.
-3. **Run the cleaner with `--allow-hardlinked`.** It remuxes anyway. Seeding is
-   *not* affected — qBittorrent keeps seeding its own copy of the original
-   bytes, since the remux only replaces the library path — but the movie then
-   occupies two copies until you delete the source, and the report will say so.
 
-Option 1 or 2 means the cleaner needs no special flag and costs no extra space.
+#### About the temporary file during a remux
+
+A remux **cannot** rewrite a container in place. `mkvmerge` always reads the
+input and writes a new file, so any track-cleaning step necessarily stages a
+full-size copy of the movie at least briefly. There is no way around it, and no
+tool that avoids it.
+
+What `mkv_track_cleaner.py` does to keep that as cheap and safe as possible:
+
+- the temp file is a **sibling in the same folder**, so it never crosses a
+  filesystem boundary;
+- it **becomes** the new movie rather than being discarded, so the space is not
+  paid twice;
+- **free space is checked first** and the remux is refused outright when there is
+  not enough room — *"not enough free disk space to remux (need X, have Y).
+  Original file left untouched."*;
+- the original is replaced only **after** full post-remux verification, and a
+  crash mid-remux leaves a journaled orphan for review rather than a half-written
+  movie.
+
+Because seeding movies are never touched, this only ever happens for a movie you
+have already stopped seeding.
 
 ### Running the manual steps: `pipeline.py`
 
@@ -164,8 +190,8 @@ python pipeline.py --source "E:\torrents\final_organized"
 # Just fetch subtitles and audit, skipping the remux and the bit-depth scan
 python pipeline.py --steps fetcher,auditor
 
-# Clean even movies still hardlinked to their seed source (costs disk, not ratio)
-python pipeline.py --allow-hardlinked --nice
+# Lower remux priority so cleaning does not starve Jellyfin during playback
+python pipeline.py --nice
 ```
 
 Each tool still runs as its own process with its own locks, logs and reports, so
@@ -182,8 +208,7 @@ python pipeline.py --list-steps
 ```
 
 Key flags: `--source`, `--steps`, `--dry-run`, `--limit N`, `--nice`,
-`--allow-hardlinked`, `--continue-on-error`, `--list-steps`, `--self-test`,
-`--version`.
+`--continue-on-error`, `--list-steps`, `--self-test`, `--version`.
 
 ---
 
@@ -267,7 +292,7 @@ python mkv_track_cleaner.py --dir "E:\torrents\final_organized" --nice
 
 Key flags: `--dir`, `--only MKV` (repeatable), `--dry-run`, `--mkvmerge PATH`,
 `--log`, `--report`, `--standardizer-lock-timeout SECS`, `--no-color`,
-`--nice`, `--min-size MB`, `--limit N`, `--allow-hardlinked`, `--self-test`.
+`--nice`, `--min-size MB`, `--limit N`, `--self-test`.
 
 ### 10bit.py
 

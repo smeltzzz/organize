@@ -15,16 +15,20 @@ Safety:
   * Unique same-directory transaction journal + atomic replace; orphan output is
     recoverable only after durable proof of full verification
   * Coordinates with movie_standardizer.py before scanning/remuxing
-  * Canonical hardlinked movies are deferred while qBittorrent is seeding
-    (--allow-hardlinked overrides this; see the note below)
+  * Canonical hardlinked movies are ALWAYS deferred while qBittorrent is
+    seeding - there is no override flag. A movie being seeded is left alone.
   * Extra folders (Featurettes, Trailers, BDMV, …) are never processed
 
 On hardlink deferral: movie_standardizer.py is hardlink-only, so a completed
 torrent shares an inode with its qBittorrent source and this tool defers it to
 avoid holding two copies. qBittorrent's default seed-limit action only PAUSES
-the torrent and leaves the file, so that deferral can persist indefinitely.
-Seeding is unaffected by remuxing either way - qBittorrent keeps seeding its own
-copy - so --allow-hardlinked is a disk-space tradeoff, not a risk to your ratio.
+the torrent and leaves the file, so that deferral persists until you delete the
+source yourself or configure qBittorrent to remove the content.
+
+On the temporary file: a remux cannot rewrite a container in place, so this tool
+always stages a full-size sibling temp file and atomically swaps it in. That temp
+file becomes the new movie rather than being discarded, free space is verified
+before it starts, and the remux is refused outright when there is not enough room.
 
 Pipeline position: run this AFTER movie_standardizer.py and AFTER
 subtitle_fetcher.py. A remux rewrites the container bytes, which permanently
@@ -1904,7 +1908,6 @@ def process_mkv(
     log_file_path: Optional[str] = LOG_FILE,
     file_index: int = 0,
     file_total: int = 0,
-    allow_hardlinked: bool = False,
 ):
     global _active_temp_file
     if _interrupt_requested:
@@ -1950,30 +1953,24 @@ def process_mkv(
         stats["errors"].append({"name": movie_name, "error": err_msg})
         return
 
+    # Hard policy: never touch a movie that is still being seeded. There is
+    # deliberately no override flag - release the source copy first.
     links = hardlink_count(mkv_path)
-    if links > 1 and not allow_hardlinked:
+    if links > 1:
         reason = f"deferred: {links} hardlinks (seeded source still linked)"
         if _console is not None:
             _console.end_file_inline(reason, kind="skip")
         log(
-            f"{tag}Deferring '{display_name}' because it has {links} hardlinks: the seeded "
-            "source copy still shares this file. Remuxing is safe for seeding either way - "
-            "qBittorrent keeps seeding its own copy - but it holds two full copies of the movie "
-            "until the source is deleted. Note that qBittorrent's default 'stop seeding' action "
-            "only PAUSES the torrent and leaves the file in place, so this can persist forever. "
-            "Either let qBittorrent delete the content when seeding stops, remove the source "
-            "yourself, or re-run with --allow-hardlinked.",
+            f"{tag}Deferring '{display_name}': it has {links} hardlinks, so the seeded source "
+            "copy still shares this file and the movie is still being served. Left completely "
+            "untouched. Note that qBittorrent's default 'stop seeding' action only PAUSES the "
+            "torrent and leaves the file in place, so this can persist forever. Either let "
+            "qBittorrent delete the content when seeding stops, or remove the source yourself. "
+            "There is no flag to force it.",
             level="WARNING", to_console=_console is None, log_file_path=log_file_path,
         )
         stats.setdefault("deferred_hardlinked", []).append({"name": movie_name, "hardlinks": links})
         return
-    if links > 1:
-        log(
-            f"{tag}Remuxing '{display_name}' with {links} hardlinks because --allow-hardlinked "
-            "was given. The seeded source keeps the original bytes and keeps seeding normally; "
-            "this movie now occupies two copies until you delete that source.",
-            level="WARNING", to_console=_console is None, log_file_path=log_file_path,
-        )
 
     try:
         rc, stdout, stderr = _run_mkvmerge([mkvmerge_bin, "-J", str(mkv_path)])
@@ -2427,7 +2424,8 @@ def generate_and_save_report(
             "  IMPORTANT: qBittorrent's default 'stop seeding' action only PAUSES the torrent\n"
             "  and leaves the file in place, so this list can persist indefinitely. Either\n"
             "  configure qBittorrent to delete the content when seeding stops, delete the\n"
-            "  source from E:\\torrents\\final yourself, or re-run with --allow-hardlinked."
+            "  source from E:\\torrents\\final yourself. There is no flag to force it: this\n"
+            "  tool never remuxes a movie that is still being seeded."
         )
         for item in stats["deferred_hardlinked"]:
             lines.append(f"  [~] {item.get('name', '?')}  ({item.get('hardlinks', '?')} hardlinks)")
@@ -2473,7 +2471,7 @@ def generate_and_save_report(
 def _print_startup_banner(
     target_path: Path, mkvmerge_bin: str, mkvmerge_version: str, dry_run: bool,
     audio_langs: Set[str], sub_langs: Set[str], remove_commentary: bool,
-    log_file_path: Optional[str], priority: str = "normal", allow_hardlinked: bool = False,
+    log_file_path: Optional[str], priority: str = "normal",
 ) -> None:
     width = 79
     mode = "DRY-RUN (simulation - no files modified)" if dry_run else "LIVE RUN (modifications will be applied)"
@@ -2491,9 +2489,7 @@ def _print_startup_banner(
         "  Sidecar subtitles   : never modified by this cleaner",
         "  Pipeline order      : movie_standardizer.py -> subtitle_fetcher.py -> this cleaner",
         "  (remuxing first invalidates the OpenSubtitles moviehash; a warning is logged per file)",
-        "  Hardlinked movies   : "
-        + ("remuxed anyway (--allow-hardlinked; two copies until the source is deleted)"
-           if allow_hardlinked else "deferred until qBittorrent releases the source"),
+        "  Hardlinked movies   : always deferred (never remuxed while seeding)",
         f"  Process priority    : {priority}",
         f"  Log file            : {log_file_path or '(disabled)'}",
         "=" * width,
@@ -2531,12 +2527,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--nice", action="store_true", help="Lower process priority so remuxing does not starve Jellyfin")
     parser.add_argument("--min-size", type=float, default=0, metavar="MB", help="Ignore MKVs smaller than this")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N files (0 = all)")
-    parser.add_argument(
-        "--allow-hardlinked", action="store_true",
-        help=("Remux movies that still share a hardlink with the qBittorrent source instead of "
-              "deferring them. Seeding is unaffected - qBittorrent keeps seeding its own copy - "
-              "but the movie then occupies two copies until you delete the source."),
-    )
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
 
@@ -2589,7 +2579,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     _print_startup_banner(
         target_path, mkvmerge_bin, mkvmerge_version, args.dry_run,
         audio_langs_set, sub_langs_set, remove_commentary, args.log, priority_label,
-        allow_hardlinked=args.allow_hardlinked,
     )
     log(f"--- Starting Scan on '{target_path}' ---", log_file_path=args.log)
     log(f"Single report file: '{args.report}'", log_file_path=args.log)
@@ -2705,7 +2694,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                     dry_run=args.dry_run, remove_commentary=remove_commentary,
                     audio_langs=audio_langs_set, sub_langs=sub_langs_set,
                     log_file_path=args.log, file_index=i, file_total=file_total,
-                    allow_hardlinked=args.allow_hardlinked,
                 )
             except KeyboardInterrupt:
                 _interrupt_requested = True
