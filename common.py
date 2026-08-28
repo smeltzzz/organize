@@ -15,6 +15,8 @@ from __future__ import annotations
 import errno
 import hashlib
 import os
+import re
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -25,6 +27,23 @@ from typing import Any
 # no media-library file needs to be created just to coordinate.
 STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
 
+# ---------------------------------------------------------------------------
+# External English SRT sidecar contract
+# ---------------------------------------------------------------------------
+# Every tool in the pipeline that reasons about an external subtitle agrees on
+# the same conservative contract: a plain-text file beside the movie, small,
+# non-empty, and carrying at least one well-formed cue.  The content verdict
+# lives here so a new tool cannot quietly disagree with the others about
+# whether a sidecar is usable.
+#
+# The cue pattern is the tolerant form: leading whitespace before the cue
+# number is accepted, because some muxers and editors indent it.  This is a
+# "does it look like a subtitle at all" test, not a full SRT parser.
+EXTERNAL_SRT_MAX_BYTES = 4 * 1024 * 1024
+EXTERNAL_SRT_CUE_RE = re.compile(
+    r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
+)
+
 __all__ = [
     "STANDARDIZER_LOCK_NAME",
     "LockTimeoutError",
@@ -34,7 +53,59 @@ __all__ = [
     "path_is_within",
     "path_norm",
     "paths_equal",
+    "EXTERNAL_SRT_MAX_BYTES",
+    "EXTERNAL_SRT_CUE_RE",
+    "srt_looks_valid",
+    "validate_srt_sidecar",
 ]
+
+
+def srt_looks_valid(text: str) -> bool:
+    """True when ``text`` contains at least one well-formed SRT cue.
+
+    A file that fails this is not a subtitle: it is an error page, a stub, or a
+    truncated download, and must never be treated as covering a movie.
+    """
+    return bool(EXTERNAL_SRT_CUE_RE.search(text))
+
+
+def validate_srt_sidecar(path: Path) -> tuple[bool, str]:
+    """Conservatively decide whether ``path`` is a usable external SRT.
+
+    Returns ``(True, "")`` only for a regular, non-symlink, non-empty,
+    size-bounded file that decodes as text and contains at least one
+    well-formed cue.  Everything else returns ``(False, reason)`` with a
+    human-readable explanation suitable for a report line.
+
+    This never writes, follows symlinks, or deletes anything.
+    """
+    try:
+        file_stat = path.stat(follow_symlinks=False)
+    except OSError as exc:
+        return False, f"could not stat subtitle ({exc.strerror or exc})"
+    if path.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
+        return False, "not a regular file (symlink or special file)"
+    if file_stat.st_size <= 0:
+        return False, "subtitle file is empty"
+    if file_stat.st_size > EXTERNAL_SRT_MAX_BYTES:
+        return False, f"subtitle exceeds {EXTERNAL_SRT_MAX_BYTES // (1024 * 1024)} MiB safety limit"
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return False, f"could not read subtitle ({exc.strerror or exc})"
+    text: str | None = None
+    for encoding in ("utf-8-sig", "utf-8", "cp1252"):
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        return False, "subtitle has an unsupported text encoding"
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if not srt_looks_valid(normalized):
+        return False, "subtitle contains no valid SRT cue"
+    return True, ""
 
 
 class LockTimeoutError(TimeoutError):

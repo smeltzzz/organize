@@ -11,6 +11,14 @@ It always attempts the exact OpenSubtitles moviehash first. After a hash miss,
 it automatically allows only a high-confidence exact title/year candidate. A
 wrong cut is held for review rather than downloaded.
 
+The position in the pipeline is deliberate, not cosmetic. The moviehash is the
+file size plus the sum of the first and last 64 KiB, and this tool submits it
+with ``moviehash_match=only`` so the provider returns only subtitles uploaded
+against a byte-identical release. ``mkv_track_cleaner.py`` rewrites those bytes,
+so any movie that is remuxed first can never reproduce its release hash again
+and is silently reduced to the far weaker title/year fallback. Fetching first
+keeps the pristine release hash available while it still exists.
+
     py -3 subtitle_fetcher.py --dry-run
     py -3 subtitle_fetcher.py
     py -3 subtitle_fetcher.py --self-test
@@ -1120,8 +1128,17 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
         if path == exact and valid:
             return "covered", path, "validated exact .en.srt"
         if valid:
-            return "review", path, "valid English SRT is not the exact .en.srt sidecar"
-    return "review", candidates[0], "English SRT sidecar is invalid or unsafe"
+            return (
+                "review", path,
+                f"'{path.name}' is a valid English SRT but not the exact .en.srt sidecar; "
+                "rename or remove it to let this movie be fetched",
+            )
+    broken = candidates[0]
+    return (
+        "review", broken,
+        f"'{broken.name}' exists but is unusable (empty, truncated, or not an SRT); "
+        "delete it and re-run to allow a replacement download",
+    )
 
 
 def relative_text(path: Path, root: Path) -> str:
