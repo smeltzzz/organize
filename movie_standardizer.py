@@ -5,9 +5,10 @@ Movie Filename Standardizer for qBittorrent
 Organizes movie downloads into the exact canonical layout
 ``Title (Year)/Title (Year).mkv`` with English subtitle sidecars only.
 
-Zero third-party dependencies. Safe by default: never deletes a unique
-source file, never clobbers a larger encode, never follows a failed
-hard-link with a silent data-destroying overwrite.
+Zero third-party Python dependencies. Initial placement needs no external
+binary; replacing an existing canonical movie uses optional ``ffprobe`` and
+otherwise keeps the existing copy. Safe by default: never deletes a unique
+source file and never follows a failed hard-link with a silent overwrite.
 
 Movies-first: this tool is for movie libraries. TV-name detection exists
 purely to *exclude* TV content; ``--allow-tv`` is an escape hatch for
@@ -86,6 +87,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -158,6 +160,16 @@ JELLYFIN_MODE = False
 
 MIN_YEAR = 1880
 LOCK_NAME = ".movie_standardizer.lock"
+
+# Replacing an existing canonical movie is deliberately much stricter than
+# initial placement. Title/year comes from the canonical destination, while a
+# close runtime match establishes that the files are the same cut. A weighted
+# ffprobe score must then show a meaningful technical upgrade; file size alone
+# is never sufficient.
+DUPLICATE_DURATION_MAX_SECONDS = 30.0
+DUPLICATE_DURATION_MAX_FRACTION = 0.01
+DUPLICATE_MIN_SCORE_GAIN = 10.0
+FFPROBE_TIMEOUT_SECONDS = 30.0
 
 # Plex / Jellyfin extra directory names (compared case-insensitively).
 EXTRA_FOLDER_NAMES = frozenset({
@@ -472,6 +484,7 @@ class Config:
     dry_run: bool = False
     verbose: bool = False
     lock_timeout_seconds: float = 60.0
+    ffprobe: str = "ffprobe"
 
     @property
     def min_movie_bytes(self) -> int:
@@ -1607,8 +1620,228 @@ def _create_hardlink(src: Path, dest: Path) -> None:
     os.link(str(src), str(dest))
 
 
+@dataclass(frozen=True)
+class MediaTechnicalInfo:
+    """Small, stable subset of ffprobe data used for duplicate decisions."""
+
+    duration: float
+    width: int
+    height: int
+    video_codec: str
+    bit_depth: int
+    hdr: bool
+    video_bitrate: int
+    audio_channels: int
+    audio_bitrate: int
+
+    @property
+    def resolution_tier(self) -> int:
+        longest = max(self.width, self.height)
+        if longest >= 3800:
+            return 4  # UHD / 4K
+        if longest >= 2500:
+            return 3  # 1440p-ish
+        if longest >= 1800:
+            return 2  # 1080p
+        if longest >= 1200:
+            return 1  # 720p
+        return 0
+
+
+def find_ffprobe(explicit: str = "ffprobe") -> str | None:
+    """Find ffprobe without making it a prerequisite for initial placement."""
+    candidates: list[str] = []
+    if explicit and explicit != "ffprobe":
+        candidates.append(explicit)
+        explicit_on_path = shutil.which(explicit)
+        if explicit_on_path:
+            candidates.append(explicit_on_path)
+    located = shutil.which("ffprobe") or shutil.which("ffprobe.exe")
+    if located:
+        candidates.append(located)
+    here = Path(__file__).resolve().parent
+    candidates.extend([
+        str(here / "ffprobe.exe"),
+        str(here / "ffprobe"),
+        str(here / "ffmpeg" / "ffprobe.exe"),
+        r"C:\ffmpeg\bin\ffprobe.exe",
+        r"C:\Program Files\ffmpeg\bin\ffprobe.exe",
+        r"C:\Program Files\FFmpeg\bin\ffprobe.exe",
+    ])
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate and candidate not in seen and Path(candidate).is_file():
+            return str(Path(candidate))
+        seen.add(candidate)
+    return None
+
+
+def _probe_int(value: object) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _probe_float(value: object) -> float:
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _stream_bit_depth(stream: dict) -> int:
+    raw = _probe_int(stream.get("bits_per_raw_sample"))
+    if raw:
+        return raw
+    pix_fmt = str(stream.get("pix_fmt") or "").casefold()
+    match = re.search(r"(?:p|p0)(10|12|14|16)(?:le|be)?$", pix_fmt)
+    return int(match.group(1)) if match else 8
+
+
+def _stream_is_hdr(stream: dict) -> bool:
+    transfer = str(stream.get("color_transfer") or "").casefold()
+    if transfer in {"smpte2084", "arib-std-b67", "smpte428"}:
+        return True
+    side_data = " ".join(
+        str(item.get("side_data_type") or "")
+        for item in stream.get("side_data_list") or []
+        if isinstance(item, dict)
+    ).casefold()
+    return any(marker in side_data for marker in ("dovi", "dolby vision", "hdr dynamic"))
+
+
+def probe_media(path: Path, ffprobe: str) -> tuple[MediaTechnicalInfo | None, str]:
+    """Inspect one movie for conservative identity and quality comparison."""
+    command = [
+        ffprobe, "-v", "error", "-show_streams", "-show_format",
+        "-of", "json", str(path),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=FFPROBE_TIMEOUT_SECONDS,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"ffprobe could not inspect {path.name}: {exc}"
+    if completed.returncode != 0:
+        detail = (completed.stderr or "").strip().splitlines()
+        return None, f"ffprobe rejected {path.name}: {detail[-1] if detail else f'exit {completed.returncode}'}"
+    try:
+        payload = json.loads(completed.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        return None, f"ffprobe returned invalid JSON for {path.name}: {exc}"
+
+    streams = payload.get("streams") or []
+    videos = [
+        stream for stream in streams
+        if isinstance(stream, dict)
+        and stream.get("codec_type") == "video"
+        and not _probe_int((stream.get("disposition") or {}).get("attached_pic"))
+    ]
+    if not videos:
+        return None, f"ffprobe found no feature video stream in {path.name}"
+    video = max(videos, key=lambda stream: _probe_int(stream.get("width")) * _probe_int(stream.get("height")))
+    audios = [stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "audio"]
+    audio = max(
+        audios,
+        key=lambda stream: (_probe_int(stream.get("channels")), _probe_int(stream.get("bit_rate"))),
+        default={},
+    )
+    fmt = payload.get("format") if isinstance(payload.get("format"), dict) else {}
+    duration = _probe_float(fmt.get("duration")) or _probe_float(video.get("duration"))
+    width, height = _probe_int(video.get("width")), _probe_int(video.get("height"))
+    if duration <= 0 or width <= 0 or height <= 0:
+        return None, f"ffprobe returned incomplete duration/resolution data for {path.name}"
+    return MediaTechnicalInfo(
+        duration=duration,
+        width=width,
+        height=height,
+        video_codec=str(video.get("codec_name") or "unknown").casefold(),
+        bit_depth=_stream_bit_depth(video),
+        hdr=_stream_is_hdr(video),
+        video_bitrate=_probe_int(video.get("bit_rate")) or _probe_int(fmt.get("bit_rate")),
+        audio_channels=_probe_int(audio.get("channels")),
+        audio_bitrate=_probe_int(audio.get("bit_rate")),
+    ), ""
+
+
+def technical_quality_score(info: MediaTechnicalInfo) -> float:
+    """Balanced score; a replacement still must pass all downgrade guards."""
+    codec_bonus = {
+        "mpeg2video": -3.0, "h264": 0.0, "vp9": 4.0, "hevc": 5.0,
+        "av1": 8.0,
+    }.get(info.video_codec, 0.0)
+    video_mbps = min(info.video_bitrate / 1_000_000.0, 20.0)
+    audio_mbps = min(info.audio_bitrate / 1_000_000.0, 3.0)
+    return (
+        info.resolution_tier * 25.0
+        + (20.0 if info.hdr else 0.0)
+        + info.bit_depth * 3.0
+        + video_mbps * 2.0
+        + info.audio_channels * 1.5
+        + audio_mbps * 2.0
+        + codec_bonus
+    )
+
+
+def _movie_upgrade_decision(src: Path, dest: Path) -> tuple[bool, str]:
+    """Require same-cut identity and a meaningful, non-regressive upgrade."""
+    source_name = parse_video_identity(src, fallback=src.parent)
+    existing_name = parse_movie_name(dest.name)
+    if (source_name.title.casefold(), source_name.year) != (existing_name.title.casefold(), existing_name.year):
+        return False, "conflict: source and canonical title/year identities differ"
+    if source_name.edition or source_name.three_d or source_name.part:
+        markers = ", ".join(filter(None, (source_name.edition, source_name.three_d, source_name.part)))
+        return False, f"conflict: incoming release has alternate-cut/version marker ({markers})"
+
+    ffprobe = find_ffprobe(CFG.ffprobe)
+    if not ffprobe:
+        return False, "conflict: ffprobe unavailable; keeping existing movie (size alone never replaces)"
+    source_info, source_error = probe_media(src, ffprobe)
+    existing_info, existing_error = probe_media(dest, ffprobe)
+    if source_info is None or existing_info is None:
+        return False, f"conflict: {source_error or existing_error}; keeping existing movie"
+
+    duration_gap = abs(source_info.duration - existing_info.duration)
+    duration_limit = max(
+        DUPLICATE_DURATION_MAX_SECONDS,
+        max(source_info.duration, existing_info.duration) * DUPLICATE_DURATION_MAX_FRACTION,
+    )
+    if duration_gap > duration_limit:
+        return False, (
+            f"conflict: runtime differs by {duration_gap:.1f}s (limit {duration_limit:.1f}s); "
+            "likely a different cut"
+        )
+    if source_info.resolution_tier < existing_info.resolution_tier:
+        return False, "conflict: incoming movie has a lower resolution tier"
+    if existing_info.hdr and not source_info.hdr:
+        return False, "conflict: incoming movie would replace HDR with SDR"
+    if source_info.bit_depth < existing_info.bit_depth:
+        return False, "conflict: incoming movie has lower video bit depth"
+    if source_info.audio_channels < existing_info.audio_channels:
+        return False, "conflict: incoming movie has fewer audio channels"
+
+    source_score = technical_quality_score(source_info)
+    existing_score = technical_quality_score(existing_info)
+    gain = source_score - existing_score
+    if gain < DUPLICATE_MIN_SCORE_GAIN:
+        return False, (
+            f"conflict: no clear technical upgrade (score {source_score:.1f} vs "
+            f"{existing_score:.1f}, need +{DUPLICATE_MIN_SCORE_GAIN:.1f})"
+        )
+    return True, (
+        f"verified same-cut technical upgrade (runtime gap {duration_gap:.1f}s; "
+        f"score {source_score:.1f} vs {existing_score:.1f}, +{gain:.1f})"
+    )
+
+
 def should_replace(src: Path, dest: Path) -> tuple[bool, str]:
-    """Decide whether dest should be replaced by src. Never deletes unique data blindly."""
+    """Decide whether a destination may be replaced without relying on size alone."""
     if not dest.exists():
         return True, "missing"
     if paths_equal(src, dest):
@@ -1618,6 +1851,11 @@ def should_replace(src: Path, dest: Path) -> tuple[bool, str]:
             return False, "already-linked"
     except OSError:
         pass
+    if src.suffix.casefold() == CANONICAL_VIDEO_EXTENSION and dest.suffix.casefold() == CANONICAL_VIDEO_EXTENSION:
+        return _movie_upgrade_decision(src, dest)
+
+    # Non-movie sidecars retain their established behavior. The stricter probe
+    # policy applies only to replacement of the canonical MKV.
     src_sz, dest_sz = file_size(src), file_size(dest)
     if src_sz > dest_sz:
         return True, f"src-larger ({src_sz} > {dest_sz})"
@@ -2185,7 +2423,7 @@ def deduplicate_movies(target: Path) -> None:
 # CLI / QBITTORRENT ARGUMENTS
 # =====================================================================
 
-__version__ = "2.9.0"
+__version__ = "3.0.0"
 
 
 def resolve_input_path(positional: Sequence[str]) -> Path | None:
@@ -2230,6 +2468,7 @@ def apply_env(cfg: Config) -> None:
         "MOVIE_STD_MIN_SIZE": ("min_movie_size_mb", float),
         "MOVIE_STD_REPORT": ("report_file", Path),
         "MOVIE_STD_LOCK_TIMEOUT": ("lock_timeout_seconds", float),
+        "MOVIE_STD_FFPROBE": ("ffprobe", str),
         "MOVIE_STD_DRY_RUN": ("dry_run", lambda v: v.lower() in {"1", "true", "yes"}),
     }
     for env, (attr, caster) in mapping.items():
@@ -2252,6 +2491,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-size", type=float, metavar="MB", help="Minimum movie size in MB")
     p.add_argument("--report", type=Path, help="Human-readable text report file (default: E:\\torrents\\movie_standardizer\\movie_standardizer_report.txt)")
     p.add_argument("--lock-timeout", type=float, metavar="SECONDS", help="Maximum wait for another organizer run")
+    p.add_argument(
+        "--ffprobe", default=None, metavar="PATH",
+        help="ffprobe used to verify same-cut technical upgrades before replacing an existing MKV",
+    )
     p.add_argument("--allow-tv", action="store_true", help="Do not skip S01E02-style names")
     p.add_argument("--category", default="", help="qBittorrent %%L — skip if it looks like TV")
     p.add_argument("--dry-run", action="store_true", help="Log actions without writing")
@@ -2275,6 +2518,8 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         cfg.report_file = args.report
     if args.lock_timeout is not None:
         cfg.lock_timeout_seconds = args.lock_timeout
+    if args.ffprobe:
+        cfg.ffprobe = args.ffprobe
     if args.allow_tv:
         cfg.skip_tv_shows = False
     cfg.dry_run = bool(args.dry_run)
@@ -2556,12 +2801,17 @@ def run_canonical_self_tests() -> int:
         guard_dest.parent.mkdir()
         guard_dest.write_bytes(b"destination")
         real_replace = os.replace
+        real_upgrade_decision = globals()["_movie_upgrade_decision"]
         try:
+            # This test isolates atomic activation failure. Duplicate identity
+            # and quality policy is covered separately by the unit suite.
+            globals()["_movie_upgrade_decision"] = lambda *_args: (True, "self-test upgrade")
             os.replace = lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("locked"))
             if process_file_action(guard_src, guard_dest):
                 errors.append("locked destination replacement unexpectedly succeeded")
         finally:
             os.replace = real_replace
+            globals()["_movie_upgrade_decision"] = real_upgrade_decision
         _assert_eq(guard_src.read_bytes(), b"source-replacement", "failed replacement keeps source", errors)
         _assert_eq(guard_dest.read_bytes(), b"destination", "failed replacement keeps destination", errors)
     finally:

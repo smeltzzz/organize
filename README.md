@@ -20,7 +20,7 @@ what happened.
 
 | Script | What it does | Needs |
 | --- | --- | --- |
-| `movie_standardizer.py` | Renames/hardlinks a finished torrent into the canonical **`Title (Year)/Title (Year).mkv`** layout with English subtitles only. The default qBittorrent completion hook (`"%F"`). | none |
+| `movie_standardizer.py` | Renames/hardlinks a finished torrent into the canonical **`Title (Year)/Title (Year).mkv`** layout with English subtitles only. The default qBittorrent completion hook (`"%F"`). Existing movies are replaced only after a same-cut, clear technical-upgrade check. | `ffprobe` only when comparing a duplicate |
 | `mkv_track_cleaner.py` | Remux-only (no re-encode) cleanup: keeps one best English audio track, drops commentary/DVS, keeps SDH/forced subs, and prefers a validated exact `.en.srt`. | `mkvmerge` (MKVToolNix) |
 | `10bit.py` | Uses `ffprobe` to report which movies are **8-bit** (queue for x265 10-bit), and which are already HDR / 10-bit. Fail-closed classification. | `ffprobe` (FFmpeg) |
 | `library_auditor.py` | **Read-only** audit of the direct container file per movie folder: canonical MKV, missing English SRT, unusable SRT sidecar, stem mismatch, non-canonical SRT sidecar, multiple/other/no movie file. | none |
@@ -272,7 +272,9 @@ Importing `common` writes nothing to disk.
 - **Python 3.11+** (uses modern typing, `match`-free but `|` annotations, etc.).
 - **MKVToolNix** (`mkvmerge`) — only for `mkv_track_cleaner.py`. Found on `PATH`
   or in the standard install locations; override with `--mkvmerge`.
-- **FFmpeg** (`ffprobe`) — only for `10bit.py`; override with `--ffprobe`.
+- **FFmpeg** (`ffprobe`) — for `10bit.py`, and for duplicate-upgrade decisions
+  in `movie_standardizer.py`; override with `--ffprobe`. Initial standardizer
+  placement still works without it.
 - **OpenSubtitles consumer API key** — only for the *daily queue* mode of
   `subtitle_fetcher.py`, via `OPENSUBTITLES_API_KEY` (and optionally
   `OPENSUBTITLES_USERNAME` / `OPENSUBTITLES_PASSWORD`).
@@ -302,7 +304,14 @@ python movie_standardizer.py --dry-run --target "E:\torrents\final_organized"
 ```
 
 Key flags: `--target`, `--source`, `--min-size MB`, `--lock-timeout SECS`,
-`--allow-tv`, `--category`, `--dry-run`, `--verbose`, `--self-test`.
+`--ffprobe PATH`, `--allow-tv`, `--category`, `--dry-run`, `--verbose`, `--self-test`.
+
+When a canonical MKV already exists, file size alone never authorizes replacement.
+The standardizer requires the same canonical title/year, rejects alternate-cut,
+3D, and multipart markers, and uses `ffprobe` to require runtimes within 30 seconds
+or 1% plus a meaningful weighted technical-quality gain. Resolution tier, HDR,
+bit depth, and audio channel count cannot regress. If either file cannot be
+probed, the existing movie is kept and the conflict is reported.
 
 ### mkv_track_cleaner.py
 
