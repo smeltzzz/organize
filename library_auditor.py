@@ -28,7 +28,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Sequence
 
-from common import atomic_write_text, path_is_within, try_file_lock
+from common import atomic_write_text, path_is_within, try_file_lock, validate_srt_sidecar
 
 SOURCE_DIR = r"E:\torrents\final_organized"
 OUTPUT_DIR = r"E:\torrents\library_auditor"
@@ -214,11 +214,22 @@ def classify_folder(folder: Path) -> FolderAudit:
         return FolderAudit(folder, "NONCANONICAL_SIDECAR", files, "; ".join(unexpected_srt))
     if not srt_names:
         # Structurally fine, but no external English subtitle yet. This is the
-        # one audit finding that a tool can actually fix, so it is reported as
+        # kind of audit finding another tool can act on, so it is reported as
         # its own state instead of being folded into CANONICAL_MKV.
         return FolderAudit(
             folder, "MISSING_SIDECAR", files,
             "no English .en.srt sidecar; subtitle_fetcher.py can still fetch one",
+        )
+    # The name is right, so check the contents. A sidecar that is empty, an
+    # error page, or a truncated download looks perfectly healthy to a
+    # filename-only audit, but it silently blocks every downstream tool: the
+    # fetcher will not replace a file it thinks is already there and the
+    # cleaner will not trust it. That dead end has to be visible here.
+    usable, reason = validate_srt_sidecar(folder / expected_srt)
+    if not usable:
+        return FolderAudit(
+            folder, "INVALID_SIDECAR", files,
+            f"{expected_srt} is unusable ({reason}); delete it and re-run subtitle_fetcher.py",
         )
     return FolderAudit(folder, "CANONICAL_MKV", files)
 
@@ -271,6 +282,7 @@ def build_report(audit: Audit, cfg: Config) -> str:
     add(f"Folders checked : {len(audit.folders)}")
     add(f"Canonical MKV   : {counts['CANONICAL_MKV']}")
     add(f"Missing Eng SRT : {counts['MISSING_SIDECAR']}")
+    add(f"Invalid Eng SRT : {counts['INVALID_SIDECAR']}")
     add(f"MKV stem mismatch: {counts['MKV_STEM_MISMATCH']}")
     add(f"Noncanonical SRT: {counts['NONCANONICAL_SIDECAR']}")
     add(f"Single other    : {counts['SINGLE_OTHER_CONTAINER']}")
@@ -302,18 +314,24 @@ def build_report(audit: Audit, cfg: Config) -> str:
     if not audit.folders:
         add("No top-level movie folders found.")
 
-    missing = [item.folder.name for item in audit.folders if item.state == "MISSING_SIDECAR"]
+    missing = [
+        (item.folder.name, item.detail)
+        for item in audit.folders
+        if item.state in ("MISSING_SIDECAR", "INVALID_SIDECAR")
+    ]
     if missing:
         add("")
-        add("MOVIES WITH NO EXTERNAL ENGLISH SRT (ACTIONABLE)")
+        add("MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)")
         add("-" * 116)
         add(
-            "These folders have a canonical MKV and no English .en.srt. Run subtitle_fetcher.py"
-            " before mkv_track_cleaner.py: fetching first keeps the pristine release moviehash,"
-            " which is what makes an exact subtitle match possible."
+            "These folders have a canonical MKV but no working English .en.srt. Run"
+            " subtitle_fetcher.py before mkv_track_cleaner.py: fetching first keeps the"
+            " pristine release moviehash, which is what makes an exact subtitle match possible."
+            " An INVALID entry means a sidecar exists but is unusable - delete that file first,"
+            " because no tool will replace a sidecar it believes is already present."
         )
-        for name in missing:
-            add(f"  [ ] {name}")
+        for name, detail in missing:
+            add(f"  [ ] {name}  ({detail})")
     return "\n".join(lines) + "\n"
 
 
@@ -399,9 +417,10 @@ def run_self_tests() -> int:
     try:
         library, output = root / "library", root / "reports"
         library.mkdir(); output.mkdir()
+        valid_srt = "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n"
         (library / "Movie One (2020)").mkdir()
         (library / "Movie One (2020)" / "Movie One (2020).mkv").write_bytes(b"mkv")
-        (library / "Movie One (2020)" / "Movie One (2020).en.srt").write_text("sub", encoding="utf-8")
+        (library / "Movie One (2020)" / "Movie One (2020).en.srt").write_text(valid_srt, encoding="utf-8")
         (library / "Movie One (2020)" / "Featurettes").mkdir()
         (library / "Movie One (2020)" / "Featurettes" / "making-of.mp4").write_bytes(b"extra")
         (library / "Legacy (1999)").mkdir()
@@ -415,14 +434,21 @@ def run_self_tests() -> int:
         (library / "Stem Mismatch (2003)" / "wrong-name.mkv").write_bytes(b"mkv")
         (library / "Sidecar Mismatch (2004)").mkdir()
         (library / "Sidecar Mismatch (2004)" / "Sidecar Mismatch (2004).mkv").write_bytes(b"mkv")
-        (library / "Sidecar Mismatch (2004)" / "Sidecar Mismatch (2004).eng.srt").write_text("sub", encoding="utf-8")
+        (library / "Sidecar Mismatch (2004)" / "Sidecar Mismatch (2004).eng.srt").write_text(valid_srt, encoding="utf-8")
+        # A correctly named sidecar whose contents are unusable is a real defect:
+        # nothing downstream will replace a subtitle it believes is present.
+        (library / "Broken Subs (2005)").mkdir()
+        (library / "Broken Subs (2005)" / "Broken Subs (2005).mkv").write_bytes(b"mkv")
+        (library / "Broken Subs (2005)" / "Broken Subs (2005).en.srt").write_text("sub", encoding="utf-8")
         cfg = Config(source_dir=library, log_file=output / "audit.log", report_file=output / "report.txt", lock_timeout_seconds=0)
         audit = audit_library(cfg)
         states = {item.folder.name: item.state for item in audit.folders}
-        check(states == {"Legacy (1999)": "SINGLE_OTHER_CONTAINER", "Movie One (2020)": "CANONICAL_MKV", "Multiple (2001)": "MULTIPLE_DIRECT_MOVIE_FILES", "No Movie (2002)": "NO_DIRECT_MOVIE_FILE", "Stem Mismatch (2003)": "MKV_STEM_MISMATCH", "Sidecar Mismatch (2004)": "NONCANONICAL_SIDECAR"}, f"folder states {states}")
+        check(states == {"Legacy (1999)": "SINGLE_OTHER_CONTAINER", "Movie One (2020)": "CANONICAL_MKV", "Multiple (2001)": "MULTIPLE_DIRECT_MOVIE_FILES", "No Movie (2002)": "NO_DIRECT_MOVIE_FILE", "Stem Mismatch (2003)": "MKV_STEM_MISMATCH", "Sidecar Mismatch (2004)": "NONCANONICAL_SIDECAR", "Broken Subs (2005)": "INVALID_SIDECAR"}, f"folder states {states}")
         report = build_report(audit, cfg)
         check("Movie One (2020).en.srt" not in report and "making-of.mp4" not in report, "non-direct media leaked into report")
         check("MKV stem mismatch: 1" in report and "Noncanonical SRT: 1" in report, "canonical exception counts")
+        check("Invalid Eng SRT : 1" in report and "MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT" in report,
+              "unusable sidecar reported as actionable")
         atomic_write_text(cfg.report_file, report)
         check(cfg.report_file.read_text(encoding="utf-8") == report, "saved report differs")
         check(not list(output.glob("*.json")), "JSON output exists")

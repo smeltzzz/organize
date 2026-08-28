@@ -22,6 +22,8 @@ from common import (
     path_is_within,
     path_norm,
     paths_equal,
+    srt_looks_valid,
+    validate_srt_sidecar,
 )
 
 
@@ -89,6 +91,83 @@ class CoordinationLockTests(unittest.TestCase):
         lock_b = CoordinationLock("/Data/Library")
         self.assertEqual(lock_a.path, lock_b.path)
         self.assertIn(STANDARDIZER_LOCK_NAME, lock_a.path.name)
+
+
+class SrtSidecarContractTests(unittest.TestCase):
+    """The shared verdict on whether an external SRT is actually usable.
+
+    A file that fails this is not a subtitle but an empty stub, a provider error
+    page, or a truncated download. Treating one as valid silently blocks the
+    pipeline: the fetcher will not replace a sidecar it believes is present and
+    the cleaner will not trust one it cannot parse.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="common_srt_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _write(self, name: str, body: str) -> Path:
+        path = self.root / name
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_accepts_a_well_formed_cue(self) -> None:
+        self.assertTrue(srt_looks_valid("1\n00:00:00,000 --> 00:00:01,000\nHi\n"))
+
+    def test_accepts_period_millisecond_separator(self) -> None:
+        self.assertTrue(srt_looks_valid("1\n00:00:00.000 --> 00:00:01.000\nHi\n"))
+
+    def test_accepts_indented_cue_number(self) -> None:
+        self.assertTrue(srt_looks_valid("  1\n00:00:00,000 --> 00:00:01,000\nHi\n"))
+
+    def test_rejects_non_subtitle_text(self) -> None:
+        for body in ("", "sub", "<html><body>429 Too Many Requests</body></html>",
+                     "1\n00:00:00,000 --> ", "not a subtitle at all"):
+            with self.subTest(body=body[:24]):
+                self.assertFalse(srt_looks_valid(body))
+
+    def test_validator_accepts_a_real_sidecar(self) -> None:
+        ok, reason = validate_srt_sidecar(
+            self._write("a.en.srt", "1\n00:00:00,000 --> 00:00:01,000\nHi\n"))
+        self.assertTrue(ok, reason)
+        self.assertEqual(reason, "")
+
+    def test_validator_rejects_empty_file(self) -> None:
+        ok, reason = validate_srt_sidecar(self._write("b.en.srt", ""))
+        self.assertFalse(ok)
+        self.assertIn("empty", reason)
+
+    def test_validator_rejects_stub_file(self) -> None:
+        ok, reason = validate_srt_sidecar(self._write("c.en.srt", "sub"))
+        self.assertFalse(ok)
+        self.assertIn("cue", reason)
+
+    def test_validator_normalizes_crlf(self) -> None:
+        ok, _ = validate_srt_sidecar(
+            self._write("d.en.srt", "1\r\n00:00:00,000 --> 00:00:01,000\r\nHi\r\n"))
+        self.assertTrue(ok)
+
+    def test_validator_rejects_oversized_file(self) -> None:
+        path = self._write("e.en.srt", "1\n00:00:00,000 --> 00:00:01,000\nHi\n")
+        with path.open("ab") as handle:
+            handle.truncate(4 * 1024 * 1024 + 1)
+        ok, reason = validate_srt_sidecar(path)
+        self.assertFalse(ok)
+        self.assertIn("safety limit", reason)
+
+    def test_validator_rejects_missing_file(self) -> None:
+        ok, reason = validate_srt_sidecar(self.root / "absent.en.srt")
+        self.assertFalse(ok)
+        self.assertIn("could not stat", reason)
+
+    def test_validator_never_follows_a_symlink(self) -> None:
+        target = self._write("real.en.srt", "1\n00:00:00,000 --> 00:00:01,000\nHi\n")
+        link = self.root / "link.en.srt"
+        link.symlink_to(target)
+        ok, reason = validate_srt_sidecar(link)
+        self.assertFalse(ok)
+        self.assertIn("symlink", reason)
 
     def test_times_out_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as td:

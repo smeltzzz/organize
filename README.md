@@ -19,7 +19,7 @@ external binaries are optional and per-tool (`mkvmerge`, `ffprobe`).
 | `movie_standardizer.py` | Renames/hardlinks a finished torrent into the canonical **`Title (Year)/Title (Year).mkv`** layout with English subtitles only. The default qBittorrent completion hook (`"%F"`). | none |
 | `mkv_track_cleaner.py` | Remux-only (no re-encode) cleanup: keeps one best English audio track, drops commentary/DVS, keeps SDH/forced subs, and prefers a validated exact `.en.srt`. | `mkvmerge` (MKVToolNix) |
 | `10bit.py` | Uses `ffprobe` to report which movies are **8-bit** (queue for x265 10-bit), and which are already HDR / 10-bit. Fail-closed classification. | `ffprobe` (FFmpeg) |
-| `library_auditor.py` | **Read-only** audit of the direct container file per movie folder: canonical MKV, missing English SRT, stem mismatch, non-canonical SRT sidecar, multiple/other/no movie file. | none |
+| `library_auditor.py` | **Read-only** audit of the direct container file per movie folder: canonical MKV, missing English SRT, unusable SRT sidecar, stem mismatch, non-canonical SRT sidecar, multiple/other/no movie file. | none |
 | `subtitle_fetcher.py` | Fetches English human-authored UTF-8 SRTs from OpenSubtitles, hash-gated, with a coordination lock and transaction guards. **Run before `mkv_track_cleaner.py`.** | `OPENSUBTITLES_API_KEY` env var |
 
 ### Recommended ordering
@@ -80,6 +80,24 @@ for those files; the fetcher still works, it just leans on identity matching.
 `mkv_track_cleaner.py` warns when it remuxes a movie that has no validated
 external SRT, so the mistake is visible rather than silent.
 
+#### Watch out for unusable `.en.srt` files
+
+A sidecar can be present and still be worthless: an empty file, a truncated
+download, or a provider error page saved under a `.srt` name. **Nothing in this
+pipeline recovers from that on its own.** `subtitle_fetcher.py` will not replace
+a sidecar it believes is already there, and `mkv_track_cleaner.py` will not
+trust one it cannot parse — so the movie simply never acquires a working
+subtitle, and a filename-only audit cheerfully reports it as healthy.
+
+`library_auditor.py` therefore validates sidecar *contents*, not just filenames.
+Anything that is not a real subtitle is reported as `INVALID_SIDECAR` with the
+specific reason and the remedy, and listed alongside the `MISSING_SIDECAR`
+folders in one actionable section.
+
+> **If a movie stubbornly never picks up a subtitle, this is the first thing to
+> check.** Deleting the bad `.en.srt` and re-running `subtitle_fetcher.py` is
+> usually the entire fix.
+
 ---
 
 ## Shared infrastructure
@@ -104,6 +122,13 @@ module: [`common.py`](common.py). It provides:
 - `try_file_lock(handle, *, strict_non_contention)` — the shared low-level
   non-blocking lock attempt used by both the coordination lock and the tools'
   own single-instance run locks.
+
+- `srt_looks_valid(text)` / `validate_srt_sidecar(path)` — the single shared
+  verdict on whether an external SRT is genuinely usable: a regular,
+  non-symlink, non-empty, size-bounded file that decodes as text and contains
+  at least one well-formed cue. Built on `EXTERNAL_SRT_MAX_BYTES` and
+  `EXTERNAL_SRT_CUE_RE`. Keeping one definition stops a new tool from quietly
+  disagreeing with the others about whether a sidecar counts.
 
 Importing `common` writes nothing to disk.
 

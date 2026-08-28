@@ -1128,8 +1128,17 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
         if path == exact and valid:
             return "covered", path, "validated exact .en.srt"
         if valid:
-            return "review", path, "valid English SRT is not the exact .en.srt sidecar"
-    return "review", candidates[0], "English SRT sidecar is invalid or unsafe"
+            return (
+                "review", path,
+                f"'{path.name}' is a valid English SRT but not the exact .en.srt sidecar; "
+                "rename or remove it to let this movie be fetched",
+            )
+    broken = candidates[0]
+    return (
+        "review", broken,
+        f"'{broken.name}' exists but is unusable (empty, truncated, or not an SRT); "
+        "delete it and re-run to allow a replacement download",
+    )
 
 
 def relative_text(path: Path, root: Path) -> str:
