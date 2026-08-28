@@ -198,22 +198,19 @@ have already stopped seeding.
 
 The standardizer is the qBittorrent hook, so it needs no attention. The other
 four tools are manual, and the order between the first two is the one thing you
-must not get wrong. `pipeline.py` runs them for you, in the right order, in one
-command:
+must not get wrong. Open a terminal in this directory and run:
 
-```bash
-# See exactly what would run, without running it
-python pipeline.py --dry-run --source "E:\torrents\final_organized"
+```powershell
+# Normal run using the built-in E:\torrents paths
+py pipeline.py
 
-# The normal weekly sweep
-python pipeline.py --source "E:\torrents\final_organized"
-
-# Just fetch subtitles and audit, skipping the remux and the bit-depth scan
-python pipeline.py --steps fetcher,auditor
-
-# Lower remux priority so cleaning does not starve Jellyfin during playback
-python pipeline.py --nice
+# Preview the commands without running them
+py pipeline.py --dry-run
 ```
+
+No source, target, binary, or policy flags are needed for normal use. The
+advanced CLI options remain available only as recovery/debugging overrides;
+they are not part of the everyday workflow.
 
 Each tool still runs as its own process with its own locks, logs and reports, so
 behaviour is identical to running it by hand. Steps whose prerequisites are
@@ -283,24 +280,58 @@ No Python packages are required at runtime.
 
 ---
 
-## Usage
+## Normal Windows usage
 
-Every script prints a timestamped `[LEVEL] log` to the console and appends to
-an append-only log file, and writes **exactly one** replaceable report. Run
-each with `--self-test` to verify its internal invariants offline (no media,
-no binaries, no credentials required).
+Open PowerShell or Command Prompt in the directory containing these files. The
+normal interface is simply `py` followed by the script name:
+
+```powershell
+py movie_standardizer.py
+py subtitle_fetcher.py
+py mkv_track_cleaner.py
+py 10bit.py
+py library_auditor.py
+
+# Or run the four manual maintenance tools in the correct order:
+py pipeline.py
+```
+
+Every normal path and policy is already built into the scripts for the
+`E:\torrents` layout. `movie_standardizer.py` with no argument batch-scans
+`E:\torrents\final`; qBittorrent supplies the completed item automatically when
+it invokes the configured completion hook. The only everyday optional flag is
+`--dry-run`:
+
+```powershell
+py movie_standardizer.py --dry-run
+py subtitle_fetcher.py --dry-run
+py mkv_track_cleaner.py --dry-run
+py 10bit.py --dry-run
+py pipeline.py --dry-run
+```
+
+`library_auditor.py` is already read-only, so it does not need a dry-run mode.
+The subtitle fetcher still reads the previously configured OpenSubtitles API key
+from the environment; it never requires a credential flag.
+
+Every script prints a timestamped log to the console, appends to its normal log
+file, and writes one replaceable report. Additional CLI options exist only as
+advanced recovery and debugging overrides. They are not required for normal
+operation.
+
+## Advanced command reference
 
 ### movie_standardizer.py
 
-```bash
-# qBittorrent completion hook (content path)
-python movie_standardizer.py "%F"
+```powershell
+# Manual batch scan of E:\torrents\final
+py movie_standardizer.py
 
-# old "%D" "%N" form, and batch-scan SOURCE_DIR when no path is given
-python movie_standardizer.py --target "E:\torrents\final_organized" --source "E:\torrents\final"
+# Preview without touching anything
+py movie_standardizer.py --dry-run
 
-# preview without touching anything
-python movie_standardizer.py --dry-run --target "E:\torrents\final_organized"
+# qBittorrent completion hook (qBittorrent supplies the path)
+py movie_standardizer.py "%F"
 ```
 
 Key flags: `--target`, `--source`, `--min-size MB`, `--lock-timeout SECS`,
@@ -315,9 +346,9 @@ probed, the existing movie is kept and the conflict is reported.
 
 ### mkv_track_cleaner.py
 
-```bash
-python mkv_track_cleaner.py --dry-run --dir "E:\torrents\final_organized"
-python mkv_track_cleaner.py --dir "E:\torrents\final_organized" --nice
+```powershell
+py mkv_track_cleaner.py
+py mkv_track_cleaner.py --dry-run
 ```
 
 Key flags: `--dir`, `--only MKV` (repeatable), `--dry-run`, `--mkvmerge PATH`,
@@ -326,9 +357,9 @@ Key flags: `--dir`, `--only MKV` (repeatable), `--dry-run`, `--mkvmerge PATH`,
 
 ### 10bit.py
 
-```bash
-python 10bit.py --ffprobe ffprobe --source "E:\torrents\final_organized"
-python 10bit.py --dry-run --fail-if-queue   # exit code for CI/automation
+```powershell
+py 10bit.py
+py 10bit.py --dry-run
 ```
 
 Key flags: `--source`, `--min-size MB`, `--workers N`, `--timeout SECS`,
@@ -337,18 +368,21 @@ Key flags: `--source`, `--min-size MB`, `--workers N`, `--timeout SECS`,
 
 ### library_auditor.py
 
-```bash
-python library_auditor.py --source "E:\torrents\final_organized"
+```powershell
+py library_auditor.py
 ```
 
 Key flags: `--source`, `--log`, `--report`, `--lock-timeout SECS`, `--self-test`.
 
 ### subtitle_fetcher.py
 
-```bash
-export OPENSUBTITLES_API_KEY="..."
-python subtitle_fetcher.py --source "E:\torrents\final_organized" --dry-run
+```powershell
+py subtitle_fetcher.py
+py subtitle_fetcher.py --dry-run
 ```
+
+The API key is read automatically from the already configured
+`OPENSUBTITLES_API_KEY` environment variable.
 
 Key flags: `--source`, `--report`, `--log`, `--daily-cap N`, `--min-size MB`,
 `--lock-timeout SECS`, `--limit N`, `--dry-run`, `--no-identity-fallback`,
@@ -362,8 +396,9 @@ Each script has sensible built-in defaults for a Windows `E:\torrents\...`
 library and exposes them via CLI flags. `movie_standardizer.py` additionally
 honors a small set of environment variables (`MOVIE_STD_TARGET`,
 `MOVIE_STD_SOURCE`, `MOVIE_STD_LOG`, `MOVIE_STD_MIN_SIZE`, `MOVIE_STD_REPORT`,
-`MOVIE_STD_LOCK_TIMEOUT`, `MOVIE_STD_DRY_RUN`). `subtitle_fetcher.py` reads its
-OpenSubtitles credentials from the environment.
+`MOVIE_STD_LOCK_TIMEOUT`, `MOVIE_STD_FFPROBE`, `MOVIE_STD_DRY_RUN`). These are
+advanced overrides; normal use needs none of them. `subtitle_fetcher.py` reads
+its OpenSubtitles credentials from the environment.
 
 ---
 
