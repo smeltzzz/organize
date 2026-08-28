@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 
 import library_auditor as la
@@ -158,3 +159,90 @@ class UnusableSidecarReportTests(unittest.TestCase):
         self.assertIn("Bare (2008)", actionable)
         self.assertIn("Broken (2009)", actionable)
         self.assertNotIn("Covered (2010)", actionable)
+
+
+class InFlightRemuxTests(unittest.TestCase):
+    """mkv_track_cleaner.py stages a remux beside the movie it is rewriting."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="auditor_remux_test_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _movie(self, name: str) -> Path:
+        folder = self.root / name
+        folder.mkdir()
+        (folder / f"{name}.mkv").write_bytes(b"x")
+        return folder
+
+    def test_staging_file_is_not_counted_as_a_second_feature(self) -> None:
+        folder = self._movie("Film (2000)")
+        (folder / "Film (2000).en.srt").write_text(VALID_SRT, encoding="utf-8")
+        (folder / "temp_clean_deadbeef__Film (2000).mkv").write_bytes(b"y")
+        self.assertEqual(la.classify_folder(folder).state, "CANONICAL_MKV")
+
+    def test_staging_file_alone_is_not_a_feature(self) -> None:
+        folder = self.root / "Bare (2001)"
+        folder.mkdir()
+        (folder / "temp_clean_deadbeef__Bare (2001).mkv").write_bytes(b"y")
+        self.assertEqual(la.classify_folder(folder).state, "NO_DIRECT_MOVIE_FILE")
+
+    def test_a_real_second_feature_is_still_reported(self) -> None:
+        folder = self._movie("Two (2002)")
+        (folder / "Two (2002).mp4").write_bytes(b"y")
+        self.assertEqual(la.classify_folder(folder).state, "MULTIPLE_DIRECT_MOVIE_FILES")
+
+    def test_transaction_journal_is_ignored(self) -> None:
+        folder = self._movie("Three (2003)")
+        (folder / "Three (2003).en.srt").write_text(VALID_SRT, encoding="utf-8")
+        (folder / ".track_cleaner.deadbeef.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(la.classify_folder(folder).state, "CANONICAL_MKV")
+
+    def test_a_real_movie_named_like_the_prefix_is_still_counted(self) -> None:
+        # The filter is prefix-anchored, not a substring match, so a genuine
+        # feature whose title merely starts with the token is not hidden.
+        folder = self.root / "Temp Clean (2004)"
+        folder.mkdir()
+        (folder / "Temp Clean (2004).mkv").write_bytes(b"x")
+        (folder / "Temp Clean (2004).en.srt").write_text(VALID_SRT, encoding="utf-8")
+        self.assertEqual(la.classify_folder(folder).state, "CANONICAL_MKV")
+
+
+class ExitCodeGateTests(unittest.TestCase):
+    """The exit status is what a scheduler can act on; the report is for humans."""
+
+    def test_default_is_zero_even_with_defects(self) -> None:
+        counts = Counter({"CANONICAL_MKV": 3, "MKV_STEM_MISMATCH": 1})
+        self.assertEqual(la.exit_code_for(counts, la.Config()), 0)
+
+    def test_fail_on_defects_flags_layout_problems(self) -> None:
+        counts = Counter({"CANONICAL_MKV": 3, "MKV_STEM_MISMATCH": 1})
+        self.assertEqual(la.exit_code_for(counts, la.Config(fail_on_defects=True)), 1)
+
+    def test_missing_sidecar_is_not_a_defect(self) -> None:
+        # A freshly standardized movie has no sidecar until the fetcher runs,
+        # so counting it would make the gate fail on every healthy new library.
+        counts = Counter({"CANONICAL_MKV": 3, "MISSING_SIDECAR": 2})
+        self.assertEqual(la.exit_code_for(counts, la.Config(fail_on_defects=True)), 0)
+        self.assertEqual(la.exit_code_for(counts, la.Config(fail_on_findings=True)), 1)
+
+    def test_invalid_sidecar_is_a_defect(self) -> None:
+        counts = Counter({"CANONICAL_MKV": 3, "INVALID_SIDECAR": 1})
+        self.assertEqual(la.exit_code_for(counts, la.Config(fail_on_defects=True)), 1)
+
+    def test_clean_library_passes_both_gates(self) -> None:
+        counts = Counter({"CANONICAL_MKV": 5})
+        cfg = la.Config(fail_on_defects=True, fail_on_findings=True)
+        self.assertEqual(la.exit_code_for(counts, cfg), 0)
+
+    def test_every_defect_state_is_covered(self) -> None:
+        for state in la.DEFECT_STATES:
+            counts = Counter({state: 1})
+            self.assertEqual(
+                la.exit_code_for(counts, la.Config(fail_on_defects=True)), 1,
+                f"{state} should trip --fail-on-defects",
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

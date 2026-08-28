@@ -138,6 +138,164 @@ class DuplicateUpgradeTests(unittest.TestCase):
         self.assertFalse(replace)
         self.assertIn("alternate-cut", reason)
 
+class _RunStateMixin(unittest.TestCase):
+    """Isolate the module-level run state that record_outcome mutates."""
+
+    def setUp(self) -> None:
+        self._cfg, self._summary, self._events = ms.CFG, ms.RUN_SUMMARY, ms.RUN_EVENTS
+        self._td = tempfile.TemporaryDirectory(prefix="ms_runstate_")
+        self.root = Path(self._td.name)
+        ms.CFG = ms.Config(
+            source_dir=self.root / "final",
+            target_dir=self.root / "lib",
+            log_file=None,
+            report_file=self.root / "out" / "report.txt",
+        )
+        ms.RUN_SUMMARY = ms.RunSummary()
+        ms.RUN_EVENTS = []
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        ms.CFG, ms.RUN_SUMMARY, ms.RUN_EVENTS = self._cfg, self._summary, self._events
+        self._td.cleanup()
+
+
+class DeclinedSourceTests(_RunStateMixin):
+    """A declined download must be a durable outcome, not just a log line."""
+
+    def test_decline_counts_as_skipped(self) -> None:
+        ms.decline_source(self.root / "final" / "Film.1995.mkv", "small file")
+        self.assertEqual(ms.RUN_SUMMARY.skipped, 1)
+
+    def test_decline_records_source_and_reason(self) -> None:
+        item = self.root / "final" / "Film.1995.mkv"
+        ms.decline_source(item, "not an MKV; this tool never transcodes")
+        event = ms.RUN_EVENTS[-1]
+        self.assertEqual(event["action"], "left in source")
+        self.assertEqual(event["source"], str(item))
+        self.assertEqual(event["reason"], "not an MKV; this tool never transcodes")
+
+    def test_small_file_decline_is_recorded(self) -> None:
+        final = self.root / "final"
+        final.mkdir(parents=True)
+        small = final / "Small.Movie.1995.1080p.mkv"
+        small.write_bytes(b"x" * 1024)
+        ms.CFG.min_movie_size_mb = 300
+        ms.handle_single_file(small)
+        self.assertEqual(ms.RUN_SUMMARY.skipped, 1)
+        self.assertIn("300 MB minimum", ms.RUN_EVENTS[-1]["reason"])
+
+    def test_non_mkv_decline_is_recorded(self) -> None:
+        final = self.root / "final"
+        final.mkdir(parents=True)
+        other = final / "Big.Movie.2020.1080p.mp4"
+        other.write_bytes(b"x" * 1024)
+        ms.CFG.min_movie_size_mb = 0
+        ms.handle_single_file(other)
+        self.assertIn("not an MKV", ms.RUN_EVENTS[-1]["reason"])
+
+    def test_report_has_a_left_in_source_section(self) -> None:
+        ms.decline_source(self.root / "final" / "Small.1995.mkv", "smaller than the 300 MB minimum")
+        ms.decline_source(self.root / "final" / "Parts.2018", "multipart fragments")
+        report = self._capture_report()
+        self.assertIn("ITEMS LEFT IN SOURCE", report)
+        self.assertIn("Small.1995.mkv", report)
+        self.assertIn("multipart fragments", report)
+        self.assertIn("Skipped              : 2", report)
+
+    def test_section_is_absent_when_nothing_was_declined(self) -> None:
+        ms.record_outcome("completed", "HARDLINK", src=self.root / "a", dest=self.root / "b")
+        self.assertNotIn("ITEMS LEFT IN SOURCE", self._capture_report())
+
+    def _capture_report(self) -> str:
+        import contextlib
+        import io
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            ms.write_report()
+        return buffer.getvalue()
+
+
+class MaintenanceOptionTests(unittest.TestCase):
+    """--maintenance-mode / --quarantine-dir / --manifest were validated but unreachable."""
+
+    def test_options_parse(self) -> None:
+        args = ms.build_parser().parse_args([
+            "--deduplicate",
+            "--maintenance-mode", "QUARANTINE",
+            "--quarantine-dir", "/tmp/quarantine",
+            "--manifest", "/tmp/manifest.json",
+        ])
+        cfg = ms.cfg_from_args(args)
+        self.assertTrue(cfg.enable_deduplication)
+        self.assertEqual(cfg.maintenance_mode, "QUARANTINE")
+        self.assertEqual(cfg.quarantine_dir, Path("/tmp/quarantine"))
+        self.assertEqual(cfg.manifest_file, Path("/tmp/manifest.json"))
+
+    def test_defaults_stay_non_destructive(self) -> None:
+        cfg = ms.cfg_from_args(ms.build_parser().parse_args([]))
+        self.assertEqual(cfg.maintenance_mode, "REPORT")
+        self.assertFalse(cfg.enable_deduplication)
+        self.assertIsNone(cfg.quarantine_dir)
+        self.assertIsNone(cfg.manifest_file)
+
+    def test_quarantine_requires_a_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "final").mkdir()
+            (root / "lib").mkdir()
+            args = ms.build_parser().parse_args([
+                "--source", str(root / "final"),
+                "--target", str(root / "lib"),
+                "--log", str(root / "run.log"),
+                "--report", str(root / "report.txt"),
+                "--maintenance-mode", "QUARANTINE",
+            ])
+            errors = ms.validate_config(ms.cfg_from_args(args))
+        self.assertEqual(errors, ["QUARANTINE maintenance mode requires --quarantine-dir"])
+
+    def test_manifest_inside_the_library_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "final").mkdir()
+            (root / "lib").mkdir()
+            args = ms.build_parser().parse_args([
+                "--source", str(root / "final"),
+                "--target", str(root / "lib"),
+                "--log", str(root / "run.log"),
+                "--report", str(root / "report.txt"),
+                "--manifest", str(root / "lib" / "manifest.json"),
+            ])
+            errors = ms.validate_config(ms.cfg_from_args(args))
+        self.assertTrue(any("--manifest must be outside --target" in e for e in errors), errors)
+
+    def test_environment_variables_are_honoured(self) -> None:
+        import os
+
+        with tempfile.TemporaryDirectory() as td:
+            env = {
+                "MOVIE_STD_DEDUPLICATE": "1",
+                "MOVIE_STD_MAINTENANCE_MODE": "quarantine",
+                "MOVIE_STD_QUARANTINE": str(Path(td) / "quar"),
+                "MOVIE_STD_MANIFEST": str(Path(td) / "manifest.json"),
+            }
+            saved = {k: os.environ.get(k) for k in env}
+            os.environ.update(env)
+            try:
+                cfg = ms.Config()
+                ms.apply_env(cfg)
+            finally:
+                for key, value in saved.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+        self.assertTrue(cfg.enable_deduplication)
+        self.assertEqual(cfg.maintenance_mode, "quarantine")
+        self.assertEqual(cfg.quarantine_dir, Path(td) / "quar")
+        self.assertEqual(cfg.manifest_file, Path(td) / "manifest.json")
+
 
 if __name__ == "__main__":
     unittest.main()

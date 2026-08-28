@@ -549,6 +549,18 @@ def record_outcome(
         RUN_SUMMARY.events.append(event)
 
 
+def decline_source(item: Path, reason: str) -> None:
+    """Record a source item this run deliberately left in the torrent folder.
+
+    Skips used to be console-log-only, so ``E:\\torrents\\final`` could quietly
+    accumulate non-MKV, multipart, undersized and unparseable releases with no
+    durable record anywhere but the append-only log — and the report still read
+    ``Skipped : 0``. Recording every decline makes that counter truthful and
+    gives the report an actionable "still in source" section.
+    """
+    record_outcome("skipped", "left in source", src=item, reason=reason)
+
+
 def write_manifest() -> None:
     """Write the optional JSON run manifest after all media actions complete."""
     if not CFG.manifest_file:
@@ -598,6 +610,20 @@ def write_report() -> None:
         reason = ev.get("reason") or ""
         detail = where + (f"  ({reason})" if reason else "")
         lines.append(f"[{ev['status'].upper():9}] {ev['action']}: {detail}".rstrip())
+    declined = [ev for ev in RUN_EVENTS if ev.get("action") == "left in source"]
+    if declined:
+        lines += [
+            "-" * width,
+            "ITEMS LEFT IN SOURCE (not organized; each needs a decision)",
+            "-" * width,
+        ]
+        for ev in declined:
+            lines.append(f"  {ev['source']}")
+            lines.append(f"      reason: {ev['reason']}")
+        lines.append(
+            "  These stay in the torrent folder indefinitely unless acted on:"
+            " lower --min-size, place the release yourself, or delete it."
+        )
     lines += ["=" * width, ""]
     text = "\n".join(lines)
     print(text)
@@ -2007,25 +2033,34 @@ def skip_tv(name: str, origin: str) -> bool:
 
 def handle_single_file(path: Path) -> None:
     if is_skipped_junk_name(path.name):
+        # Transient by definition (".!qb", ".part", ...): not reported as a
+        # leftover, because it is expected to disappear on its own.
         LOG.info("Skipping junk / incomplete: %s", path.name)
         return
     if path.suffix.lower() != CANONICAL_VIDEO_EXTENSION:
         LOG.info("Skipping non-MKV file; no transcoding is performed: %s", path.name)
+        decline_source(path, "not an MKV; this tool never transcodes")
         return
     if is_extra_video(path):
         LOG.info("Skipping extra/sample: %s", path.name)
+        decline_source(path, "extra/sample video, not a feature")
         return
     if file_size(path) < CFG.min_movie_bytes:
-        LOG.info("Skipping small file (%.1f MB): %s", file_size(path) / (1024 * 1024), path.name)
+        size_mb = file_size(path) / (1024 * 1024)
+        LOG.info("Skipping small file (%.1f MB): %s", size_mb, path.name)
+        decline_source(path, f"smaller than the {CFG.min_movie_size_mb:.0f} MB minimum ({size_mb:.1f} MB)")
         return
     if skip_tv(path.name, "filename"):
+        decline_source(path, "looks like a TV episode, not a movie")
         return
     parsed = parse_movie_name(path.name)
     if not parsed.title:
         LOG.warning("Could not parse title: %s", path.name)
+        decline_source(path, "no title/year could be parsed from the name")
         return
     if parsed.part:
         LOG.info("Skipping multipart fragment; canonical output requires one complete MKV: %s", path.name)
+        decline_source(path, "multipart fragment; canonical output requires one complete MKV")
         return
     LOG.info("Single file '%s' -> '%s'", path.name, parsed.folder_name)
     dest = dest_for(
@@ -2071,20 +2106,24 @@ def _group_videos(videos: Sequence[ScannedFile], root: Path) -> dict[tuple, list
 def handle_directory(path: Path) -> None:
     name = path.name
     if skip_tv(name, "folder"):
+        decline_source(path, "looks like a TV show, not a movie")
         return
 
     scan = scan_tree(path)
     if scan.is_disc:
         LOG.info("Skipping disc structure; canonical output requires one complete MKV: %s", path)
+        decline_source(path, "disc structure (BDMV/VIDEO_TS); canonical output requires one complete MKV")
         return
 
     if not scan.videos:
         LOG.warning("No movie-sized video in: %s", path)
+        decline_source(path, "no movie-sized video found inside")
         return
 
     groups = _group_videos(scan.videos, path)
     if not groups:
         LOG.warning("No usable movies in: %s", path)
+        decline_source(path, "no usable movie video after excluding TV content")
         return
 
     multi_titles = len(groups) > 1
@@ -2127,10 +2166,12 @@ def handle_directory(path: Path) -> None:
         parts = [(v, p) for v, p in items if p.part]
         if len(items) > 1 and len(parts) == len(items):
             LOG.info("Skipping multipart movie; canonical output requires one complete MKV: %s", path)
+            decline_source(path, "multipart movie; canonical output requires one complete MKV")
             continue
 
         if any(item_parsed.part for _, item_parsed in items):
             LOG.info("Skipping multipart fragments; canonical output requires one complete MKV: %s", path)
+            decline_source(path, "multipart fragments; canonical output requires one complete MKV")
             continue
 
         # One (or several unmarked) files of the same title: keep the largest.
@@ -2469,6 +2510,10 @@ def apply_env(cfg: Config) -> None:
         "MOVIE_STD_REPORT": ("report_file", Path),
         "MOVIE_STD_LOCK_TIMEOUT": ("lock_timeout_seconds", float),
         "MOVIE_STD_FFPROBE": ("ffprobe", str),
+        "MOVIE_STD_DEDUPLICATE": ("enable_deduplication", lambda v: v.lower() in {"1", "true", "yes"}),
+        "MOVIE_STD_MAINTENANCE_MODE": ("maintenance_mode", str),
+        "MOVIE_STD_QUARANTINE": ("quarantine_dir", Path),
+        "MOVIE_STD_MANIFEST": ("manifest_file", Path),
         "MOVIE_STD_DRY_RUN": ("dry_run", lambda v: v.lower() in {"1", "true", "yes"}),
     }
     for env, (attr, caster) in mapping.items():
@@ -2495,6 +2540,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--ffprobe", default=None, metavar="PATH",
         help="ffprobe used to verify same-cut technical upgrades before replacing an existing MKV",
     )
+    p.add_argument(
+        "--deduplicate", action="store_true",
+        help="Scan the organized library for duplicate folders of the same movie",
+    )
+    p.add_argument(
+        "--maintenance-mode", choices=("REPORT", "QUARANTINE", "DELETE"),
+        help=("What to do with duplicate-maintenance candidates (needs --deduplicate): "
+              "REPORT only logs them (default, non-destructive), QUARANTINE moves them "
+              "outside the library, DELETE removes them"),
+    )
+    p.add_argument("--quarantine-dir", type=Path, metavar="DIR",
+                   help="Destination outside the library for --maintenance-mode QUARANTINE")
+    p.add_argument("--manifest", type=Path, metavar="PATH",
+                   help="Optional JSON run manifest, outside --source and --target")
     p.add_argument("--allow-tv", action="store_true", help="Do not skip S01E02-style names")
     p.add_argument("--category", default="", help="qBittorrent %%L — skip if it looks like TV")
     p.add_argument("--dry-run", action="store_true", help="Log actions without writing")
@@ -2520,6 +2579,14 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         cfg.lock_timeout_seconds = args.lock_timeout
     if args.ffprobe:
         cfg.ffprobe = args.ffprobe
+    if args.deduplicate:
+        cfg.enable_deduplication = True
+    if args.maintenance_mode:
+        cfg.maintenance_mode = args.maintenance_mode
+    if args.quarantine_dir:
+        cfg.quarantine_dir = args.quarantine_dir
+    if args.manifest:
+        cfg.manifest_file = args.manifest
     if args.allow_tv:
         cfg.skip_tv_shows = False
     cfg.dry_run = bool(args.dry_run)
