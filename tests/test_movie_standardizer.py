@@ -218,6 +218,212 @@ class DeclinedSourceTests(_RunStateMixin):
         return buffer.getvalue()
 
 
+class DeclineReasonPrecisionTests(_RunStateMixin):
+    """A decline must say what the user can act on.
+
+    ``decline_source`` was added so the report carries an actionable record, but
+    every folder with no placeable MKV reported the same blanket "no movie-sized
+    video found inside" — including a folder holding a 15 GB ``.mp4`` (nothing is
+    wrong with the file, the tool simply never transcodes) and an MKV that is
+    merely under the size floor.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        ms.CFG.min_movie_size_mb = 1
+
+    def _folder(self, name: str, filename: str, kb: int) -> Path:
+        folder = self.root / "final" / name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / filename).write_bytes(b"x" * kb * 1024)
+        return folder
+
+    def _reason(self, name: str, filename: str, kb: int) -> str:
+        folder = self._folder(name, filename, kb)
+        ms.handle_directory(folder)
+        return ms.RUN_EVENTS[-1]["reason"]
+
+    def test_non_mkv_movie_names_the_format(self) -> None:
+        reason = self._reason("Only.Mp4.2019", "Only.Mp4.2019.mp4", 15360)
+        self.assertIn("not an MKV", reason)
+        self.assertIn("never transcodes", reason)
+        self.assertNotIn("no movie-sized video", reason)
+
+    def test_other_containers_are_named_too(self) -> None:
+        for ext in (".avi", ".webm", ".m4v"):
+            with self.subTest(ext=ext):
+                ms.RUN_EVENTS.clear()
+                ms.RUN_SUMMARY = ms.RunSummary()
+                reason = self._reason(f"Only{ext.strip('.')}.2019",
+                                      f"Only.{ext.strip('.')}.2019{ext}", 15360)
+                self.assertIn("not an MKV", reason)
+
+    def test_undersized_mkv_reports_the_size_floor(self) -> None:
+        reason = self._reason("Tiny.Mkv.2019", "Tiny.Mkv.2019.mkv", 100)
+        self.assertIn("smaller than the 1 MB minimum", reason)
+        self.assertNotIn("not an MKV", reason)
+
+    def test_genuinely_empty_folder_keeps_the_old_reason(self) -> None:
+        reason = self._reason("Emptyish.2019", "Emptyish.2019.nfo", 10)
+        self.assertEqual(reason, "no movie-sized video found inside")
+
+    def test_zero_size_floor_does_not_invent_a_non_mkv_reason(self) -> None:
+        """Regression: `biggest_other >= 0` is always true at a 0 MB floor.
+
+        Without a truthiness guard a folder holding no other-container at all
+        reported "not an MKV (0 MB); this tool never transcodes".
+        """
+        ms.CFG.min_movie_size_mb = 0
+        folder = self.root / "final" / "Just.Text.2019"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "Just.Text.2019.nfo").write_text("nothing here")
+
+        ms.handle_directory(folder)
+
+        self.assertEqual(ms.RUN_EVENTS[-1]["reason"], "no movie-sized video found inside")
+
+    def test_symlinked_video_is_not_cited_as_a_non_mkv_movie(self) -> None:
+        """A symlink must not manufacture a 'not an MKV' reason either."""
+        outside = self.root / "outside.mp4"
+        outside.write_bytes(b"x" * 15360 * 1024)
+        folder = self.root / "final" / "Linked.Movie.2018"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "Linked.Movie.2018.mp4").symlink_to(outside)
+
+        ms.handle_directory(folder)
+
+        self.assertEqual(ms.RUN_EVENTS[-1]["reason"], "no movie-sized video found inside")
+
+
+class MultipartSplitDetectionTests(_RunStateMixin):
+    """A part-numbered split release must never land one fragment in the library.
+
+    ``_extract_part()`` deliberately declines to call a bare ``part`` token a
+    split marker so that "Deathly Hallows Part 2" keeps its title. That left a
+    hole: ``Title.2018.part1.mkv`` + ``Title.2018.part2.mkv`` grouped as a
+    single title with no part metadata, so the largest fragment won and was
+    hardlinked as though it were a complete movie. These tests pin both the fix
+    and the title protection it must not regress.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        ms.CFG.min_movie_size_mb = 0
+        ms.CFG.target_dir.mkdir(parents=True, exist_ok=True)
+
+    def _folder_with(self, names: list[str]) -> Path:
+        folder = self.root / "final" / "Stacked.Movie.2018"
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in names:
+            (folder / name).write_bytes(b"mkv")
+        return folder
+
+    def test_part_numbered_pair_is_declined(self) -> None:
+        folder = self._folder_with(["Stacked.Movie.2018.part1.mkv", "Stacked.Movie.2018.part2.mkv"])
+        ms.handle_directory(folder)
+        self.assertEqual(ms.RUN_SUMMARY.skipped, 1)
+        self.assertIn("one complete MKV", ms.RUN_EVENTS[-1]["reason"])
+        self.assertEqual(list(ms.CFG.target_dir.iterdir()), [])
+
+    def test_part_numbered_trio_is_declined(self) -> None:
+        folder = self._folder_with(
+            [f"Stacked.Movie.2018.part{n}.mkv" for n in (1, 2, 3)]
+        )
+        ms.handle_directory(folder)
+        self.assertEqual(ms.RUN_SUMMARY.skipped, 1)
+        self.assertEqual(list(ms.CFG.target_dir.iterdir()), [])
+
+    def test_cd_numbered_pair_is_still_declined(self) -> None:
+        folder = self._folder_with(["Stacked.Movie.2018.cd1.mkv", "Stacked.Movie.2018.cd2.mkv"])
+        ms.handle_directory(folder)
+        self.assertEqual(ms.RUN_SUMMARY.skipped, 1)
+        self.assertEqual(list(ms.CFG.target_dir.iterdir()), [])
+
+    def test_title_integral_part_survives(self) -> None:
+        """A single 'Part 2' release is a real movie, not a split fragment."""
+        cleaned, part = ms._extract_part("Harry.Potter.and.the.Deathly.Hallows.Part.2.2011")
+        self.assertIsNone(part)
+        self.assertEqual(cleaned, "Harry.Potter.and.the.Deathly.Hallows.Part.2.2011")
+        # and the folder it lands in keeps the distinguishing "Part 2"
+        parsed = ms.parse_movie_name("Harry.Potter.and.the.Deathly.Hallows.Part.2.2011")
+        self.assertIn("Part 2", parsed.title)
+        self.assertEqual(parsed.year, 2011)
+
+    def test_lone_part_file_is_still_linked(self) -> None:
+        """One part-numbered file with no sibling is not a stack."""
+        folder = self._folder_with(["Stacked.Movie.2018.part1.mkv"])
+        ms.handle_directory(folder)
+        self.assertEqual(ms.RUN_SUMMARY.skipped, 0)
+
+    def test_two_versions_of_one_movie_keep_the_largest(self) -> None:
+        """Unmarked siblings are quality variants, not a split — keep one."""
+        folder = self.root / "final" / "Movie.2020"
+        folder.mkdir(parents=True, exist_ok=True)
+        small = folder / "Movie.2020.720p.mkv"
+        big = folder / "Movie.2020.1080p.mkv"
+        small.write_bytes(b"a" * 100)
+        big.write_bytes(b"b" * 4000)
+        ms.handle_directory(folder)
+        self.assertEqual(ms.RUN_SUMMARY.skipped, 0)
+        linked = list(ms.CFG.target_dir.rglob("*.mkv"))
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(linked[0].stat().st_size, 4000)
+
+
+class SymlinkedNestedVideoTests(_RunStateMixin):
+    """A symlink inside a torrent folder must never be hardlinked into the library.
+
+    ``os.link()`` follows symlinks, so linking one would pull a file from
+    outside ``E:\\torrents`` into the library and present it as a movie the
+    release never shipped. Top-level items (``handle_item``) and SRT sidecars
+    (``is_valid_plain_english_srt``) already refused symlinks; the folder scan
+    did not, so ``link.mkv`` beside a real movie was hardlinked as a phantom
+    ``Link/Link.mkv`` entry.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        ms.CFG.min_movie_size_mb = 0
+        ms.CFG.target_dir.mkdir(parents=True, exist_ok=True)
+
+    def test_symlink_beside_a_real_movie_is_ignored(self) -> None:
+        folder = self.root / "final" / "Real.Movie.2015"
+        folder.mkdir(parents=True)
+        real = folder / "Real.Movie.2015.mkv"
+        real.write_bytes(b"mkv")
+        (folder / "link.mkv").symlink_to(real)
+
+        ms.handle_directory(folder)
+
+        linked = sorted(p.name for p in ms.CFG.target_dir.rglob("*.mkv"))
+        self.assertEqual(linked, ["Real Movie (2015).mkv"])
+        self.assertEqual(ms.RUN_SUMMARY.skipped, 0)
+
+    def test_folder_holding_only_a_symlink_is_declined(self) -> None:
+        outside = self.root / "elsewhere.mkv"
+        outside.write_bytes(b"mkv")
+        folder = self.root / "final" / "Phantom.Movie.2014"
+        folder.mkdir(parents=True)
+        (folder / "Phantom.Movie.2014.mkv").symlink_to(outside)
+
+        ms.handle_directory(folder)
+
+        self.assertEqual(list(ms.CFG.target_dir.rglob("*.mkv")), [])
+        self.assertEqual(ms.RUN_SUMMARY.skipped, 1)
+        self.assertIn("no movie-sized video", ms.RUN_EVENTS[-1]["reason"])
+
+    def test_scan_tree_does_not_follow_the_symlink_target(self) -> None:
+        outside = self.root / "outside.mkv"
+        outside.write_bytes(b"outside-bytes")
+        folder = self.root / "final" / "Only.Link.2013"
+        folder.mkdir(parents=True)
+        (folder / "Only.Link.2013.mkv").symlink_to(outside)
+
+        scan = ms.scan_tree(folder)
+
+        self.assertEqual([f for f in scan.videos if f.kind == "video"], [])
+
+
 class MaintenanceOptionTests(unittest.TestCase):
     """--maintenance-mode / --quarantine-dir / --manifest were validated but unreachable."""
 

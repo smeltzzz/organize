@@ -1258,7 +1258,12 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 raise RuntimeError("movie changed while calculating moviehash")
             candidates = client.search(movie_hash=digest, query=video.stem)
             pick = pick_candidate(candidates, fetcher_cfg)
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError) as exc:
+            # ValueError matters as much as RuntimeError here: moviehash()
+            # raises it for a file below MIN_HASH_SIZE, and the size gate ran at
+            # scan time, so a file truncated or partially removed in between
+            # reaches this point. Without it, one stub file aborted the whole
+            # run with a traceback and every remaining movie went unfetched.
             set_movie_status(record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1)
             ledger["errors"] += 1
             persist_state(state, cfg.log_file)
@@ -1340,7 +1345,10 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             result = JobResult(video, "have", str(exc), dest)
             results.append(result)
             emit(index, "HAVE", video, str(exc))
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError) as exc:
+            # decode_subtitle_bytes() raises ValueError for a subtitle that
+            # decompresses past MAX_SUBTITLE_BYTES, so a single hostile or
+            # corrupt provider payload must not abort the rest of the library.
             set_movie_status(record, "error", str(exc))
             ledger["errors"] += 1
             result = JobResult(video, "error", str(exc))

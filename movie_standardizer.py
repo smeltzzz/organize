@@ -98,6 +98,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+from stat import S_ISREG
 
 from common import (
     EXTERNAL_SRT_CUE_RE,
@@ -1396,9 +1397,18 @@ def scan_tree(root: Path) -> FolderScan:
             path = current / name
             ext = path.suffix.lower()
             try:
-                size = path.stat().st_size
+                st = path.stat(follow_symlinks=False)
             except OSError:
                 continue
+            if path.is_symlink() or not S_ISREG(st.st_mode):
+                # A symlink inside a torrent folder can point anywhere on the
+                # machine, and os.link() follows it: hardlinking one would pull
+                # a file from outside E:\torrents into the library and present
+                # it as a movie the release never shipped. Top-level items and
+                # SRT sidecars already refuse symlinks; nested videos must too.
+                LOG.warning("Skipping symlinked/non-regular file inside folder: %s", path)
+                continue
+            size = st.st_size
             if ext in VIDEO_EXTENSIONS:
                 if is_disc:
                     # Individual .m2ts files are not movies.
@@ -2104,6 +2114,62 @@ def _group_videos(videos: Sequence[ScannedFile], root: Path) -> dict[tuple, list
     return groups
 
 
+# Non-MKV containers a finished movie can plausibly arrive in. Used only to
+# explain a decline precisely — this tool never transcodes, so these are always
+# left where they are. The vocabulary matches library_auditor.MOVIE_EXTENSIONS
+# so the two tools never disagree about what counts as a movie container.
+OTHER_MOVIE_EXTENSIONS = frozenset({
+    ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".webm", ".mpg", ".mpeg", ".ts",
+    ".m2ts", ".mts", ".vob", ".flv", ".ogv", ".3gp", ".asf", ".rm", ".rmvb",
+    ".m2v", ".divx", ".f4v", ".mxf", ".dv", ".wtv", ".dvr-ms", ".iso", ".img",
+    ".nrg",
+})
+
+
+def explain_no_canonical_video(root: Path) -> str:
+    """Return an actionable reason when a folder yields no placeable MKV.
+
+    ``decline_source`` exists so the report tells the user what to do next, but
+    the blanket "no movie-sized video found inside" was unhelpful for the two
+    common cases that are not actually about size or absence: a 15 GB ``.mp4``
+    release (the tool will not transcode, so nothing is wrong with the file) and
+    an MKV that is merely under the size floor. Distinguishing them keeps the
+    "items left in source" section trustworthy.
+    """
+    biggest_other = 0
+    biggest_mkv = 0
+    for _root, _dirs, files in os.walk(root, onerror=lambda _e: None):
+        for filename in files:
+            if is_skipped_junk_name(filename):
+                continue
+            candidate = Path(_root) / filename
+            ext = candidate.suffix.lower()
+            if ext not in VIDEO_EXTENSIONS and ext not in OTHER_MOVIE_EXTENSIONS:
+                continue
+            try:
+                st = candidate.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            if candidate.is_symlink() or not S_ISREG(st.st_mode):
+                continue
+            if ext in VIDEO_EXTENSIONS:
+                biggest_mkv = max(biggest_mkv, st.st_size)
+            else:
+                biggest_other = max(biggest_other, st.st_size)
+
+    if biggest_mkv and biggest_mkv < CFG.min_movie_bytes:
+        return (
+            f"smaller than the {CFG.min_movie_size_mb:.0f} MB minimum "
+            f"({biggest_mkv / (1024 * 1024):.1f} MB)"
+        )
+    # `biggest_other and ...`: with a 0 MB size floor the comparison alone is
+    # always true and would invent "not an MKV (0 MB)" for a folder holding no
+    # other-container at all.
+    if biggest_other and biggest_other >= CFG.min_movie_bytes:
+        return f"not an MKV ({biggest_other / (1024 * 1024):.0f} MB); this tool never transcodes"
+    return "no movie-sized video found inside"
+
+
 def handle_directory(path: Path) -> None:
     name = path.name
     if skip_tv(name, "folder"):
@@ -2117,8 +2183,9 @@ def handle_directory(path: Path) -> None:
         return
 
     if not scan.videos:
-        LOG.warning("No movie-sized video in: %s", path)
-        decline_source(path, "no movie-sized video found inside")
+        reason = explain_no_canonical_video(path)
+        LOG.warning("No placeable movie in: %s (%s)", path, reason)
+        decline_source(path, reason)
         return
 
     groups = _group_videos(scan.videos, path)
@@ -2169,6 +2236,35 @@ def handle_directory(path: Path) -> None:
             LOG.info("Skipping multipart movie; canonical output requires one complete MKV: %s", path)
             decline_source(path, "multipart movie; canonical output requires one complete MKV")
             continue
+
+        # _extract_part() deliberately refuses to call a bare "part" token a
+        # split marker, because "Deathly Hallows Part 2" is a distinct movie
+        # and must never lose its title. That is the right call for a file
+        # standing alone, but it left a real hole: a folder holding
+        # "Title.2018.part1.mkv" and "Title.2018.part2.mkv" grouped as one
+        # title with no part metadata at all, so the largest file won and
+        # part 1 was hardlinked into the library as a complete movie.
+        # Siblings that differ only in a part number are an unambiguous split
+        # release, so detect the stack from the raw names rather than from
+        # parsed.part. Re-reading the names here keeps the title-integral
+        # "Part 2" protection exactly as it was for single files.
+        if len(items) > 1:
+            stack_numbers = []
+            for video, _ in items:
+                stack_match = _PART_RE.search(video.path.stem)
+                stack_numbers.append(int(stack_match.group(1)) if stack_match else None)
+            if all(n is not None for n in stack_numbers) and len(set(stack_numbers)) == len(stack_numbers):
+                LOG.info(
+                    "Skipping part-numbered split release (parts %s); "
+                    "canonical output requires one complete MKV: %s",
+                    ", ".join(str(n) for n in sorted(stack_numbers)),
+                    path,
+                )
+                decline_source(
+                    path,
+                    "multipart movie; canonical output requires one complete MKV",
+                )
+                continue
 
         if any(item_parsed.part for _, item_parsed in items):
             LOG.info("Skipping multipart fragments; canonical output requires one complete MKV: %s", path)

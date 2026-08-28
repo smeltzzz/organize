@@ -214,6 +214,14 @@ processes in 2.2s, an unchanged re-run spawned **0** in 0.11s, touching one
 file spawned exactly **1**, and `--no-cache` restored all 30. The reports from
 the cold and warm runs were identical apart from timestamps.
 
+The same behaviour was then re-verified against real Matroska files produced by
+`ffmpeg` (8-bit H.264, 10-bit HEVC, HDR10, HLG, multi-audio): a cold run
+probed 30 files, an unchanged re-run probed **0** — the only process spawned was
+`ffprobe -version` — touching exactly one file re-probed exactly **1**, and the
+cold and warm reports were byte-identical apart from timestamps. Cache files
+written by 8 concurrent probe workers stayed valid JSON with no malformed
+entries, and every verdict was reproduced on the warm run.
+
 **Only the probe output is cached, never a decision.** This is the part that
 makes it safe. Each tool still re-derives its verdict from live filesystem
 state on every run, so a change the tool must react to is never masked:
