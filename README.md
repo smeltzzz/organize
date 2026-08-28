@@ -98,6 +98,50 @@ folders in one actionable section.
 > check.** Deleting the bad `.en.srt` and re-running `subtitle_fetcher.py` is
 > usually the entire fix.
 
+#### Hardlinks and seeding: why the cleaner can look like it does nothing
+
+This trips people up, so it is worth being precise.
+
+`movie_standardizer.py` is **hardlink-only** — it calls `os.link()` and has no
+copy or move fallback. So the moment a torrent completes, the library file at
+`...\final_organized\Title (Year)\Title (Year).mkv` and the qBittorrent source
+at `...\final\...` are the *same inode* under two names. No extra disk space is
+used, and seeding continues untouched.
+
+`mkv_track_cleaner.py` therefore **defers any movie with more than one hardlink**.
+The reasoning is disk space, not safety: a remux writes a new file and swaps it
+over the library path, which breaks the link, so you briefly hold two full copies
+of the movie until the source is deleted.
+
+**Here is the catch.** qBittorrent's default action when a seed limit is reached
+is to *pause the torrent* — it does **not** delete the content. The file stays in
+`E:\torrents\final`, the hardlink count stays at 2, and the cleaner keeps
+deferring that movie indefinitely. If you seed to "24 hours or ratio 1.00" and
+have never changed that setting, the cleaner is likely deferring everything and
+you may not have realised.
+
+**Check it in ten seconds:** open `E:\torrents\final` and look for a movie that
+finished more than 24 hours ago. If the file is still there, you are in this
+state. The cleaner's report also lists every deferred movie under
+`DEFERRED (STILL HARDLINKED / SEEDED)`.
+
+Three ways out:
+
+1. **Let qBittorrent delete the content when seeding stops.** Options →
+   BitTorrent → *When ratio reaches* / *When seeding time reaches* → set the
+   action to remove the torrent **and its content**. This is safe precisely
+   *because* it is a hardlink: deleting the source removes one directory entry,
+   and the inode — your library copy — is untouched because its link count is
+   still above zero. This is the cleanest option.
+2. **Delete the source yourself** from `E:\torrents\final` once seeding is done.
+   Same reasoning, same safety.
+3. **Run the cleaner with `--allow-hardlinked`.** It remuxes anyway. Seeding is
+   *not* affected — qBittorrent keeps seeding its own copy of the original
+   bytes, since the remux only replaces the library path — but the movie then
+   occupies two copies until you delete the source, and the report will say so.
+
+Option 1 or 2 means the cleaner needs no special flag and costs no extra space.
+
 ---
 
 ## Shared infrastructure
@@ -180,7 +224,7 @@ python mkv_track_cleaner.py --dir "E:\torrents\final_organized" --nice
 
 Key flags: `--dir`, `--only MKV` (repeatable), `--dry-run`, `--mkvmerge PATH`,
 `--log`, `--report`, `--standardizer-lock-timeout SECS`, `--no-color`,
-`--nice`, `--min-size MB`, `--limit N`, `--self-test`.
+`--nice`, `--min-size MB`, `--limit N`, `--allow-hardlinked`, `--self-test`.
 
 ### 10bit.py
 

@@ -73,6 +73,65 @@ def _empty_stats() -> dict:
     }
 
 
+class HardlinkDeferralTests(unittest.TestCase):
+    """Hardlinked movies defer by default; --allow-hardlinked overrides that.
+
+    movie_standardizer.py is hardlink-only, so every freshly completed movie
+    shares an inode with its qBittorrent source. qBittorrent's default "stop
+    seeding" action only pauses the torrent and leaves the file, so that link
+    can persist indefinitely and the cleaner would defer the movie forever.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="cleaner_hl_test_")
+        self.tmp = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.calls: list = []
+
+        self._root = tc._target_root
+        self._run = tc._run_mkvmerge
+        tc._target_root = self.tmp
+
+        def boom(*_args, **_kwargs):
+            self.calls.append(_args)
+            raise RuntimeError("mkvmerge must not run in this unit test")
+
+        tc._run_mkvmerge = boom
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        tc._target_root = self._root
+        tc._run_mkvmerge = self._run
+
+    def _hardlinked_movie(self, name: str) -> Path:
+        """A canonical movie folder whose MKV has a second link (the seed source)."""
+        folder = self.tmp / name
+        folder.mkdir()
+        movie = folder / f"{name}.mkv"
+        movie.write_bytes(b"x" * 2048)
+        (self.tmp / f"{name}.source.mkv").hardlink_to(movie)
+        self.assertGreaterEqual(tc.hardlink_count(movie), 2)
+        return movie
+
+    def _run_it(self, movie: Path, **kwargs) -> dict:
+        stats = _empty_stats()
+        with contextlib.redirect_stdout(io.StringIO()):
+            tc.process_mkv(movie, stats, "stub-mkvmerge", log_file_path=None, **kwargs)
+        return stats
+
+    def test_defers_a_hardlinked_movie_by_default(self) -> None:
+        stats = self._run_it(self._hardlinked_movie("Film (2000)"))
+        self.assertEqual(len(stats["deferred_hardlinked"]), 1)
+        self.assertGreaterEqual(stats["deferred_hardlinked"][0]["hardlinks"], 2)
+        self.assertEqual(stats["errors"], [])
+        self.assertEqual(self.calls, [], "mkvmerge must not be invoked on a deferred movie")
+
+    def test_allow_hardlinked_remuxes_anyway(self) -> None:
+        stats = self._run_it(self._hardlinked_movie("Other (2001)"), allow_hardlinked=True)
+        self.assertEqual(stats["deferred_hardlinked"], [])
+        self.assertTrue(self.calls, "mkvmerge should be reached with --allow-hardlinked")
+
+
 class RemuxWithoutSrtReportTests(unittest.TestCase):
     """Remuxing with no external SRT invalidates the moviehash; say so in the report."""
 
