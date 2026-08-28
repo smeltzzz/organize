@@ -1,0 +1,3014 @@
+#!/usr/bin/env python3
+"""
+Lossless Canonical Jellyfin MKV Track Cleaner
+==============================================
+Remux-only (no video/audio re-encode). Keeps the single best English audio
+track and, whenever present and validated, a sole external English SRT subtitle.
+
+Safety:
+  * Idempotent — already-clean files are not rewritten
+  * Foreign films with no English audio are left untouched
+  * SDH, text-description, and Forced *subtitles* are kept (never treated as DVS)
+  * DVS / commentary *audio* is dropped
+  * Post-remux fingerprint verification (tracks, chapters, attachments, duration,
+    frames, size) — a bad remux is never swapped over the original
+  * Unique same-directory transaction journal + atomic replace; orphan output is
+    recoverable only after durable proof of full verification
+  * Coordinates with movie_standardizer.py before scanning/remuxing
+  * Canonical hardlinked movies are deferred while qBittorrent is seeding
+  * Extra folders (Featurettes, Trailers, BDMV, …) are never processed
+
+    python track_cleaner.py --dry-run
+    python track_cleaner.py --dir "E:\\torrents\\final_organized"
+    python track_cleaner.py --self-test
+"""
+
+from __future__ import annotations
+
+import atexit
+import argparse
+import errno
+import hashlib
+import json
+import os
+import re
+import shutil
+import signal
+import socket
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, Dict, IO, List, Optional, Set, Tuple
+
+VERSION = "2.5.2"
+
+# ==================== DEFAULT CONFIGURATION ====================
+TARGET_DIR = r"E:\torrents\final_organized"
+MKVMERGE_PATH = "mkvmerge"
+AUDIO_LANGUAGES = {"eng", "en"}
+SUBTITLE_LANGUAGES = {"eng", "en"}
+REMOVE_COMMENTARY = True
+LOG_FILE = r"E:\torrents\mkv_track_cleaner\mkv_track_cleaner.log"
+REPORT_FILE = r"E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt"
+# ===============================================================
+
+# Legacy temporary files used this deterministic prefix. New work uses unique
+# same-directory transaction artifacts, but legacy files are recognized safely.
+TEMP_PREFIX = "temp_clean_"
+TRANSACTION_MARKER = ".track_cleaner."
+TRANSACTION_PART_SUFFIX = ".partial.mkv"
+TRANSACTION_JOURNAL_SUFFIX = ".json"
+TRANSACTION_SCHEMA_VERSION = 1
+LOCK_FILENAME = ".track_cleaner.lock"
+STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
+STANDARDIZER_LOCK_TIMEOUT_SECONDS = 60.0
+ORPHAN_MIN_AGE_SECONDS = 60.0
+MIN_OUTPUT_RATIO = 0.50  # remux smaller than 50% of source → reject (likely truncated)
+# Hardlinked movies are always deferred. Replacing one would break the seed
+# link and consume another full movie-sized allocation until seeding ends.
+EXTERNAL_SRT_MAX_BYTES = 4 * 1024 * 1024
+_EXTERNAL_SRT_CUE_RE = re.compile(
+    r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
+)
+
+KNOWN_MKVMERGE_PATHS = [
+    r"C:\Program Files\MKVToolNix\mkvmerge.exe",
+    r"C:\Program Files (x86)\MKVToolNix\mkvmerge.exe",
+    "/usr/bin/mkvmerge",
+    "/usr/local/bin/mkvmerge",
+    "/opt/homebrew/bin/mkvmerge",
+]
+
+EXTRA_DIR_NAMES = frozenset({
+    "featurettes", "extras", "specials", "shorts", "bonus",
+    "behind the scenes", "deleted scenes", "interviews", "scenes",
+    "trailers", "other", "samples", "sample", "clips",
+    "bdmv", "certificate", "video_ts", "audio_ts", "hvdvd_ts",
+    "subs", "sub", "subtitles", "subtitle",
+    "proof", "screens", "screenshots",
+})
+
+SAMPLE_NAME_RE = re.compile(
+    r"(?i)(?:^|[._\-\s\[(])(sample|trailer|teaser)(?:[.)\]\-\s_]|$)"
+)
+
+_LANG_NORMALIZE = {
+    "fre": "fr", "fra": "fr",
+    "ger": "de", "deu": "de",
+    "gre": "el", "ell": "el",
+    "chi": "zh", "zho": "zh",
+    "dut": "nl", "nld": "nl",
+    "per": "fa", "fas": "fa",
+    "rum": "ro", "ron": "ro",
+    "slo": "sk", "slk": "sk",
+    "cze": "cs", "ces": "cs",
+    "wel": "cy", "cym": "cy",
+    "baq": "eu", "eus": "eu",
+    "arm": "hy", "hye": "hy",
+    "geo": "ka", "kat": "ka",
+    "bur": "my", "mya": "my",
+    "ice": "is", "isl": "is",
+    "mac": "mk", "mkd": "mk",
+    "may": "ms", "msa": "ms",
+    "mao": "mi", "mri": "mi",
+    "tib": "bo", "bod": "bo",
+    "eng": "en", "spa": "es", "ita": "it", "por": "pt", "jpn": "ja",
+    "kor": "ko", "rus": "ru", "ara": "ar", "hin": "hi", "swe": "sv",
+    "nor": "no", "dan": "da", "fin": "fi", "pol": "pl", "tur": "tr",
+    "vie": "vi", "tha": "th", "ind": "id", "heb": "he", "ukr": "uk",
+    "hun": "hu", "bul": "bg", "hrv": "hr", "srp": "sr", "slv": "sl",
+    "lit": "lt", "lav": "lv", "est": "et", "cat": "ca",
+}
+
+_DISK_SLACK_BYTES = 64 * 1024 * 1024
+_DISK_SLACK_RATIO = 0.02
+
+
+def normalize_language(code: str) -> str:
+    return _LANG_NORMALIZE.get((code or "").strip().lower(), (code or "").strip().lower())
+
+
+def resolve_mkvmerge_path(custom_path: Optional[str] = None) -> str:
+    if custom_path:
+        found = shutil.which(custom_path)
+        if found:
+            return found
+        p = Path(custom_path)
+        if p.is_file():
+            return str(p)
+        raise FileNotFoundError(f"Specified mkvmerge binary not found: '{custom_path}'")
+
+    found = shutil.which(MKVMERGE_PATH)
+    if found:
+        return found
+    for candidate in KNOWN_MKVMERGE_PATHS:
+        found = shutil.which(candidate)
+        if found:
+            return found
+        p = Path(candidate)
+        if p.is_file():
+            return str(p)
+    raise FileNotFoundError(
+        f"'{MKVMERGE_PATH}' was not found in PATH or standard locations. "
+        "Install MKVToolNix or pass --mkvmerge."
+    )
+
+
+def get_mkvmerge_version(mkvmerge_bin: str) -> str:
+    try:
+        rc, out, err = _run_mkvmerge([mkvmerge_bin, "--version"])
+        if rc not in (0, 1):
+            return "unknown version"
+        banner = (out or err or "").strip().splitlines()
+        return (banner[0] if banner else "unknown version").strip()
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        return "unknown version"
+
+
+def format_size(bytes_val: int) -> str:
+    if not isinstance(bytes_val, (int, float)) or bytes_val <= 0:
+        return "0 Bytes"
+    n = float(bytes_val)
+    for unit, div in (("TB", 1024 ** 4), ("GB", 1024 ** 3), ("MB", 1024 ** 2), ("KB", 1024)):
+        if n >= div:
+            return f"{n / div:.2f} {unit}"
+    return f"{int(n)} Bytes"
+
+
+def format_duration(seconds: float) -> str:
+    try:
+        seconds_f = float(seconds)
+    except (TypeError, ValueError):
+        return "0s"
+    if seconds_f < 0 or seconds_f != seconds_f:
+        return "0s"
+    total = int(seconds_f)
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    if m:
+        return f"{m}m {s:02d}s"
+    if seconds_f < 10:
+        return f"{seconds_f:.1f}s"
+    return f"{s}s"
+
+
+def _this_hostname() -> str:
+    try:
+        return (socket.gethostname() or "").strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _eta_seconds(elapsed: float, done_bytes: int, total_bytes: int, done_files: int, total_files: int) -> Optional[float]:
+    if elapsed <= 0:
+        return None
+    if total_bytes > 0 and done_bytes > 0:
+        remain = total_bytes - done_bytes
+        return 0.0 if remain <= 0 else remain / (done_bytes / elapsed)
+    if total_files > 0 and done_files > 0:
+        remain_n = total_files - done_files
+        return 0.0 if remain_n <= 0 else (elapsed / done_files) * remain_n
+    return None
+
+
+def check_free_space(target_dir: Path, source_size: int) -> Tuple[bool, int, int, Optional[str]]:
+    required = int(max(0, source_size) * (1.0 + _DISK_SLACK_RATIO)) + _DISK_SLACK_BYTES
+    try:
+        free = int(shutil.disk_usage(str(target_dir)).free)
+    except Exception as e:
+        return True, 0, required, f"could not query free space: {e}"
+    if free < required:
+        return False, free, required, None
+    return True, free, required, None
+
+
+def _unix_ns_to_filetime(unix_ns: int) -> Tuple[int, int]:
+    windows_epoch_offset_ns = 11_644_473_600 * 1_000_000_000
+    ft = (int(unix_ns) + windows_epoch_offset_ns) // 100
+    if ft < 0:
+        ft = 0
+    return ft & 0xFFFFFFFF, (ft >> 32) & 0xFFFFFFFF
+
+
+def _restore_windows_ctime(path: Path, orig_stat: os.stat_result) -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        unix_ns = int(getattr(orig_stat, "st_ctime_ns", int(orig_stat.st_ctime * 1_000_000_000)))
+        low, high = _unix_ns_to_filetime(unix_ns)
+
+        class FILETIME(ctypes.Structure):
+            _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+
+        creation = FILETIME(low, high)
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateFileW(str(path), 0x0100, 0x00000007, None, 3, 0x02000000, None)
+        if not handle or handle == ctypes.c_void_p(-1).value:
+            return
+        try:
+            kernel32.SetFileTime(handle, ctypes.byref(creation), None, None)
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        pass
+
+
+def restore_file_times(path: Path, orig_stat: os.stat_result) -> None:
+    try:
+        ns = getattr(orig_stat, "st_atime_ns", None)
+        ms = getattr(orig_stat, "st_mtime_ns", None)
+        if ns is not None and ms is not None:
+            os.utime(path, ns=(int(ns), int(ms)))
+        else:
+            os.utime(path, (orig_stat.st_atime, orig_stat.st_mtime))
+    except Exception:
+        pass
+    _restore_windows_ctime(path, orig_stat)
+
+
+def apply_low_priority() -> str:
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+            kernel32.GetCurrentProcess.argtypes = []
+            kernel32.SetPriorityClass.restype = wintypes.BOOL
+            kernel32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel32.GetCurrentThread.restype = wintypes.HANDLE
+            kernel32.GetCurrentThread.argtypes = []
+            kernel32.SetThreadPriority.restype = wintypes.BOOL
+            kernel32.SetThreadPriority.argtypes = [wintypes.HANDLE, ctypes.c_int]
+            if kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), 0x00004000):
+                return "below-normal (Windows)"
+            if kernel32.SetThreadPriority(kernel32.GetCurrentThread(), -1):
+                return "thread below-normal (Windows)"
+            return f"unchanged (Windows error {ctypes.get_last_error()})"
+        except Exception as e:
+            return f"unchanged ({e})"
+    try:
+        os.nice(10)
+        return "nice +10"
+    except PermissionError:
+        return "unchanged (nice: permission denied)"
+    except Exception as e:
+        return f"unchanged ({e})"
+
+
+def _print_safe(msg: str) -> None:
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        try:
+            enc = sys.stdout.encoding or "utf-8"
+            sys.stdout.buffer.write((msg + "\n").encode(enc, errors="replace"))
+            sys.stdout.buffer.flush()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _write_raw(text: str) -> None:
+    try:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+def _ellipsize_path(text: str, max_len: int) -> str:
+    if max_len <= 0:
+        return ""
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return "..." + text[-(max_len - 3):]
+
+
+def _enable_windows_vt() -> bool:
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        if not handle or handle == -1:
+            return False
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        if mode.value & 0x0004:
+            return True
+        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+    except Exception:
+        return False
+
+
+_GUI_PROGRESS_RE = re.compile(
+    r"#\s*GUI\s*#\s*progress(?:\s+(\d+)\s*%?|#percent=(\d+)|#parts=(\d+)/(\d+))",
+    re.IGNORECASE,
+)
+_PLAIN_PROGRESS_RE = re.compile(r"Progress:\s*(\d+)\s*%", re.IGNORECASE)
+_GUI_MSG_RE = re.compile(r"#\s*GUI\s*#\s*(warning|error)#message=(.*)$", re.IGNORECASE)
+
+
+def _clamp_percent(value: int) -> int:
+    return 0 if value < 0 else 100 if value > 100 else value
+
+
+def _parse_mkvmerge_progress(line: str) -> Optional[int]:
+    if not line:
+        return None
+    m = _GUI_PROGRESS_RE.search(line)
+    if m:
+        if m.group(1) is not None:
+            return _clamp_percent(int(m.group(1)))
+        if m.group(2) is not None:
+            return _clamp_percent(int(m.group(2)))
+        if m.group(3) is not None and m.group(4) is not None:
+            denom = int(m.group(4))
+            if denom > 0:
+                return _clamp_percent(int(round(100.0 * int(m.group(3)) / denom)))
+            return None
+    m = _PLAIN_PROGRESS_RE.search(line)
+    if m:
+        return _clamp_percent(int(m.group(1)))
+    return None
+
+
+def _summarize_mkvmerge_failure(output: str, rc: int) -> str:
+    if not (output or "").strip():
+        return f"mkvmerge remux failed with code {rc}"
+    lines: List[str] = []
+    for raw in output.splitlines():
+        s = raw.strip()
+        if not s:
+            continue
+        gm = _GUI_MSG_RE.search(s)
+        if gm:
+            lines.append(f"{gm.group(1).upper()}: {gm.group(2).strip()}")
+            continue
+        if _parse_mkvmerge_progress(s) is not None:
+            continue
+        if s.startswith("#GUI#") or s.startswith("# GUI #") or s.lower().startswith("progress:"):
+            continue
+        lines.append(s)
+    text = " | ".join(lines).strip() or f"mkvmerge remux failed with code {rc}"
+    return text[:497] + "..." if len(text) > 500 else text
+
+
+class LiveConsole:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    CYAN = "\033[36m"
+
+    def __init__(self, use_color: Optional[bool] = None):
+        self.is_tty = False
+        try:
+            self.is_tty = bool(sys.stdout and sys.stdout.isatty())
+        except Exception:
+            self.is_tty = False
+        env_no_color = bool(os.environ.get("NO_COLOR"))
+        env_force = os.environ.get("FORCE_COLOR", "").strip() not in ("", "0")
+        env_dumb = os.environ.get("TERM", "").lower() == "dumb"
+        if use_color is False:
+            want_color = False
+        elif use_color is True or env_force:
+            want_color = True
+        elif env_no_color or env_dumb:
+            want_color = False
+        else:
+            want_color = self.is_tty
+        ansi_ok = _enable_windows_vt() if want_color else False
+        if os.name != "nt":
+            ansi_ok = want_color
+        if env_force and use_color is not False:
+            ansi_ok = True
+        self.use_color = bool(want_color and ansi_ok)
+        self._can_erase = self.use_color or (os.name != "nt" and self.is_tty)
+        try:
+            enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+            "█░".encode(enc)
+            self._bar_fill, self._bar_empty = "█", "░"
+        except Exception:
+            self._bar_fill, self._bar_empty = "#", "-"
+        self.target_root: Optional[Path] = None
+        self._detail_indent = "           "
+        self._file_ts = ""
+        self._file_tag = ""
+        self._file_name = ""
+        self._file_size_note = ""
+        self._file_line_pending = False
+        self._progress_active = False
+        self._last_progress_pct = -1
+        self._last_progress_draw = 0.0
+        self._last_progress_bucket = -1
+
+    def style(self, text: str, *codes: str) -> str:
+        if not self.use_color or not codes:
+            return text
+        return "".join(codes) + text + self.RESET
+
+    def _cols(self) -> int:
+        try:
+            return max(40, int(shutil.get_terminal_size((100, 24)).columns))
+        except Exception:
+            return 100
+
+    def _compose_file_line(self, suffix_plain: str = "", suffix_styled: str = "") -> Tuple[str, str]:
+        prefix = f"[{self._file_ts}] {self._file_tag}"
+        reserved = len(prefix) + len(self._file_size_note) + len(suffix_plain)
+        budget = max(8, self._cols() - 1 - reserved)
+        name_fit = _ellipsize_path(self._file_name, budget)
+        plain = f"{prefix}{name_fit}{self._file_size_note}{suffix_plain}"
+        styled = (
+            self.style(f"[{self._file_ts}]", self.DIM) + " " + self.style(self._file_tag, self.CYAN)
+            + self.style(name_fit, self.BOLD) + self.style(self._file_size_note, self.DIM)
+            + (suffix_styled if suffix_styled else suffix_plain)
+        )
+        return plain, styled
+
+    def _overwrite_line(self, text: str) -> None:
+        cols = self._cols()
+        visible = _strip_ansi(text)
+        if len(visible) > cols - 1:
+            keep = max(1, cols - 1)
+            text = visible[:keep] if keep <= 3 else "..." + visible[-(keep - 3):]
+            visible = text
+        try:
+            if self._can_erase:
+                _write_raw("\r" + text + "\033[K")
+            else:
+                _write_raw("\r" + text + (" " * max(0, cols - 1 - len(visible))))
+        except Exception:
+            _print_safe(_strip_ansi(text))
+
+    def _commit_open_line(self) -> None:
+        if self._file_line_pending or self._progress_active:
+            try:
+                if self.is_tty:
+                    _write_raw("\n")
+            except Exception:
+                pass
+        self._file_line_pending = False
+        self._progress_active = False
+        self._last_progress_pct = -1
+        self._last_progress_bucket = -1
+
+    def finish_progress(self) -> None:
+        self._commit_open_line()
+
+    def log_line(self, timestamp: str, level: str, msg: str) -> None:
+        self._commit_open_line()
+        lvl_color = {"INFO": self.CYAN, "WARNING": self.YELLOW, "ERROR": self.RED,
+                     "SUCCESS": self.GREEN, "SKIP": self.DIM}.get(level, self.CYAN)
+        if self.use_color:
+            body = self.style(msg, self.RED) if level == "ERROR" else msg
+            _print_safe(f"{self.style('['+timestamp+']', self.DIM)} {self.style('['+level+']', lvl_color, self.BOLD)} {body}")
+        else:
+            _print_safe(f"[{timestamp}] [{level}] {msg}")
+
+    def begin_file(self, tag: str, name: str, size: int) -> None:
+        self._commit_open_line()
+        self._file_ts = datetime.now().strftime("%H:%M:%S")
+        self._file_tag = tag
+        self._file_name = name
+        self._file_size_note = f"  ({format_size(size)})" if size else ""
+        self._detail_indent = " " * len(f"[{self._file_ts}] {tag}")
+        inspect_plain = "  inspecting..." if self.is_tty else ""
+        inspect_styled = self.style(inspect_plain, self.DIM) if inspect_plain else ""
+        plain, styled = self._compose_file_line(inspect_plain, inspect_styled)
+        shown = styled if self.use_color else plain
+        if self.is_tty:
+            self._overwrite_line(shown)
+            self._file_line_pending = True
+        else:
+            _print_safe(shown)
+            self._file_line_pending = False
+
+    def end_file_inline(self, suffix: str, kind: str = "info") -> None:
+        color = {"skip": self.DIM, "error": self.RED, "success": self.GREEN, "warn": self.YELLOW}.get(kind)
+        suffix_plain = f"  {suffix}"
+        suffix_styled = self.style(suffix_plain, color) if color else suffix_plain
+        if self.is_tty and self._file_name:
+            plain, styled = self._compose_file_line(suffix_plain, suffix_styled)
+            self._overwrite_line(styled if self.use_color else plain)
+            _write_raw("\n")
+        else:
+            indent = self._detail_indent or "           "
+            _print_safe(f"{indent}{self.style(suffix, color) if color else suffix}")
+        self._file_line_pending = False
+        self._progress_active = False
+        self._file_name = ""
+
+    def mark_details(self) -> None:
+        if self._file_line_pending:
+            if self.is_tty and self._file_name:
+                plain, styled = self._compose_file_line()
+                self._overwrite_line(styled if self.use_color else plain)
+            _write_raw("\n")
+            self._file_line_pending = False
+
+    def detail(self, msg: str, kind: str = "info") -> None:
+        self.mark_details()
+        if self._progress_active:
+            self._commit_open_line()
+        indent = self._detail_indent or ""
+        color = {"success": self.GREEN, "error": self.RED, "warn": self.YELLOW}.get(kind, "")
+        if self.use_color and color:
+            _print_safe(f"{indent}{self.style(msg.strip(), color)}")
+        else:
+            _print_safe(f"{indent}{msg.strip()}")
+
+    def remux_progress(self, percent: int, started: float) -> None:
+        self.mark_details()
+        percent = _clamp_percent(int(percent))
+        elapsed = time.monotonic() - started
+        eta = ""
+        if percent >= 4 and elapsed >= 0.8:
+            remain = elapsed * (100.0 - percent) / max(percent, 1)
+            if remain >= 0:
+                eta = f"  ~{format_duration(remain)} left"
+        width = 22
+        filled = max(0, min(width, int(round(width * percent / 100.0))))
+        bar = (
+            (self.style(self._bar_fill * filled, self.CYAN) + self.style(self._bar_empty * (width - filled), self.DIM))
+            if self.use_color else self._bar_fill * filled + self._bar_empty * (width - filled)
+        )
+        indent = self._detail_indent or "           "
+        prefix = f"{indent}-> remux      : "
+        suffix = f" {percent:3d}%  {format_duration(elapsed)} elapsed{eta}"
+        now = time.monotonic()
+        if self.is_tty:
+            if percent == self._last_progress_pct and (now - self._last_progress_draw) < 0.08 and percent < 100:
+                return
+            self._overwrite_line(f"{prefix}[{bar}]{suffix}")
+            self._progress_active = True
+            self._last_progress_pct = percent
+            self._last_progress_draw = now
+        else:
+            bucket = percent // 10
+            if bucket == self._last_progress_bucket and percent < 100:
+                return
+            self._last_progress_bucket = bucket
+            _print_safe(f"{prefix}[{self._bar_fill * filled}{self._bar_empty * (width - filled)}]{suffix}")
+            self._progress_active = False
+
+    def progress_message(self, msg: str) -> None:
+        ts = datetime.now().strftime("%H:%M:%S")
+        shown = (self.style(f"[{ts}]", self.DIM) + " " + msg) if self.use_color else f"[{ts}] {msg}"
+        if self.is_tty:
+            self._overwrite_line(shown)
+            self._progress_active = True
+        else:
+            now = time.monotonic()
+            if now - self._last_progress_draw >= 2.0:
+                _print_safe(shown)
+                self._last_progress_draw = now
+
+
+_console: Optional[LiveConsole] = None
+_target_root: Optional[Path] = None
+_interrupt_requested: bool = False
+_log_fp: Optional[IO[str]] = None
+_log_fp_path: Optional[str] = None
+_active_temp_file: Optional[Path] = None
+_active_proc: Optional[subprocess.Popen] = None
+
+
+def _progress_tag(file_index: int, file_total: int) -> str:
+    if file_total <= 0 or file_index <= 0:
+        return ""
+    width = max(len(str(file_total)), 3)
+    return f"[{file_index:>{width}d}/{file_total}] "
+
+
+def _rel_display_name(mkv_path: Path) -> str:
+    if _target_root is not None:
+        try:
+            return str(mkv_path.relative_to(_target_root))
+        except ValueError:
+            pass
+    return mkv_path.name
+
+
+def _open_log_fp(log_file_path: str) -> Optional[IO[str]]:
+    global _log_fp, _log_fp_path
+    if _log_fp is not None and _log_fp_path == log_file_path:
+        return _log_fp
+    close_log_fp()
+    try:
+        log_dir = os.path.dirname(log_file_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        _log_fp = open(log_file_path, "a", encoding="utf-8", errors="replace", buffering=1)
+        _log_fp_path = log_file_path
+        return _log_fp
+    except Exception:
+        _log_fp = None
+        _log_fp_path = None
+        return None
+
+
+def close_log_fp() -> None:
+    global _log_fp, _log_fp_path
+    fp = _log_fp
+    _log_fp = None
+    _log_fp_path = None
+    if fp is not None:
+        try:
+            fp.flush()
+            fp.close()
+        except Exception:
+            pass
+
+
+def log(msg: str, level: str = "INFO", to_console: bool = True, log_file_path: Optional[str] = LOG_FILE):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    formatted = f"[{timestamp}] [{level}] {msg}"
+    if to_console:
+        if _console is not None:
+            _console.log_line(timestamp, level, msg)
+        else:
+            _print_safe(formatted)
+    if log_file_path and level != "PROGRESS":
+        try:
+            fp = _open_log_fp(log_file_path)
+            if fp is not None:
+                fp.write(formatted + "\n")
+                fp.flush()
+        except Exception:
+            pass
+
+
+def _log_detail(msg: str, log_file_path: Optional[str], kind: str = "info", level: str = "INFO") -> None:
+    if _console is not None:
+        _console.detail(msg, kind=kind)
+        log(msg, level=level, to_console=False, log_file_path=log_file_path)
+    else:
+        log(msg, level=level, to_console=True, log_file_path=log_file_path)
+
+
+# =============================================================================
+# TRACK CLASSIFICATION
+# =============================================================================
+
+
+def is_commentary_name(name: str, *, track_type: str = "audio") -> bool:
+    """Commentary / isolated-score / DVS *titles*. SDH is NOT commentary."""
+    if not name:
+        return False
+    name_lower = name.lower()
+    if re.search(r"\b(commentary|riff|riffing|rifftrax)\b", name_lower):
+        return True
+    if re.search(
+        r"\b(isolated\s+score|isolated\s+music|music\s*(&|and)\s*effects|"
+        r"isolated\s+audio|score\s+only)\b",
+        name_lower,
+    ):
+        return True
+    if re.search(
+        r"\b(audio\s+description|descriptive\s+audio|described\s+video|"
+        r"visual\s+description|\bdvs\b)\b",
+        name_lower,
+    ):
+        return True
+    # Bare "description" on AUDIO is almost always DVS. On SUBS it is often
+    # "English (SDH) / hearing-impaired description" — keep those.
+    if track_type != "subtitles" and re.search(r"\b(description|descriptive)\b", name_lower):
+        return True
+    cleaned = re.sub(
+        r"\b(director'?s?|producer'?s?)\s+(cut|edition|version|theatrical)\b",
+        "",
+        name_lower,
+    )
+    if re.search(
+        r"\b(director|directors|producer|producers|cast|crew|"
+        r"filmmaker|filmmakers|writer|writers|actor|actors|"
+        r"discussion|interview)\b",
+        cleaned,
+    ):
+        return True
+    return False
+
+
+def is_commentary_track(track: Dict[str, Any], remove_commentary: bool = True) -> bool:
+    """Drop commentary / DVS audio. Never drop hearing-impaired (SDH) subtitles."""
+    if not remove_commentary:
+        return False
+    props = track.get("properties") or {}
+    ttype = str(track.get("type") or "")
+    if props.get("flag_commentary"):
+        return True
+    # Matroska's text-descriptions flag marks an accessibility text stream for
+    # text-to-speech; it is not commentary and must not discard English SDH.
+    # Visual-impaired on AUDIO = descriptive video service. On SUBS it is
+    # often how muxers mark SDH — those must be kept.
+    if ttype != "subtitles" and props.get("flag_visual_impaired"):
+        return True
+    return is_commentary_name(str(props.get("track_name") or ""), track_type=ttype)
+
+
+def is_forced_subtitle(track: Dict[str, Any]) -> bool:
+    props = track.get("properties") or {}
+    if props.get("flag_forced") or props.get("forced_track"):
+        return True
+    name = str(props.get("track_name") or "")
+    return bool(re.search(r"\b(forced|foreign only|signs?/?songs?)\b", name.lower()))
+
+
+def get_audio_quality_score(track: Dict[str, Any]) -> Tuple[int, int, int, int, int, int]:
+    """(codec tier, atmos, channels, bitrate, sample-rate, original-flag)."""
+    props = track.get("properties") or {}
+    codec_id = str(props.get("codec_id") or "").upper()
+    codec = str(track.get("codec") or "").upper()
+    name = str(props.get("track_name") or "").upper()
+    blob = f"{codec} {codec_id} {name}"
+
+    tier = 10
+    if "TRUEHD" in blob or "A_MLP" in codec_id:
+        tier = 100
+    elif any(k in blob for k in ("DTS-HD MA", "DTS-HD MASTER", "DTS/HD_MA", "DTS:X", "DTS-X")):
+        tier = 95
+    elif any(k in blob for k in ("PCM", "FLAC", "ALAC", "WAVPACK", "APE", "MONKEY")):
+        tier = 90
+    elif any(k in blob for k in ("DTS-HD HRA", "DTS-HD HR", "DTS/HD_HRA", "DTS-HD HIGH RESOLUTION", "DTS-HD")):
+        tier = 85
+    elif any(k in blob for k in ("E-AC-3", "EAC3", "E_AC3", "DOLBY DIGITAL PLUS", "DD+", "DDPLUS")):
+        tier = 80
+    elif "DTS" in blob:
+        tier = 70
+    elif any(k in blob for k in ("AC-3", "AC3", "A_AC3", "DOLBY DIGITAL")):
+        tier = 60
+    elif "OPUS" in blob:
+        tier = 50
+    elif "AAC" in blob:
+        tier = 40
+    elif any(k in blob for k in ("MP3", "MPEG", "VORBIS", "WMA")):
+        tier = 20
+
+    try:
+        channels = int(props.get("audio_channels") or 2)
+    except (ValueError, TypeError):
+        channels = 2
+    atmos_flag = 1 if any(k in blob for k in ("ATMOS", "JOC")) else 0
+    try:
+        bitrate = int(props.get("tag_bps") or props.get("bps") or props.get("tag_bitrate") or props.get("bitrate") or 0)
+    except (ValueError, TypeError):
+        bitrate = 0
+    try:
+        sampling_freq = int(float(props.get("audio_sampling_frequency") or 48000))
+    except (ValueError, TypeError):
+        sampling_freq = 48000
+    original = 1 if props.get("flag_original") else 0
+    return (tier, atmos_flag, channels, bitrate, sampling_freq, original)
+
+
+def is_matching_language(track: Optional[Dict[str, Any]], target_languages: Set[str]) -> bool:
+    if not track:
+        return False
+    props = track.get("properties") or {}
+    candidates = [
+        str(props.get("language") or "").strip().lower(),
+        str(props.get("language_ietf") or "").strip().lower(),
+        str(props.get("tag_language") or "").strip().lower(),
+    ]
+    norm_targets = set()
+    for c in target_languages:
+        base = re.split(r"[-_.]", (c or "").strip().lower())[0]
+        norm_targets.add(normalize_language(base))
+    for code in candidates:
+        if not code:
+            continue
+        base = re.split(r"[-_.]", code)[0].strip().lower()
+        if normalize_language(base) in norm_targets:
+            return True
+    return False
+
+
+def name_implies_english(name: str) -> bool:
+    if not name:
+        return False
+    return bool(re.search(r"\b(english|eng)\b", name.lower()))
+
+
+def is_english_named_untagged(track: Optional[Dict[str, Any]]) -> bool:
+    if not track:
+        return False
+    props = track.get("properties") or {}
+    lang = str(props.get("language") or "").strip().lower()
+    lang_ietf = str(props.get("language_ietf") or "").strip().lower()
+    if lang not in ("und", "") or lang_ietf not in ("und", ""):
+        return False
+    return name_implies_english(str(props.get("track_name") or ""))
+
+
+def hardlink_count(path: Path) -> int:
+    """Return the visible hardlink count; treat unsupported values as one link."""
+    try:
+        return max(1, int(path.stat().st_nlink))
+    except (OSError, AttributeError, TypeError, ValueError):
+        return 1
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Best-effort directory sync after atomically replacing a journal file."""
+    if os.name == "nt":
+        return
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def _source_snapshot(path: Path, stat_result: Optional[os.stat_result] = None) -> Dict[str, Any]:
+    """Return a cheap identity snapshot used to reject concurrent source changes."""
+    st = stat_result if stat_result is not None else path.stat()
+    fields = {
+        "size": int(st.st_size),
+        "mtime_ns": int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))),
+        "device": int(getattr(st, "st_dev", 0)),
+        "inode": int(getattr(st, "st_ino", 0)),
+    }
+    canonical = json.dumps(fields, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    fields["identity"] = hashlib.sha256(canonical).hexdigest()
+    return fields
+
+
+def _source_snapshot_matches(path: Path, snapshot: Dict[str, Any]) -> bool:
+    try:
+        observed = _source_snapshot(path)
+    except OSError:
+        return False
+    expected = dict(snapshot or {})
+    # Older journal records might not carry a digest, but no current run writes
+    # one. Compare named fields rather than trusting a malformed record.
+    for key in ("size", "mtime_ns", "device", "inode"):
+        if key not in expected or expected.get(key) != observed.get(key):
+            return False
+    return bool(expected.get("identity") == observed.get("identity"))
+
+
+def validate_exact_external_english_srt(mkv_path: Path) -> Dict[str, Any]:
+    """Validate the sole sidecar allowed to replace embedded subtitle choices.
+
+    Only ``<exact MKV stem>.en.srt`` beside the movie qualifies. The helper is
+    intentionally conservative: any uncertain encoding, unsafe file type,
+    oversized payload, or malformed SRT leaves embedded subtitle selection
+    unchanged.
+    """
+    sidecar = mkv_path.with_name(f"{mkv_path.stem}.en.srt")
+    result: Dict[str, Any] = {"mkv_path": str(mkv_path), "path": str(sidecar), "valid": False, "reason": ""}
+    try:
+        file_stat = sidecar.stat(follow_symlinks=False)
+    except OSError as exc:
+        result["reason"] = "external SRT is absent" if not sidecar.exists() else f"could not stat external SRT: {exc}"
+        return result
+    if sidecar.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
+        result["reason"] = "external SRT is not a regular non-symlink file"
+        return result
+    if file_stat.st_size <= 0:
+        result["reason"] = "external SRT is empty"
+        return result
+    if file_stat.st_size > EXTERNAL_SRT_MAX_BYTES:
+        result["reason"] = f"external SRT exceeds {format_size(EXTERNAL_SRT_MAX_BYTES)} safety limit"
+        return result
+    try:
+        raw = sidecar.read_bytes()
+    except OSError as exc:
+        result["reason"] = f"could not read external SRT: {exc}"
+        return result
+    text: Optional[str] = None
+    for encoding in ("utf-8-sig", "utf-8", "cp1252"):
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        result["reason"] = "external SRT has an unsupported text encoding"
+        return result
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    if not _EXTERNAL_SRT_CUE_RE.search(normalized):
+        result["reason"] = "external SRT does not contain a valid numbered cue"
+        return result
+    try:
+        after_read_stat = sidecar.stat(follow_symlinks=False)
+    except OSError as exc:
+        result["reason"] = f"could not re-stat external SRT after reading: {exc}"
+        return result
+    if _source_snapshot(sidecar, file_stat)["identity"] != _source_snapshot(sidecar, after_read_stat)["identity"]:
+        result["reason"] = "external SRT changed while being validated"
+        return result
+    snapshot = _source_snapshot(sidecar, after_read_stat)
+    snapshot["sha256"] = hashlib.sha256(raw).hexdigest()
+    result.update({"valid": True, "reason": "", "snapshot": snapshot})
+    return result
+
+
+def external_srt_snapshot_matches(record: Dict[str, Any]) -> bool:
+    """Revalidate the external SRT and require the pre-remux identity to match."""
+    if not record or not record.get("valid") or not record.get("snapshot"):
+        return False
+    path = Path(str(record.get("path") or ""))
+    mkv_path = Path(str(record.get("mkv_path") or ""))
+    current = validate_exact_external_english_srt(mkv_path)
+    expected_digest = str((record.get("snapshot") or {}).get("sha256") or "")
+    current_digest = str((current.get("snapshot") or {}).get("sha256") or "")
+    return (
+        bool(current.get("valid"))
+        and str(current.get("path") or "") == str(path)
+        and bool(re.fullmatch(r"[0-9a-f]{64}", expected_digest))
+        and current_digest == expected_digest
+        and _source_snapshot_matches(path, record["snapshot"])
+    )
+
+
+def _transaction_token_from_temp_name(name: str) -> Optional[str]:
+    if not name.startswith(TEMP_PREFIX):
+        return None
+    remainder = name[len(TEMP_PREFIX):]
+    token, separator, _ = remainder.partition("__")
+    if not separator or not re.fullmatch(r"[0-9a-f]{32}", token):
+        return None
+    return token
+
+
+def _transaction_journal_path(parent: Path, token: str) -> Path:
+    return parent / f"{TRANSACTION_MARKER}{token}{TRANSACTION_JOURNAL_SUFFIX}"
+
+
+def new_transaction_paths(original: Path) -> Tuple[Path, Path, str]:
+    """Create unique sibling paths so staging and atomic replacement share a filesystem."""
+    token = uuid.uuid4().hex
+    temp = original.with_name(f"{TEMP_PREFIX}{token}__{original.name}")
+    return temp, _transaction_journal_path(original.parent, token), token
+
+
+def read_transaction(journal_path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        data = json.loads(journal_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(data, dict) or data.get("schema") != TRANSACTION_SCHEMA_VERSION:
+        return None
+    return data
+
+
+def write_transaction(journal_path: Path, payload: Dict[str, Any]) -> None:
+    """Durably replace a compact JSON transaction journal on the media volume."""
+    tmp = journal_path.with_name(f".{journal_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(str(tmp), str(journal_path))
+        _fsync_directory(journal_path.parent)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def create_transaction(original: Path, temp: Path, token: str, orig_stat: os.stat_result) -> Dict[str, Any]:
+    return {
+        "schema": TRANSACTION_SCHEMA_VERSION,
+        "token": token,
+        "phase": "remuxing",
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "source_path": str(original),
+        "source_name": original.name,
+        "temp_name": temp.name,
+        "source_snapshot": _source_snapshot(original, orig_stat),
+    }
+
+
+def cleanup_transaction_artifacts(temp_path: Path, journal_path: Optional[Path] = None) -> None:
+    safe_delete(temp_path)
+    if journal_path is not None:
+        safe_delete(journal_path)
+
+
+def safe_replace(src_path: Path, dst_path: Path, max_retries: int = 10, initial_delay: float = 0.5) -> bool:
+    delay = initial_delay
+    for attempt in range(max_retries):
+        try:
+            os.replace(str(src_path), str(dst_path))
+            return True
+        except (PermissionError, OSError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay = min(delay * 1.5, 3.0)
+            else:
+                raise e
+    return False
+
+
+def safe_delete(file_path: Path, max_retries: int = 6, delay: float = 0.5):
+    for _ in range(max_retries):
+        try:
+            if file_path.exists():
+                file_path.unlink(missing_ok=True)
+            return
+        except Exception:
+            time.sleep(delay)
+
+
+def describe_track(track: Dict[str, Any]) -> str:
+    props = track.get("properties") or {}
+    tid = track.get("id")
+    codec = track.get("codec") or "Unknown"
+    channels = props.get("audio_channels")
+    lang = props.get("language") or "und"
+    name = props.get("track_name") or ""
+    ch_str = f" {channels}ch" if channels is not None else ""
+    name_str = f" - '{name}'" if name else ""
+    return f"ID {tid}: {codec}{ch_str} [{lang}]{name_str}"
+
+
+def _kill_active_child() -> None:
+    proc = _active_proc
+    if proc is None:
+        return
+    try:
+        if proc.poll() is None:
+            proc.kill()
+    except Exception:
+        pass
+
+
+def request_interrupt() -> None:
+    global _interrupt_requested
+    already = _interrupt_requested
+    _interrupt_requested = True
+    _kill_active_child()
+    if already:
+        try:
+            if _active_temp_file is not None:
+                safe_delete(_active_temp_file)
+        except Exception:
+            pass
+        try:
+            close_log_fp()
+        except Exception:
+            pass
+        os._exit(1)
+    if _console is not None:
+        try:
+            _console.finish_progress()
+        except Exception:
+            pass
+
+
+def _run_mkvmerge(cmd: List[str], on_progress: Optional[Callable[[int], None]] = None) -> Tuple[int, str, str]:
+    global _active_proc
+    live = on_progress is not None
+    run_cmd = list(cmd)
+    # ``--ui-language`` is not a supported mkvmerge CLI option on current
+    # MKVToolNix releases; JSON output is locale-neutral, so do not inject it.
+    if live and "--gui-mode" not in run_cmd:
+        run_cmd.insert(1, "--gui-mode")
+
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    popen_kwargs: Dict[str, Any] = dict(
+        args=run_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT if live else subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=creationflags,
+    )
+    if live:
+        popen_kwargs["bufsize"] = 1
+
+    proc = subprocess.Popen(**popen_kwargs)
+    _active_proc = proc
+    try:
+        if not live:
+            stdout, stderr = proc.communicate()
+            if _interrupt_requested:
+                raise KeyboardInterrupt
+            return proc.returncode, stdout, stderr
+
+        output_parts: List[str] = []
+        stdout_handle = proc.stdout
+        if stdout_handle is None:
+            proc.wait()
+            return proc.returncode, "", ""
+
+        def _emit(part: str) -> None:
+            if not part:
+                return
+            output_parts.append(part + "\n")
+            pct = _parse_mkvmerge_progress(part)
+            if pct is not None:
+                try:
+                    on_progress(pct)
+                except Exception:
+                    pass
+
+        carry = ""
+        try:
+            while True:
+                chunk = stdout_handle.read(256)
+                if chunk == "":
+                    _emit(carry)
+                    break
+                carry += chunk
+                pieces = re.split(r"[\r\n]+", carry)
+                carry = pieces.pop()
+                for piece in pieces:
+                    _emit(piece)
+        finally:
+            stdout_handle.close()
+        proc.wait()
+        if _interrupt_requested:
+            raise KeyboardInterrupt
+        out = "".join(output_parts)
+        return proc.returncode, out, out
+    except BaseException:
+        try:
+            if proc.poll() is None:
+                proc.kill()
+        except Exception:
+            pass
+        try:
+            proc.wait()
+        except Exception:
+            pass
+        raise
+    finally:
+        if _active_proc is proc:
+            _active_proc = None
+
+
+_FINGERPRINT_FLAG_ALIASES = {
+    # mkvmerge JSON has used both the Matroska-style ``*_track`` names and
+    # newer ``flag_*`` names across fields/releases. Normalize both forms.
+    "flag_default": ("flag_default", "default_track"),
+    "flag_forced": ("flag_forced", "forced_track"),
+    "flag_enabled": ("flag_enabled", "enabled_track"),
+    "flag_hearing_impaired": ("flag_hearing_impaired",),
+    "flag_visual_impaired": ("flag_visual_impaired",),
+    "flag_text_descriptions": ("flag_text_descriptions",),
+    "flag_original": ("flag_original",),
+    "flag_commentary": ("flag_commentary",),
+}
+
+# Only these stable identity/timing fields are emitted by diagnostic mode. Full
+# mkvmerge JSON can be enormous and includes regenerated statistics; those are
+# deliberately not used as the verifier contract.
+_TRACK_DIAGNOSTIC_PROPERTY_KEYS = (
+    "codec_id", "pixel_dimensions", "display_dimensions", "default_duration",
+    "tag_number_of_frames", "language", "language_ietf", "track_name",
+    "audio_channels", "audio_sampling_frequency",
+    *tuple(alias for aliases in _FINGERPRINT_FLAG_ALIASES.values() for alias in aliases),
+)
+
+
+def _bool_flag(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    return bool(value)
+
+
+def _normal_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def track_fingerprint(
+    track: Dict[str, Any], *, default_override: Optional[bool] = None,
+    forced_override: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Return stable track metadata sufficient to detect wrong retained streams.
+
+    IDs and statistics tags are intentionally excluded because mkvmerge may
+    legitimately renumber tracks and regenerate statistics during a remux.
+    """
+    props = track.get("properties") or {}
+    flags = {
+        key: next((_bool_flag(props.get(alias)) for alias in aliases if alias in props), False)
+        for key, aliases in _FINGERPRINT_FLAG_ALIASES.items()
+    }
+    if default_override is not None:
+        flags["flag_default"] = bool(default_override)
+    if forced_override is not None:
+        flags["flag_forced"] = bool(forced_override)
+    language = str(props.get("language") or "und").strip().lower()
+    raw_language_ietf = str(props.get("language_ietf") or "").strip().lower()
+    # MKVToolNix can materialize a BCP-47 tag (for example, ``en``) in a
+    # remuxed file when the source represented the same language only through
+    # legacy ISO-639 metadata (for example, ``eng``). Treat the absent source
+    # tag as its canonical language equivalent, but preserve an explicit tag
+    # when present so genuine language/tag changes remain verification failures.
+    language_ietf = raw_language_ietf or normalize_language(language)
+    result: Dict[str, Any] = {
+        "type": str(track.get("type") or ""),
+        "codec": str(track.get("codec") or ""),
+        "codec_id": str(props.get("codec_id") or ""),
+        "language": language,
+        "language_ietf": language_ietf,
+        "name": str(props.get("track_name") or ""),
+        "flags": flags,
+    }
+    if result["type"] == "audio":
+        result.update({
+            "channels": _normal_int(props.get("audio_channels")),
+            "sample_rate": _normal_int(props.get("audio_sampling_frequency")),
+        })
+    elif result["type"] == "video":
+        result.update({
+            "pixel_dimensions": str(props.get("pixel_dimensions") or ""),
+            "display_dimensions": str(props.get("display_dimensions") or ""),
+            "default_duration": _normal_int(props.get("default_duration")),
+        })
+    return result
+
+
+def _diagnostic_track_record(track: Dict[str, Any]) -> Dict[str, Any]:
+    """Return compact raw and normalized metadata for a failed-track diagnosis."""
+    props = track.get("properties") or {}
+    raw_properties = {
+        key: props.get(key) for key in _TRACK_DIAGNOSTIC_PROPERTY_KEYS if key in props
+    }
+    return {
+        "track_id": track.get("id"),
+        "type": track.get("type"),
+        "codec": track.get("codec"),
+        "raw_properties": raw_properties,
+        "normalized_fingerprint": track_fingerprint(track),
+    }
+
+
+def build_verification_diagnostic(
+    source_info: Dict[str, Any], output_info: Optional[Dict[str, Any]], plan: Dict[str, Any], reason: str,
+) -> Dict[str, Any]:
+    """Produce actionable evidence for a fail-closed remux mismatch.
+
+    The payload intentionally records only comparison-relevant metadata. It is
+    diagnostic evidence and never changes the verification decision.
+    """
+    source_tracks = source_info.get("tracks") or []
+    output_tracks = (output_info or {}).get("tracks") or []
+    return {
+        "reason": reason,
+        "expected_audio_fingerprint": plan.get("audio"),
+        "actual_audio_fingerprints": _fingerprint_list(
+            [track for track in output_tracks if track.get("type") == "audio"]
+        ),
+        "source_audio_tracks": [
+            _diagnostic_track_record(track) for track in source_tracks if track.get("type") == "audio"
+        ],
+        "output_audio_tracks": [
+            _diagnostic_track_record(track) for track in output_tracks if track.get("type") == "audio"
+        ],
+        "expected_video_fingerprints": (plan.get("preserved_tracks") or {}).get("video", []),
+        "actual_video_fingerprints": _fingerprint_list(
+            [track for track in output_tracks if track.get("type") == "video"]
+        ),
+        "source_video_tracks": [
+            _diagnostic_track_record(track) for track in source_tracks if track.get("type") == "video"
+        ],
+        "output_video_tracks": [
+            _diagnostic_track_record(track) for track in output_tracks if track.get("type") == "video"
+        ],
+        "expected_video_frame_counts": plan.get("video_frame_counts", []),
+        "actual_video_frame_counts": _video_frame_counts(output_tracks),
+        "expected_duration_ns": plan.get("source_duration_ns"),
+        "actual_duration_ns": (((output_info or {}).get("container") or {}).get("properties") or {}).get("duration"),
+    }
+
+
+def _fingerprint_key(fingerprint: Dict[str, Any]) -> str:
+    return json.dumps(fingerprint, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _fingerprint_list(tracks: List[Dict[str, Any]], **kwargs: Any) -> List[Dict[str, Any]]:
+    return sorted((track_fingerprint(track, **kwargs) for track in tracks), key=_fingerprint_key)
+
+
+def retained_audio_fingerprint_matches(actual: Dict[str, Any], expected: Dict[str, Any]) -> bool:
+    """Compare the selected audio contract without masking a real stream change.
+
+    MKVToolNix 100 preserves the AAC payload but can report an AAC stream whose
+    source Matroska ``audio_channels`` value is 7 as 8 after remux. The observed
+    difference is the well-known AAC 7.1 reporting ambiguity, not a changed
+    stream: codec, language, sample rate, flags, and the extracted raw AAC bytes
+    remain identical. Accept only that exact 7-to-8 representation change and
+    require every other normalized audio fingerprint field to match exactly.
+    """
+    if actual == expected:
+        return True
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    if (
+        actual.get("type") != "audio"
+        or expected.get("type") != "audio"
+        or actual.get("codec_id") != "A_AAC"
+        or expected.get("codec_id") != "A_AAC"
+        or expected.get("channels") != 7
+        or actual.get("channels") != 8
+    ):
+        return False
+    normalized_expected = dict(expected)
+    normalized_expected["channels"] = 8
+    return actual == normalized_expected
+
+
+def _chapter_entry_count(info: Dict[str, Any]) -> int:
+    return sum(int(c.get("num_entries", 0) or 0) for c in (info.get("chapters") or []))
+
+
+def _video_frame_counts(tracks: List[Dict[str, Any]]) -> List[Optional[int]]:
+    return sorted(
+        (_normal_int((track.get("properties") or {}).get("tag_number_of_frames"))
+         for track in tracks if track.get("type") == "video"),
+        key=lambda value: (-1 if value is None else value),
+    )
+
+
+def build_verification_plan(
+    input_info: Dict[str, Any], best_audio: Dict[str, Any], keep_subtitles: List[Dict[str, Any]],
+    source_size: int,
+) -> Dict[str, Any]:
+    """Build a JSON-serializable contract for normal and orphan remux verification."""
+    tracks = input_info.get("tracks") or []
+    preserved: Dict[str, List[Dict[str, Any]]] = {}
+    for track_type in ("video", "buttons", "menu", "complex"):
+        preserved[track_type] = _fingerprint_list(
+            [track for track in tracks if track.get("type") == track_type]
+        )
+    return {
+        "source_size": int(source_size),
+        "audio": track_fingerprint(best_audio, default_override=True),
+        "subtitles": sorted(
+            (
+                track_fingerprint(
+                    subtitle, default_override=False, forced_override=is_forced_subtitle(subtitle),
+                )
+                for subtitle in keep_subtitles
+            ),
+            key=_fingerprint_key,
+        ),
+        "preserved_tracks": preserved,
+        "attachment_count": len(input_info.get("attachments") or []),
+        "chapter_entries": _chapter_entry_count(input_info),
+        "video_frame_counts": _video_frame_counts(tracks),
+        "source_duration_ns": ((input_info.get("container") or {}).get("properties") or {}).get("duration"),
+    }
+
+
+def _verify_remux_info(temp_path: Path, out_info: Dict[str, Any], plan: Dict[str, Any]) -> Tuple[bool, str]:
+    container = out_info.get("container") or {}
+    if not (container.get("recognized") and container.get("supported")):
+        return False, "remuxed file is not a recognized/supported media container"
+    try:
+        out_size = temp_path.stat().st_size
+    except OSError as exc:
+        return False, f"could not stat remuxed file: {exc}"
+    source_size = int(plan.get("source_size") or 0)
+    if out_size < 1024:
+        return False, f"remuxed file is tiny ({format_size(out_size)})"
+    if source_size > 0 and out_size < int(source_size * MIN_OUTPUT_RATIO):
+        return False, (
+            f"remuxed file shrank too much ({format_size(source_size)} -> {format_size(out_size)}); "
+            "refusing to replace original"
+        )
+
+    out_tracks = out_info.get("tracks") or []
+    out_audio = [track for track in out_tracks if track.get("type") == "audio"]
+    if len(out_audio) != 1:
+        return False, f"expected exactly 1 audio track in output, found {len(out_audio)}"
+    if not retained_audio_fingerprint_matches(track_fingerprint(out_audio[0]), plan.get("audio") or {}):
+        return False, "retained audio fingerprint differs from the selected source audio"
+
+    actual_subtitles = _fingerprint_list([track for track in out_tracks if track.get("type") == "subtitles"])
+    if actual_subtitles != plan.get("subtitles", []):
+        return False, "retained subtitle fingerprints differ from the planned subtitle set"
+
+    for track_type, expected in (plan.get("preserved_tracks") or {}).items():
+        actual = _fingerprint_list([track for track in out_tracks if track.get("type") == track_type])
+        if actual != expected:
+            return False, f"{track_type} track fingerprints changed during remux"
+    if len(out_info.get("attachments") or []) != int(plan.get("attachment_count") or 0):
+        return False, "attachment count changed during remux"
+    if _chapter_entry_count(out_info) != int(plan.get("chapter_entries") or 0):
+        return False, "chapter count changed during remux"
+
+    # MKVToolNix can generate the NumberOfFrames statistics tag during a remux
+    # when the source did not carry one. Frame counts present in the source
+    # remain a verification signal, but newly materialized output-only values
+    # are informational and must not reject an otherwise identical remux.
+    expected_frames = plan.get("video_frame_counts", [])
+    actual_frames = _video_frame_counts(out_tracks)
+    remaining_actual_frames = list(actual_frames)
+    for expected_frame in expected_frames:
+        if expected_frame is None:
+            continue
+        try:
+            remaining_actual_frames.remove(expected_frame)
+        except ValueError:
+            return False, (
+                "a source video frame count is absent from the remuxed output "
+                f"({expected_frames} -> {actual_frames})"
+            )
+
+    # Container duration is the longest track, not necessarily picture duration.
+    # Removing padded commentary/DVS can legitimately shorten it; without usable
+    # frame counts, retain the old conservative floor to reject a truncated output.
+    in_duration = plan.get("source_duration_ns")
+    out_duration = ((out_info.get("container") or {}).get("properties") or {}).get("duration")
+    if in_duration and out_duration:
+        try:
+            in_ns, out_ns = int(in_duration), int(out_duration)
+            slack = max(1_000_000_000, int(in_ns * 0.02))
+            frames_confirmed = bool(expected_frames) and expected_frames == actual_frames and all(
+                value is not None for value in expected_frames
+            )
+            if out_ns > in_ns + slack:
+                return False, f"duration grew during remux ({in_ns / 1e9:.2f}s -> {out_ns / 1e9:.2f}s)"
+            if not frames_confirmed and out_ns + slack < in_ns * 0.85:
+                return False, (
+                    f"duration shrank too much during remux ({in_ns / 1e9:.2f}s -> {out_ns / 1e9:.2f}s) "
+                    "and usable video frame counts were not available"
+                )
+        except (TypeError, ValueError):
+            pass
+    return True, ""
+
+
+def verify_remux_output(
+    temp_path: Path, mkvmerge_bin: str, plan: Dict[str, Any],
+) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    try:
+        rc, out, err = _run_mkvmerge([mkvmerge_bin, "-J", str(temp_path)])
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        return False, f"could not re-inspect remuxed file: {exc}", None
+    if rc not in (0, 1):
+        return False, f"remuxed file inspection failed (code {rc}): {(err or '').strip()[:300]}", None
+    try:
+        out_info = json.loads(out or "{}")
+    except (TypeError, ValueError) as exc:
+        return False, f"could not parse remuxed file metadata: {exc}", None
+    ok, reason = _verify_remux_info(temp_path, out_info, plan)
+    return ok, reason, out_info
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return True
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                return False
+            kernel32.CloseHandle(handle)
+            return True
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError, OverflowError, ValueError):
+        return True
+    return True
+
+
+def acquire_lock(lock_path: Path, log_file_path: Optional[str] = LOG_FILE) -> bool:
+    try:
+        for _ in range(2):
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(f"{_this_hostname()}\n{os.getpid()}\n{time.time()}\n")
+                return True
+            except FileExistsError:
+                host_str = ""
+                pid_str = ""
+                try:
+                    content = lock_path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+                    if (len(content) >= 2 and not content[0].strip().isdigit()
+                            and content[1].strip().isdigit()):
+                        host_str, pid_str = content[0].strip(), content[1].strip()
+                    elif content and content[0].strip().isdigit():
+                        host_str, pid_str = _this_hostname(), content[0].strip()
+                    else:
+                        log(f"Lock file '{lock_path}' is unreadable; assuming another instance holds it. Exiting.",
+                            level="WARNING", log_file_path=log_file_path)
+                        return False
+                except OSError:
+                    return False
+                same_host = host_str.casefold() == _this_hostname().casefold()
+                pid_live = pid_str.isdigit() and _pid_alive(int(pid_str))
+                if not same_host:
+                    log(f"Another instance appears to be running on host '{host_str}' "
+                        f"(lock held by PID {pid_str or 'unknown'}). Exiting.",
+                        level="WARNING", log_file_path=log_file_path)
+                    return False
+                if pid_live:
+                    log(f"Another instance appears to be running (lock held by PID {pid_str}). Exiting.",
+                        level="WARNING", log_file_path=log_file_path)
+                    return False
+                log(f"Removing stale lock file from a previous run (PID {pid_str or 'unknown'}).",
+                    level="WARNING", log_file_path=log_file_path)
+                try:
+                    lock_path.unlink(missing_ok=True)
+                except OSError:
+                    return False
+            except OSError as e:
+                log(f"Could not create lock file '{lock_path}': {e}",
+                    level="ERROR", log_file_path=log_file_path)
+                return False
+        return False
+    except Exception as e:
+        log(f"Lock acquisition error: {e}", level="ERROR", log_file_path=log_file_path)
+        return False
+
+
+def release_lock(lock_path: Path):
+    try:
+        lock_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+class StandardizerCoordinationLock:
+    """Advisory lock compatible with ``movie_standardizer.ExclusiveLock``.
+
+    The standardizer intentionally stores its deterministic lock in the system
+    temporary directory so neither program creates media-library files merely to
+    coordinate. Matching that exact protocol prevents a qBittorrent completion
+    hook from placing/replacing canonical hardlinks while this cleaner scans or
+    remuxes them.
+    """
+
+    def __init__(self, target_dir: Path, timeout_seconds: float) -> None:
+        normalized = os.path.normcase(os.path.normpath(str(target_dir)))
+        key = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
+        self.path = Path(tempfile.gettempdir()) / f"{STANDARDIZER_LOCK_NAME}.{key}"
+        self.timeout_seconds = max(0.0, float(timeout_seconds))
+        self._fh: Optional[Any] = None
+
+    @staticmethod
+    def _try_lock(handle: Any) -> bool:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                return True
+            except OSError as exc:
+                if getattr(exc, "winerror", None) in {33, 36} or exc.errno in {errno.EACCES, errno.EAGAIN}:
+                    return False
+                raise
+        import fcntl
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            return False
+
+    def acquire(self) -> None:
+        handle = open(self.path, "a+b")
+        self._fh = handle
+        if handle.seek(0, os.SEEK_END) == 0:
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + self.timeout_seconds
+        try:
+            while not self._try_lock(handle):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"timed out after {self.timeout_seconds:.1f}s waiting for standardizer lock: {self.path}"
+                    )
+                time.sleep(0.1)
+        except BaseException:
+            handle.close()
+            self._fh = None
+            raise
+
+    def release(self) -> None:
+        handle = self._fh
+        if handle is None:
+            return
+        try:
+            if os.name == "nt":
+                import msvcrt
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+            self._fh = None
+
+
+def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: Optional[str] = LOG_FILE) -> int:
+    """Resolve only journal-proven, fully verified interrupted transactions.
+
+    A recognized MKV is not evidence that it passed this program's selection and
+    integrity checks. Therefore legacy files and incomplete/new unverified
+    transactions remain available for manual review whenever the original is
+    absent; they are never promoted automatically.
+    """
+    log("Checking for orphaned remux transactions from previous runs...", log_file_path=log_file_path)
+    handled = 0
+    preserved = 0
+    now = time.time()
+    for root, _, files in os.walk(target_path):
+        if _interrupt_requested:
+            break
+        for filename in files:
+            if _interrupt_requested:
+                break
+            if not (filename.startswith(TEMP_PREFIX) and filename.lower().endswith(".mkv")):
+                continue
+            temp = Path(root) / filename
+            try:
+                if now - temp.stat().st_mtime < ORPHAN_MIN_AGE_SECONDS:
+                    continue
+            except OSError:
+                continue
+
+            token = _transaction_token_from_temp_name(filename)
+            if token is None:
+                original_name = filename[len(TEMP_PREFIX):]
+                original = Path(root) / original_name if original_name else None
+                if original is not None and original.exists():
+                    log(f"Removing legacy orphan temp beside intact original: '{filename}'",
+                        level="WARNING", log_file_path=log_file_path)
+                    safe_delete(temp)
+                    handled += 1
+                else:
+                    log(f"Leaving legacy orphan temp for manual review: '{filename}'",
+                        level="WARNING", log_file_path=log_file_path)
+                    preserved += 1
+                continue
+
+            journal_path = _transaction_journal_path(Path(root), token)
+            journal = read_transaction(journal_path)
+            source_name = str((journal or {}).get("source_name") or "")
+            valid_names = (
+                journal is not None
+                and journal.get("token") == token
+                and journal.get("temp_name") == filename
+                and bool(source_name)
+                and Path(source_name).name == source_name
+                and source_name not in {".", ".."}
+            )
+            if not valid_names:
+                log(f"Leaving temp without a valid transaction journal: '{filename}'",
+                    level="WARNING", log_file_path=log_file_path)
+                preserved += 1
+                continue
+
+            original = Path(root) / source_name
+            if original.exists():
+                log(f"Removing completed/abandoned transaction artifacts beside intact original: '{filename}'",
+                    level="WARNING", log_file_path=log_file_path)
+                cleanup_transaction_artifacts(temp, journal_path)
+                handled += 1
+                continue
+            if journal.get("phase") != "verified":
+                log(f"Leaving unverified orphan remux for manual review: '{filename}'",
+                    level="WARNING", log_file_path=log_file_path)
+                preserved += 1
+                continue
+            if not _source_snapshot_matches(temp, journal.get("temp_snapshot") or {}):
+                log(f"Leaving changed verified temp for manual review: '{filename}'",
+                    level="WARNING", log_file_path=log_file_path)
+                preserved += 1
+                continue
+            plan = journal.get("verification_plan")
+            if not isinstance(plan, dict):
+                log(f"Leaving verified temp with incomplete journal for manual review: '{filename}'",
+                    level="WARNING", log_file_path=log_file_path)
+                preserved += 1
+                continue
+            external_srt = journal.get("external_srt")
+            if external_srt is not None and not external_srt_snapshot_matches(external_srt):
+                log(f"Leaving verified temp because its validated external SRT changed: '{filename}'",
+                    level="WARNING", log_file_path=log_file_path)
+                preserved += 1
+                continue
+            try:
+                ok, reason, _ = verify_remux_output(temp, mkvmerge_bin, plan)
+                if not ok:
+                    log(f"Leaving failed-verification orphan remux for manual review: '{filename}' ({reason})",
+                        level="WARNING", log_file_path=log_file_path)
+                    preserved += 1
+                    continue
+                log(f"Recovering journal-verified remux: '{filename}' -> '{source_name}'",
+                    level="WARNING", log_file_path=log_file_path)
+                safe_replace(temp, original)
+                safe_delete(journal_path)
+                handled += 1
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
+                log(f"Could not recover verified temp '{filename}': {exc}; leaving it",
+                    level="WARNING", log_file_path=log_file_path)
+                preserved += 1
+
+    # A crash immediately after a successful os.replace can leave the journal
+    # behind while the temp path no longer exists. That is safe to remove only
+    # after validating the journal's naming contract and confirming the original
+    # is present; never infer recovery from a journal alone when the original is
+    # missing.
+    for root, _, files in os.walk(target_path):
+        if _interrupt_requested:
+            break
+        for filename in files:
+            if not (filename.startswith(TRANSACTION_MARKER) and filename.endswith(TRANSACTION_JOURNAL_SUFFIX)):
+                continue
+            journal_path = Path(root) / filename
+            journal = read_transaction(journal_path)
+            token = str((journal or {}).get("token") or "")
+            source_name = str((journal or {}).get("source_name") or "")
+            temp_name = str((journal or {}).get("temp_name") or "")
+            if not (
+                journal is not None
+                and re.fullmatch(r"[0-9a-f]{32}", token)
+                and journal_path == _transaction_journal_path(Path(root), token)
+                and Path(source_name).name == source_name
+                and Path(temp_name).name == temp_name
+                and _transaction_token_from_temp_name(temp_name) == token
+            ):
+                continue
+            original = Path(root) / source_name
+            temp = Path(root) / temp_name
+            if original.exists() and not temp.exists():
+                log(f"Removing stale transaction journal beside intact original: '{filename}'",
+                    level="WARNING", log_file_path=log_file_path)
+                safe_delete(journal_path)
+                handled += 1
+
+    if handled or preserved:
+        log(
+            f"Orphan recovery finished: cleaned/recovered {handled}; retained for manual review {preserved}.",
+            log_file_path=log_file_path,
+        )
+    else:
+        log("No orphaned remux transactions found.", log_file_path=log_file_path)
+    return handled
+
+
+def _in_extra_dir(path: Path, root: Path) -> bool:
+    try:
+        rel = path.parent.relative_to(root)
+    except ValueError:
+        rel = path.parent
+    return any(part.strip().lower() in EXTRA_DIR_NAMES for part in rel.parts)
+
+
+def canonical_movie_layout_issue(mkv_path: Path, target_root: Path) -> Optional[str]:
+    """Return a reason when a movie does not follow the canonical folder contract."""
+    parent = mkv_path.parent
+    if parent == target_root:
+        return "noncanonical layout: MKV is directly under the library root"
+    if mkv_path.is_symlink() or parent.is_symlink() or not mkv_path.is_file():
+        return "noncanonical layout: MKV is not a regular non-symlink file in a regular folder"
+    if mkv_path.stem.casefold() != parent.name.casefold():
+        return "noncanonical layout: MKV stem does not match its movie-folder name"
+    try:
+        siblings = [
+            path for path in parent.iterdir()
+            if path.suffix.lower() == ".mkv" and path.is_file() and not path.is_symlink()
+            and not path.name.startswith(TEMP_PREFIX) and not SAMPLE_NAME_RE.search(path.stem)
+        ]
+    except OSError as exc:
+        return f"noncanonical layout: could not inspect movie folder ({exc})"
+    if len(siblings) != 1:
+        return f"noncanonical layout: expected one regular MKV in movie folder, found {len(siblings)}"
+    return None
+
+
+def discover_mkv_files(
+    target_path: Path,
+    log_file_path: Optional[str],
+    onerror: Optional[Callable[[OSError], None]] = None,
+    *,
+    skip_extras: bool = True,
+    min_size: int = 0,
+) -> Tuple[List[Path], List[int], int]:
+    log(f"Scanning '{target_path}' for MKV files...", log_file_path=log_file_path)
+    found: List[Tuple[Path, int]] = []
+    total_bytes = 0
+    last_draw = 0.0
+    walk_kwargs: Dict[str, Any] = {}
+    if onerror is not None:
+        walk_kwargs["onerror"] = onerror
+    for root, dirnames, names in os.walk(target_path, **walk_kwargs):
+        if _interrupt_requested:
+            break
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        if skip_extras:
+            dirnames[:] = [d for d in dirnames if d.strip().lower() not in EXTRA_DIR_NAMES]
+        for f in names:
+            if _interrupt_requested:
+                break
+            if not f.lower().endswith(".mkv") or f.startswith(TEMP_PREFIX):
+                continue
+            if SAMPLE_NAME_RE.search(Path(f).stem):
+                continue
+            pth = Path(root) / f
+            if skip_extras and _in_extra_dir(pth, target_path):
+                continue
+            try:
+                sz = int(pth.stat().st_size)
+            except OSError:
+                sz = 0
+            if min_size and sz < min_size:
+                continue
+            found.append((pth, sz))
+            total_bytes += sz
+            if _console is not None:
+                now = time.monotonic()
+                if now - last_draw >= 0.12:
+                    _console.progress_message(f"Scanning...  {len(found)} MKV file(s) found")
+                    last_draw = now
+    if _console is not None:
+        _console.finish_progress()
+    found.sort(key=lambda item: os.path.normcase(str(item[0])))
+    files = [item[0] for item in found]
+    sizes = [item[1] for item in found]
+    log(f"Found {len(files)} MKV file(s) totaling {format_size(total_bytes)}", log_file_path=log_file_path)
+    return files, sizes, total_bytes
+
+
+def _log_live_totals(
+    stats: Dict[str, Any], index: int, total: int, run_started: float,
+    log_file_path: Optional[str], done_bytes: int = 0, total_bytes: int = 0,
+) -> None:
+    elapsed = time.monotonic() - run_started
+    remain_est = _eta_seconds(elapsed, done_bytes, total_bytes, index, total)
+    eta = f"  ~{format_duration(remain_est)} left" if remain_est is not None else ""
+    byte_part = f"  {format_size(done_bytes)}/{format_size(total_bytes)}" if total_bytes > 0 else ""
+    msg = (
+        f"-- {index}/{total}  cleaned {len(stats['cleaned'])}  "
+        f"already {len(stats['already_clean'])}  "
+        f"deferred {len(stats.get('deferred_hardlinked', []))}  "
+        f"skipped {len(stats['skipped_no_english'])}  "
+        f"layout {len(stats.get('skipped_layout', []))}  "
+        f"errors {len(stats['errors'])}  "
+        f"saved {format_size(stats['total_space_saved_bytes'])}"
+        f"{byte_part}  elapsed {format_duration(elapsed)}{eta}"
+    )
+    log(msg, log_file_path=log_file_path)
+
+
+def process_mkv(
+    mkv_path: Path,
+    stats: Dict[str, Any],
+    mkvmerge_bin: str,
+    dry_run: bool = False,
+    remove_commentary: Optional[bool] = None,
+    audio_langs: Optional[Set[str]] = None,
+    sub_langs: Optional[Set[str]] = None,
+    log_file_path: Optional[str] = LOG_FILE,
+    file_index: int = 0,
+    file_total: int = 0,
+):
+    global _active_temp_file
+    if _interrupt_requested:
+        raise KeyboardInterrupt
+    proc_start = time.monotonic()
+    if remove_commentary is None:
+        remove_commentary = REMOVE_COMMENTARY
+    if audio_langs is None:
+        audio_langs = AUDIO_LANGUAGES
+    if sub_langs is None:
+        sub_langs = SUBTITLE_LANGUAGES
+
+    movie_name = mkv_path.name
+    display_name = _rel_display_name(mkv_path)
+    tag = _progress_tag(file_index, file_total)
+    temp_output: Optional[Path] = None
+    journal_path: Optional[Path] = None
+
+    orig_stat: Optional[os.stat_result] = None
+    try:
+        orig_stat = mkv_path.stat()
+        size_before = orig_stat.st_size
+    except Exception:
+        size_before = 0
+
+    if _console is not None:
+        _console.begin_file(tag, display_name, size_before)
+    layout_issue = canonical_movie_layout_issue(mkv_path, _target_root) if _target_root is not None else None
+    if layout_issue:
+        if _console is not None:
+            _console.end_file_inline("skipped (noncanonical layout)", kind="warn")
+        log(f"{tag}Skipping '{display_name}' ({layout_issue})", level="WARNING", to_console=_console is None,
+            log_file_path=log_file_path)
+        stats.setdefault("skipped_layout", []).append({"name": movie_name, "reason": layout_issue})
+        return
+
+    if orig_stat is None:
+        err_msg = "could not stat source file; refusing to remux without a stable source snapshot"
+        if _console is not None:
+            _console.end_file_inline(f"ERROR: {err_msg}", kind="error")
+        log(f"{tag}{err_msg}: '{display_name}'", level="ERROR", to_console=_console is None,
+            log_file_path=log_file_path)
+        stats["errors"].append({"name": movie_name, "error": err_msg})
+        return
+
+    links = hardlink_count(mkv_path)
+    if links > 1:
+        reason = f"deferred: {links} hardlinks (likely still seeding)"
+        if _console is not None:
+            _console.end_file_inline(reason, kind="skip")
+        log(
+            f"{tag}Deferring '{display_name}' because it has {links} hardlinks. "
+            "Run again after qBittorrent removes the seeded source from E:\\torrents\\final.",
+            level="WARNING", to_console=_console is None, log_file_path=log_file_path,
+        )
+        stats.setdefault("deferred_hardlinked", []).append({"name": movie_name, "hardlinks": links})
+        return
+
+    try:
+        rc, stdout, stderr = _run_mkvmerge([mkvmerge_bin, "-J", str(mkv_path)])
+        if rc not in (0, 1):
+            err_msg = (stderr or "").strip() or f"mkvmerge exited with code {rc}"
+            if _console is not None:
+                _console.end_file_inline(f"ERROR: {err_msg}", kind="error")
+            log(f"{tag}Metadata inspection failed for '{display_name}': {err_msg}",
+                level="ERROR", to_console=_console is None, log_file_path=log_file_path)
+            stats["errors"].append({"name": movie_name, "error": err_msg})
+            return
+        media_info = json.loads(stdout)
+        container = media_info.get("container") or {}
+        if not (container.get("recognized") and container.get("supported")):
+            err_msg = "file is not a recognized/supported media container"
+            if _console is not None:
+                _console.end_file_inline(f"ERROR: {err_msg}", kind="error")
+            log(f"{tag}Metadata inspection failed for '{display_name}': {err_msg}",
+                level="ERROR", to_console=_console is None, log_file_path=log_file_path)
+            stats["errors"].append({"name": movie_name, "error": err_msg})
+            return
+    except json.JSONDecodeError as e:
+        err_msg = f"Invalid mkvmerge JSON: {e}"
+        if _console is not None:
+            _console.end_file_inline(f"ERROR: {err_msg}", kind="error")
+        log(f"{tag}Invalid metadata output for '{display_name}': {e}",
+            level="ERROR", to_console=_console is None, log_file_path=log_file_path)
+        stats["errors"].append({"name": movie_name, "error": err_msg})
+        return
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as e:
+        err_msg = f"Metadata inspection exception: {e}"
+        if _console is not None:
+            _console.end_file_inline(f"ERROR: {err_msg}", kind="error")
+        log(f"{tag}Failed to inspect metadata for '{display_name}': {e}",
+            level="ERROR", to_console=_console is None, log_file_path=log_file_path)
+        stats["errors"].append({"name": movie_name, "error": err_msg})
+        return
+
+    tracks = media_info.get("tracks") or []
+    audio_tracks = [t for t in tracks if t.get("type") == "audio"]
+    subtitle_tracks = [t for t in tracks if t.get("type") == "subtitles"]
+
+    valid_audio = [
+        t for t in audio_tracks
+        if is_matching_language(t, audio_langs) and not is_commentary_track(t, remove_commentary)
+    ]
+    if not valid_audio:
+        # An untagged stream is safe only when its explicit title identifies it
+        # as English. Never guess that a bare ``und`` audio stream is English.
+        valid_audio = [
+            t for t in audio_tracks
+            if is_english_named_untagged(t) and not is_commentary_track(t, remove_commentary)
+        ]
+
+    if not valid_audio:
+        any_english = any(is_matching_language(t, audio_langs) for t in audio_tracks)
+        reason = ("all English audio tracks are commentary/descriptive"
+                  if any_english else "foreign film / no tagged or explicitly named English audio")
+        if _console is not None:
+            _console.end_file_inline(f"skipped ({reason})", kind="warn")
+        log(f"{tag}Skipping '{display_name}' ({reason})",
+            level="WARNING", to_console=_console is None, log_file_path=log_file_path)
+        stats["skipped_no_english"].append({"name": movie_name, "reason": reason})
+        return
+
+    best_audio = max(valid_audio, key=get_audio_quality_score)
+    best_audio_id = int(best_audio["id"])
+
+    keep_subtitles = [
+        t for t in subtitle_tracks
+        if (is_matching_language(t, sub_langs) or is_english_named_untagged(t))
+        and not is_commentary_track(t, remove_commentary)
+    ]
+    external_srt: Optional[Dict[str, Any]] = None
+    candidate = validate_exact_external_english_srt(mkv_path)
+    if candidate.get("valid"):
+        external_srt = candidate
+        # A verified exact-stem external SRT is always the authoritative
+        # Jellyfin subtitle choice. Remove every embedded subtitle option,
+        # including normal, SDH, forced, and non-English tracks.
+        keep_subtitles = []
+    elif candidate.get("reason") != "external SRT is absent":
+        log(
+            f"{tag}External SRT ignored for '{display_name}': {candidate.get('reason')}; "
+            "retaining the established embedded subtitle selection",
+            level="WARNING", to_console=_console is None, log_file_path=log_file_path,
+        )
+    keep_sub_ids = [int(t["id"]) for t in keep_subtitles]
+    existing_audio_ids = [int(t["id"]) for t in audio_tracks]
+    existing_sub_ids = [int(t["id"]) for t in subtitle_tracks]
+    needs_audio_cleanup = existing_audio_ids != [best_audio_id]
+    needs_sub_cleanup = set(existing_sub_ids) != set(keep_sub_ids)
+
+    if not needs_audio_cleanup and not needs_sub_cleanup:
+        stats["already_clean"].append(movie_name)
+        if _console is not None:
+            _console.end_file_inline("already clean", kind="skip")
+        log(f"{tag}Already clean: {display_name}",
+            to_console=_console is None, log_file_path=log_file_path)
+        return
+
+    removed_audio = [t for t in audio_tracks if int(t["id"]) != best_audio_id]
+    removed_subs = [t for t in subtitle_tracks if int(t["id"]) not in set(keep_sub_ids)]
+    best_audio_desc = describe_track(best_audio)
+    removed_audio_descs = [describe_track(t) for t in removed_audio]
+    kept_subs_descs = [describe_track(t) for t in keep_subtitles]
+    removed_subs_descs = [describe_track(t) for t in removed_subs]
+
+    if _console is not None:
+        _console.mark_details()
+    log(f"{tag}Processing: {display_name} ({format_size(size_before)})",
+        to_console=_console is None, log_file_path=log_file_path)
+    _log_detail(f"  -> Retaining Audio: {best_audio_desc}", log_file_path)
+    if removed_audio_descs:
+        if len(removed_audio_descs) <= 8:
+            _log_detail(f"  -> Removing {len(removed_audio_descs)} Audio Track(s):", log_file_path)
+            for desc in removed_audio_descs:
+                _log_detail(f"       drop  {desc}", log_file_path)
+        else:
+            _log_detail(
+                f"  -> Removing {len(removed_audio_descs)} Audio Track(s): "
+                f"{', '.join(removed_audio_descs[:8])} ... +{len(removed_audio_descs) - 8} more",
+                log_file_path,
+            )
+    if external_srt is not None:
+        _log_detail(
+            f"  -> Validated External SRT: {Path(str(external_srt['path'])).name} "
+            "(sole subtitle option; embedded subtitles removed)",
+            log_file_path,
+        )
+    _log_detail(f"  -> Subtitles Kept: {len(keep_sub_ids)} | Removed: {len(removed_subs)}", log_file_path)
+
+    if dry_run:
+        _log_detail(f"  -> [DRY-RUN] No changes written to '{display_name}'.", log_file_path, kind="warn")
+        stats["cleaned"].append({
+            "name": movie_name, "kept_audio": best_audio_desc,
+            "removed_audio_count": len(removed_audio_descs), "removed_audio_desc": removed_audio_descs,
+            "kept_subs_count": len(keep_sub_ids), "kept_subs_desc": kept_subs_descs,
+            "removed_subs_count": len(removed_subs), "removed_subs_desc": removed_subs_descs,
+            "external_srt": external_srt,
+            "size_before": size_before, "size_after": size_before, "space_saved": 0,
+            "elapsed_seconds": round(time.monotonic() - proc_start, 2),
+        })
+        return
+
+    space_ok, free_bytes, required_bytes, space_warn = check_free_space(mkv_path.parent, size_before)
+    if space_warn:
+        log(f"  -> Free-space check warning: {space_warn}. Continuing.",
+            level="WARNING", log_file_path=log_file_path)
+    if not space_ok:
+        err_msg = (f"not enough free disk space to remux "
+                   f"(need {format_size(required_bytes)}, have {format_size(free_bytes)}). "
+                   f"Original file left untouched.")
+        log(f"{tag}{err_msg}", level="ERROR", log_file_path=log_file_path)
+        stats["errors"].append({"name": movie_name, "error": err_msg})
+        return
+
+    verification_plan = build_verification_plan(media_info, best_audio, keep_subtitles, size_before)
+    temp_output, journal_path, transaction_token = new_transaction_paths(mkv_path)
+    transaction = create_transaction(mkv_path, temp_output, transaction_token, orig_stat)
+    transaction["verification_plan"] = verification_plan
+    if external_srt is not None:
+        transaction["external_srt"] = external_srt
+    try:
+        write_transaction(journal_path, transaction)
+    except Exception as exc:
+        err_msg = f"could not create remux transaction journal: {exc}"
+        log(f"{tag}{err_msg}", level="ERROR", log_file_path=log_file_path)
+        stats["errors"].append({"name": movie_name, "error": err_msg})
+        return
+    _active_temp_file = temp_output
+
+    merge_cmd = [
+        mkvmerge_bin, "-o", str(temp_output),
+        "--audio-tracks", str(best_audio_id),
+        "--default-track-flag", f"{best_audio_id}:1",
+    ]
+    if keep_sub_ids:
+        merge_cmd.extend(["--subtitle-tracks", ",".join(map(str, keep_sub_ids))])
+        for sub in keep_subtitles:
+            sid = int(sub["id"])
+            # Keep all retained English subtitles available, but do not force
+            # subtitle auto-display through inherited default flags. Forced
+            # flags are retained for player-side forced-subtitle handling.
+            merge_cmd.extend(["--default-track-flag", f"{sid}:0"])
+            merge_cmd.extend([
+                "--forced-display-flag", f"{sid}:{1 if is_forced_subtitle(sub) else 0}",
+            ])
+    else:
+        merge_cmd.append("--no-subtitles")
+    merge_cmd.append(str(mkv_path))
+
+    remux_started = time.monotonic()
+
+    def _on_remux_progress(pct: int) -> None:
+        if _console is not None:
+            _console.remux_progress(pct, remux_started)
+
+    try:
+        rc, merge_out, merge_err = _run_mkvmerge(merge_cmd, on_progress=_on_remux_progress)
+        if _console is not None:
+            _console.finish_progress()
+        if rc not in (0, 1):
+            err_msg = _summarize_mkvmerge_failure(merge_err or merge_out, rc)
+            log(f"mkvmerge failed for '{display_name}': {err_msg}",
+                level="ERROR", log_file_path=log_file_path)
+            stats["errors"].append({"name": movie_name, "error": err_msg})
+            cleanup_transaction_artifacts(temp_output, journal_path)
+            _active_temp_file = None
+            return
+
+        _log_detail("  -> Verifying remux integrity...", log_file_path)
+        ok, verr, output_info = verify_remux_output(temp_output, mkvmerge_bin, verification_plan)
+        if not ok:
+            diagnostic = build_verification_diagnostic(media_info, output_info, verification_plan, verr)
+            log(
+                f"Verification diagnostic for '{display_name}': "
+                + json.dumps(diagnostic, sort_keys=True, ensure_ascii=False),
+                level="ERROR", log_file_path=log_file_path,
+            )
+            log(f"Verification failed for '{display_name}': {verr}. Original file left untouched.",
+                level="ERROR", log_file_path=log_file_path)
+            stats["errors"].append({"name": movie_name, "error": f"Post-remux verification failed: {verr}",
+                                    "video_diagnostic": diagnostic})
+            cleanup_transaction_artifacts(temp_output, journal_path)
+            _active_temp_file = None
+            return
+        if _interrupt_requested:
+            raise KeyboardInterrupt
+        if external_srt is not None and not external_srt_snapshot_matches(external_srt):
+            err_msg = "validated external SRT changed or became invalid while remuxing; refusing to replace MKV"
+            log(f"{err_msg}: '{display_name}'", level="ERROR", log_file_path=log_file_path)
+            stats["errors"].append({"name": movie_name, "error": err_msg})
+            cleanup_transaction_artifacts(temp_output, journal_path)
+            _active_temp_file = None
+            return
+        if not _source_snapshot_matches(mkv_path, transaction["source_snapshot"]):
+            err_msg = "source changed while remuxing; refusing to replace it"
+            log(f"{err_msg}: '{display_name}'", level="ERROR", log_file_path=log_file_path)
+            stats["errors"].append({"name": movie_name, "error": err_msg})
+            cleanup_transaction_artifacts(temp_output, journal_path)
+            _active_temp_file = None
+            return
+
+        transaction["phase"] = "verified"
+        transaction["verified_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        transaction["temp_snapshot"] = _source_snapshot(temp_output)
+        write_transaction(journal_path, transaction)
+
+        _log_detail("  -> Atomic swap over original...", log_file_path)
+        time.sleep(0.1)
+        if _interrupt_requested:
+            raise KeyboardInterrupt
+        if external_srt is not None and not external_srt_snapshot_matches(external_srt):
+            err_msg = "validated external SRT changed before atomic swap; refusing to replace MKV"
+            log(f"{err_msg}: '{display_name}'", level="ERROR", log_file_path=log_file_path)
+            stats["errors"].append({"name": movie_name, "error": err_msg})
+            cleanup_transaction_artifacts(temp_output, journal_path)
+            _active_temp_file = None
+            return
+        safe_replace(temp_output, mkv_path)
+        _active_temp_file = None
+        safe_delete(journal_path)
+        restore_file_times(mkv_path, orig_stat)
+
+        size_after = mkv_path.stat().st_size
+        saved_bytes = max(0, size_before - size_after)
+        stats["total_space_saved_bytes"] += saved_bytes
+        result = (
+            f"  -> Successfully cleaned: {display_name} "
+            f"({format_size(size_before)} -> {format_size(size_after)} | "
+            f"Saved: {format_size(saved_bytes)} | "
+            f"{format_duration(time.monotonic() - proc_start)})"
+        )
+        _log_detail(result, log_file_path, kind="success")
+        stats["cleaned"].append({
+            "name": movie_name, "kept_audio": best_audio_desc,
+            "removed_audio_count": len(removed_audio_descs), "removed_audio_desc": removed_audio_descs,
+            "kept_subs_count": len(keep_sub_ids), "kept_subs_desc": kept_subs_descs,
+            "removed_subs_count": len(removed_subs), "removed_subs_desc": removed_subs_descs,
+            "external_srt": external_srt,
+            "size_before": size_before, "size_after": size_after, "space_saved": saved_bytes,
+            "elapsed_seconds": round(time.monotonic() - proc_start, 2),
+        })
+    except KeyboardInterrupt:
+        if temp_output is not None:
+            cleanup_transaction_artifacts(temp_output, journal_path)
+        _active_temp_file = None
+        raise
+    except SystemExit:
+        raise
+    except Exception as exc:
+        log(f"Exception processing '{display_name}': {exc}", level="ERROR", log_file_path=log_file_path)
+        stats["errors"].append({"name": movie_name, "error": str(exc)})
+        if temp_output is not None:
+            cleanup_transaction_artifacts(temp_output, journal_path)
+        _active_temp_file = None
+
+
+def generate_and_save_report(
+    stats: Dict[str, Any], dry_run: bool, report_file: str,
+    log_file_path: Optional[str] = LOG_FILE, meta: Optional[Dict[str, Any]] = None,
+) -> str:
+    if _console is not None:
+        _console.finish_progress()
+    end_time = datetime.now()
+    duration = end_time - stats["start_time"]
+    dur_str = str(duration).split(".")[0]
+    meta = meta or {}
+    lines = [
+        "=" * 85,
+        "                     JELLYFIN MKV TRACK CLEANUP REPORT",
+        "=" * 85,
+        f"Execution Mode  : {'DRY-RUN (Simulation - No files modified)' if dry_run else 'LIVE RUN (Modifications Applied)'}",
+    ]
+    if meta.get("interrupted"):
+        lines.append("Run Status      : INTERRUPTED by user (partial results below)")
+    if meta.get("target_dir"):
+        lines.append(f"Target Directory: {meta['target_dir']}")
+    if meta.get("report_file"):
+        lines.append(f"Report File     : {meta['report_file']}")
+    if meta.get("mkvmerge"):
+        lines.append(f"mkvmerge Binary : {meta['mkvmerge']}")
+    if meta.get("mkvmerge_version"):
+        lines.append(f"mkvmerge Version: {meta['mkvmerge_version']}")
+    if meta.get("audio_langs"):
+        lines.append(f"Audio Languages : {', '.join(sorted(meta['audio_langs']))}")
+    if meta.get("sub_langs"):
+        lines.append(f"Subtitle Langs  : {', '.join(sorted(meta['sub_langs']))}")
+    if "remove_commentary" in meta:
+        lines.append(f"Commentary / DVS Removal: {'Enabled (fixed policy)' if meta['remove_commentary'] else 'Disabled'}")
+    lines.append("Hardlinked Movies : Always deferred until qBittorrent removes the seeded source")
+    if meta.get("external_srt_auto_preference"):
+        lines.append(
+            "External English SRT: Validated exact .en.srt automatically becomes the sole subtitle option"
+        )
+    if "standardizer_lock_acquired" in meta:
+        lines.append(
+            "Standardizer Lock : "
+            f"{'Acquired' if meta['standardizer_lock_acquired'] else 'Not acquired'} "
+            f"(timeout {meta.get('standardizer_lock_timeout_seconds', '?')} s)"
+        )
+    lines += [
+        f"Start Time      : {stats['start_time'].strftime('%Y-%m-%d %H:%M:%S')}",
+        f"End Time        : {end_time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Total Duration  : {dur_str}",
+        "-" * 85,
+        "SUMMARY TOTALS:",
+        f"  • Total Movies Scanned     : {stats['total_scanned']}",
+        f"  • Movies Cleaned / Remuxed : {len(stats['cleaned'])}",
+        f"  • Movies Already Clean     : {len(stats['already_clean'])}",
+        f"  • Deferred (Hardlinked)    : {len(stats.get('deferred_hardlinked', []))}",
+        f"  • Skipped (Foreign / No Eng): {len(stats['skipped_no_english'])}",
+        f"  • Skipped (Layout Contract) : {len(stats.get('skipped_layout', []))}",
+        f"  • Errors / Unreadable Files : {len(stats['errors'])}",
+    ]
+    if stats["cleaned"]:
+        total_before = sum(int(i.get("size_before", 0) or 0) for i in stats["cleaned"])
+        total_after = sum(int(i.get("size_after", 0) or 0) for i in stats["cleaned"])
+        lines.append(f"  • Total Size Before        : {format_size(total_before)}")
+        if not dry_run:
+            lines.append(f"  • Total Size After         : {format_size(total_after)}")
+            lines.append(f"  • Total Disk Space Freed   : {format_size(stats['total_space_saved_bytes'])}")
+        else:
+            lines.append(f"  • Total Size After (est.)  : {format_size(total_after)}")
+    elif not dry_run:
+        lines.append(f"  • Total Disk Space Freed   : {format_size(stats['total_space_saved_bytes'])}")
+    lines.append("=" * 85)
+
+    if stats["cleaned"]:
+        header_title = " CLEANED MOVIES (SIMULATED) " if dry_run else " CLEANED MOVIES "
+        padding = (85 - len(header_title)) // 2
+        lines.append("\n" + "=" * padding + header_title + "=" * (85 - len(header_title) - padding))
+        for item in stats["cleaned"]:
+            lines.append(f"\n[✓] {item['name']}")
+            lines.append(f"    Kept Audio       : {item['kept_audio']}")
+            lines.append(
+                f"    Removed Audio    : {', '.join(item['removed_audio_desc'])}"
+                if item.get("removed_audio_desc") else "    Removed Audio    : (none - single English audio already)"
+            )
+            if item.get("external_srt"):
+                lines.append(f"    External SRT     : {Path(str(item['external_srt']['path'])).name} (validated; preserved)")
+            if item.get("kept_subs_desc"):
+                lines.append(f"    Subtitles Kept   : {item['kept_subs_count']}")
+                for d in item["kept_subs_desc"]:
+                    lines.append(f"        Keep  {d}")
+            else:
+                lines.append("    Subtitles Kept   : 0")
+            if item.get("removed_subs_desc"):
+                lines.append(f"    Subtitles Removed: {item['removed_subs_count']}")
+                for d in item["removed_subs_desc"]:
+                    lines.append(f"        Drop  {d}")
+            else:
+                lines.append("    Subtitles Removed: 0")
+            if not dry_run and "space_saved" in item:
+                lines.append(
+                    f"    File Size        : {format_size(item['size_before'])} -> "
+                    f"{format_size(item['size_after'])} (Saved: {format_size(item['space_saved'])})"
+                )
+            elif dry_run and item.get("size_before", 0) > 0:
+                lines.append(f"    Current File Size: {format_size(item['size_before'])}")
+            if item.get("elapsed_seconds") is not None:
+                lines.append(f"    Processing Time : {item['elapsed_seconds']:.2f} s")
+
+    if stats["already_clean"]:
+        lines.append("\n" + "=" * 32 + " ALREADY CLEAN MOVIES " + "=" * 31)
+        lines.append(f"  ({len(stats['already_clean'])} files required no changes - skipped with 0 disk writes)")
+        for name in stats["already_clean"]:
+            lines.append(f"  [=] {name}")
+    if stats.get("deferred_hardlinked"):
+        lines.append("\n" + "=" * 25 + " DEFERRED (STILL HARDLINKED / SEEDED) " + "=" * 24)
+        lines.append(
+            "  These movies were NOT cleaned because they still have multiple hardlinks\n"
+            "  (qBittorrent is still seeding the source). Cleaning would break the seed\n"
+            "  link and consume another full movie allocation. They become eligible only\n"
+            "  after qBittorrent removes the seeded source from E:\\torrents\\final."
+        )
+        for item in stats["deferred_hardlinked"]:
+            lines.append(f"  [~] {item.get('name', '?')}  ({item.get('hardlinks', '?')} hardlinks)")
+    if stats["skipped_no_english"]:
+        lines.append("\n" + "=" * 27 + " SKIPPED (FOREIGN / NO ENG AUDIO) " + "=" * 26)
+        for item in stats["skipped_no_english"]:
+            if isinstance(item, dict):
+                lines.append(f"  [-] {item.get('name', '?')}  ({item.get('reason', 'no English audio')})")
+            else:
+                lines.append(f"  [-] {item}")
+    if stats.get("skipped_layout"):
+        lines.append("\n" + "=" * 29 + " SKIPPED (LAYOUT CONTRACT) " + "=" * 29)
+        for item in stats["skipped_layout"]:
+            lines.append(f"  [-] {item.get('name', '?')}  ({item.get('reason', 'noncanonical layout')})")
+    if stats["errors"]:
+        lines.append("\n" + "=" * 33 + " ERRORS ENCOUNTERED " + "=" * 32)
+        for err in stats["errors"]:
+            lines.append(f"  [!] {err['name']}: {err['error']}")
+    lines += ["\n" + "=" * 85, "                               END OF REPORT", "=" * 85]
+    report_text = "\n".join(lines)
+    _print_safe("\n" + report_text)
+    try:
+        destination = Path(report_file)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        stage = destination.with_name(f".{destination.name}.partial.{os.getpid()}.{uuid.uuid4().hex}")
+        try:
+            with stage.open("x", encoding="utf-8", errors="replace", newline="\n") as handle:
+                handle.write(report_text + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(stage, destination)
+        finally:
+            try:
+                stage.unlink(missing_ok=True)
+            except OSError:
+                pass
+        log(f"Detailed summary report saved to: '{destination}'", log_file_path=log_file_path)
+    except Exception as e:
+        log(f"Failed to save summary report: {e}", level="ERROR", log_file_path=log_file_path)
+    return report_text
+
+
+def _print_startup_banner(
+    target_path: Path, mkvmerge_bin: str, mkvmerge_version: str, dry_run: bool,
+    audio_langs: Set[str], sub_langs: Set[str], remove_commentary: bool,
+    log_file_path: Optional[str], priority: str = "normal",
+) -> None:
+    width = 79
+    mode = "DRY-RUN (simulation - no files modified)" if dry_run else "LIVE RUN (modifications will be applied)"
+    rows = [
+        "=" * width, "  LOSSLESS JELLYFIN MKV TRACK CLEANER", "=" * width,
+        f"  Target directory    : {target_path}",
+        f"  Execution mode      : {mode}",
+        f"  mkvmerge            : {mkvmerge_bin}",
+        f"  mkvmerge version    : {mkvmerge_version}",
+        f"  Audio languages     : {', '.join(sorted(audio_langs))}",
+        f"  Subtitle languages  : {', '.join(sorted(sub_langs))}",
+        f"  Commentary / DVS    : {'remove (fixed policy)' if remove_commentary else 'keep'}",
+        "  Accessibility subs  : retained only when no valid external .en.srt exists",
+        "  External .en.srt   : validated exact sidecar automatically becomes sole subtitle option",
+        "  Sidecar subtitles   : never modified by this cleaner",
+        f"  Process priority    : {priority}",
+        f"  Log file            : {log_file_path or '(disabled)'}",
+        "=" * width,
+    ]
+    if _console is not None:
+        _console.finish_progress()
+    for line in rows:
+        if _console is not None and _console.use_color and line.startswith("  LOSSLESS"):
+            _print_safe(_console.style(line, LiveConsole.BOLD, LiveConsole.CYAN))
+        else:
+            _print_safe(line)
+        log(line, to_console=False, log_file_path=log_file_path)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    global _console, _target_root, _interrupt_requested
+    parser = argparse.ArgumentParser(
+        description="Lossless post-standardizer cleanup: keep one best English audio and automatically prefer validated external English SRTs."
+    )
+    parser.add_argument("--version", action="version", version=f"track_cleaner.py {VERSION}")
+    parser.add_argument("--dir", default=TARGET_DIR, help=f"Target library folder (Default: {TARGET_DIR})")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate cleanup without modifying any files")
+    parser.add_argument(
+        "--only", action="append", default=[], metavar="MKV",
+        help="Process only this exact MKV path (may be supplied more than once)",
+    )
+    parser.add_argument("--mkvmerge", default=None, help="Custom path to mkvmerge executable")
+    parser.add_argument("--log", default=LOG_FILE, help=f"Continuous log file path (Default: {LOG_FILE})")
+    parser.add_argument("--report", default=REPORT_FILE, help=f"Single overwritten report file (Default: {REPORT_FILE})")
+    parser.add_argument(
+        "--standardizer-lock-timeout", type=float, default=STANDARDIZER_LOCK_TIMEOUT_SECONDS,
+        metavar="SECONDS", help="Maximum wait for movie_standardizer.py coordination (default: 60)",
+    )
+    parser.add_argument("--no-color", action="store_true")
+    parser.add_argument("--nice", action="store_true", help="Lower process priority so remuxing does not starve Jellyfin")
+    parser.add_argument("--min-size", type=float, default=0, metavar="MB", help="Ignore MKVs smaller than this")
+    parser.add_argument("--limit", type=int, default=0, help="Process at most N files (0 = all)")
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args(argv)
+
+    if args.self_test:
+        return run_self_tests()
+    if args.standardizer_lock_timeout < 0:
+        parser.error("--standardizer-lock-timeout must be zero or greater")
+
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+    _console = LiveConsole(use_color=False if args.no_color else None)
+    atexit.register(close_log_fp)
+
+    try:
+        mkvmerge_bin = resolve_mkvmerge_path(args.mkvmerge)
+    except FileNotFoundError as e:
+        log(str(e), level="ERROR", log_file_path=args.log)
+        return 1
+
+    target_path = Path(args.dir).resolve()
+    if not target_path.exists() or not target_path.is_dir():
+        log(f"Target directory does not exist: '{target_path}'", level="ERROR", log_file_path=args.log)
+        return 1
+    for label, raw_path in (("--log", args.log), ("--report", args.report)):
+        if not raw_path:
+            continue
+        candidate = Path(str(raw_path)).expanduser().resolve()
+        try:
+            candidate.relative_to(target_path)
+        except ValueError:
+            continue
+        log(f"{label} must be outside the Jellyfin media library: '{candidate}'", level="ERROR", log_file_path=args.log)
+        return 2
+    args.report = str(Path(args.report).expanduser().resolve())
+
+    _target_root = target_path
+    if _console is not None:
+        _console.target_root = target_path
+
+    audio_langs_set = set(AUDIO_LANGUAGES)
+    sub_langs_set = set(SUBTITLE_LANGUAGES)
+    remove_commentary = REMOVE_COMMENTARY
+    mkvmerge_version = get_mkvmerge_version(mkvmerge_bin)
+    priority_label = apply_low_priority() if args.nice else "normal"
+
+    _print_startup_banner(
+        target_path, mkvmerge_bin, mkvmerge_version, args.dry_run,
+        audio_langs_set, sub_langs_set, remove_commentary, args.log, priority_label,
+    )
+    log(f"--- Starting Scan on '{target_path}' ---", log_file_path=args.log)
+    log(f"Single report file: '{args.report}'", log_file_path=args.log)
+    if args.dry_run:
+        log("Running in DRY-RUN mode (Simulation only).", log_file_path=args.log)
+
+    stats: Dict[str, Any] = {
+        "start_time": datetime.now(), "total_scanned": 0, "cleaned": [],
+        "already_clean": [], "skipped_no_english": [], "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
+        "diagnostics": [], "total_space_saved_bytes": 0,
+    }
+    report_meta: Dict[str, Any] = {
+        "target_dir": str(target_path), "report_file": args.report, "mkvmerge": mkvmerge_bin,
+        "mkvmerge_version": mkvmerge_version, "audio_langs": audio_langs_set,
+        "sub_langs": sub_langs_set, "remove_commentary": remove_commentary,
+        "external_srt_auto_preference": True,
+        "standardizer_lock_timeout_seconds": args.standardizer_lock_timeout,
+    }
+
+    # Coordinate with movie_standardizer.py before scanning. Its lock protocol is
+    # deliberately mirrored so qBittorrent placement and cleanup cannot race.
+    standardizer_lock = StandardizerCoordinationLock(target_path, args.standardizer_lock_timeout)
+    try:
+        standardizer_lock.acquire()
+    except (OSError, TimeoutError) as exc:
+        report_meta["standardizer_lock_acquired"] = False
+        log(f"Could not acquire movie_standardizer.py coordination lock: {exc}",
+            level="ERROR", log_file_path=args.log)
+        return 1
+    report_meta["standardizer_lock_acquired"] = True
+    log("movie_standardizer.py coordination lock acquired.", log_file_path=args.log)
+
+    lock_path = target_path / LOCK_FILENAME
+    lock_acquired = False
+    if not args.dry_run:
+        lock_acquired = acquire_lock(lock_path, log_file_path=args.log)
+        if not lock_acquired:
+            standardizer_lock.release()
+            return 1
+        log(f"Single-instance lock acquired (PID {os.getpid()}).", log_file_path=args.log)
+
+    def _release_locks():
+        if lock_acquired:
+            release_lock(lock_path)
+        standardizer_lock.release()
+
+    atexit.register(_release_locks)
+    if _console is not None:
+        atexit.register(_console.finish_progress)
+
+    def handle_interrupt(signum, frame):
+        request_interrupt()
+
+    signal.signal(signal.SIGINT, handle_interrupt)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, handle_interrupt)
+
+    if lock_acquired:
+        cleanup_orphan_temps(target_path, mkvmerge_bin, log_file_path=args.log)
+
+    def _walk_error(err):
+        log(f"Could not access directory '{err.filename}': {err.strerror}",
+            level="WARNING", log_file_path=args.log)
+
+    run_started = time.monotonic()
+    processed_bytes = 0
+    library_bytes = 0
+    try:
+        mkv_files, file_sizes, library_bytes = discover_mkv_files(
+            target_path, log_file_path=args.log, onerror=_walk_error,
+            skip_extras=True,
+            min_size=int(args.min_size * 1024 * 1024) if args.min_size else 0,
+        )
+        if args.only:
+            requested: Set[str] = set()
+            for raw_path in args.only:
+                candidate_path = Path(raw_path).expanduser().resolve()
+                if candidate_path.suffix.lower() != ".mkv" or candidate_path.is_symlink() or not candidate_path.is_file():
+                    raise ValueError(f"--only must name an existing regular MKV: {raw_path}")
+                try:
+                    candidate_path.relative_to(target_path)
+                except ValueError as exc:
+                    raise ValueError(f"--only MKV must be inside --dir: {raw_path}") from exc
+                requested.add(os.path.normcase(os.path.normpath(str(candidate_path))))
+            selected = [
+                (path, size) for path, size in zip(mkv_files, file_sizes)
+                if os.path.normcase(os.path.normpath(str(path))) in requested
+            ]
+            if len(selected) != len(requested):
+                found = {os.path.normcase(os.path.normpath(str(path))) for path, _ in selected}
+                missing = sorted(requested - found)
+                raise ValueError(f"--only MKV was not discovered under --dir: {missing[0]}")
+            mkv_files = [path for path, _ in selected]
+            file_sizes = [size for _, size in selected]
+            library_bytes = sum(file_sizes)
+        if args.limit and args.limit > 0:
+            mkv_files = mkv_files[: args.limit]
+            file_sizes = file_sizes[: args.limit]
+            library_bytes = sum(file_sizes)
+        file_total = len(mkv_files)
+        if file_total == 0 and not _interrupt_requested:
+            log("No MKV files found. Nothing to do.", level="WARNING", log_file_path=args.log)
+
+        for i, file_path in enumerate(mkv_files, start=1):
+            if _interrupt_requested:
+                break
+            stats["total_scanned"] += 1
+            prev_cleaned = len(stats["cleaned"])
+            prev_errors = len(stats["errors"])
+            try:
+                process_mkv(
+                    mkv_path=file_path, stats=stats, mkvmerge_bin=mkvmerge_bin,
+                    dry_run=args.dry_run, remove_commentary=remove_commentary,
+                    audio_langs=audio_langs_set, sub_langs=sub_langs_set,
+                    log_file_path=args.log, file_index=i, file_total=file_total,
+                )
+            except KeyboardInterrupt:
+                _interrupt_requested = True
+                _kill_active_child()
+                break
+            except SystemExit:
+                raise
+            except Exception as e:
+                log(f"Unexpected error processing '{file_path.name}': {e}",
+                    level="ERROR", log_file_path=args.log)
+                stats["errors"].append({"name": file_path.name, "error": str(e)})
+            processed_bytes += file_sizes[i - 1] if (i - 1) < len(file_sizes) else 0
+            if (
+                len(stats["cleaned"]) != prev_cleaned or len(stats["errors"]) != prev_errors
+                or i == file_total or (i % 25 == 0) or _interrupt_requested
+            ):
+                _log_live_totals(stats, i, file_total, run_started, args.log,
+                                 done_bytes=processed_bytes, total_bytes=library_bytes)
+    except KeyboardInterrupt:
+        _interrupt_requested = True
+        _kill_active_child()
+    except Exception as e:
+        log(f"Fatal unexpected error: {e}", level="ERROR", log_file_path=args.log)
+        stats["errors"].append({"name": "<fatal>", "error": str(e)})
+        generate_and_save_report(stats, dry_run=args.dry_run, report_file=args.report,
+                                 log_file_path=args.log, meta=report_meta)
+        return 1
+    finally:
+        _release_locks()
+
+    if _interrupt_requested:
+        if _console is not None:
+            _console.finish_progress()
+        log("Execution interrupted by user. Cleaning up active temporary files...",
+            level="WARNING", log_file_path=args.log)
+        if _active_temp_file:
+            safe_delete(_active_temp_file)
+        report_meta["interrupted"] = True
+        generate_and_save_report(stats, dry_run=args.dry_run, report_file=args.report,
+                                 log_file_path=args.log, meta=report_meta)
+        return 130
+
+    generate_and_save_report(stats, dry_run=args.dry_run, report_file=args.report,
+                             log_file_path=args.log, meta=report_meta)
+    return 1 if stats["errors"] else 0
+
+
+# =============================================================================
+# SELF-TEST  (no mkvmerge required)
+# =============================================================================
+
+
+def run_self_tests() -> int:
+    errors: list[str] = []
+
+    def check(cond: bool, msg: str) -> None:
+        if not cond:
+            errors.append(msg)
+
+    check(normalize_language("fre") == "fr", "fre->fr")
+    check(normalize_language("eng") == "en", "eng->en")
+    check(normalize_language("en-US".split("-")[0]) == "en", "en-US")
+
+    eng = {"id": 1, "type": "audio", "properties": {"language": "eng", "language_ietf": "en"}}
+    fre = {"id": 2, "type": "audio", "properties": {"language": "fre"}}
+    check(is_matching_language(eng, {"en", "eng"}), "eng match")
+    check(is_matching_language(fre, {"fr", "fra"}), "fra matches fre")
+    check(not is_matching_language(fre, {"en"}), "fre not en")
+
+    sdh = {"type": "subtitles", "properties": {
+        "language": "eng", "track_name": "English SDH",
+        "flag_hearing_impaired": True, "flag_visual_impaired": True,
+    }}
+    check(not is_commentary_track(sdh, True), "SDH subtitle must be KEPT")
+
+    dvs = {"type": "audio", "properties": {
+        "language": "eng", "track_name": "English Audio Description",
+        "flag_visual_impaired": True,
+    }}
+    check(is_commentary_track(dvs, True), "DVS audio must be DROPPED")
+
+    comm = {"type": "audio", "properties": {"language": "eng", "track_name": "Director Commentary", "flag_commentary": True}}
+    check(is_commentary_track(comm, True), "commentary audio dropped")
+    cut = {"type": "audio", "properties": {"language": "eng", "track_name": "Director's Cut"}}
+    check(not is_commentary_track(cut, True), "Director's Cut is not commentary")
+
+    forced = {"type": "subtitles", "properties": {"language": "eng", "track_name": "English Forced", "flag_forced": True}}
+    check(is_forced_subtitle(forced), "forced flag")
+    check(not is_commentary_track(forced, True), "forced sub kept")
+
+    und_eng = {"type": "subtitles", "properties": {"language": "und", "track_name": "English"}}
+    und_unknown = {"type": "audio", "properties": {"language": "und", "track_name": ""}}
+    check(is_english_named_untagged(und_eng), "untagged English by name")
+    check(not is_english_named_untagged(und_unknown), "untagged unknown is not English")
+
+    truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
+    aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
+    check(get_audio_quality_score(truehd) > get_audio_quality_score(aac), "TrueHD Atmos > AAC 5.1")
+
+    check(_parse_mkvmerge_progress("Progress: 45%") == 45, "plain progress")
+    check(_parse_mkvmerge_progress("#GUI#progress 80%") == 80, "gui progress")
+    check(_parse_mkvmerge_progress("#GUI#progress#parts=1/4") == 25, "parts progress")
+    check(_parse_mkvmerge_progress("hello") is None, "no progress")
+
+    check(not SAMPLE_NAME_RE.search("The Sampler (2012)"), "false sample")
+    check(bool(SAMPLE_NAME_RE.search("Movie-sample")), "sample name")
+
+    tmp = Path(tempfile.mkdtemp(prefix="tcc_"))
+    try:
+        movie = tmp / "Film (2000)"
+        extra = movie / "Featurettes"
+        extra.mkdir(parents=True)
+        (movie / "Film (2000).mkv").write_bytes(b"x")
+        (extra / "Making-Of.mkv").write_bytes(b"y")
+        (movie / "Film-sample.mkv").write_bytes(b"z")
+        files, _, _ = discover_mkv_files(tmp, None, skip_extras=True)
+        names = {p.name for p in files}
+        check(names == {"Film (2000).mkv"}, f"discover extras/samples skipped: {names}")
+        files2, _, _ = discover_mkv_files(tmp, None, skip_extras=False)
+        check(any(p.name == "Making-Of.mkv" for p in files2), "include extras helper")
+        hardlink_source = tmp / "seed-source.mkv"
+        hardlink_target = tmp / "hardlink-target.mkv"
+        hardlink_source.write_bytes(b"linked")
+        hardlink_target.hardlink_to(hardlink_source)
+        check(hardlink_count(hardlink_source) >= 2, "hardlink count detects seeded-style link")
+        hardlink_target.unlink()
+        check(hardlink_count(hardlink_source) == 1, "hardlink count clears after source removal")
+
+        movie_srt = movie / "Film (2000).en.srt"
+        movie_srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8")
+        external_record = validate_exact_external_english_srt(movie / "Film (2000).mkv")
+        check(external_record.get("valid"), f"valid exact external SRT: {external_record}")
+        check(external_srt_snapshot_matches(external_record), "external SRT snapshot initial match")
+        (movie / "Film (2000).eng.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nWrong suffix\n", encoding="utf-8")
+        check(external_record.get("path", "").endswith("Film (2000).en.srt"), "only exact .en.srt qualifies")
+        movie_srt.write_text("<html>not a subtitle</html>", encoding="utf-8")
+        check(not external_srt_snapshot_matches(external_record), "changed/malformed external SRT rejects activation")
+        check(not validate_exact_external_english_srt(movie / "Film (2000).mkv").get("valid"),
+              "malformed external SRT does not qualify")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # Accessibility and selected-track verification fixtures require no media
+    # binaries; they model mkvmerge JSON directly.
+    text_description = {"type": "subtitles", "codec": "SubRip/SRT", "properties": {
+        "language": "eng", "track_name": "English text descriptions",
+        "flag_text_descriptions": True, "flag_default": False,
+    }}
+    check(not is_commentary_track(text_description, True), "text-description subtitle must be KEPT")
+
+    source_video = {"type": "video", "codec": "AVC/H.264/MPEG-4p10", "properties": {
+        "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
+        "display_dimensions": "1920x1080", "tag_number_of_frames": "240", "flag_default": True,
+    }}
+    source_audio = {"type": "audio", "codec": "AC-3", "properties": {
+        "codec_id": "A_AC3", "language": "eng", "language_ietf": "en",
+        "track_name": "English 5.1", "audio_channels": 6,
+        "audio_sampling_frequency": 48000, "flag_default": False,
+    }}
+    source_forced = {"type": "subtitles", "codec": "SubRip/SRT", "properties": {
+        "codec_id": "S_TEXT/UTF8", "language": "eng", "track_name": "English Forced",
+        "flag_forced": True, "flag_default": False,
+    }}
+    source_info = {
+        "container": {"recognized": True, "supported": True, "properties": {"duration": 10_000_000_000}},
+        "tracks": [source_video, source_audio, source_forced, text_description],
+        "attachments": [], "chapters": [],
+    }
+    verification_plan = build_verification_plan(
+        source_info, source_audio, [source_forced, text_description], 4096,
+    )
+    output_info = json.loads(json.dumps(source_info))
+    output_info["tracks"][1]["properties"]["flag_default"] = True
+    check(
+        track_fingerprint(output_info["tracks"][1]) == verification_plan["audio"],
+        "selected audio default flag is explicit",
+    )
+    source_without_ietf = json.loads(json.dumps(source_info))
+    source_without_ietf["tracks"][1]["properties"].pop("language_ietf")
+    normalized_output = json.loads(json.dumps(output_info))
+    normalized_output["tracks"][1]["properties"]["language_ietf"] = "en"
+    normalized_plan = build_verification_plan(
+        source_without_ietf, source_without_ietf["tracks"][1], [source_forced, text_description], 4096,
+    )
+    check(
+        track_fingerprint(normalized_output["tracks"][1]) == normalized_plan["audio"],
+        "missing source IETF tag normalizes to MKVToolNix output language tag",
+    )
+    aac_seven_channel_source = {"type": "audio", "codec": "AAC", "properties": {
+        "codec_id": "A_AAC", "language": "eng", "audio_channels": 7,
+        "audio_sampling_frequency": 24000, "default_track": True,
+    }}
+    aac_eight_channel_output = json.loads(json.dumps(aac_seven_channel_source))
+    aac_eight_channel_output["properties"]["audio_channels"] = 8
+    aac_eight_channel_output["properties"]["language_ietf"] = "en"
+    aac_expected = track_fingerprint(aac_seven_channel_source, default_override=True)
+    check(
+        retained_audio_fingerprint_matches(track_fingerprint(aac_eight_channel_output), aac_expected),
+        "AAC source channel count 7 and MKVToolNix output count 8 are accepted only when all other fields match",
+    )
+    aac_six_channel_source = json.loads(json.dumps(aac_seven_channel_source))
+    aac_six_channel_source["properties"]["audio_channels"] = 6
+    aac_six_expected = track_fingerprint(aac_six_channel_source, default_override=True)
+    check(
+        not retained_audio_fingerprint_matches(track_fingerprint(aac_eight_channel_output), aac_six_expected),
+        "AAC channel changes other than the observed 7-to-8 representation mismatch reject the remux",
+    )
+
+    tx_tmp = Path(tempfile.mkdtemp(prefix="tcc_tx_"))
+    original_runner = globals()["_run_mkvmerge"]
+
+    def age_for_recovery(path: Path) -> None:
+        aged = time.time() - ORPHAN_MIN_AGE_SECONDS - 2.0
+        os.utime(path, (aged, aged))
+
+    try:
+        temp_fixture = tx_tmp / "verify-fixture.mkv"
+        temp_fixture.write_bytes(b"x" * 4096)
+        ok, reason = _verify_remux_info(temp_fixture, output_info, verification_plan)
+        check(ok, f"fingerprint verification accepted intended output: {reason}")
+        source_without_frame_stats = json.loads(json.dumps(source_info))
+        source_without_frame_stats["tracks"][0]["properties"].pop("tag_number_of_frames")
+        generated_frame_output = json.loads(json.dumps(output_info))
+        generated_frame_plan = build_verification_plan(
+            source_without_frame_stats, source_without_frame_stats["tracks"][1],
+            [source_forced, text_description], 4096,
+        )
+        ok, reason = _verify_remux_info(temp_fixture, generated_frame_output, generated_frame_plan)
+        check(ok, f"generated output-only frame statistics are accepted: {reason}")
+        wrong_frame_output = json.loads(json.dumps(output_info))
+        wrong_frame_output["tracks"][0]["properties"]["tag_number_of_frames"] = "241"
+        ok, _ = _verify_remux_info(temp_fixture, wrong_frame_output, verification_plan)
+        check(not ok, "a changed source-known video frame count rejects the remux")
+        changed_output = json.loads(json.dumps(output_info))
+        changed_output["tracks"][1]["properties"]["language"] = "fra"
+        ok, _ = _verify_remux_info(temp_fixture, changed_output, verification_plan)
+        check(not ok, "fingerprint verification rejects a wrong retained audio track")
+
+        original = tx_tmp / "Recovery Film.mkv"
+        original.write_bytes(b"source" * 1024)
+        temp_path, journal, token = new_transaction_paths(original)
+        check(temp_path.parent == original.parent and journal.parent == original.parent, "transaction paths are siblings")
+        check(temp_path.name != original.name and _transaction_token_from_temp_name(temp_path.name) == token,
+              "transaction temp names are unique and parseable")
+        transaction = create_transaction(original, temp_path, token, original.stat())
+        transaction["verification_plan"] = verification_plan
+        temp_path.write_bytes(b"x" * 4096)
+        write_transaction(journal, transaction)
+        check(read_transaction(journal) is not None, "transaction journal round-trip")
+        check(_source_snapshot_matches(original, transaction["source_snapshot"]), "source snapshot initial match")
+        original.write_bytes(b"changed" * 1024)
+        check(not _source_snapshot_matches(original, transaction["source_snapshot"]), "source snapshot detects mutation")
+
+        # An unverified missing-original transaction must be preserved, not promoted.
+        original.unlink()
+        age_for_recovery(temp_path)
+        cleanup_orphan_temps(tx_tmp, "stub", None)
+        check(temp_path.exists() and journal.exists(), "unverified orphan retained for manual review")
+        cleanup_transaction_artifacts(temp_path, journal)
+
+        # A verified journal is recoverable only after verification succeeds again.
+        recovered = tx_tmp / "Recovered Film.mkv"
+        recovered_temp, recovered_journal, recovered_token = new_transaction_paths(recovered)
+        recovered_temp.write_bytes(b"x" * 4096)
+        recovered_tx = create_transaction(recovered, recovered_temp, recovered_token, temp_fixture.stat())
+        recovered_tx["verification_plan"] = verification_plan
+        recovered_tx["phase"] = "verified"
+        age_for_recovery(recovered_temp)
+        recovered_tx["temp_snapshot"] = _source_snapshot(recovered_temp)
+        write_transaction(recovered_journal, recovered_tx)
+        globals()["_run_mkvmerge"] = lambda *_args, **_kwargs: (0, json.dumps(output_info), "")
+        cleanup_orphan_temps(tx_tmp, "stub", None)
+        check(recovered.exists() and not recovered_temp.exists() and not recovered_journal.exists(),
+              "verified and rechecked orphan recovers atomically")
+
+        # Simulate a crash after os.replace but before journal deletion.
+        journal_only = tx_tmp / "Journal Only.mkv"
+        journal_only.write_bytes(b"source" * 1024)
+        missing_temp, stale_journal, stale_token = new_transaction_paths(journal_only)
+        stale_tx = create_transaction(journal_only, missing_temp, stale_token, journal_only.stat())
+        stale_tx["phase"] = "verified"
+        write_transaction(stale_journal, stale_tx)
+        cleanup_orphan_temps(tx_tmp, "stub", None)
+        check(not stale_journal.exists() and journal_only.exists(), "stale journal removed only beside intact original")
+
+        legacy = tx_tmp / "temp_clean_legacy-missing.mkv"
+        legacy.write_bytes(b"x" * 4096)
+        age_for_recovery(legacy)
+        cleanup_orphan_temps(tx_tmp, "stub", None)
+        check(legacy.exists(), "legacy orphan without original is never auto-promoted")
+    except Exception as exc:
+        errors.append(f"transaction/fingerprint self-test exception: {exc}")
+    finally:
+        globals()["_run_mkvmerge"] = original_runner
+        shutil.rmtree(tx_tmp, ignore_errors=True)
+
+    if errors:
+        print("SELF-TEST FAILED:")
+        for e in errors:
+            print("  -", e)
+        return 1
+    print("SELF-TEST PASSED (selection + external-SRT policy + fingerprints + transactions + recovery + discovery + hardlinks)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
