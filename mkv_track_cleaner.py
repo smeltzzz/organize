@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import atexit
 import argparse
-import errno
 import hashlib
 import json
 import os
@@ -44,6 +43,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, IO, List, Optional, Set, Tuple
+
+from common import CoordinationLock
 
 VERSION = "2.5.2"
 
@@ -65,7 +66,6 @@ TRANSACTION_PART_SUFFIX = ".partial.mkv"
 TRANSACTION_JOURNAL_SUFFIX = ".json"
 TRANSACTION_SCHEMA_VERSION = 1
 LOCK_FILENAME = ".track_cleaner.lock"
-STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
 STANDARDIZER_LOCK_TIMEOUT_SECONDS = 60.0
 ORPHAN_MIN_AGE_SECONDS = 60.0
 MIN_OUTPUT_RATIO = 0.50  # remux smaller than 50% of source → reject (likely truncated)
@@ -1625,81 +1625,6 @@ def release_lock(lock_path: Path):
         pass
 
 
-class StandardizerCoordinationLock:
-    """Advisory lock compatible with ``movie_standardizer.ExclusiveLock``.
-
-    The standardizer intentionally stores its deterministic lock in the system
-    temporary directory so neither program creates media-library files merely to
-    coordinate. Matching that exact protocol prevents a qBittorrent completion
-    hook from placing/replacing canonical hardlinks while this cleaner scans or
-    remuxes them.
-    """
-
-    def __init__(self, target_dir: Path, timeout_seconds: float) -> None:
-        normalized = os.path.normcase(os.path.normpath(str(target_dir)))
-        key = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
-        self.path = Path(tempfile.gettempdir()) / f"{STANDARDIZER_LOCK_NAME}.{key}"
-        self.timeout_seconds = max(0.0, float(timeout_seconds))
-        self._fh: Optional[Any] = None
-
-    @staticmethod
-    def _try_lock(handle: Any) -> bool:
-        if os.name == "nt":
-            import msvcrt
-            handle.seek(0)
-            try:
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                return True
-            except OSError as exc:
-                if getattr(exc, "winerror", None) in {33, 36} or exc.errno in {errno.EACCES, errno.EAGAIN}:
-                    return False
-                raise
-        import fcntl
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except BlockingIOError:
-            return False
-
-    def acquire(self) -> None:
-        handle = open(self.path, "a+b")
-        self._fh = handle
-        if handle.seek(0, os.SEEK_END) == 0:
-            handle.write(b"\0")
-            handle.flush()
-        deadline = time.monotonic() + self.timeout_seconds
-        try:
-            while not self._try_lock(handle):
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(
-                        f"timed out after {self.timeout_seconds:.1f}s waiting for standardizer lock: {self.path}"
-                    )
-                time.sleep(0.1)
-        except BaseException:
-            handle.close()
-            self._fh = None
-            raise
-
-    def release(self) -> None:
-        handle = self._fh
-        if handle is None:
-            return
-        try:
-            if os.name == "nt":
-                import msvcrt
-                handle.seek(0)
-                try:
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-                except OSError:
-                    pass
-            else:
-                import fcntl
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        finally:
-            handle.close()
-            self._fh = None
-
-
 def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: Optional[str] = LOG_FILE) -> int:
     """Resolve only journal-proven, fully verified interrupted transactions.
 
@@ -2611,7 +2536,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Coordinate with movie_standardizer.py before scanning. Its lock protocol is
     # deliberately mirrored so qBittorrent placement and cleanup cannot race.
-    standardizer_lock = StandardizerCoordinationLock(target_path, args.standardizer_lock_timeout)
+    standardizer_lock = CoordinationLock(target_path, timeout_seconds=args.standardizer_lock_timeout)
     try:
         standardizer_lock.acquire()
     except (OSError, TimeoutError) as exc:

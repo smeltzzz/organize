@@ -81,8 +81,6 @@ v2.3 (one-movie-file-per-folder guarantee)
 from __future__ import annotations
 
 import argparse
-import errno
-import hashlib
 import json
 import logging
 import os
@@ -90,7 +88,6 @@ import re
 import shutil
 import sys
 import tempfile
-import time
 import traceback
 import unicodedata
 import uuid
@@ -99,6 +96,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+
+from common import CoordinationLock, LockTimeoutError, path_is_within, path_norm, paths_equal
 
 # =====================================================================
 # CONFIGURATION  (CLI flags and supported environment variables override these)
@@ -646,19 +645,6 @@ def nfc(text: str) -> str:
     return unicodedata.normalize("NFC", text)
 
 
-def path_norm(path: Path) -> str:
-    return os.path.normcase(os.path.normpath(str(path)))
-
-
-def paths_equal(a: Path, b: Path) -> bool:
-    try:
-        if a.exists() and b.exists():
-            return a.samefile(b)
-    except OSError:
-        pass
-    return path_norm(a) == path_norm(b)
-
-
 def file_size(path: Path) -> int:
     try:
         return path.stat().st_size
@@ -671,78 +657,6 @@ def is_skipped_junk_name(name: str) -> bool:
     if lower in SKIP_NAME_EXACT or lower.startswith("."):
         return True
     return any(lower.endswith(suf) for suf in SKIP_NAME_SUFFIXES)
-
-
-class LockTimeoutError(RuntimeError):
-    """Raised when another organizer process owns the run lock too long."""
-
-
-class ExclusiveLock:
-    """Cross-platform, fail-closed process lock for qBittorrent hooks."""
-
-    def __init__(self, path: Path, *, timeout_seconds: float = 60.0) -> None:
-        self.path = path
-        self.timeout_seconds = max(0.0, timeout_seconds)
-        self._fh: object | None = None
-
-    def _try_lock(self, fh: object) -> bool:
-        if os.name == "nt":
-            import msvcrt
-            fh.seek(0)
-            try:
-                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                return True
-            except OSError as exc:
-                if getattr(exc, "winerror", None) in {33, 36} or exc.errno in {errno.EACCES, errno.EAGAIN}:
-                    return False
-                raise
-        import fcntl
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except BlockingIOError:
-            return False
-
-    def __enter__(self) -> ExclusiveLock:  # noqa: PYI034 - typing.Self is 3.11+
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(self.path, "a+b")
-        self._fh = fh
-        # Windows locks byte ranges. Materialize the first byte before locking.
-        if fh.seek(0, os.SEEK_END) == 0:
-            fh.write(b"\0")
-            fh.flush()
-        deadline = time.monotonic() + self.timeout_seconds
-        try:
-            while not self._try_lock(fh):
-                if time.monotonic() >= deadline:
-                    raise LockTimeoutError(
-                        f"Timed out after {self.timeout_seconds:.1f}s waiting for organizer lock: {self.path}"
-                    )
-                time.sleep(0.1)
-        except BaseException:
-            fh.close()
-            self._fh = None
-            raise
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        fh = self._fh
-        if fh is None:
-            return
-        try:
-            if os.name == "nt":
-                import msvcrt
-                fh.seek(0)
-                try:
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-                except OSError:
-                    pass
-            else:
-                import fcntl
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        finally:
-            fh.close()
-            self._fh = None
 
 
 # =====================================================================
@@ -2374,15 +2288,6 @@ _TV_CATEGORY_TOKENS = frozenset({
 })
 
 
-def _path_is_within(candidate: Path, parent: Path) -> bool:
-    """True when ``candidate`` is ``parent`` or a descendant after normalization."""
-    try:
-        candidate.resolve(strict=False).relative_to(parent.resolve(strict=False))
-        return True
-    except (OSError, ValueError):
-        return False
-
-
 def _filesystem_device(path: Path) -> int:
     """Return the device ID for an existing ancestor of ``path``."""
     probe = path.resolve(strict=False)
@@ -2404,7 +2309,7 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append("--lock-timeout must be zero or greater")
     if paths_equal(cfg.source_dir, cfg.target_dir):
         errors.append("--source and --target must be different directories")
-    elif _path_is_within(cfg.target_dir, cfg.source_dir) or _path_is_within(cfg.source_dir, cfg.target_dir):
+    elif path_is_within(cfg.target_dir, cfg.source_dir) or path_is_within(cfg.source_dir, cfg.target_dir):
         errors.append("--source and --target must not be nested to prevent batch self-processing")
     else:
         try:
@@ -2415,24 +2320,24 @@ def validate_config(cfg: Config) -> list[str]:
     if cfg.target_dir.exists() and not cfg.target_dir.is_dir():
         errors.append("--target exists but is not a directory")
     if cfg.quarantine_dir is not None:
-        if paths_equal(cfg.quarantine_dir, cfg.target_dir) or _path_is_within(cfg.quarantine_dir, cfg.target_dir):
+        if paths_equal(cfg.quarantine_dir, cfg.target_dir) or path_is_within(cfg.quarantine_dir, cfg.target_dir):
             errors.append("--quarantine-dir must be outside the organized library directory")
-        if _path_is_within(cfg.quarantine_dir, cfg.source_dir):
+        if path_is_within(cfg.quarantine_dir, cfg.source_dir):
             errors.append("--quarantine-dir must be outside --source to prevent batch self-processing")
     if cfg.manifest_file is not None:
-        if _path_is_within(cfg.manifest_file, cfg.target_dir):
+        if path_is_within(cfg.manifest_file, cfg.target_dir):
             errors.append("--manifest must be outside --target so media servers do not index it")
-        if _path_is_within(cfg.manifest_file, cfg.source_dir):
+        if path_is_within(cfg.manifest_file, cfg.source_dir):
             errors.append("--manifest must be outside --source so batch scans do not treat it as input")
     if cfg.report_file is not None:
-        if _path_is_within(cfg.report_file, cfg.target_dir):
+        if path_is_within(cfg.report_file, cfg.target_dir):
             errors.append("--report must be outside --target so media servers do not index it")
-        if _path_is_within(cfg.report_file, cfg.source_dir):
+        if path_is_within(cfg.report_file, cfg.source_dir):
             errors.append("--report must be outside --source so batch scans do not treat it as input")
     if cfg.log_file is not None:
-        if _path_is_within(cfg.log_file, cfg.target_dir):
+        if path_is_within(cfg.log_file, cfg.target_dir):
             errors.append("--log must be outside --target so media servers do not index it")
-        if _path_is_within(cfg.log_file, cfg.source_dir):
+        if path_is_within(cfg.log_file, cfg.source_dir):
             errors.append("--log must be outside --source so batch scans do not treat it as input")
     return errors
 
@@ -2453,7 +2358,7 @@ def validate_automated_input(item_path: Path, cfg: Config) -> str | None:
             return "qBittorrent input path does not exist"
         if item_path.is_symlink():
             return "qBittorrent input must not be a symlink"
-        if _path_is_within(item_path, cfg.target_dir):
+        if path_is_within(item_path, cfg.target_dir):
             return "qBittorrent input is inside the organized library"
         if item_path.is_file() and item_path.suffix.lower() != CANONICAL_VIDEO_EXTENSION:
             return "qBittorrent input is not an MKV movie file"
@@ -2524,12 +2429,11 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     # A deterministic temp lock serializes dry-runs and hardlink writes without
-    # creating a target directory merely to lock.
-    lock_key = hashlib.sha256(path_norm(CFG.target_dir).encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
-    lock_path = Path(tempfile.gettempdir()) / f"{LOCK_NAME}.{lock_key}"
-
+    # creating a target directory merely to lock.  The lock key is derived from
+    # the normalized target path so the track cleaner and subtitle fetcher
+    # coordinate on the very same file.
     try:
-        with ExclusiveLock(lock_path, timeout_seconds=CFG.lock_timeout_seconds):
+        with CoordinationLock(CFG.target_dir, timeout_seconds=CFG.lock_timeout_seconds):
             target = resolve_input_path(args.paths)
             if target is not None:
                 reason = validate_automated_input(target, CFG)

@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+# Make `pytest` discover the tests/ directory and put the repository root on
+# sys.path so the standalone scripts (which are imported by the tests) resolve.
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

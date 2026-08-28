@@ -1,0 +1,3 @@
+# The runtime scripts (and the unit tests) are stdlib-only.
+# pytest is optional — the suite also runs via `python3 -m unittest`.
+pytest>=7.0

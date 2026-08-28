@@ -16,13 +16,14 @@ import sys
 import tempfile
 import time
 import traceback
-import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Sequence
+
+from common import atomic_write_text, path_is_within, try_file_lock
 
 SOURCE_DIR = r"E:\torrents\final_organized"
 OUTPUT_DIR = r"E:\torrents\library_auditor"
@@ -98,29 +99,6 @@ def is_junk_filename(name: str) -> bool:
     return lower.startswith(".") or lower in {"thumbs.db", "desktop.ini"} or any(lower.endswith(s) for s in JUNK_SUFFIXES)
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Publish a complete report or retain the previous report on failure."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    staged = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        staged.write_text(text, encoding="utf-8")
-        os.replace(str(staged), str(path))
-    except OSError:
-        try:
-            staged.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-
-
-def _path_is_within(candidate: Path, parent: Path) -> bool:
-    try:
-        candidate.resolve(strict=False).relative_to(parent.resolve(strict=False))
-        return True
-    except (OSError, ValueError):
-        return False
-
-
 class LockUnavailable(RuntimeError):
     pass
 
@@ -133,20 +111,12 @@ class ExclusiveRunLock:
 
     def _try_lock(self) -> bool:
         assert self.handle is not None
-        try:
-            if os.name == "nt":
-                import msvcrt
-                self.handle.seek(0)
-                self.handle.write("0")
-                self.handle.flush()
-                self.handle.seek(0)
-                msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError:
-            return False
+        if os.name == "nt":
+            # Materialize a byte before the Windows byte-range lock.
+            self.handle.seek(0)
+            self.handle.write("0")
+            self.handle.flush()
+        return try_file_lock(self.handle, strict_non_contention=False)
 
     def __enter__(self) -> "ExclusiveRunLock":
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -325,9 +295,9 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append(f"--source is not an accessible directory: {cfg.source_dir}")
     if cfg.lock_timeout_seconds < 0:
         errors.append("--lock-timeout must be zero or greater")
-    if _path_is_within(cfg.report_file, cfg.source_dir):
+    if path_is_within(cfg.report_file, cfg.source_dir):
         errors.append(f"--report must be outside --source: {cfg.report_file}")
-    if _path_is_within(cfg.log_file, cfg.source_dir):
+    if path_is_within(cfg.log_file, cfg.source_dir):
         errors.append(f"--log must be outside --source: {cfg.log_file}")
     if os.path.normcase(os.path.normpath(str(cfg.log_file))) == os.path.normcase(os.path.normpath(str(cfg.report_file))):
         errors.append("--log and --report must be different files")
@@ -350,7 +320,7 @@ def run(cfg: Config) -> int:
             audit = audit_library(cfg)
             audit.elapsed_sec = time.perf_counter() - started
             report = build_report(audit, cfg)
-            _atomic_write_text(cfg.report_file, report)
+            atomic_write_text(cfg.report_file, report)
             counts = Counter(item.state for item in audit.folders)
             log(f"Audit complete: canonical_mkv={counts['CANONICAL_MKV']}; exceptions={len(audit.folders) - counts['CANONICAL_MKV']}; elapsed={audit.elapsed_sec:.2f}s")
             log(f"Report published: {cfg.report_file}")
@@ -421,7 +391,7 @@ def run_self_tests() -> int:
         report = build_report(audit, cfg)
         check("Movie One (2020).en.srt" not in report and "making-of.mp4" not in report, "non-direct media leaked into report")
         check("MKV stem mismatch: 1" in report and "Noncanonical SRT: 1" in report, "canonical exception counts")
-        _atomic_write_text(cfg.report_file, report)
+        atomic_write_text(cfg.report_file, report)
         check(cfg.report_file.read_text(encoding="utf-8") == report, "saved report differs")
         check(not list(output.glob("*.json")), "JSON output exists")
         check(bool(validate_config(Config(source_dir=library, log_file=output / "audit.log", report_file=library / "bad.txt", lock_timeout_seconds=0))), "report within library accepted")

@@ -1,0 +1,9 @@
+# No runtime third-party dependencies.
+# All five tools use only the Python 3.11+ standard library.
+#
+# External binaries (optional per tool):
+#   * mkvmerge  (MKVToolNix)  -> mkv_track_cleaner.py
+#   * ffprobe   (FFmpeg)      -> 10bit.py
+#   * OpenSubtitles API key   -> subtitle_fetcher.py  (env: OPENSUBTITLES_API_KEY)
+#
+# Development dependencies (tests) live in requirements-dev.txt.

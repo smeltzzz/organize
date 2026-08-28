@@ -33,7 +33,6 @@ Free key: https://www.opensubtitles.com/en/consumers
 from __future__ import annotations
 
 import argparse
-import errno
 import gzip
 import hashlib
 import io
@@ -55,6 +54,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
+
+from common import CoordinationLock, path_norm
 
 # =============================================================================
 # CONFIGURATION
@@ -98,7 +99,6 @@ LANGUAGES = "en"
 
 HASH_CHUNK = 65536  # 64 KiB
 MIN_HASH_SIZE = HASH_CHUNK * 2
-STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
 
 EXTRA_DIR_NAMES = frozenset({
     "featurettes", "extras", "specials", "shorts", "bonus",
@@ -201,85 +201,8 @@ class VideoSnapshot:
 # =============================================================================
 
 
-def path_norm(path: Path) -> str:
-    """Match the standardizer/cleaner path-normalization contract exactly."""
-    return os.path.normcase(os.path.normpath(str(path)))
-
-
-class LockTimeoutError(RuntimeError):
-    """Raised when the standardizer/cleaner coordination lock cannot be acquired."""
-
-
 class ConcurrentSidecarError(RuntimeError):
     """Raised when another actor safely created the requested sidecar first."""
-
-
-class StandardizerCoordinationLock:
-    """Cross-platform lock shared with movie_standardizer.py and mkv_track_cleaner.py."""
-
-    def __init__(self, library: Path, *, timeout_seconds: float) -> None:
-        key = hashlib.sha256(path_norm(library).encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
-        self.path = Path(tempfile.gettempdir()) / f"{STANDARDIZER_LOCK_NAME}.{key}"
-        self.timeout_seconds = max(0.0, timeout_seconds)
-        self._fh: Any | None = None
-
-    def _try_lock(self, fh: Any) -> bool:
-        if os.name == "nt":
-            import msvcrt
-            fh.seek(0)
-            try:
-                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                return True
-            except OSError as exc:
-                if getattr(exc, "winerror", None) in {33, 36} or exc.errno in {errno.EACCES, errno.EAGAIN}:
-                    return False
-                raise
-        import fcntl
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except BlockingIOError:
-            return False
-
-    def __enter__(self) -> "StandardizerCoordinationLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(self.path, "a+b")
-        self._fh = fh
-        if fh.seek(0, os.SEEK_END) == 0:
-            fh.write(b"\0")
-            fh.flush()
-        deadline = time.monotonic() + self.timeout_seconds
-        try:
-            while not self._try_lock(fh):
-                if time.monotonic() >= deadline:
-                    raise LockTimeoutError(
-                        f"Timed out after {self.timeout_seconds:.1f}s waiting for library coordination lock: {self.path}"
-                    )
-                time.sleep(0.1)
-        except BaseException:
-            fh.close()
-            self._fh = None
-            raise
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        fh = self._fh
-        if fh is None:
-            return
-        try:
-            if os.name == "nt":
-                import msvcrt
-                fh.seek(0)
-                try:
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-                except OSError:
-                    pass
-            else:
-                import fcntl
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-        finally:
-            fh.close()
-            self._fh = None
 
 
 def log(msg: str, level: str = "INFO", log_file: Path | None = None) -> None:
@@ -1591,7 +1514,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"OpenSubtitles mode: {cfg.auth_mode} | UTC request cap: {cfg.daily_cap} | Ledger: {cfg.log_file}")
         print(f"Report: {cfg.report_file} | Log: {cfg.log_file}")
         print("=" * 78, flush=True)
-        with StandardizerCoordinationLock(cfg.library, timeout_seconds=cfg.lock_timeout_seconds):
+        with CoordinationLock(cfg.library, timeout_seconds=cfg.lock_timeout_seconds):
             results, summary = queue_run(cfg)
             write_report(results, cfg, summary)
         return 1 if any(result.status == "error" for result in results) else 0

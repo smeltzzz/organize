@@ -36,13 +36,14 @@ import sys
 import tempfile
 import time
 import traceback
-import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Sequence
+
+from common import atomic_write_text, path_is_within, try_file_lock
 
 # =============================================================================
 # CONFIGURATION  (CLI flags override these)
@@ -231,29 +232,6 @@ def ffprobe_works(binary: str) -> bool:
         return False
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Write complete text through a unique sibling then atomically replace it."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        temp.write_text(text, encoding="utf-8")
-        os.replace(str(temp), str(path))
-    except OSError:
-        try:
-            temp.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-
-
-def _path_is_within(candidate: Path, parent: Path) -> bool:
-    try:
-        candidate.resolve(strict=False).relative_to(parent.resolve(strict=False))
-        return True
-    except (OSError, ValueError):
-        return False
-
-
 class LockUnavailable(RuntimeError):
     """Raised when another inspector instance owns the run lock."""
 
@@ -268,21 +246,13 @@ class ExclusiveRunLock:
 
     def _try_lock(self) -> bool:
         assert self.handle is not None
-        try:
-            if os.name == "nt":
-                import msvcrt
-                self.handle.seek(0)
-                if self.handle.tell() == 0:
-                    self.handle.write("0")
-                    self.handle.flush()
-                self.handle.seek(0)
-                msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError:
-            return False
+        if os.name == "nt":
+            # Materialize a leading byte once, exactly as the original did.
+            self.handle.seek(0)
+            if self.handle.tell() == 0:
+                self.handle.write("0")
+                self.handle.flush()
+        return try_file_lock(self.handle, strict_non_contention=False)
 
     def __enter__(self) -> "ExclusiveRunLock":
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -820,7 +790,7 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
 def write_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) -> bool:
     """Publish the sole inspector artifact as a complete atomic text report."""
     try:
-        _atomic_write_text(cfg.report_file, build_report(results, cfg, elapsed))
+        atomic_write_text(cfg.report_file, build_report(results, cfg, elapsed))
         return True
     except OSError as exc:
         log(f"[ERROR] Cannot write report {cfg.report_file}: {exc}")
@@ -846,9 +816,9 @@ def validate_config(cfg: Config) -> list[str]:
     if cfg.lock_timeout_seconds < 0:
         errors.append("--lock-timeout must be zero or greater")
 
-    if _path_is_within(cfg.report_file, cfg.source_dir):
+    if path_is_within(cfg.report_file, cfg.source_dir):
         errors.append(f"Report path must be outside --source: {cfg.report_file}")
-    if _path_is_within(cfg.log_file, cfg.source_dir):
+    if path_is_within(cfg.log_file, cfg.source_dir):
         errors.append(f"Log path must be outside --source: {cfg.log_file}")
     if os.path.normcase(os.path.normpath(str(cfg.log_file))) == os.path.normcase(os.path.normpath(str(cfg.report_file))):
         errors.append("--log and --report must be different files")
