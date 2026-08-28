@@ -47,6 +47,32 @@ MOVIE_EXTENSIONS = frozenset({
     ".f4v", ".mxf", ".dv", ".wtv", ".dvr-ms", ".iso", ".img", ".nrg",
 })
 JUNK_SUFFIXES = (".!qb", ".parts", ".part", ".crdownload", ".tmp", ".temp")
+
+# mkv_track_cleaner.py stages a remux as a full-size sibling named
+# ``temp_clean_<token>__<original>.mkv`` and atomically swaps it over the
+# original only after verification. An audit that happens to run mid-remux
+# would otherwise count that staged copy as a second feature and report
+# MULTIPLE_DIRECT_MOVIE_FILES for a perfectly healthy folder. It is a
+# transaction artifact, not library content, so it is not counted.
+# (The matching journal, ``.track_cleaner.<token>.json``, is already excluded
+# by the leading-dot rule in is_junk_filename.) Orphaned staging files are the
+# cleaner's own orphan-recovery responsibility, not a library-layout finding.
+TRACK_CLEANER_TEMP_PREFIX = "temp_clean_"
+
+# Folder states that mean the layout itself is wrong. MISSING_SIDECAR is
+# deliberately absent: a freshly standardized movie has no sidecar until
+# subtitle_fetcher.py runs, so counting it as a defect would make the exit-code
+# gate fail on every healthy new library.
+DEFECT_STATES = frozenset({
+    "SINGLE_OTHER_CONTAINER",
+    "MULTIPLE_DIRECT_MOVIE_FILES",
+    "NO_DIRECT_MOVIE_FILE",
+    "MKV_STEM_MISMATCH",
+    "NONCANONICAL_SIDECAR",
+    "INVALID_SIDECAR",
+    "INACCESSIBLE",
+})
+
 PRINT_LOCK = Lock()
 
 
@@ -56,6 +82,8 @@ class Config:
     log_file: Path = field(default_factory=lambda: Path(LOG_FILE))
     report_file: Path = field(default_factory=lambda: Path(REPORT_FILE))
     lock_timeout_seconds: float = 60.0
+    fail_on_findings: bool = False
+    fail_on_defects: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,6 +130,11 @@ def log(message: str, level: str = "INFO", log_file: Path | None = None) -> None
 def is_junk_filename(name: str) -> bool:
     lower = name.casefold()
     return lower.startswith(".") or lower in {"thumbs.db", "desktop.ini"} or any(lower.endswith(s) for s in JUNK_SUFFIXES)
+
+
+def is_in_flight_remux(name: str) -> bool:
+    """True for a mkv_track_cleaner.py staging file written during a remux."""
+    return name.casefold().startswith(TRACK_CLEANER_TEMP_PREFIX)
 
 
 class LockUnavailable(RuntimeError):
@@ -175,6 +208,8 @@ def direct_movie_files(folder: Path) -> tuple[list[MovieFile], str]:
     found: list[MovieFile] = []
     for entry in entries:
         if not entry.is_file() or is_junk_filename(entry.name):
+            continue
+        if is_in_flight_remux(entry.name):
             continue
         extension = entry.suffix.casefold()
         if extension not in MOVIE_EXTENSIONS:
@@ -354,6 +389,25 @@ def validate_config(cfg: Config) -> list[str]:
     return errors
 
 
+def exit_code_for(counts: Counter, cfg: Config) -> int:
+    """Translate audit results into a scheduler-usable exit status.
+
+    The auditor used to return 0 no matter what it found, so a Task Scheduler
+    or cron run could never report that the library had gone unhealthy. Both
+    gates are opt-in and the default stays 0, so existing automation that only
+    reads the report is unaffected.
+    """
+    findings = sum(n for state, n in counts.items() if state != "CANONICAL_MKV")
+    defects = sum(n for state, n in counts.items() if state in DEFECT_STATES)
+    if cfg.fail_on_findings and findings:
+        log(f"FAIL-ON-FINDINGS: {findings} folder(s) are not canonical.", level="ERROR")
+        return 1
+    if cfg.fail_on_defects and defects:
+        log(f"FAIL-ON-DEFECTS: {defects} folder(s) have a layout defect.", level="ERROR")
+        return 1
+    return 0
+
+
 def run(cfg: Config) -> int:
     errors = validate_config(cfg)
     if errors:
@@ -375,7 +429,7 @@ def run(cfg: Config) -> int:
             log(f"Audit complete: canonical_mkv={counts['CANONICAL_MKV']}; exceptions={len(audit.folders) - counts['CANONICAL_MKV']}; elapsed={audit.elapsed_sec:.2f}s")
             log(f"Report published: {cfg.report_file}")
             print(report, end="")
-        return 0
+        return exit_code_for(counts, cfg)
     except LockUnavailable as exc:
         log(f"Audit lock unavailable: {exc}", level="ERROR")
         return 3
@@ -394,12 +448,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log", type=Path, default=Path(LOG_FILE), help="Append-only execution log outside the media library")
     parser.add_argument("--report", type=Path, default=Path(REPORT_FILE), help="The sole replaceable plain-text output report")
     parser.add_argument("--lock-timeout", type=float, default=60.0, metavar="SECONDS", help="Maximum wait for another audit run")
+    parser.add_argument("--fail-on-findings", action="store_true",
+                        help="Exit 1 when any folder is not CANONICAL_MKV (includes missing sidecars)")
+    parser.add_argument("--fail-on-defects", action="store_true",
+                        help="Exit 1 only on layout defects; a missing sidecar alone still exits 0")
     parser.add_argument("--self-test", action="store_true")
     return parser
 
 
 def cfg_from_args(args: argparse.Namespace) -> Config:
-    return Config(source_dir=args.source, log_file=args.log, report_file=args.report, lock_timeout_seconds=args.lock_timeout)
+    return Config(
+        source_dir=args.source,
+        log_file=args.log,
+        report_file=args.report,
+        lock_timeout_seconds=args.lock_timeout,
+        fail_on_findings=bool(args.fail_on_findings),
+        fail_on_defects=bool(args.fail_on_defects),
+    )
 
 
 # =============================================================================

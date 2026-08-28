@@ -23,7 +23,7 @@ what happened.
 | `movie_standardizer.py` | Renames/hardlinks a finished torrent into the canonical **`Title (Year)/Title (Year).mkv`** layout with English subtitles only. The default qBittorrent completion hook (`"%F"`). Existing movies are replaced only after a same-cut, clear technical-upgrade check. | `ffprobe` only when comparing a duplicate |
 | `mkv_track_cleaner.py` | Remux-only (no re-encode) cleanup: keeps one best English audio track, drops commentary/DVS, keeps SDH/forced subs, and prefers a validated exact `.en.srt`. | `mkvmerge` (MKVToolNix) |
 | `10bit.py` | Uses `ffprobe` to report which movies are **8-bit** (queue for x265 10-bit), and which are already HDR / 10-bit. Fail-closed classification. | `ffprobe` (FFmpeg) |
-| `library_auditor.py` | **Read-only** audit of the direct container file per movie folder: canonical MKV, missing English SRT, unusable SRT sidecar, stem mismatch, non-canonical SRT sidecar, multiple/other/no movie file. | none |
+| `library_auditor.py` | **Read-only** audit of the direct container file per movie folder: canonical MKV, missing English SRT, unusable SRT sidecar, stem mismatch, non-canonical SRT sidecar, multiple/other/no movie file. Ignores a cleaner remux in flight, and can exit non-zero so a scheduler can gate on it. | none |
 | `subtitle_fetcher.py` | Fetches English human-authored UTF-8 SRTs from OpenSubtitles, hash-gated, with a coordination lock and transaction guards. **Run before `mkv_track_cleaner.py`.** | `OPENSUBTITLES_API_KEY` env var |
 | `pipeline.py` | Runs the four manual steps in the correct order as one command. Skips steps whose prerequisites are missing instead of failing. | none |
 
@@ -194,6 +194,50 @@ What `mkv_track_cleaner.py` does to keep that as cheap and safe as possible:
 Because seeding movies are never touched, this only ever happens for a movie you
 have already stopped seeding.
 
+#### The probe cache: why re-runs are cheap
+
+`10bit.py` and `mkv_track_cleaner.py` each spawn one external process per
+movie — `ffprobe` and `mkvmerge -J` respectively — and that, not the filesystem
+walk, is what a maintenance sweep costs. Walking 2,000 movie folders takes
+about 0.15s; probing them does not.
+
+Both tools therefore keep a JSON cache of that probe output, reused only while
+the file's **size and `st_mtime_ns` are both unchanged**:
+
+```
+E:\torrents\10bit\10bit_probe_cache.json
+E:\torrents\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json
+```
+
+Measured on a 30-movie library with a stub `mkvmerge`: a cold run spawned 30
+processes in 2.2s, an unchanged re-run spawned **0** in 0.11s, touching one
+file spawned exactly **1**, and `--no-cache` restored all 30. The reports from
+the cold and warm runs were identical apart from timestamps.
+
+The same behaviour was then re-verified against real Matroska files produced by
+`ffmpeg` (8-bit H.264, 10-bit HEVC, HDR10, HLG, multi-audio): a cold run
+probed 30 files, an unchanged re-run probed **0** — the only process spawned was
+`ffprobe -version` — touching exactly one file re-probed exactly **1**, and the
+cold and warm reports were byte-identical apart from timestamps. Cache files
+written by 8 concurrent probe workers stayed valid JSON with no malformed
+entries, and every verdict was reproduced on the warm run.
+
+**Only the probe output is cached, never a decision.** This is the part that
+makes it safe. Each tool still re-derives its verdict from live filesystem
+state on every run, so a change the tool must react to is never masked:
+
+- a `.en.srt` appearing beside a movie still makes the cleaner drop embedded
+  subtitle tracks;
+- a hardlink count dropping when seeding stops still releases the deferral;
+- a remux landing still invalidates that entry, because size and mtime changed.
+
+Failures are never cached, so a transient `ffprobe` timeout does not become a
+sticky verdict. The cache is fail-open in both directions: a missing,
+truncated, corrupt or foreign-format cache is a miss rather than an error, and
+a cache that cannot be written costs only the next run's speed. Use
+`--no-cache` to bypass it entirely, or `--cache PATH` to relocate it (it must
+stay outside the media library).
+
 ### Running the manual steps: `pipeline.py`
 
 The standardizer is the qBittorrent hook, so it needs no attention. The other
@@ -337,6 +381,30 @@ py movie_standardizer.py "%F"
 Key flags: `--target`, `--source`, `--min-size MB`, `--lock-timeout SECS`,
 `--ffprobe PATH`, `--allow-tv`, `--category`, `--dry-run`, `--verbose`, `--self-test`.
 
+Maintenance flags (all optional; the defaults are non-destructive):
+`--deduplicate` scans the organized library for duplicate folders of the same
+movie, and `--maintenance-mode {REPORT,QUARANTINE,DELETE}` decides what happens
+to a candidate. `REPORT` is the default and only logs; `QUARANTINE` moves the
+candidate outside the library and requires `--quarantine-dir`; `DELETE` removes
+it. `--manifest PATH` additionally writes a JSON run manifest for automation.
+
+#### Items left in the source folder
+
+A download this tool declines — not an MKV, a multipart or disc release, under
+`--min-size`, unparseable, or TV-named — stays in `E:\torrents\final` forever
+unless you act on it. Every decline is now a recorded outcome, so the `Skipped`
+counter is accurate and the report ends with an actionable section:
+
+```
+ITEMS LEFT IN SOURCE (not organized; each needs a decision)
+----------------------------------------------------------------------
+  E:\torrents\final\Small.Movie.1995.1080p.mkv
+      reason: smaller than the 300 MB minimum (238.4 MB)
+```
+
+Transient download artifacts (`.!qb`, `.part`, …) are deliberately *not*
+reported, since they are expected to disappear on their own.
+
 When a canonical MKV already exists, file size alone never authorizes replacement.
 The standardizer requires the same canonical title/year, rejects alternate-cut,
 3D, and multipart markers, and uses `ffprobe` to require runtimes within 30 seconds
@@ -352,7 +420,8 @@ py mkv_track_cleaner.py --dry-run
 ```
 
 Key flags: `--dir`, `--only MKV` (repeatable), `--dry-run`, `--mkvmerge PATH`,
-`--log`, `--report`, `--standardizer-lock-timeout SECS`, `--no-color`,
+`--log`, `--report`, `--cache PATH`, `--no-cache`,
+`--standardizer-lock-timeout SECS`, `--no-color`,
 `--nice`, `--min-size MB`, `--limit N`, `--self-test`.
 
 ### 10bit.py
@@ -363,16 +432,38 @@ py 10bit.py --dry-run
 ```
 
 Key flags: `--source`, `--min-size MB`, `--workers N`, `--timeout SECS`,
-`--ffprobe PATH`, `--fail-if-queue`, `--fail-if-review`, `--fail-if-error`,
+`--ffprobe PATH`, `--cache PATH`, `--no-cache`, `--fail-if-queue`, `--fail-if-review`, `--fail-if-error`,
 `--dry-run`, `--verbose`, `--self-test`.
 
 ### library_auditor.py
 
 ```powershell
 py library_auditor.py
+
+# Usable as a scheduled health gate:
+py library_auditor.py --fail-on-defects
 ```
 
-Key flags: `--source`, `--log`, `--report`, `--lock-timeout SECS`, `--self-test`.
+Key flags: `--source`, `--log`, `--report`, `--lock-timeout SECS`,
+`--fail-on-defects`, `--fail-on-findings`, `--self-test`.
+
+Both gates are opt-in and the default exit status stays 0, so automation that
+only reads the report is unaffected.
+
+- `--fail-on-defects` exits 1 on a layout defect — `SINGLE_OTHER_CONTAINER`,
+  `MULTIPLE_DIRECT_MOVIE_FILES`, `NO_DIRECT_MOVIE_FILE`, `MKV_STEM_MISMATCH`,
+  `NONCANONICAL_SIDECAR`, `INVALID_SIDECAR`, `INACCESSIBLE`.
+- `--fail-on-findings` is stricter: any folder that is not `CANONICAL_MKV`,
+  which includes `MISSING_SIDECAR`.
+
+`MISSING_SIDECAR` is excluded from the defect gate on purpose — a freshly
+standardized movie has no sidecar until `subtitle_fetcher.py` runs, so counting
+it would make the gate fail on every healthy new library.
+
+A `mkv_track_cleaner.py` remux in progress is not a finding either: the staged
+`temp_clean_*.mkv` sibling is a transaction artifact, so an audit that happens
+to overlap a remux no longer reports a healthy folder as
+`MULTIPLE_DIRECT_MOVIE_FILES`.
 
 ### subtitle_fetcher.py
 
@@ -396,7 +487,9 @@ Each script has sensible built-in defaults for a Windows `E:\torrents\...`
 library and exposes them via CLI flags. `movie_standardizer.py` additionally
 honors a small set of environment variables (`MOVIE_STD_TARGET`,
 `MOVIE_STD_SOURCE`, `MOVIE_STD_LOG`, `MOVIE_STD_MIN_SIZE`, `MOVIE_STD_REPORT`,
-`MOVIE_STD_LOCK_TIMEOUT`, `MOVIE_STD_FFPROBE`, `MOVIE_STD_DRY_RUN`). These are
+`MOVIE_STD_LOCK_TIMEOUT`, `MOVIE_STD_FFPROBE`, `MOVIE_STD_DEDUPLICATE`,
+`MOVIE_STD_MAINTENANCE_MODE`, `MOVIE_STD_QUARANTINE`, `MOVIE_STD_MANIFEST`,
+`MOVIE_STD_DRY_RUN`). These are
 advanced overrides; normal use needs none of them. `subtitle_fetcher.py` reads
 its OpenSubtitles credentials from the environment.
 

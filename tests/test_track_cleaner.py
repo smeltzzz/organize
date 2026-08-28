@@ -6,11 +6,13 @@ import contextlib
 import pathlib
 import datetime
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 import mkv_track_cleaner as tc
+from common import MediaProbeCache
 
 
 class LanguageAndCommentaryTests(unittest.TestCase):
@@ -169,6 +171,240 @@ class RemuxWithoutSrtReportTests(unittest.TestCase):
         text = self._render(_empty_stats())
         self.assertNotIn("REMUXED WITH NO EXTERNAL SRT", text)
         self.assertIn("Remuxed Without SRT       : 0", text)
+
+
+class MetadataCacheWiringTests(unittest.TestCase):
+    """process_mkv must actually consult the cache, not just accept one."""
+
+    INFO = {
+        "container": {"recognized": True, "supported": True,
+                      "properties": {"duration": 6_000_000_000_000}},
+        "tracks": [
+            {"id": 0, "type": "video", "codec": "AVC/H.264/MPEG-4p10", "properties": {
+                "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
+                "display_dimensions": "1920x1080", "tag_number_of_frames": "144000",
+                "flag_default": True}},
+            {"id": 1, "type": "audio", "codec": "AC-3", "properties": {
+                "codec_id": "A_AC3", "language": "eng", "language_ietf": "en",
+                "track_name": "English 5.1", "audio_channels": 6,
+                "audio_sampling_frequency": 48000, "flag_default": True}},
+        ],
+        "attachments": [], "chapters": [],
+    }
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="tc_cache_")
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.movie = self.root / "Film (2020).mkv"
+        self.movie.write_bytes(b"x" * 4096)
+        self.calls: list[str] = []
+
+        def fake_mkvmerge(cmd, on_progress=None):
+            self.calls.append(" ".join(str(part) for part in cmd))
+            if "-J" in cmd:
+                return 0, json.dumps(self.INFO), ""
+            return 1, "", "stub refuses to remux"
+
+        self._real = tc._run_mkvmerge
+        self._real_root = tc._target_root
+        tc._run_mkvmerge = fake_mkvmerge
+        tc._target_root = None  # skip the canonical-layout gate in this unit test
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        tc._run_mkvmerge = self._real
+        tc._target_root = self._real_root
+
+    def _run(self, cache=None) -> dict:
+        stats = {"cleaned": [], "already_clean": [], "skipped_no_english": [],
+                 "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
+                 "total_scanned": 0, "bytes_freed": 0}
+        with contextlib.redirect_stdout(io.StringIO()):
+            tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=True,
+                           log_file_path=None, probe_cache=cache)
+        return stats
+
+    def _cache(self, enabled: bool = True):
+        return MediaProbeCache(self.root / "cache.json", tool="mkv_track_cleaner",
+                               enabled=enabled)
+
+    def test_second_call_reuses_the_metadata(self) -> None:
+        cache = self._cache()
+        self._run(cache)
+        first_calls = len(self.calls)
+        self._run(cache)
+        self.assertEqual(len(self.calls), first_calls, "warm run must not respawn mkvmerge")
+        self.assertGreater(first_calls, 0)
+
+    def test_changed_file_is_reread(self) -> None:
+        cache = self._cache()
+        self._run(cache)
+        before = len(self.calls)
+        self.movie.write_bytes(b"y" * 8192)
+        self._run(cache)
+        self.assertGreater(len(self.calls), before)
+
+    def test_no_cache_rereads_every_time(self) -> None:
+        cache = self._cache(enabled=False)
+        self._run(cache)
+        before = len(self.calls)
+        self._run(cache)
+        self.assertGreater(len(self.calls), before)
+
+    def test_a_deferred_movie_is_never_read_from_cache(self) -> None:
+        # The hardlink gate runs before the metadata read, so a seeded movie
+        # must stay deferred even when its metadata is cached.
+        cache = self._cache()
+        self._run(cache)
+        linked = self.root / "hardlink.mkv"
+        linked.hardlink_to(self.movie)
+        cache.put(self.movie, self.movie.stat().st_size,
+                  self.movie.stat().st_mtime_ns, self.INFO)
+        before = len(self.calls)
+        stats = self._run(cache)
+        self.assertEqual(len(self.calls), before, "deferred movie must not be probed")
+        self.assertEqual(len(stats["deferred_hardlinked"]), 1)
+
+
+class RemuxVerificationGuardsTests(unittest.TestCase):
+    """The guards that stop a bad remux replacing a good movie.
+
+    ``_verify_remux_output`` is the last thing standing between a truncated
+    mkvmerge output and ``os.replace()`` overwriting the original. The repo's
+    own self-test covers the fingerprint and transaction paths, but the size and
+    duration truncation guards — the ones that catch a remux that silently lost
+    most of the film — had no coverage at all. A logic error there would destroy
+    real movies, so each rejection path is pinned here.
+    """
+
+    SOURCE_SIZE = 10_000_000  # 10 MB source
+
+    def _fixtures(self):
+        video = {"type": "video", "codec": "AVC/H.264/MPEG-4p10", "properties": {
+            "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
+            "display_dimensions": "1920x1080", "tag_number_of_frames": "240",
+            "flag_default": True}}
+        audio = {"type": "audio", "codec": "AC-3", "properties": {
+            "codec_id": "A_AC3", "language": "eng", "language_ietf": "en",
+            "track_name": "English 5.1", "audio_channels": 6,
+            "audio_sampling_frequency": 48000, "flag_default": False}}
+        source = {
+            "container": {"recognized": True, "supported": True,
+                          "properties": {"duration": 10_000_000_000}},
+            "tracks": [video, audio], "attachments": [], "chapters": [],
+        }
+        plan = tc.build_verification_plan(source, audio, [], self.SOURCE_SIZE)
+        return source, plan
+
+    def _write(self, size: int) -> Path:
+        temp = Path(self._td.name) / "remuxed.mkv"
+        temp.write_bytes(b"x" * size)
+        return temp
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="remux_verify_")
+        self.addCleanup(self._td.cleanup)
+
+    def _output(self, source):
+        """Model what mkvmerge produces: the retained audio becomes default."""
+        out_info = json.loads(json.dumps(source))
+        out_info["tracks"][1]["properties"]["flag_default"] = True
+        return out_info
+
+    def _check(self, out_info, size):
+        return tc._verify_remux_info(self._write(size), out_info, self.plan)
+
+    def test_baseline_clean_remux_is_accepted(self) -> None:
+        self.source, self.plan = self._fixtures()
+        ok, reason = self._check(self._output(self.source), int(self.SOURCE_SIZE * 0.98))
+        self.assertTrue(ok, reason)
+
+    def test_tiny_output_is_rejected(self) -> None:
+        self.source, self.plan = self._fixtures()
+        ok, reason = self._check(self._output(self.source), 512)
+        self.assertFalse(ok)
+        self.assertIn("tiny", reason)
+
+    def test_truncated_output_below_half_is_rejected(self) -> None:
+        """The primary data-loss guard: a remux that lost most of the film."""
+        self.source, self.plan = self._fixtures()
+        ok, reason = self._check(self._output(self.source), int(self.SOURCE_SIZE * 0.20))
+        self.assertFalse(ok)
+        self.assertIn("shrank too much", reason)
+
+    def test_output_just_above_the_ratio_is_accepted(self) -> None:
+        self.source, self.plan = self._fixtures()
+        ok, reason = self._check(self._output(self.source), int(self.SOURCE_SIZE * 0.75))
+        self.assertTrue(ok, reason)
+
+    def test_unrecognized_container_is_rejected(self) -> None:
+        self.source, self.plan = self._fixtures()
+        bad = self._output(self.source)
+        bad["container"]["recognized"] = False
+        ok, reason = self._check(bad, int(self.SOURCE_SIZE * 0.98))
+        self.assertFalse(ok)
+        self.assertIn("not a recognized", reason)
+
+    def test_wrong_audio_track_count_is_rejected(self) -> None:
+        self.source, self.plan = self._fixtures()
+        bad = self._output(self.source)
+        bad["tracks"].append(json.loads(json.dumps(bad["tracks"][1])))
+        ok, reason = self._check(bad, int(self.SOURCE_SIZE * 0.98))
+        self.assertFalse(ok)
+        self.assertIn("exactly 1 audio track", reason)
+
+    def test_attachment_count_change_is_rejected(self) -> None:
+        self.source, self.plan = self._fixtures()
+        bad = self._output(self.source)
+        bad["attachments"] = [{"id": 1}]
+        ok, reason = self._check(bad, int(self.SOURCE_SIZE * 0.98))
+        self.assertFalse(ok)
+        self.assertIn("attachment count", reason)
+
+    def test_chapter_count_change_is_rejected(self) -> None:
+        self.source, self.plan = self._fixtures()
+        bad = self._output(self.source)
+        # mkvmerge -J reports chapter *atoms*, each carrying num_entries.
+        bad["chapters"] = [{"num_entries": 12}]
+        ok, reason = self._check(bad, int(self.SOURCE_SIZE * 0.98))
+        self.assertFalse(ok)
+        self.assertIn("chapter count", reason)
+
+    def test_duration_growing_is_rejected(self) -> None:
+        self.source, self.plan = self._fixtures()
+        bad = self._output(self.source)
+        bad["container"]["properties"]["duration"] = 20_000_000_000
+        ok, reason = self._check(bad, int(self.SOURCE_SIZE * 0.98))
+        self.assertFalse(ok)
+        self.assertIn("duration grew", reason)
+
+    def test_duration_collapse_without_frame_counts_is_rejected(self) -> None:
+        """A remux that silently lost 90% of the runtime must not be accepted."""
+        source, self.plan = self._fixtures()
+        # Drop the source frame count so the guard cannot be satisfied by
+        # frame statistics and must fall back to the conservative floor.
+        for track in source["tracks"]:
+            track["properties"].pop("tag_number_of_frames", None)
+        self.plan = tc.build_verification_plan(
+            source, source["tracks"][1], [], self.SOURCE_SIZE)
+        bad = self._output(source)
+        bad["container"]["properties"]["duration"] = 1_000_000_000
+        ok, reason = self._check(bad, int(self.SOURCE_SIZE * 0.98))
+        self.assertFalse(ok)
+        self.assertIn("duration shrank too much", reason)
+
+    def test_small_legitimate_duration_shrink_is_tolerated(self) -> None:
+        """Dropping padded commentary legitimately shortens the container."""
+        source, self.plan = self._fixtures()
+        for track in source["tracks"]:
+            track["properties"].pop("tag_number_of_frames", None)
+        self.plan = tc.build_verification_plan(
+            source, source["tracks"][1], [], self.SOURCE_SIZE)
+        ok_info = self._output(source)
+        ok_info["container"]["properties"]["duration"] = 9_500_000_000
+        ok, reason = self._check(ok_info, int(self.SOURCE_SIZE * 0.98))
+        self.assertTrue(ok, reason)
 
 
 if __name__ == "__main__":

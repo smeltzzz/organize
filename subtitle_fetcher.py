@@ -63,7 +63,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from common import CoordinationLock, path_norm
+from common import (
+    EXTERNAL_SRT_ENCODINGS,
+    EXTERNAL_SRT_MAX_BYTES,
+    CoordinationLock,
+    normalize_srt_newlines,
+    path_norm,
+    srt_looks_valid,
+)
 
 # =============================================================================
 # CONFIGURATION
@@ -98,7 +105,8 @@ DIRECT_PLAY_SUBTITLE_EXTENSION = ".srt"
 DOWNLOAD_SUBTITLE_FORMAT = "srt"
 MIN_MOVIE_SIZE_MB = 300
 REQUEST_GAP_SEC = 1.1  # stay under the documented per-second limit
-MAX_SUBTITLE_BYTES = 4 * 1024 * 1024
+# Bound to the one shared limit in common.py, not a second copy of the number.
+MAX_SUBTITLE_BYTES = EXTERNAL_SRT_MAX_BYTES
 LANGUAGES = "en"
 
 # =============================================================================
@@ -483,7 +491,7 @@ class OpenSubtitlesClient:
             text = decode_subtitle_bytes(data)
         except (OSError, EOFError, ValueError) as exc:
             raise RuntimeError("downloaded subtitle could not be decompressed") from exc
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        text = normalize_srt_newlines(text)
         if not looks_like_srt(text):
             raise RuntimeError("downloaded payload is not a valid SRT subtitle")
         if not video_snapshot_matches(video, expected_video):
@@ -535,11 +543,13 @@ def decode_subtitle_bytes(data: bytes) -> str:
             data = archive.read(MAX_SUBTITLE_BYTES + 1)
         if len(data) > MAX_SUBTITLE_BYTES:
             raise ValueError("decompressed subtitle exceeds safety limit")
-    for enc in ("utf-8-sig", "utf-8", "cp1252"):
+    for enc in EXTERNAL_SRT_ENCODINGS:
         try:
             return data.decode(enc)
         except UnicodeDecodeError:
             continue
+    # Unlike common.decode_srt_bytes this must return a string: the caller
+    # inspects a rejected download in order to explain why it was rejected.
     return data.decode("utf-8", errors="replace")
 
 
@@ -690,11 +700,16 @@ def pick_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity)
 
 
 def looks_like_srt(text: str) -> bool:
-    # Minimal: a cue index, a timestamp arrow, and some dialogue.
-    return bool(re.search(
-        r"(?m)^\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}",
-        text,
-    ))
+    """Shared verdict from common.py — see the note on why this is not local.
+
+    This used to be a private copy of the cue pattern, and it had drifted: it
+    anchored the cue number at column 0 while the other four tools allowed
+    leading whitespace. A subtitle with an indented cue number was therefore
+    rejected here at download time ("downloaded payload is not a valid SRT
+    subtitle") yet accepted as canonical by library_auditor, movie_standardizer
+    and mkv_track_cleaner. Delegating makes that disagreement impossible.
+    """
+    return srt_looks_valid(text)
 
 
 def is_english_srt_sidecar(path: Path, video_stem: str) -> bool:
@@ -1121,7 +1136,7 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
             file_stat = path.stat(follow_symlinks=False)
             if path.is_symlink() or not path.is_file() or file_stat.st_size <= 0 or file_stat.st_size > MAX_SUBTITLE_BYTES:
                 continue
-            text = decode_subtitle_bytes(path.read_bytes()).replace("\r\n", "\n").replace("\r", "\n")
+            text = normalize_srt_newlines(decode_subtitle_bytes(path.read_bytes()))
             valid = looks_like_srt(text)
         except (OSError, EOFError, ValueError):
             valid = False
@@ -1243,7 +1258,12 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 raise RuntimeError("movie changed while calculating moviehash")
             candidates = client.search(movie_hash=digest, query=video.stem)
             pick = pick_candidate(candidates, fetcher_cfg)
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError) as exc:
+            # ValueError matters as much as RuntimeError here: moviehash()
+            # raises it for a file below MIN_HASH_SIZE, and the size gate ran at
+            # scan time, so a file truncated or partially removed in between
+            # reaches this point. Without it, one stub file aborted the whole
+            # run with a traceback and every remaining movie went unfetched.
             set_movie_status(record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1)
             ledger["errors"] += 1
             persist_state(state, cfg.log_file)
@@ -1325,7 +1345,10 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             result = JobResult(video, "have", str(exc), dest)
             results.append(result)
             emit(index, "HAVE", video, str(exc))
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError) as exc:
+            # decode_subtitle_bytes() raises ValueError for a subtitle that
+            # decompresses past MAX_SUBTITLE_BYTES, so a single hostile or
+            # corrupt provider payload must not abort the rest of the library.
             set_movie_status(record, "error", str(exc))
             ledger["errors"] += 1
             result = JobResult(video, "error", str(exc))

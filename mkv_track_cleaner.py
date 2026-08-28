@@ -14,6 +14,9 @@ Safety:
     frames, size) — a bad remux is never swapped over the original
   * Unique same-directory transaction journal + atomic replace; orphan output is
     recoverable only after durable proof of full verification
+  * The optional metadata cache stores only `mkvmerge -J` output for files
+    whose size and mtime are unchanged. It never stores a decision, so every
+    track choice is still made fresh from live state each run.
   * Coordinates with movie_standardizer.py before scanning/remuxing
   * Canonical hardlinked movies are ALWAYS deferred while qBittorrent is
     seeding - there is no override flag. A movie being seeded is left alone.
@@ -62,7 +65,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, IO, List, Optional, Set, Tuple
 
-from common import CoordinationLock
+from common import (
+    EXTERNAL_SRT_CUE_RE,
+    EXTERNAL_SRT_MAX_BYTES,
+    CoordinationLock,
+    MediaProbeCache,
+    decode_srt_bytes,
+    normalize_srt_newlines,
+)
 
 VERSION = "2.5.2"
 
@@ -74,6 +84,10 @@ SUBTITLE_LANGUAGES = {"eng", "en"}
 REMOVE_COMMENTARY = True
 LOG_FILE = r"E:\torrents\mkv_track_cleaner\mkv_track_cleaner.log"
 REPORT_FILE = r"E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt"
+# Reused `mkvmerge -J` metadata for files whose size and mtime have not
+# changed, so a re-scan of an unchanged library does not respawn mkvmerge per
+# movie. Only the metadata read is cached; every decision is made fresh.
+CACHE_FILE = r"E:\torrents\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json"
 # ===============================================================
 
 # Legacy temporary files used this deterministic prefix. New work uses unique
@@ -89,10 +103,8 @@ ORPHAN_MIN_AGE_SECONDS = 60.0
 MIN_OUTPUT_RATIO = 0.50  # remux smaller than 50% of source → reject (likely truncated)
 # Hardlinked movies are always deferred. Replacing one would break the seed
 # link and consume another full movie-sized allocation until seeding ends.
-EXTERNAL_SRT_MAX_BYTES = 4 * 1024 * 1024
-_EXTERNAL_SRT_CUE_RE = re.compile(
-    r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
-)
+# The external-SRT size limit and cue pattern are imported from common.py so
+# this tool cannot drift from the others on what counts as a usable subtitle.
 
 KNOWN_MKVMERGE_PATHS = [
     r"C:\Program Files\MKVToolNix\mkvmerge.exe",
@@ -972,18 +984,12 @@ def validate_exact_external_english_srt(mkv_path: Path) -> Dict[str, Any]:
     except OSError as exc:
         result["reason"] = f"could not read external SRT: {exc}"
         return result
-    text: Optional[str] = None
-    for encoding in ("utf-8-sig", "utf-8", "cp1252"):
-        try:
-            text = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
+    text = decode_srt_bytes(raw)
     if text is None:
         result["reason"] = "external SRT has an unsupported text encoding"
         return result
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-    if not _EXTERNAL_SRT_CUE_RE.search(normalized):
+    normalized = normalize_srt_newlines(text)
+    if not EXTERNAL_SRT_CUE_RE.search(normalized):
         result["reason"] = "external SRT does not contain a valid numbered cue"
         return result
     try:
@@ -1908,6 +1914,7 @@ def process_mkv(
     log_file_path: Optional[str] = LOG_FILE,
     file_index: int = 0,
     file_total: int = 0,
+    probe_cache: Optional[MediaProbeCache] = None,
 ):
     global _active_temp_file
     if _interrupt_requested:
@@ -1973,16 +1980,26 @@ def process_mkv(
         return
 
     try:
-        rc, stdout, stderr = _run_mkvmerge([mkvmerge_bin, "-J", str(mkv_path)])
-        if rc not in (0, 1):
-            err_msg = (stderr or "").strip() or f"mkvmerge exited with code {rc}"
-            if _console is not None:
-                _console.end_file_inline(f"ERROR: {err_msg}", kind="error")
-            log(f"{tag}Metadata inspection failed for '{display_name}': {err_msg}",
-                level="ERROR", to_console=_console is None, log_file_path=log_file_path)
-            stats["errors"].append({"name": movie_name, "error": err_msg})
-            return
-        media_info = json.loads(stdout)
+        # Only the mkvmerge metadata read is cached, never the cleaning
+        # decision. Everything below still runs on live state, so a sidecar
+        # appearing beside the movie or a hardlink count dropping when seeding
+        # stops is still acted on immediately.
+        media_info: Optional[Dict[str, Any]] = None
+        if probe_cache is not None:
+            media_info = probe_cache.get(mkv_path, orig_stat.st_size, orig_stat.st_mtime_ns)
+        if media_info is None:
+            rc, stdout, stderr = _run_mkvmerge([mkvmerge_bin, "-J", str(mkv_path)])
+            if rc not in (0, 1):
+                err_msg = (stderr or "").strip() or f"mkvmerge exited with code {rc}"
+                if _console is not None:
+                    _console.end_file_inline(f"ERROR: {err_msg}", kind="error")
+                log(f"{tag}Metadata inspection failed for '{display_name}': {err_msg}",
+                    level="ERROR", to_console=_console is None, log_file_path=log_file_path)
+                stats["errors"].append({"name": movie_name, "error": err_msg})
+                return
+            media_info = json.loads(stdout)
+            if probe_cache is not None:
+                probe_cache.put(mkv_path, orig_stat.st_size, orig_stat.st_mtime_ns, media_info)
         container = media_info.get("container") or {}
         if not (container.get("recognized") and container.get("supported")):
             err_msg = "file is not a recognized/supported media container"
@@ -2527,6 +2544,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--nice", action="store_true", help="Lower process priority so remuxing does not starve Jellyfin")
     parser.add_argument("--min-size", type=float, default=0, metavar="MB", help="Ignore MKVs smaller than this")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N files (0 = all)")
+    parser.add_argument("--cache", default=CACHE_FILE, metavar="PATH",
+                        help=f"Reusable mkvmerge metadata for unchanged files (Default: {CACHE_FILE})")
+    parser.add_argument("--no-cache", dest="use_cache", action="store_false",
+                        help="Re-read metadata for every movie and do not read or write the cache")
+    parser.set_defaults(use_cache=True)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
 
@@ -2646,6 +2668,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     run_started = time.monotonic()
     processed_bytes = 0
     library_bytes = 0
+    probe_cache = MediaProbeCache(args.cache, tool="mkv_track_cleaner", enabled=args.use_cache)
+    if args.use_cache:
+        log(f"Metadata cache: {args.cache} ({len(probe_cache)} entries loaded)", log_file_path=args.log)
     try:
         mkv_files, file_sizes, library_bytes = discover_mkv_files(
             target_path, log_file_path=args.log, onerror=_walk_error,
@@ -2694,6 +2719,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     dry_run=args.dry_run, remove_commentary=remove_commentary,
                     audio_langs=audio_langs_set, sub_langs=sub_langs_set,
                     log_file_path=args.log, file_index=i, file_total=file_total,
+                    probe_cache=probe_cache,
                 )
             except KeyboardInterrupt:
                 _interrupt_requested = True
@@ -2722,6 +2748,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                                  log_file_path=args.log, meta=report_meta)
         return 1
     finally:
+        probe_cache.save()
+        if args.use_cache:
+            log(f"Metadata cache: {probe_cache.hits} reused, {probe_cache.misses} read from mkvmerge.",
+                log_file_path=args.log)
         _release_locks()
 
     if _interrupt_requested:

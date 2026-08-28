@@ -9,16 +9,21 @@ Runs with only the standard library:
 
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
 
+import common
 from common import (
+    EXTERNAL_SRT_ENCODINGS,
+    EXTERNAL_SRT_MAX_BYTES,
     CoordinationLock,
     LockTimeoutError,
+    MediaProbeCache,
     STANDARDIZER_LOCK_NAME,
     atomic_write_text,
+    decode_srt_bytes,
+    normalize_srt_newlines,
     path_is_within,
     path_norm,
     paths_equal,
@@ -182,6 +187,208 @@ class SrtSidecarContractTests(unittest.TestCase):
                 finally:
                     blocker.release()
             _ = held
+
+
+PLAIN_CUE = "1\n00:00:01,000 --> 00:00:04,000\nDreams are messages.\n"
+INDENTED_CUE = "  1\n00:00:01,000 --> 00:00:04,000\nDreams are messages.\n"
+CRLF_CUE = "1\r\n00:00:01,000 --> 00:00:04,000\r\nDreams are messages.\r\n"
+NOT_A_CUE = "<html>nope</html>"
+
+
+class SharedSrtPrimitiveTests(unittest.TestCase):
+    def test_decode_prefers_utf8_sig(self) -> None:
+        self.assertEqual(decode_srt_bytes("\ufeff1\n".encode("utf-8")), "1\n")
+
+    def test_decode_falls_back_to_cp1252(self) -> None:
+        # 0x92 is a cp1252 right single quote and is invalid UTF-8.
+        self.assertEqual(decode_srt_bytes(b"it\x92s"), "it\u2019s")
+
+    def test_decode_returns_none_when_nothing_applies(self) -> None:
+        # cp1252 accepts almost any byte, so only its five undefined code
+        # positions (0x81, 0x8d, 0x8f, 0x90, 0x9d) are genuinely undecodable.
+        self.assertIsNone(decode_srt_bytes(b"\x81\x8d\x8f\x90\x9d"))
+
+    def test_encoding_order_is_the_documented_one(self) -> None:
+        self.assertEqual(EXTERNAL_SRT_ENCODINGS, ("utf-8-sig", "utf-8", "cp1252"))
+
+    def test_normalize_collapses_crlf_and_bare_cr(self) -> None:
+        self.assertEqual(normalize_srt_newlines("a\r\nb\rc\nd"), "a\nb\nc\nd")
+
+    def test_size_limit_is_four_mebibytes(self) -> None:
+        self.assertEqual(EXTERNAL_SRT_MAX_BYTES, 4 * 1024 * 1024)
+
+
+class MediaProbeCacheTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="probe_cache_")
+        self.path = Path(self._td.name) / "cache.json"
+        self.addCleanup(self._td.cleanup)
+
+    def test_cold_cache_is_a_miss(self) -> None:
+        self.assertIsNone(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1))
+
+    def test_warm_cache_is_a_hit(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        self.assertEqual(cache.get("a.mkv", 10, 1), {"streams": []})
+        self.assertEqual((cache.hits, cache.misses), (1, 0))
+
+    def test_size_change_invalidates(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        self.assertIsNone(cache.get("a.mkv", 11, 1))
+
+    def test_mtime_change_invalidates(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        self.assertIsNone(cache.get("a.mkv", 10, 2))
+
+    def test_survives_a_reload(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": [{"id": 0}]})
+        cache.save()
+        self.assertEqual(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1),
+                         {"streams": [{"id": 0}]})
+
+    def test_save_is_a_noop_when_nothing_changed(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.save()
+        self.assertFalse(self.path.exists())
+
+    def test_a_different_tool_cache_is_not_reused(self) -> None:
+        cache = MediaProbeCache(self.path, tool="10bit")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        cache.save()
+        self.assertIsNone(MediaProbeCache(self.path, tool="mkv_track_cleaner").get("a.mkv", 10, 1))
+
+    def test_corrupt_cache_degrades_to_a_miss(self) -> None:
+        self.path.write_text("{not json", encoding="utf-8")
+        cache = MediaProbeCache(self.path, tool="t")
+        self.assertIsNone(cache.get("a.mkv", 10, 1))
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        self.assertEqual(cache.get("a.mkv", 10, 1), {"streams": []})
+
+    def test_truncated_json_degrades_to_a_miss(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        cache.save()
+        raw = self.path.read_text(encoding="utf-8")
+        self.path.write_text(raw[: len(raw) // 2], encoding="utf-8")
+        self.assertIsNone(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1))
+
+    def test_foreign_schema_is_ignored(self) -> None:
+        import json as _json
+
+        self.path.write_text(_json.dumps(
+            {"schema": MediaProbeCache.SCHEMA + 1, "tool": "t",
+             "entries": {"a.mkv": {"size": 10, "mtime_ns": 1, "payload": {}}}}
+        ), encoding="utf-8")
+        self.assertIsNone(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1))
+
+    def test_disabled_cache_never_reads_writes_or_persists(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t", enabled=False)
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        cache.save()
+        self.assertIsNone(cache.get("a.mkv", 10, 1))
+        self.assertFalse(self.path.exists())
+
+    def test_evicts_oldest_past_the_cap(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t", max_entries=3)
+        for index in range(5):
+            cache.put(f"m{index}.mkv", 10, 1, {"i": index})
+        self.assertEqual(len(cache), 3)
+        self.assertIsNone(cache.get("m0.mkv", 10, 1))
+        self.assertEqual(cache.get("m4.mkv", 10, 1), {"i": 4})
+
+    def test_reinsert_refreshes_recency(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t", max_entries=2)
+        cache.put("a.mkv", 10, 1, {"i": "a"})
+        cache.put("b.mkv", 10, 1, {"i": "b"})
+        cache.put("a.mkv", 10, 1, {"i": "a2"})  # refresh a
+        cache.put("c.mkv", 10, 1, {"i": "c"})   # should evict b, not a
+        self.assertEqual(cache.get("a.mkv", 10, 1), {"i": "a2"})
+        self.assertIsNone(cache.get("b.mkv", 10, 1))
+        self.assertEqual(cache.get("c.mkv", 10, 1), {"i": "c"})
+
+    def test_keys_are_path_normalized(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("/lib/Film (2020)/Film (2020).mkv", 10, 1, {"ok": True})
+        self.assertEqual(cache.get("/lib/Film (2020)//Film (2020).mkv", 10, 1), {"ok": True})
+
+    def test_nondict_payload_is_ignored(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"ok": True})
+        cache.save()
+        import json as _json
+
+        doc = _json.loads(self.path.read_text(encoding="utf-8"))
+        doc["entries"][path_norm("a.mkv")]["payload"] = "not a dict"
+        self.path.write_text(_json.dumps(doc), encoding="utf-8")
+        self.assertIsNone(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1))
+
+
+class SingleSourceContractTests(unittest.TestCase):
+    """No tool may keep a private copy of the subtitle contract.
+
+    ``subtitle_fetcher.looks_like_srt`` used to be a fifth, drifted copy: it
+    anchored the cue number at column 0, so it rejected indented cues that the
+    other four tools accepted, and a perfectly good download was refused at the
+    door. These tests fail if that ever happens again.
+    """
+
+    @staticmethod
+    def _verdicts(text: str) -> dict[str, bool]:
+        import library_auditor  # noqa: F401  (imported so a break there is caught)
+        import mkv_track_cleaner as tc
+        import movie_standardizer as ms
+        import subtitle_fetcher as sf
+
+        normalized = normalize_srt_newlines(text)
+        return {
+            "common": srt_looks_valid(normalized),
+            "movie_standardizer": ms.EXTERNAL_SRT_CUE_RE.search(normalized) is not None,
+            "mkv_track_cleaner": tc.EXTERNAL_SRT_CUE_RE.search(normalized) is not None,
+            "subtitle_fetcher": sf.looks_like_srt(normalized),
+        }
+
+    def test_every_tool_agrees_on_a_plain_cue(self) -> None:
+        verdicts = self._verdicts(PLAIN_CUE)
+        self.assertEqual(set(verdicts.values()), {True}, verdicts)
+
+    def test_every_tool_agrees_on_an_indented_cue(self) -> None:
+        verdicts = self._verdicts(INDENTED_CUE)
+        self.assertEqual(set(verdicts.values()), {True}, verdicts)
+
+    def test_every_tool_agrees_on_crlf_line_endings(self) -> None:
+        verdicts = self._verdicts(CRLF_CUE)
+        self.assertEqual(set(verdicts.values()), {True}, verdicts)
+
+    def test_every_tool_agrees_on_junk(self) -> None:
+        verdicts = self._verdicts(NOT_A_CUE)
+        self.assertEqual(set(verdicts.values()), {False}, verdicts)
+
+    def test_no_tool_keeps_its_own_size_limit(self) -> None:
+        import mkv_track_cleaner as tc
+        import movie_standardizer as ms
+        import subtitle_fetcher as sf
+
+        self.assertEqual(ms.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
+        self.assertEqual(tc.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
+        self.assertEqual(sf.MAX_SUBTITLE_BYTES, EXTERNAL_SRT_MAX_BYTES)
+
+    def test_no_tool_keeps_its_own_cue_pattern(self) -> None:
+        import mkv_track_cleaner as tc
+        import movie_standardizer as ms
+
+        self.assertIs(ms.EXTERNAL_SRT_CUE_RE, common.EXTERNAL_SRT_CUE_RE)
+        self.assertIs(tc.EXTERNAL_SRT_CUE_RE, common.EXTERNAL_SRT_CUE_RE)
+
+    def test_no_tool_keeps_its_own_encoding_list(self) -> None:
+        import subtitle_fetcher as sf
+
+        # cp1252 bytes must decode identically everywhere.
+        raw = b"it\x92s fine"
+        self.assertEqual(decode_srt_bytes(raw), sf.decode_subtitle_bytes(raw))
 
 
 if __name__ == "__main__":
