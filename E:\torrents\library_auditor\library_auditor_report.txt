@@ -1,0 +1,42 @@
+====================================================================================================================
+JELLYFIN MOVIE FOLDER FILE-TYPE AUDIT
+Generated       : 2026-08-28 15:38:51 UTC
+Library         : /tmp/lib
+Report file     : E:\torrents\library_auditor\library_auditor_report.txt
+Folders checked : 5
+Canonical MKV   : 1
+Missing Eng SRT : 0
+Invalid Eng SRT : 2
+MKV stem mismatch: 1
+Noncanonical SRT: 0
+Single other    : 0
+Multiple files  : 1
+No movie file   : 0
+Inaccessible    : 0
+Elapsed         : 0.00s
+====================================================================================================================
+Scope: direct feature containers plus direct SRT sidecar names. Artwork, NFO files, and nested extras are ignored.
+Container labels are file extensions only; they do not verify codecs or Jellyfin client direct-play support.
+
+SUMMARY BY DIRECT MOVIE FILE TYPE
+--------------------------------------------------------------------------------------------------------------------
+Type              Files
+--------------------------------------------------------------------------------------------------------------------
+.MKV                  5
+.MP4                  1
+
+FOLDER-BY-FOLDER RESULTS
+--------------------------------------------------------------------------------------------------------------------
+Folder                               Status                         Type(s)            Movie file(s) / detail
+--------------------------------------------------------------------------------------------------------------------
+Arrival (2016)                       CANONICAL MKV                  .MKV               Arrival (2016).mkv
+Blade Runner 2049 (2017)             INVALID SIDECAR                .MKV               Blade Runner 2049 (2017).en.srt is unusable (subtitle contains no valid SRT cue); delete it and re-run subtitle_fetcher.py
+Dune (2021)                          MKV STEM MISMATCH              .MKV               expected exact folder-name MKV stem
+Heat (1995)                          MULTIPLE DIRECT MOVIE FILES    .MKV, .MP4         Heat (1995).mkv; Heat (1995).mp4
+Zero (2019)                          INVALID SIDECAR                .MKV               Zero (2019).en.srt is unusable (subtitle file is empty); delete it and re-run subtitle_fetcher.py
+
+MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)
+--------------------------------------------------------------------------------------------------------------------
+These folders have a canonical MKV but no working English .en.srt. Run subtitle_fetcher.py before mkv_track_cleaner.py: fetching first keeps the pristine release moviehash, which is what makes an exact subtitle match possible. An INVALID entry means a sidecar exists but is unusable - delete that file first, because no tool will replace a sidecar it believes is already present.
+  [ ] Blade Runner 2049 (2017)  (Blade Runner 2049 (2017).en.srt is unusable (subtitle contains no valid SRT cue); delete it and re-run subtitle_fetcher.py)
+  [ ] Zero (2019)  (Zero (2019).en.srt is unusable (subtitle file is empty); delete it and re-run subtitle_fetcher.py)

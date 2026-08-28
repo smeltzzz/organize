@@ -10,6 +10,10 @@ touches the library coordinates with the others through a shared advisory lock.
 All five tools are **stdio-only** — no third-party Python packages. The only
 external binaries are optional and per-tool (`mkvmerge`, `ffprobe`).
 
+`pipeline.py` is a thin stdlib-only runner for the four manual steps. It adds no
+behaviour of its own; it just invokes them in the order that matters and reports
+what happened.
+
 ---
 
 ## The five tools
@@ -21,6 +25,7 @@ external binaries are optional and per-tool (`mkvmerge`, `ffprobe`).
 | `10bit.py` | Uses `ffprobe` to report which movies are **8-bit** (queue for x265 10-bit), and which are already HDR / 10-bit. Fail-closed classification. | `ffprobe` (FFmpeg) |
 | `library_auditor.py` | **Read-only** audit of the direct container file per movie folder: canonical MKV, missing English SRT, unusable SRT sidecar, stem mismatch, non-canonical SRT sidecar, multiple/other/no movie file. | none |
 | `subtitle_fetcher.py` | Fetches English human-authored UTF-8 SRTs from OpenSubtitles, hash-gated, with a coordination lock and transaction guards. **Run before `mkv_track_cleaner.py`.** | `OPENSUBTITLES_API_KEY` env var |
+| `pipeline.py` | Runs the four manual steps in the correct order as one command. Skips steps whose prerequisites are missing instead of failing. | none |
 
 ### Recommended ordering
 
@@ -141,6 +146,44 @@ Three ways out:
    occupies two copies until you delete the source, and the report will say so.
 
 Option 1 or 2 means the cleaner needs no special flag and costs no extra space.
+
+### Running the manual steps: `pipeline.py`
+
+The standardizer is the qBittorrent hook, so it needs no attention. The other
+four tools are manual, and the order between the first two is the one thing you
+must not get wrong. `pipeline.py` runs them for you, in the right order, in one
+command:
+
+```bash
+# See exactly what would run, without running it
+python pipeline.py --dry-run --source "E:\torrents\final_organized"
+
+# The normal weekly sweep
+python pipeline.py --source "E:\torrents\final_organized"
+
+# Just fetch subtitles and audit, skipping the remux and the bit-depth scan
+python pipeline.py --steps fetcher,auditor
+
+# Clean even movies still hardlinked to their seed source (costs disk, not ratio)
+python pipeline.py --allow-hardlinked --nice
+```
+
+Each tool still runs as its own process with its own locks, logs and reports, so
+behaviour is identical to running it by hand. Steps whose prerequisites are
+missing are **skipped with a reason rather than crashing the run** — no API key
+means no fetching, no `mkvmerge` means no cleaning, no `ffprobe` means no
+bit-depth scan. You get one summary at the end naming what ran, what was
+skipped, and why.
+
+Check what is currently runnable on your box:
+
+```bash
+python pipeline.py --list-steps
+```
+
+Key flags: `--source`, `--steps`, `--dry-run`, `--limit N`, `--nice`,
+`--allow-hardlinked`, `--continue-on-error`, `--list-steps`, `--self-test`,
+`--version`.
 
 ---
 
@@ -318,7 +361,8 @@ The tests are all offline — no media, no `mkvmerge`, no `ffprobe`, no API key.
 ├── mkv_track_cleaner.py
 ├── movie_standardizer.py
 ├── subtitle_fetcher.py
-├── common.py              # shared infra (atomic write, paths, locking)
+├── pipeline.py            # runs the manual steps in the correct order
+├── common.py              # shared infra (atomic write, paths, locking, SRT contract)
 ├── tests/                 # stdlib unit tests
 ├── run_tests.sh           # runs all self-tests + the unit suite
 ├── requirements.txt       # runtime: none (stdlib only)
