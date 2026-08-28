@@ -113,6 +113,13 @@ folders in one actionable section.
 
 #### Hardlinks and seeding: why the cleaner can look like it does nothing
 
+**If you configured qBittorrent to *remove the torrent and its files* when the
+seed limit is reached, you can skip this section.** That is the recommended
+setting: deleting the source drops the second hardlink, the library file's link
+count falls to 1, and the cleaner picks the movie up on your next manual run
+with no intervention. Below is only an explanation of what goes wrong if that is
+*not* set, since the failure is silent.
+
 This trips people up, so it is worth being precise.
 
 `movie_standardizer.py` is **hardlink-only** — it calls `os.link()` and has no
@@ -152,10 +159,24 @@ still being seeded is left completely untouched. Two ways to release it:
 
 #### About the temporary file during a remux
 
-A remux **cannot** rewrite a container in place. `mkvmerge` always reads the
-input and writes a new file, so any track-cleaning step necessarily stages a
-full-size copy of the movie at least briefly. There is no way around it, and no
-tool that avoids it.
+**This is a hard constraint, not a configuration choice.** A remux *cannot*
+rewrite a container in place. `mkvmerge` reads the input and writes a new file;
+there is no in-place edit mode, and removing a track means every byte after it
+has to be rewritten. So any track-cleaning step necessarily stages a full-size
+copy of the movie. **No tool can avoid this and no flag can disable it.**
+
+MKVToolNix does ship `mkvpropedit`, which edits a Matroska file in place — but
+it can only change *metadata* (track language, name, default/forced flags,
+attachments). It cannot remove or reorder tracks, so it cannot do this tool's
+job.
+
+The only way to have zero temporary copies is to not remux at all — i.e. leave
+`mkv_track_cleaner.py` out of your pipeline. If disk churn matters more to you
+than the cleanup, drop that step:
+
+```bash
+python pipeline.py --steps fetcher,10bit,auditor
+```
 
 What `mkv_track_cleaner.py` does to keep that as cheap and safe as possible:
 
