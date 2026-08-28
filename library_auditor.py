@@ -5,6 +5,11 @@ Inspects only direct movie-container files inside each top-level folder under
 E:\\torrents\\final_organized, prints one report, and atomically saves that
 same text outside the library. It never changes media, walks extras, or creates
 JSON/cache files.
+
+A folder holding a canonical MKV but no English ``.en.srt`` is reported as
+``MISSING_SIDECAR`` instead of ``CANONICAL_MKV``. That is the one finding in
+this report that another tool in the pipeline can act on, so it is called out
+in its own count and listed as an actionable section.
 """
 from __future__ import annotations
 
@@ -207,6 +212,14 @@ def classify_folder(folder: Path) -> FolderAudit:
     unexpected_srt = [name for name in srt_names if name != expected_srt]
     if unexpected_srt:
         return FolderAudit(folder, "NONCANONICAL_SIDECAR", files, "; ".join(unexpected_srt))
+    if not srt_names:
+        # Structurally fine, but no external English subtitle yet. This is the
+        # one audit finding that a tool can actually fix, so it is reported as
+        # its own state instead of being folded into CANONICAL_MKV.
+        return FolderAudit(
+            folder, "MISSING_SIDECAR", files,
+            "no English .en.srt sidecar; subtitle_fetcher.py can still fetch one",
+        )
     return FolderAudit(folder, "CANONICAL_MKV", files)
 
 
@@ -221,7 +234,12 @@ def audit_library(cfg: Config) -> Audit:
     for index, folder in enumerate(folders, 1):
         result = classify_folder(folder)
         audited.append(result)
-        if result.state != "CANONICAL_MKV":
+        if result.state == "MISSING_SIDECAR":
+            # Advisory, not a defect: the layout is correct, only the subtitle
+            # is absent. Logged at INFO so a library that simply has not been
+            # fetched yet does not drown the console in warnings.
+            log(f"[{index}/{len(folders)}] {result.state}: {folder.name}", level="INFO")
+        elif result.state != "CANONICAL_MKV":
             log(f"[{index}/{len(folders)}] {result.state}: {folder.name}", level="WARNING")
         elif index == len(folders) or index % 25 == 0:
             log(f"[{index}/{len(folders)}] audited: {folder.name}")
@@ -252,6 +270,7 @@ def build_report(audit: Audit, cfg: Config) -> str:
     add(f"Report file     : {cfg.report_file}")
     add(f"Folders checked : {len(audit.folders)}")
     add(f"Canonical MKV   : {counts['CANONICAL_MKV']}")
+    add(f"Missing Eng SRT : {counts['MISSING_SIDECAR']}")
     add(f"MKV stem mismatch: {counts['MKV_STEM_MISMATCH']}")
     add(f"Noncanonical SRT: {counts['NONCANONICAL_SIDECAR']}")
     add(f"Single other    : {counts['SINGLE_OTHER_CONTAINER']}")
@@ -282,6 +301,19 @@ def build_report(audit: Audit, cfg: Config) -> str:
         add(f"{item.folder.name:<36.36} {item.state.replace('_', ' '):<30.30} {types_for(item):<18.18} {detail}")
     if not audit.folders:
         add("No top-level movie folders found.")
+
+    missing = [item.folder.name for item in audit.folders if item.state == "MISSING_SIDECAR"]
+    if missing:
+        add("")
+        add("MOVIES WITH NO EXTERNAL ENGLISH SRT (ACTIONABLE)")
+        add("-" * 116)
+        add(
+            "These folders have a canonical MKV and no English .en.srt. Run subtitle_fetcher.py"
+            " before mkv_track_cleaner.py: fetching first keeps the pristine release moviehash,"
+            " which is what makes an exact subtitle match possible."
+        )
+        for name in missing:
+            add(f"  [ ] {name}")
     return "\n".join(lines) + "\n"
 
 

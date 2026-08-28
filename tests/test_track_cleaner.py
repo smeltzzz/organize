@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import datetime
+import io
+import tempfile
 import unittest
+from pathlib import Path
 
 import mkv_track_cleaner as tc
 
@@ -49,6 +54,54 @@ class ProgressParsingTests(unittest.TestCase):
         self.assertEqual(tc._parse_mkvmerge_progress("#GUI#progress 80%"), 80)
         self.assertEqual(tc._parse_mkvmerge_progress("#GUI#progress#parts=1/4"), 25)
         self.assertIsNone(tc._parse_mkvmerge_progress("hello"))
+
+
+def _empty_stats() -> dict:
+    """A stats dict shaped like the one ``main()`` builds before scanning."""
+    return {
+        "start_time": datetime.datetime.now(),
+        "total_scanned": 0,
+        "cleaned": [],
+        "already_clean": [],
+        "skipped_no_english": [],
+        "skipped_layout": [],
+        "deferred_hardlinked": [],
+        "errors": [],
+        "remux_without_srt": [],
+        "diagnostics": [],
+        "total_space_saved_bytes": 0,
+    }
+
+
+class RemuxWithoutSrtReportTests(unittest.TestCase):
+    """Remuxing with no external SRT invalidates the moviehash; say so in the report."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="cleaner_report_test_")
+        self.tmp = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _render(self, stats: dict) -> str:
+        report_path = self.tmp / "report.txt"
+        with contextlib.redirect_stdout(io.StringIO()):
+            tc.generate_and_save_report(
+                stats, dry_run=True, report_file=str(report_path), log_file_path=None,
+            )
+        return report_path.read_text(encoding="utf-8")
+
+    def test_section_appears_when_a_movie_had_no_srt(self) -> None:
+        stats = _empty_stats()
+        stats["remux_without_srt"] = ["Film (2000).mkv"]
+        text = self._render(stats)
+        self.assertIn("REMUXED WITH NO EXTERNAL SRT", text)
+        self.assertIn("moviehash", text)
+        self.assertIn("Film (2000).mkv", text)
+        self.assertIn("Remuxed Without SRT       : 1", text)
+
+    def test_section_is_absent_when_every_movie_had_an_srt(self) -> None:
+        text = self._render(_empty_stats())
+        self.assertNotIn("REMUXED WITH NO EXTERNAL SRT", text)
+        self.assertIn("Remuxed Without SRT       : 0", text)
 
 
 if __name__ == "__main__":

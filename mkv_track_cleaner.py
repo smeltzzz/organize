@@ -18,6 +18,12 @@ Safety:
   * Canonical hardlinked movies are deferred while qBittorrent is seeding
   * Extra folders (Featurettes, Trailers, BDMV, …) are never processed
 
+Pipeline position: run this AFTER movie_standardizer.py and AFTER
+subtitle_fetcher.py. A remux rewrites the container bytes, which permanently
+changes the OpenSubtitles moviehash for that file; fetching subtitles first is
+what preserves exact-hash subtitle matching. This tool warns (but does not
+stop) whenever it remuxes a movie that has no validated external English SRT.
+
     python track_cleaner.py --dry-run
     python track_cleaner.py --dir "E:\\torrents\\final_organized"
     python track_cleaner.py --self-test
@@ -2050,6 +2056,24 @@ def process_mkv(
             to_console=_console is None, log_file_path=log_file_path)
         return
 
+    if external_srt is None:
+        # Pipeline-ordering guardrail. The documented order is
+        # movie_standardizer -> subtitle_fetcher -> this cleaner, because a remux
+        # rewrites the container bytes and therefore permanently changes the
+        # OpenSubtitles moviehash (file size plus the first and last 64 KiB).
+        # Once this file is rewritten it can no longer reproduce the hash of the
+        # release it came from, so subtitle_fetcher.py loses its exact-match
+        # search and degrades to title/year guessing. Warn rather than block:
+        # the remux is still correct work, it just forfeits the exact hash.
+        stats.setdefault("remux_without_srt", []).append(movie_name)
+        log(
+            f"{tag}No validated external English SRT for '{display_name}': this remux permanently "
+            "changes the OpenSubtitles moviehash, so an exact-hash subtitle match is no longer "
+            "possible for this file. Run subtitle_fetcher.py before this cleaner to preserve it. "
+            "(Remux will continue.)",
+            level="WARNING", to_console=_console is None, log_file_path=log_file_path,
+        )
+
     removed_audio = [t for t in audio_tracks if int(t["id"]) != best_audio_id]
     removed_subs = [t for t in subtitle_tracks if int(t["id"]) not in set(keep_sub_ids)]
     best_audio_desc = describe_track(best_audio)
@@ -2303,6 +2327,7 @@ def generate_and_save_report(
         f"  • Deferred (Hardlinked)    : {len(stats.get('deferred_hardlinked', []))}",
         f"  • Skipped (Foreign / No Eng): {len(stats['skipped_no_english'])}",
         f"  • Skipped (Layout Contract) : {len(stats.get('skipped_layout', []))}",
+        f"  • Remuxed Without SRT       : {len(stats.get('remux_without_srt', []))}",
         f"  • Errors / Unreadable Files : {len(stats['errors'])}",
     ]
     if stats["cleaned"]:
@@ -2358,6 +2383,19 @@ def generate_and_save_report(
         lines.append(f"  ({len(stats['already_clean'])} files required no changes - skipped with 0 disk writes)")
         for name in stats["already_clean"]:
             lines.append(f"  [=] {name}")
+    if stats.get("remux_without_srt"):
+        header = " REMUXED WITH NO EXTERNAL SRT (MOVIEHASH INVALIDATED) "
+        lines.append("\n" + "=" * ((85 - len(header)) // 2) + header + "=" * ((85 - len(header) + 1) // 2))
+        lines.append(
+            "  These movies were remuxed without a validated external English SRT beside them.\n"
+            "  A remux rewrites the container bytes, which permanently changes the OpenSubtitles\n"
+            "  moviehash (file size + first/last 64 KiB) for the file. subtitle_fetcher.py can no\n"
+            "  longer find an exact hash match for any movie listed here and will fall back to the\n"
+            "  less reliable title/year search, which is held for review rather than downloaded.\n"
+            "  To keep exact-hash matching, run subtitle_fetcher.py BEFORE this cleaner."
+        )
+        for name in stats["remux_without_srt"]:
+            lines.append(f"  [!] {name}")
     if stats.get("deferred_hardlinked"):
         lines.append("\n" + "=" * 25 + " DEFERRED (STILL HARDLINKED / SEEDED) " + "=" * 24)
         lines.append(
@@ -2426,6 +2464,8 @@ def _print_startup_banner(
         "  Accessibility subs  : retained only when no valid external .en.srt exists",
         "  External .en.srt   : validated exact sidecar automatically becomes sole subtitle option",
         "  Sidecar subtitles   : never modified by this cleaner",
+        "  Pipeline order      : movie_standardizer.py -> subtitle_fetcher.py -> this cleaner",
+        "  (remuxing first invalidates the OpenSubtitles moviehash; a warning is logged per file)",
         f"  Process priority    : {priority}",
         f"  Log file            : {log_file_path or '(disabled)'}",
         "=" * width,
@@ -2524,7 +2564,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     stats: Dict[str, Any] = {
         "start_time": datetime.now(), "total_scanned": 0, "cleaned": [],
         "already_clean": [], "skipped_no_english": [], "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
-        "diagnostics": [], "total_space_saved_bytes": 0,
+        "remux_without_srt": [], "diagnostics": [], "total_space_saved_bytes": 0,
     }
     report_meta: Dict[str, Any] = {
         "target_dir": str(target_path), "report_file": args.report, "mkvmerge": mkvmerge_bin,

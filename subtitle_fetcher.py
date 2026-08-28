@@ -11,6 +11,14 @@ It always attempts the exact OpenSubtitles moviehash first. After a hash miss,
 it automatically allows only a high-confidence exact title/year candidate. A
 wrong cut is held for review rather than downloaded.
 
+The position in the pipeline is deliberate, not cosmetic. The moviehash is the
+file size plus the sum of the first and last 64 KiB, and this tool submits it
+with ``moviehash_match=only`` so the provider returns only subtitles uploaded
+against a byte-identical release. ``mkv_track_cleaner.py`` rewrites those bytes,
+so any movie that is remuxed first can never reproduce its release hash again
+and is silently reduced to the far weaker title/year fallback. Fetching first
+keeps the pristine release hash available while it still exists.
+
     py -3 subtitle_fetcher.py --dry-run
     py -3 subtitle_fetcher.py
     py -3 subtitle_fetcher.py --self-test

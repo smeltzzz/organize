@@ -53,6 +53,43 @@ class FolderClassificationTests(unittest.TestCase):
         (folder / "Sidecar (2004).eng.srt").write_text("sub", encoding="utf-8")
         self.assertEqual(la.classify_folder(folder).state, "NONCANONICAL_SIDECAR")
 
+    def test_missing_sidecar(self) -> None:
+        """A canonical MKV with no English SRT is its own actionable state."""
+        folder = self._movie("No Subs (2005)")
+        result = la.classify_folder(folder)
+        self.assertEqual(result.state, "MISSING_SIDECAR")
+        self.assertIn("subtitle_fetcher", result.detail)
+
+    def test_missing_sidecar_is_not_canonical(self) -> None:
+        without = la.classify_folder(self._movie("Bare (2006)"))
+        with_srt = self._movie("Covered (2007)")
+        (with_srt / "Covered (2007).en.srt").write_text("sub", encoding="utf-8")
+        self.assertNotEqual(without.state, "CANONICAL_MKV")
+        self.assertEqual(la.classify_folder(with_srt).state, "CANONICAL_MKV")
+
+
+class MissingSidecarReportTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="auditor_report_test_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def test_report_lists_missing_sidecars(self) -> None:
+        bare = self.root / "Bare (2008)"
+        bare.mkdir()
+        (bare / "Bare (2008).mkv").write_bytes(b"x")
+        covered = self.root / "Covered (2009)"
+        covered.mkdir()
+        (covered / "Covered (2009).mkv").write_bytes(b"x")
+        (covered / "Covered (2009).en.srt").write_text("sub", encoding="utf-8")
+
+        cfg = la.Config(source_dir=self.root)
+        report = la.build_report(la.audit_library(cfg), cfg)
+        self.assertIn("Missing Eng SRT : 1", report)
+        self.assertIn("MOVIES WITH NO EXTERNAL ENGLISH SRT", report)
+        self.assertIn("Bare (2008)", report)
+        self.assertNotIn("Covered (2009)", report.split("ACTIONABLE")[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

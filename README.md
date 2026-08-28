@@ -19,18 +19,66 @@ external binaries are optional and per-tool (`mkvmerge`, `ffprobe`).
 | `movie_standardizer.py` | Renames/hardlinks a finished torrent into the canonical **`Title (Year)/Title (Year).mkv`** layout with English subtitles only. The default qBittorrent completion hook (`"%F"`). | none |
 | `mkv_track_cleaner.py` | Remux-only (no re-encode) cleanup: keeps one best English audio track, drops commentary/DVS, keeps SDH/forced subs, and prefers a validated exact `.en.srt`. | `mkvmerge` (MKVToolNix) |
 | `10bit.py` | Uses `ffprobe` to report which movies are **8-bit** (queue for x265 10-bit), and which are already HDR / 10-bit. Fail-closed classification. | `ffprobe` (FFmpeg) |
-| `library_auditor.py` | **Read-only** audit of the direct container file per movie folder: canonical MKV, stem mismatch, non-canonical SRT sidecar, multiple/other/no movie file. | none |
-| `subtitle_fetcher.py` | Fetches English human-authored UTF-8 SRTs from OpenSubtitles, hash-gated, with a coordination lock and transaction guards. | `OPENSUBTITLES_API_KEY` env var |
+| `library_auditor.py` | **Read-only** audit of the direct container file per movie folder: canonical MKV, missing English SRT, stem mismatch, non-canonical SRT sidecar, multiple/other/no movie file. | none |
+| `subtitle_fetcher.py` | Fetches English human-authored UTF-8 SRTs from OpenSubtitles, hash-gated, with a coordination lock and transaction guards. **Run before `mkv_track_cleaner.py`.** | `OPENSUBTITLES_API_KEY` env var |
 
 ### Recommended ordering
 
 ```
-torrent done ──▶ movie_standardizer.py   (name + hardlink into library)
-        ──▶ mkv_track_cleaner.py         (drop extra audio/commentary, validate SRT)
-        ──▶ 10bit.py                     (decide whether to re-encode 8-bit → 10-bit)
-        ──▶ library_auditor.py           (periodic read-only health check)
-        ──▶ subtitle_fetcher.py          (fetch missing English SRTs)
+torrent done ──▶ movie_standardizer.py    (name + hardlink into library)
+        ──▶ subtitle_fetcher.py           (fetch SRTs while the MKV bytes are still pristine)
+        ──▶ mkv_track_cleaner.py          (remux; the validated .en.srt becomes the sole subtitle)
+        ──▶ 10bit.py                      (decide whether to re-encode 8-bit → 10-bit)
+        ──▶ library_auditor.py            (periodic read-only health check)
 ```
+
+#### Why subtitles are fetched *before* the remux
+
+This is the one ordering rule that is load-bearing rather than cosmetic, so it is
+worth explaining.
+
+`subtitle_fetcher.py` searches OpenSubtitles by **moviehash** first — the
+OpenSubtitles OSHash, defined as the file size plus the sum of the first and
+last 64 KiB of the file, read as little-endian `uint64`s. It submits that hash
+with `moviehash_match=only`, so the provider returns *only* subtitles uploaded
+against a byte-identical release. That is the high-confidence path: a hash hit
+is a genuine exact match, and the download is trusted without any guesswork.
+
+A remux changes the container bytes. `mkv_track_cleaner.py` rewrites the MKV —
+reordering tracks, dropping commentary audio, rewriting the cues and headers —
+so the file size and those first/last 64 KiB all change. **The moment a file is
+remuxed, its moviehash matches nothing in the provider's database.** Running the
+cleaner first quietly demotes every movie to the fallback path: a title/year
+search whose results must clear extra rating, vote-count and
+edition-marker thresholds, and which is deliberately *held for review* rather
+than downloaded when it is not confidently the same cut. In practice that means
+fewer subtitles fetched, more manual review, and a real chance of never getting
+a sidecar at all.
+
+Fetching first keeps the pristine release hash available for the one operation
+that can use it.
+
+Two properties make this safe rather than merely preferable:
+
+- **External sidecars survive everything downstream.** The `.en.srt` lives
+  beside the MKV, not inside it, so it is untouched by the track cleaner's remux
+  and by any later 10-bit re-encode. Fetch it once and it stays correct.
+- **Plain external SRT is the most direct-play-safe subtitle format for
+  Jellyfin.** It is plain text, so Jellyfin hands it to the client as-is.
+  Image-based PGS/VobSub and heavily styled ASS/SSA routinely force a burn-in —
+  a full video transcode — on clients that cannot render them, and even an
+  embedded SRT track must be extracted from the container before playback.
+  UTF-8 SRT beside the MKV is what keeps the video stream untouched.
+- **The cleaner then does more with it.** `mkv_track_cleaner.py` treats a
+  validated exact `.en.srt` as the authoritative Jellyfin subtitle choice and
+  removes every embedded subtitle track, including SDH, forced and non-English
+  ones. Fetch first and the cleaner can act on it in the same pass instead of
+  waiting for a second run.
+
+If you have already run the cleaner over a library, the hash advantage is gone
+for those files; the fetcher still works, it just leans on identity matching.
+`mkv_track_cleaner.py` warns when it remuxes a movie that has no validated
+external SRT, so the mistake is visible rather than silent.
 
 ---
 
