@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -271,8 +272,6 @@ class MaintenanceOptionTests(unittest.TestCase):
         self.assertTrue(any("--manifest must be outside --target" in e for e in errors), errors)
 
     def test_environment_variables_are_honoured(self) -> None:
-        import os
-
         with tempfile.TemporaryDirectory() as td:
             env = {
                 "MOVIE_STD_DEDUPLICATE": "1",
@@ -295,6 +294,90 @@ class MaintenanceOptionTests(unittest.TestCase):
         self.assertEqual(cfg.maintenance_mode, "quarantine")
         self.assertEqual(cfg.quarantine_dir, Path(td) / "quar")
         self.assertEqual(cfg.manifest_file, Path(td) / "manifest.json")
+
+class AtomicReportTests(_RunStateMixin):
+    """The README promises atomic writes: a failed write keeps the previous file."""
+
+    def _capture(self, fn) -> None:
+        import contextlib
+        import io
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            fn()
+
+    def test_report_survives_a_failed_write(self) -> None:
+        report = ms.CFG.report_file
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text("PREVIOUS REPORT", encoding="utf-8")
+
+        real_replace = os.replace
+
+        def refuse(*_a, **_k):
+            raise PermissionError("locked")
+
+        os.replace = refuse
+        try:
+            self._capture(ms.write_report)
+        finally:
+            os.replace = real_replace
+
+        self.assertEqual(report.read_text(encoding="utf-8"), "PREVIOUS REPORT")
+
+    def test_failed_report_write_leaves_no_partial_behind(self) -> None:
+        report = ms.CFG.report_file
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text("PREVIOUS REPORT", encoding="utf-8")
+
+        real_replace = os.replace
+        os.replace = lambda *_a, **_k: (_ for _ in ()).throw(PermissionError("locked"))
+        try:
+            self._capture(ms.write_report)
+        finally:
+            os.replace = real_replace
+
+        self.assertEqual(sorted(p.name for p in report.parent.iterdir()), ["report.txt"])
+
+    def test_successful_report_replaces_the_previous_one(self) -> None:
+        report = ms.CFG.report_file
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text("PREVIOUS REPORT", encoding="utf-8")
+        ms.decline_source(self.root / "final" / "Film.1995.mkv", "not an MKV")
+
+        self._capture(ms.write_report)
+
+        written = report.read_text(encoding="utf-8")
+        self.assertIn("MOVIE STANDARDIZER REPORT", written)
+        self.assertNotIn("PREVIOUS REPORT", written)
+        self.assertEqual(sorted(p.name for p in report.parent.iterdir()), ["report.txt"])
+
+    def test_manifest_survives_a_failed_write(self) -> None:
+        manifest = self.root / "out" / "manifest.json"
+        ms.CFG.manifest_file = manifest
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text('{"previous": true}', encoding="utf-8")
+
+        real_replace = os.replace
+        os.replace = lambda *_a, **_k: (_ for _ in ()).throw(PermissionError("locked"))
+        try:
+            self._capture(ms.write_manifest)
+        finally:
+            os.replace = real_replace
+
+        self.assertEqual(manifest.read_text(encoding="utf-8"), '{"previous": true}')
+        self.assertEqual(ms.RUN_SUMMARY.failed, 1)
+
+    def test_successful_manifest_is_valid_json(self) -> None:
+        import json
+
+        manifest = self.root / "out" / "manifest.json"
+        ms.CFG.manifest_file = manifest
+        ms.record_outcome("completed", "HARDLINK", src=self.root / "a", dest=self.root / "b")
+
+        self._capture(ms.write_manifest)
+
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertEqual(payload["summary"]["completed"], 1)
+        self.assertEqual(sorted(p.name for p in manifest.parent.iterdir()), ["manifest.json"])
 
 
 if __name__ == "__main__":

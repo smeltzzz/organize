@@ -99,7 +99,14 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
-from common import CoordinationLock, LockTimeoutError, path_is_within, path_norm, paths_equal
+from common import (
+    CoordinationLock,
+    LockTimeoutError,
+    atomic_write_text,
+    path_is_within,
+    path_norm,
+    paths_equal,
+)
 
 # =====================================================================
 # CONFIGURATION  (CLI flags and supported environment variables override these)
@@ -579,8 +586,7 @@ def write_manifest() -> None:
         "events": RUN_SUMMARY.events,
     }
     try:
-        CFG.manifest_file.parent.mkdir(parents=True, exist_ok=True)
-        CFG.manifest_file.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        atomic_write_text(CFG.manifest_file, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
     except OSError as exc:
         RUN_SUMMARY.failed += 1
         LOG.error("Could not write manifest %s: %s", CFG.manifest_file, exc)
@@ -629,8 +635,7 @@ def write_report() -> None:
     print(text)
     if CFG.report_file:
         try:
-            CFG.report_file.parent.mkdir(parents=True, exist_ok=True)
-            CFG.report_file.write_text(text, encoding="utf-8")
+            atomic_write_text(CFG.report_file, text)
             LOG.info("Report written to %s", CFG.report_file)
         except OSError as exc:
             LOG.error("Could not write report %s: %s", CFG.report_file, exc)
