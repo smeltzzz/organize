@@ -95,6 +95,23 @@ class Config:
     continue_on_error: bool = False
 
 
+# Shown before a step runs, because the failure mode is silent and easy to
+# misread as "nothing to do".
+HINTS: dict[str, str] = {
+    "cleaner": (
+        "Movies still hardlinked to their qBittorrent source will be DEFERRED, not cleaned. "
+        "If this step cleans nothing, open E:\\torrents\\final: qBittorrent's default "
+        "seed-limit action only pauses the torrent and leaves the file, so the link count "
+        "never drops and the deferral never clears. Delete the source, or re-run with "
+        "--allow-hardlinked."
+    ),
+    "fetcher": (
+        "Runs before the cleaner on purpose: a remux rewrites the OpenSubtitles moviehash, "
+        "so cleaning first would force the weaker title/year search."
+    ),
+}
+
+
 @dataclass
 class StepResult:
     key: str
@@ -202,6 +219,9 @@ def run_step(step: Step, cfg: Config, dry_run_pipeline: bool = False) -> StepRes
 
     command = build_command(step, cfg)
     print(f"\n{'=' * 78}\nSTEP {step.key}: {step.title}\n{'=' * 78}", flush=True)
+    hint = HINTS.get(step.key)
+    if hint and not (step.key == "cleaner" and cfg.allow_hardlinked):
+        print(f"  note: {hint}", flush=True)
     if dry_run_pipeline:
         print("  would run: " + " ".join(f'"{part}"' if " " in part else part
                                          for part in command), flush=True)

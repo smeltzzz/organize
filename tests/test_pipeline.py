@@ -7,6 +7,8 @@ degrades subtitle matching to the weaker title/year search.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import subprocess
 import unittest
 from pathlib import Path
@@ -146,6 +148,44 @@ class DryRunDoesNotExecuteTests(unittest.TestCase):
             if statuses[key] != "ran":
                 with self.subTest(step=key):
                     self.assertNotEqual(statuses[key], "ran")
+
+
+class HintTests(unittest.TestCase):
+    """The two silent failure modes get a note at the moment they matter."""
+
+    def test_cleaner_warns_about_hardlink_deferral(self) -> None:
+        self.assertIn("DEFERRED", pl.HINTS["cleaner"])
+        self.assertIn("--allow-hardlinked", pl.HINTS["cleaner"])
+
+    def test_fetcher_hint_explains_the_ordering(self) -> None:
+        self.assertIn("moviehash", pl.HINTS["fetcher"])
+
+    def test_hints_are_shown_only_for_steps_that_will_run(self) -> None:
+        seen: list[str] = []
+        original = pl.prerequisite_issue
+        try:
+            pl.prerequisite_issue = lambda step: None
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                pl.run_pipeline(pl.Config(library=pl.HERE, steps=("cleaner",)), dry_run=True)
+            seen.append(buf.getvalue())
+        finally:
+            pl.prerequisite_issue = original
+        self.assertIn("DEFERRED, not cleaned", seen[0])
+
+    def test_allow_hardlinked_suppresses_the_deferral_hint(self) -> None:
+        original = pl.prerequisite_issue
+        try:
+            pl.prerequisite_issue = lambda step: None
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                pl.run_pipeline(
+                    pl.Config(library=pl.HERE, steps=("cleaner",), allow_hardlinked=True),
+                    dry_run=True,
+                )
+        finally:
+            pl.prerequisite_issue = original
+        self.assertNotIn("DEFERRED, not cleaned", buf.getvalue())
 
 
 class SummaryTests(unittest.TestCase):
