@@ -113,6 +113,13 @@ SYM_ARROW = cyan("➜") if _SUPPORTS_UNICODE else cyan("->")
 SYM_BULLET = dim("•") if _SUPPORTS_UNICODE else dim("*")
 SYM_STAR = yellow("★") if _SUPPORTS_UNICODE else yellow("*")
 
+# Horizontal rule character. U+2500 (BOX DRAWINGS LIGHT HORIZONTAL) is not
+# encodable in the cp1252/cp437 code pages that Windows defaults stdout to for
+# non-interactive pipes, so printing it there raises UnicodeEncodeError (this
+# broke `organize.py doctor` / `organize.py test` in CI on windows-latest).
+# Fall back to ASCII when the output encoding cannot represent it.
+HRULE = "─" if _SUPPORTS_UNICODE else "-"
+
 
 # =============================================================================
 # BANNER & DASHBOARD
@@ -201,7 +208,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
     """Run full system diagnostics and print a beautiful scorecard."""
     print_hero_banner()
     print(bold("  SYSTEM & PREREQUISITE DIAGNOSTICS (DOCTOR)"))
-    print("  " + "─" * 68)
+    print("  " + HRULE * 68)
 
     checks: list[DiagnosticCheck] = []
 
@@ -397,7 +404,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             for r_line in check.remedy.splitlines():
                 print(f"      {cyan('Fix:')} {r_line}")
 
-    print("  " + "─" * 68)
+    print("  " + HRULE * 68)
     summary_line = f"  Scorecard: {green(f'{total_ok} passed')}"
     if total_warn:
         summary_line += f", {yellow(f'{total_warn} warnings')}"
@@ -444,7 +451,7 @@ def run_all_self_tests() -> int:
     """Run built-in self-tests across all scripts and return combined status."""
     print_hero_banner()
     print(bold("  RUNNING COMPREHENSIVE SELF-TEST SUITE"))
-    print("  " + "─" * 68)
+    print("  " + HRULE * 68)
 
     scripts = [
         ("organize.py", ["--internal-self-test"]),
@@ -484,7 +491,7 @@ def run_all_self_tests() -> int:
             failed += 1
 
     total_elapsed = time.monotonic() - started
-    print("  " + "─" * 68)
+    print("  " + HRULE * 68)
     if failed == 0:
         print(f"  {SYM_OK} {green('ALL SELF-TESTS PASSED')} {dim(f'in {total_elapsed:.2f}s')}\n")
         return 0
@@ -496,7 +503,7 @@ def run_all_self_tests() -> int:
 def run_unit_tests() -> int:
     """Run python3 -m unittest discover -s tests."""
     print(bold("  RUNNING REPOSITORY UNIT TESTS"))
-    print("  " + "─" * 68)
+    print("  " + HRULE * 68)
     cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
     proc = subprocess.run(cmd, cwd=str(HERE), check=False)
     return proc.returncode
@@ -558,7 +565,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _reconfigure_stdio_for_windows() -> None:
+    """Best-effort UTF-8 stdio so Unicode output never raises on Windows.
+
+    Windows defaults non-interactive stdout/stderr to the ANSI code page
+    (cp1252) or the OEM code page (cp437), neither of which can encode the
+    box-drawing and symbol characters this CLI prints.  Reconfiguring to UTF-8
+    with ``errors="replace"`` matches the sibling tools and guarantees the
+    output path cannot crash on an unencodable character.
+    """
+    if os.name == "nt":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _reconfigure_stdio_for_windows()
     raw_args = list(argv) if argv is not None else sys.argv[1:]
 
     # Handle internal self-test flag
