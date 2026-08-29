@@ -1,5 +1,11 @@
 # Configuration & CLI Reference
 
+<div align="center">
+
+[← Documentation index](../README.md#-documentation)
+
+</div>
+
 This document is an exhaustive reference of all configuration options, command-line flags, environment variables, and exit codes for every tool in the `organize` suite.
 
 ---
@@ -182,3 +188,11 @@ python library_auditor.py [OPTIONS]
 | `2` | Configuration error (missing directory, cross-device error, missing required flag) |
 | `3` | Coordination lock unavailable / Timed out waiting for other process |
 | `130` | Interrupted by user (SIGINT / Ctrl+C) |
+
+---
+
+<div align="center">
+
+[← Documentation index](../README.md#-documentation) · [Architecture & safety →](ARCHITECTURE_SAFETY.md) · [FAQ & troubleshooting →](FAQ_TROUBLESHOOTING.md)
+
+</div>

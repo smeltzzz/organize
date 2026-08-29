@@ -19,6 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Default application directory
 WORKDIR /app
 
+# Image metadata
+LABEL org.opencontainers.image.title="Organize" \
+      org.opencontainers.image.description="Dependency-free media management pipeline for Jellyfin & Plex" \
+      org.opencontainers.image.source="https://github.com/smeltzzz/organize" \
+      org.opencontainers.image.licenses="MIT"
+
 # Copy toolkit files
 COPY organize.py \
      10bit.py \

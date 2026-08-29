@@ -291,6 +291,18 @@ def resolve_steps(requested: Sequence[str]) -> tuple[str, ...]:
     return tuple(key for key in STEP_ORDER if key in chosen)
 
 
+def resolve_library(cli_source: Path | None) -> Path:
+    """Resolve the library root: explicit flag, then MOVIE_STD_TARGET, then default.
+
+    Docker deployments point ``MOVIE_STD_TARGET`` at the container mount, so
+    honoring it here lets ``docker compose run --rm organize run`` work without
+    retyping ``--source`` on every invocation.
+    """
+    if cli_source is not None:
+        return cli_source.expanduser().resolve()
+    return Path(os.environ.get("MOVIE_STD_TARGET") or DEFAULT_LIBRARY).expanduser().resolve()
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -305,8 +317,8 @@ def build_parser() -> argparse.ArgumentParser:
                 "the OpenSubtitles moviehash and would force a weaker title/year search."),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-    parser.add_argument("--source", type=Path, default=Path(DEFAULT_LIBRARY),
-                        help="Jellyfin movie-library root")
+    parser.add_argument("--source", type=Path, default=None,
+                        help=f"Jellyfin movie-library root (default: {DEFAULT_LIBRARY}, or MOVIE_STD_TARGET when set)")
     parser.add_argument("--steps", default=",".join(STEP_ORDER),
                         help=f"Comma-separated subset of: {', '.join(STEP_ORDER)}")
     parser.add_argument("--dry-run", action="store_true",
@@ -349,7 +361,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     cfg = Config(
-        library=args.source.resolve(),
+        library=resolve_library(args.source),
         steps=resolve_steps(requested),
         dry_run=bool(args.dry_run),
         limit=max(0, int(args.limit)),
@@ -391,6 +403,23 @@ def run_self_tests() -> int:
     check(resolve_steps([]) == (), "empty selection resolves to nothing")
 
     check(set(STEPS) == set(STEP_ORDER), "every step in the order has a definition")
+
+    # Library resolution: flag wins, then the environment, then the documented
+    # default. Docker and scheduled runs rely on the middle case.
+    saved_target = os.environ.pop("MOVIE_STD_TARGET", None)
+    try:
+        check(resolve_library(None) == Path(DEFAULT_LIBRARY).resolve(),
+              "no flag and no env resolves to the documented default library")
+        os.environ["MOVIE_STD_TARGET"] = str(Path("/media/movies"))
+        check(resolve_library(None) == Path("/media/movies"),
+              "MOVIE_STD_TARGET is honored when no --source flag is given")
+        check(resolve_library(Path("/srv/library")) == Path("/srv/library"),
+              "an explicit --source flag beats MOVIE_STD_TARGET")
+    finally:
+        if saved_target is not None:
+            os.environ["MOVIE_STD_TARGET"] = saved_target
+        else:
+            os.environ.pop("MOVIE_STD_TARGET", None)
 
     # Each tool's library-root flag differs; getting these wrong silently
     # points a tool at the default path instead of the requested library.

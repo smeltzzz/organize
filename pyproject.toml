@@ -1,11 +1,12 @@
 [project]
 name = "organize"
-version = "3.0.0"
+version = "3.1.0"
 description = "The Definitive Media Management Toolkit for Jellyfin & Plex"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-keywords = ["jellyfin", "plex", "media-management", "subtitles", "mkv", "remux", "handbrake"]
+keywords = ["jellyfin", "plex", "media-management", "subtitles", "mkv", "remux", "handbrake", "mediathek", "direct-play"]
+authors = [{ name = "smeltzzz" }]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
@@ -20,6 +21,13 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Video",
 ]
+
+[project.urls]
+Homepage = "https://github.com/smeltzzz/organize"
+Documentation = "https://github.com/smeltzzz/organize#-documentation"
+"Source Code" = "https://github.com/smeltzzz/organize"
+"Bug Tracker" = "https://github.com/smeltzzz/organize/issues"
+Changelog = "https://github.com/smeltzzz/organize/blob/main/CHANGELOG.md"
 
 [project.scripts]
 organize = "organize:main"

@@ -1,5 +1,11 @@
 # Linux & Docker Deployment Guide
 
+<div align="center">
+
+[← Documentation index](../README.md#-documentation)
+
+</div>
+
 While the default paths in `organize` cater to Windows conventions (`E:\torrents\...`), the entire codebase is cross-platform and extensively tested on Linux (`ext4`, `zfs`, `btrfs`, `xfs`) and Docker.
 
 This guide details setting up `organize` on Debian/Ubuntu, Arch, Fedora, Docker Compose, Unraid, and TrueNAS SCALE.
@@ -190,3 +196,11 @@ docker compose run --rm organize run --nice
 ### TrueNAS SCALE
 1. In TrueNAS Apps or Docker Compose, deploy the container with your ZFS pool mounted under a single root mount (e.g. `/mnt/tank/media:/media`) to preserve hardlink capability.
 2. In TrueNAS System Settings → Advanced → **Cron Jobs**, add a job to execute `docker exec organize python /app/organize.py run --nice`.
+
+---
+
+<div align="center">
+
+[← Documentation index](../README.md#-documentation) · [Windows guide →](WINDOWS_GUIDE.md) · [FAQ & troubleshooting →](FAQ_TROUBLESHOOTING.md)
+
+</div>

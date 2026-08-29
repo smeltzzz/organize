@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -39,6 +40,31 @@ class StepOrderTests(unittest.TestCase):
 
     def test_every_step_is_defined(self) -> None:
         self.assertEqual(set(pl.STEPS), set(pl.STEP_ORDER))
+
+
+class LibraryResolutionTests(unittest.TestCase):
+    """The library root resolves flag-first, then MOVIE_STD_TARGET, then the
+    documented default — the env case is what makes Docker one-liners work."""
+
+    def setUp(self) -> None:
+        self._saved = os.environ.pop("MOVIE_STD_TARGET", None)
+
+    def tearDown(self) -> None:
+        if self._saved is not None:
+            os.environ["MOVIE_STD_TARGET"] = self._saved
+        else:
+            os.environ.pop("MOVIE_STD_TARGET", None)
+
+    def test_no_flag_no_env_uses_documented_default(self) -> None:
+        self.assertEqual(pl.resolve_library(None), Path(pl.DEFAULT_LIBRARY).resolve())
+
+    def test_env_var_is_honored_without_a_flag(self) -> None:
+        os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
+        self.assertEqual(pl.resolve_library(None), Path("/media/torrents/final_organized"))
+
+    def test_explicit_flag_beats_env_var(self) -> None:
+        os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
+        self.assertEqual(pl.resolve_library(Path("/srv/movies")), Path("/srv/movies"))
 
 
 class CommandBuildingTests(unittest.TestCase):

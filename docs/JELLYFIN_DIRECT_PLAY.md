@@ -1,5 +1,11 @@
 # The Jellyfin Direct Play Philosophy
 
+<div align="center">
+
+[← Documentation index](../README.md#-documentation)
+
+</div>
+
 Why does Jellyfin transcode, and why does this toolkit make such a profound difference in server performance and visual fidelity?
 
 This document outlines the technical underpinnings of **Direct Play vs. Transcoding** and explains how each component in `organize` is purpose-built to eliminate unnecessary CPU/GPU work on your media server.
@@ -79,3 +85,11 @@ By running `organize`:
 2. Every movie gains a verified, external `.en.srt` for 100% Direct Play subtitles.
 3. Every container is stripped of commentary and unnecessary tracks.
 4. Your server runs cool, whisper-quiet, and at near 0% CPU.
+
+---
+
+<div align="center">
+
+[← Documentation index](../README.md#-documentation) · [Architecture & safety →](ARCHITECTURE_SAFETY.md) · [Linux & Docker guide →](LINUX_DOCKER_GUIDE.md)
+
+</div>
