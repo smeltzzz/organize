@@ -555,6 +555,7 @@ __all__ += [
     "print_text",
     "clip_text",
     "wrap_text",
+    "wrap_path_text",
     "format_bytes",
     "format_duration",
 ]
@@ -632,6 +633,54 @@ def wrap_text(text: str, width: int) -> list[str]:
         )
         out.extend(chunks or [""])
     return out
+
+
+_PATH_BREAK_RE = re.compile(r"(?<=[/\\])|(?<=\s)")
+
+
+def _pack_on_separators(text: str, width: int) -> list[str]:
+    """Greedily fill lines, breaking only after a separator or a space."""
+    lines: list[str] = []
+    current = ""
+    for token in (tok for tok in _PATH_BREAK_RE.split(text) if tok):
+        if len(token) > width:
+            if current.strip():
+                lines.append(current.rstrip())
+            current = ""
+            lines.extend(line.rstrip() for line in wrap_text(token, width))
+            continue
+        if current and len(current) + len(token) > width:
+            lines.append(current.rstrip())
+            current = token
+        else:
+            current += token
+    if current.strip():
+        lines.append(current.rstrip())
+    return lines
+
+
+def wrap_path_text(text: str, width: int) -> list[str]:
+    """Wrap ``text`` on path separators and spaces, keeping names whole.
+
+    Report lines are usually paths, and the tail of a path - the movie folder
+    or file name - is what a reader scans for.  Breaking after ``/`` and ``\\``
+    keeps that name on one line, where ``wrap_text`` would happily split it in
+    half.  Only a single component longer than ``width`` is hard-broken, and
+    nothing is ever ellipsised away.
+    """
+    width = max(1, int(width))
+    text = str(text)
+    if len(text) <= width:
+        return [text]
+    out: list[str] = []
+    for paragraph in text.split("\n"):
+        if not paragraph.strip():
+            out.append("")
+        elif len(paragraph) <= width:
+            out.append(paragraph.rstrip())
+        else:
+            out.extend(_pack_on_separators(paragraph, width))
+    return out or [""]
 
 
 def format_bytes(size: int | float | None) -> str:
@@ -734,7 +783,9 @@ class Report:
                 if not value:
                     lines.append(self._box_row(label))
                     continue
-                chunks = wrap_text(value, value_width) or [""]
+                # Long values here are usually paths; break them at a
+                # separator so a directory name is not split mid-word.
+                chunks = wrap_path_text(value, value_width) or [""]
                 pad = " " * (label_width + 2)
                 for position, chunk in enumerate(chunks):
                     lead = f"{label.ljust(label_width)}  " if position == 0 else pad
@@ -878,16 +929,21 @@ class Report:
         head_limit = span - len(prefix)
         if detail_column > 0:
             # A fixed detail column only reads as a table when the entry text
-            # is clipped to it, so long titles are ellipsised rather than
-            # pushing every detail onto its own line.
+            # stays inside it, so long titles wrap to a continuation line
+            # instead of pushing every detail sideways.
             head_limit = min(head_limit, max(8, detail_column - indent - len(prefix)))
-        head = clip_text(text, head_limit)
+        # Entry text wraps rather than being ellipsised: the tail of a long
+        # path is usually the part a reader came for, and clipping it away
+        # hides the very information the report exists to convey.
+        head_chunks = wrap_path_text(text, max(8, head_limit)) or [""]
         # Entries breathe: a blank line separates them, but a section banner or
         # its explanation paragraph keeps the first entry tight underneath.
         if self._body and self._body[-1].strip() and not self._is_rule(self._body[-1]):
             self._body.append("")
-        self._body.append(" " * indent + prefix + head)
+        head_index = len(self._body)
+        self._body.append(" " * indent + prefix + head_chunks[0])
         continuation = " " * (indent + len(prefix))
+        self._body.extend(continuation + chunk for chunk in head_chunks[1:])
         materialized = [(str(label), str(value or "")) for label, value in fields]
         if materialized:
             label_width = max(6, max(len(label) for label, _ in materialized))
@@ -898,10 +954,15 @@ class Report:
                 for chunk in chunks[1:]:
                     self._body.append(continuation + " " * len(lead) + chunk)
         if detail:
-            if detail_column > 0:
+            head = head_chunks[0]
+            # A detail can ride on the entry's own line only when that entry
+            # text did not have to wrap; otherwise it belongs underneath.
+            if detail_column > 0 and len(head_chunks) == 1:
                 room = detail_column - indent - len(prefix) - len(head)
                 if room >= 1 and len(detail) <= span - detail_column:
-                    self._body[-1] = " " * indent + prefix + head.ljust(detail_column - len(prefix)) + detail
+                    self._body[head_index] = (
+                        " " * indent + prefix + head.ljust(detail_column - indent - len(prefix)) + detail
+                    )
                     return self
             for chunk in wrap_text(detail, max(8, span - len(prefix) - 2)):
                 self._body.append(continuation + "  " + chunk)

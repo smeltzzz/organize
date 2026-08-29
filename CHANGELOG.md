@@ -22,9 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Reports no longer depend on the console's encoding.** Every tool now pins its own stdout/stderr to UTF-8 with `errors="replace"` on *every* platform (`common.enable_utf8_stdio`; previously this ran on Windows only), the `log()` helpers print through the encoding-safe path, and every caller that captures a child process — `organize.py` and the test suite — decodes it as UTF-8 instead of with the locale encoding. Before this, a boxed report was a `UnicodeDecodeError` waiting to happen on Windows (cp1252) and a `UnicodeEncodeError` on a runner with no locale set. The report *file* is written UTF-8 either way, so a limited console degrades to `?` instead of losing data or aborting a run.
+- **Report entries wrap instead of being cut off.** `Report.entry()` used to ellipsize an
+  entry that overflowed the 96-column page, which silently destroyed exactly what the line
+  was there to name: on macOS the standardizer's source paths run ~90 columns, so
+  `.../final/Small.1995.mkv` printed as `.../final/Small...`. Entry text now wraps at path
+  separators (`common.wrap_path_text`), so the movie folder or file name always lands whole
+  on its own line; the boxed header's metadata rows break the same way instead of splitting a
+  directory name mid-word. A detail that shares an entry's line now really does start at its
+  column instead of drifting four columns right. Tables still clip — columns have to line up.
 
 ### Added
-- **25 new report tests** (241 total): `tests/reporttext.py` parses the scorecard and sections back out of a rendered report, `tests/test_reports.py` builds one report per tool and asserts the shared contract, and `tests/test_common.py` covers the renderer itself (width invariants, wrapping, clipping, partial-run tallies), and `tests/test_reports.py` runs the fetcher under `PYTHONIOENCODING=ascii` to prove a hostile console cannot abort a run or corrupt the report file.
+- **28 new report tests** (244 total): `tests/reporttext.py` parses the scorecard and sections back out of a rendered report, `tests/test_reports.py` builds one report per tool and asserts the shared contract, and `tests/test_common.py` covers the renderer itself (width invariants, wrapping, clipping, partial-run tallies), and `tests/test_reports.py` runs the fetcher under `PYTHONIOENCODING=ascii` to prove a hostile console cannot abort a run or corrupt the report file.
 
 ## [3.1.0] - 2026-08-29
 

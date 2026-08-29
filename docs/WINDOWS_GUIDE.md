@@ -220,9 +220,10 @@ Useful escapes: `--limit 5` (process only 5 items), `--continue-on-error`
 
 **Reading what was left behind** — `E:\torrents\final` keeps anything the
 standardizer declines: a non-MKV release, a multipart or disc set, or a movie
-under the 300 MB minimum. These are listed at the end of
-`E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt` under
-`ITEMS LEFT IN SOURCE`, each with its reason. Nothing cleans them up for you;
+under the 300 MB minimum. These lead
+`E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt`:
+the `ITEMS LEFT IN SOURCE` section comes first, above `ORGANIZED INTO THE
+LIBRARY`, and lists each one with its reason. Nothing cleans them up for you;
 that section is the to-do list.
 
 **Verifying your install** — `py pipeline.py --list-steps` on a fully

@@ -184,6 +184,31 @@ class StandardizerReportContentTests(_SampleReports):
         self.assertLess(text.index("ITEMS LEFT IN SOURCE"), text.index("ORGANIZED INTO THE LIBRARY"))
         self.assertIn("Small.1995.mkv", section(text, "ITEMS LEFT IN SOURCE"))
 
+    def test_a_deep_source_path_still_names_the_declined_file(self) -> None:
+        """Platform-independent form of the failure CI saw on macos-latest.
+
+        ``self.tmp`` is short on Linux and Windows, so the entry above fits
+        there; a macOS temp dir (``/var/folders/.../T/...``) is long enough to
+        overflow the entry line, and the old clip rendered it as
+        ``.../final/Small...``.  Pinning a deep path makes the regression
+        visible on every runner.
+        """
+        deep = self.tmp / "a-very-deeply-nested-incomplete-torrent-download" / "final"
+        saved = (ms.CFG, ms.RUN_SUMMARY, ms.RUN_EVENTS)
+        ms.CFG = ms.Config(source_dir=deep, target_dir=self.tmp / "lib",
+                           log_file=None, report_file=self.tmp / "std_deep.txt")
+        ms.RUN_SUMMARY = ms.RunSummary()
+        ms.RUN_EVENTS = []
+        try:
+            ms.decline_source(deep / "Small.1995.mkv", "smaller than the 300 MB minimum")
+            text = ms.build_report()
+        finally:
+            ms.CFG, ms.RUN_SUMMARY, ms.RUN_EVENTS = saved
+
+        self.assertIn("Small.1995.mkv", section(text, "ITEMS LEFT IN SOURCE"))
+        for line in text.splitlines():
+            self.assertLessEqual(len(line), common.REPORT_WIDTH, line)
+
 
 class HostileConsoleEncodingTests(unittest.TestCase):
     """A console that cannot encode box-drawing must not abort a run.

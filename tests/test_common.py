@@ -491,6 +491,40 @@ class ReportRendererTests(unittest.TestCase):
         for line in report.render().splitlines():
             self.assertLessEqual(len(line), self.WIDTH, line)
 
+    def test_a_long_entry_path_keeps_its_file_name_whole(self) -> None:
+        """An entry that overflows the width wraps; it is never ellipsised.
+
+        Clipping was the original behaviour and it cost the one thing the line
+        exists to name: on a macOS runner the standardizer's source paths run
+        to ~90 columns, so ``/var/folders/.../Small.1995.mkv`` rendered as
+        ``.../final/Small...`` and the test asserting the file name failed only
+        on macOS.  Wrapping at separators keeps the name intact everywhere.
+        """
+        deep = "/var/folders/q7/" + "a" * 28 + "/T/ms_runstate_ab12cd34/final/Small.1995.mkv"
+        report = common.Report("T")
+        report.entry(deep, detail="smaller than the 300 MB minimum", ordinal=1)
+        lines = report.render().splitlines()
+
+        self.assertTrue(
+            any(line.endswith("Small.1995.mkv") for line in lines),
+            "\n".join(lines),
+        )
+        self.assertLessEqual(max(len(line) for line in lines), self.WIDTH)
+        self.assertTrue(
+            any("smaller than the 300 MB minimum" in line for line in lines),
+            "\n".join(lines),
+        )
+
+    def test_path_wrapping_prefers_separators_over_splitting_names(self) -> None:
+        wrapped = common.wrap_path_text("/aaa/bbb/ccc/ddd/Small.1995.mkv", 18)
+        self.assertTrue(all(chunk in "/aaa/bbb/ccc/ddd/Small.1995.mkv" for chunk in wrapped))
+        self.assertEqual("".join(wrapped).replace(" ", ""), "/aaa/bbb/ccc/ddd/Small.1995.mkv")
+        self.assertIn("Small.1995.mkv", wrapped[-1])
+        # A single component wider than the width still has to break somewhere.
+        self.assertEqual(common.wrap_path_text("x" * 40, 16), ["x" * 16] * 2 + ["x" * 8])
+        # Short text is untouched.
+        self.assertEqual(common.wrap_path_text("Heat (1995).mkv", 40), ["Heat (1995).mkv"])
+
     def test_a_partial_run_never_reports_more_items_than_the_total(self) -> None:
         report = common.Report("T")
         report.section("GROUP", count=5, total=3)
