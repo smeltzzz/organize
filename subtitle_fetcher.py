@@ -80,8 +80,10 @@ from common import (
 # =============================================================================
 
 LIBRARY_DIR = r"E:\torrents\final_organized"
-LOG_FILE = r"E:\torrents\subtitle_fetcher\subtitle_fetcher.log"  # Appended every run; this is also the durable quota/retry ledger.
-REPORT_FILE = r"E:\torrents\subtitle_fetcher\subtitle_fetcher_report.txt"
+# Logs and reports live under tools\ReportsAndLogs so the root of E:\torrents
+# stays media-only.
+LOG_FILE = r"E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher.log"  # Appended every run; this is also the durable quota/retry ledger.
+REPORT_FILE = r"E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher_report.txt"
 # The append-only log is the durable quota ledger; no state/cache file is created.
 LEDGER_EVENT = "SUBTITLE_LEDGER"
 USER_DAILY_CAP = 20

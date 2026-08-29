@@ -91,12 +91,14 @@ MKVMERGE_PATH = "mkvmerge"
 AUDIO_LANGUAGES = {"eng", "en"}
 SUBTITLE_LANGUAGES = {"eng", "en"}
 REMOVE_COMMENTARY = True
-LOG_FILE = r"E:\torrents\mkv_track_cleaner\mkv_track_cleaner.log"
-REPORT_FILE = r"E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt"
+# Logs, reports, and the probe cache live under tools\ReportsAndLogs so the
+# root of E:\torrents stays media-only.
+LOG_FILE = r"E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner.log"
+REPORT_FILE = r"E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner_report.txt"
 # Reused `mkvmerge -J` metadata for files whose size and mtime have not
 # changed, so a re-scan of an unchanged library does not respawn mkvmerge per
 # movie. Only the metadata read is cached; every decision is made fresh.
-CACHE_FILE = r"E:\torrents\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json"
+CACHE_FILE = r"E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json"
 # ===============================================================
 
 # Legacy temporary files used this deterministic prefix. New work uses unique

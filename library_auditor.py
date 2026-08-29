@@ -41,9 +41,11 @@ from common import (
 )
 
 SOURCE_DIR = r"E:\torrents\final_organized"
-OUTPUT_DIR = r"E:\torrents\library_auditor"
-LOG_FILE = r"E:\torrents\library_auditor\library_auditor.log"
-REPORT_FILE = r"E:\torrents\library_auditor\library_auditor_report.txt"
+# Logs and reports live under tools\ReportsAndLogs so the root of E:\torrents
+# stays media-only.
+OUTPUT_DIR = r"E:\torrents\tools\ReportsAndLogs\library_auditor"
+LOG_FILE = r"E:\torrents\tools\ReportsAndLogs\library_auditor\library_auditor.log"
+REPORT_FILE = r"E:\torrents\tools\ReportsAndLogs\library_auditor\library_auditor_report.txt"
 VERSION = "2.1.0"
 LOCK_NAME = ".jellyfin_movie_folder_auditor.lock"
 

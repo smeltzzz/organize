@@ -68,8 +68,8 @@ python movie_standardizer.py [PATH] [OPTIONS]
 | `--target PATH` | `E:\torrents\final_organized` | `MOVIE_STD_TARGET` | Organized movie library root |
 | `--min-size MB` | `300` | `MOVIE_STD_MIN_SIZE` | Minimum file size to consider a movie feature |
 | `--lock-timeout S` | `60.0` | `MOVIE_STD_LOCK_TIMEOUT` | Advisory coordination lock timeout in seconds |
-| `--log PATH` | `...\movie_standardizer.log` | `MOVIE_STD_LOG` | Execution log file |
-| `--report PATH` | `...\movie_standardizer_report.txt` | `MOVIE_STD_REPORT` | Plain text output report |
+| `--log PATH` | `E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer.log` | `MOVIE_STD_LOG` | Execution log file |
+| `--report PATH` | `E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt` | `MOVIE_STD_REPORT` | Plain text output report |
 | `--manifest PATH` | None | `MOVIE_STD_MANIFEST` | Optional JSON run manifest for automation |
 | `--ffprobe PATH` | `ffprobe` | `MOVIE_STD_FFPROBE` | Custom path to `ffprobe` binary |
 | `--allow-tv` | `False` | — | Allow movies whose title triggers TV pattern matching |
@@ -92,8 +92,8 @@ python subtitle_fetcher.py [OPTIONS]
 | Flag | Default | Environment Variable | Description |
 | :--- | :--- | :--- | :--- |
 | `--source PATH` | `E:\torrents\final_organized` | — | Organized movie library root |
-| `--log PATH` | `...\subtitle_fetcher.log` | — | Execution log & durable quota ledger |
-| `--report PATH` | `...\subtitle_fetcher_report.txt` | — | Replaceable summary report |
+| `--log PATH` | `E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher.log` | — | Execution log & durable quota ledger |
+| `--report PATH` | `E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher_report.txt` | — | Replaceable summary report |
 | `--auth-mode MODE` | `development-anonymous` | — | `development-anonymous` (API key only) or `user` |
 | `--daily-cap N` | `100` (anon) / `20` (user) | — | Maximum download requests per UTC day |
 | `--min-size MB` | `300` | — | Minimum file size in MB |
@@ -123,9 +123,9 @@ python mkv_track_cleaner.py [OPTIONS]
 | `--dir PATH` | `E:\torrents\final_organized` | Organized movie library root |
 | `--only PATH` | None | Restrict cleaning to a specific MKV file (repeatable) |
 | `--mkvmerge PATH` | `mkvmerge` | Path to `mkvmerge` binary |
-| `--log PATH` | `...\mkv_track_cleaner.log` | Execution log file |
-| `--report PATH` | `...\mkv_track_cleaner_report.txt`| Replaceable summary report |
-| `--cache PATH` | `...\mkv_track_cleaner_probe_cache.json`| Reusable JSON probe cache |
+| `--log PATH` | `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner.log` | Execution log file |
+| `--report PATH` | `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner_report.txt` | Replaceable summary report |
+| `--cache PATH` | `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json` | Reusable JSON probe cache |
 | `--no-cache` | `False` | Bypass probe cache and probe every movie |
 | `--nice` | `False` | Lower remux process priority |
 | `--min-size MB` | `0` | Minimum file size to process |
@@ -149,9 +149,9 @@ python 10bit.py [OPTIONS]
 | `--workers N` | `8` | Concurrent ffprobe inspection worker threads |
 | `--timeout S` | `45.0` | ffprobe execution timeout per movie |
 | `--min-size MB` | `0` | Minimum file size to process |
-| `--log PATH` | `...\10bit.log` | Execution log file |
-| `--report PATH` | `...\10bit_report.txt` | Replaceable action queue report |
-| `--cache PATH` | `...\10bit_probe_cache.json` | Reusable ffprobe metadata cache |
+| `--log PATH` | `E:\torrents\tools\ReportsAndLogs\10bit\10bit.log` | Execution log file |
+| `--report PATH` | `E:\torrents\tools\ReportsAndLogs\10bit\10bit_report.txt` | Replaceable action queue report |
+| `--cache PATH` | `E:\torrents\tools\ReportsAndLogs\10bit\10bit_probe_cache.json` | Reusable ffprobe metadata cache |
 | `--no-cache` | `False` | Bypass probe cache and re-probe all files |
 | `--fail-if-queue` | `False` | Exit non-zero (3) if 8-bit SDR movies are queued |
 | `--fail-if-review`| `False` | Exit non-zero (4) if movies require metadata review |
@@ -171,8 +171,8 @@ python library_auditor.py [OPTIONS]
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | `--source PATH` | `E:\torrents\final_organized` | Organized movie library root |
-| `--log PATH` | `...\library_auditor.log` | Execution log file |
-| `--report PATH` | `...\library_auditor_report.txt` | Replaceable audit report |
+| `--log PATH` | `E:\torrents\tools\ReportsAndLogs\library_auditor\library_auditor.log` | Execution log file |
+| `--report PATH` | `E:\torrents\tools\ReportsAndLogs\library_auditor\library_auditor_report.txt` | Replaceable audit report |
 | `--lock-timeout S`| `60.0` | Coordination lock timeout |
 | `--fail-on-defects`| `False` | Exit 1 on layout defects (stem mismatch, invalid SRT, etc.) |
 | `--fail-on-findings`| `False` | Exit 1 on any non-canonical state (including missing SRT) |

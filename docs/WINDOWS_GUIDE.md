@@ -15,8 +15,9 @@ below is the value the scripts already default to, so if your layout matches,
 
 ## 1. The folder layout the scripts expect
 
-Create these on `E:` (the last five are created automatically on first run —
-listed so you know where output goes):
+Create `final\` and `final_organized\` now. The `ReportsAndLogs` subfolders
+under `tools\` are created automatically on first run — listed so you know
+where output goes:
 
 ```
 E:\torrents\
@@ -25,11 +26,13 @@ E:\torrents\
 │   └── Dune (2021)\
 │       ├── Dune (2021).mkv
 │       └── Dune (2021).eng.srt
-├── movie_standardizer\         ← movie_standardizer.log / _report.txt
-├── subtitle_fetcher\           ← subtitle_fetcher.log (also the UTC quota ledger) / _report.txt
-├── mkv_track_cleaner\          ← mkv_track_cleaner.log / _report.txt
-├── 10bit\                      ← 10bit.log / _report.txt
-└── library_auditor\            ← library_auditor.log / _report.txt
+└── tools\
+    └── ReportsAndLogs\         ← created automatically on first run
+        ├── movie_standardizer\         ← movie_standardizer.log / _report.txt
+        ├── subtitle_fetcher\           ← subtitle_fetcher.log (also the UTC quota ledger) / _report.txt
+        ├── mkv_track_cleaner\          ← mkv_track_cleaner.log / _report.txt / probe cache JSON
+        ├── 10bit\                      ← 10bit.log / _report.txt / probe cache JSON
+        └── library_auditor\            ← library_auditor.log / _report.txt
 ```
 
 Put the repository in a dedicated tools directory such as `C:\Tools\organize\`.
@@ -129,7 +132,7 @@ py mkv_track_cleaner.py --limit 1                       # remux ONE movie
 
 After the first remux, play the movie in Jellyfin, then read the
 `DEFERRED (STILL HARDLINKED)` and `ERRORS ENCOUNTERED` sections of the report
-at `E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt`. Only then
+at `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner_report.txt`. Only then
 remove `--limit 1` and run the full sweep: `py pipeline.py`.
 
 Finally, point Jellyfin at `E:\torrents\final_organized` as a **Movies** library.
@@ -198,7 +201,7 @@ sidecar yet. Use `--fail-on-findings` if missing sidecars should fail too.
   is missing. Every other tool's `--dry-run` works with nothing installed.
 - **The fetcher is quota-limited per UTC day:** 100 download requests in the
   default `development-anonymous` mode, 20 with `--auth-mode user`. The
-  append-only log at `E:\torrents\subtitle_fetcher\subtitle_fetcher.log` *is*
+  append-only log at `E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher.log` *is*
   the durable ledger — don't delete it or you lose your quota accounting.
 
 ## 9. Everyday commands
@@ -218,7 +221,7 @@ Useful escapes: `--limit 5` (process only 5 items), `--continue-on-error`
 **Reading what was left behind** — `E:\torrents\final` keeps anything the
 standardizer declines: a non-MKV release, a multipart or disc set, or a movie
 under the 300 MB minimum. These are listed at the end of
-`E:\torrents\movie_standardizer\movie_standardizer_report.txt` under
+`E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt` under
 `ITEMS LEFT IN SOURCE`, each with its reason. Nothing cleans them up for you;
 that section is the to-do list.
 
