@@ -68,10 +68,13 @@ from common import (
     EXTERNAL_SRT_MAX_BYTES,
     EXTERNAL_SRT_SUFFIX,
     CoordinationLock,
+    Report,
     exact_external_english_srt_path,
     normalize_srt_newlines,
     path_norm,
+    print_text,
     promote_legacy_external_english_srt,
+    report_banner,
     srt_looks_valid,
 )
 
@@ -201,12 +204,28 @@ class MovieIdentity:
     normalized_title: str
 
 
+# Every result carries a machine-readable reason alongside its human detail so
+# the report groups movies by what the user has to *do*, instead of guessing
+# that grouping back out of a prose sentence.
+REASON_COVERED = "covered"
+REASON_DOWNLOADED = "downloaded"
+REASON_DRY_RUN = "dry_run"
+REASON_NO_MATCH = "no_match"
+REASON_SIDECAR_UNUSABLE = "sidecar_unusable"
+REASON_SIDECAR_NAME = "sidecar_name"
+REASON_REVIEW = "review"
+REASON_QUOTA = "quota"
+REASON_LAYOUT = "layout"
+REASON_ERROR = "error"
+
+
 @dataclass
 class JobResult:
     video: Path
-    status: str  # have, skip, download, dry-run, error
+    status: str  # have, skip, download, dry-run, review, error
     detail: str
     dest: Path | None = None
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -924,7 +943,7 @@ def run_self_tests() -> int:
         with legacy_vid.open("wb") as fh:
             fh.truncate(400 * 1024 * 1024)
         (legacy_movie / "Legacy Film (2010).en.srt").write_text(sample, encoding="utf-8")
-        status, path, detail = inspect_existing_sidecars(legacy_vid)
+        status, path, detail, _reason = inspect_existing_sidecars(legacy_vid)
         check(status == "covered", f"legacy .en.srt promotes to covered: {status} {detail}")
         check(path is not None and path.name.endswith(EXTERNAL_SRT_SUFFIX), f"promoted path {path}")
         check(not (legacy_movie / "Legacy Film (2010).en.srt").exists(), "legacy .en.srt removed after promote")
@@ -1131,7 +1150,7 @@ def set_movie_status(record: dict[str, Any], status: str, detail: str = "", **ex
     record.update(extras)
 
 
-def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
+def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str, str]:
     """Classify existing English sidecars without trusting filename alone.
 
     The cleaner's automatic external-subtitle policy requires the exact
@@ -1139,6 +1158,9 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
     place to that canonical name. Any other noncanonical or invalid English
     sidecar is kept for manual review rather than triggering a duplicate
     download request.
+
+    Returns ``(status, path, detail, reason)`` where ``reason`` is one of the
+    ``REASON_*`` codes (empty for ``missing``, which means "go and fetch one").
     """
     exact = dest_for(video, Config())
     # dest_for uses only the video name and the fixed .eng.srt suffix, so no
@@ -1153,6 +1175,7 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
         return (
             "review", exact if exact.exists() else None,
             f"legacy .en.srt could not be promoted to .eng.srt ({promote_reason})",
+            REASON_SIDECAR_NAME,
         )
     candidates: list[Path] = []
     try:
@@ -1161,9 +1184,9 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
             if is_english_srt_sidecar(path, video.stem)
         ]
     except OSError:
-        return "missing", None, "could not inspect sibling subtitles"
+        return "missing", None, "could not inspect sibling subtitles", ""
     if not candidates:
-        return "missing", None, "no English SRT sidecar"
+        return "missing", None, "no English SRT sidecar", ""
     for path in candidates:
         try:
             file_stat = path.stat(follow_symlinks=False)
@@ -1174,18 +1197,20 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
         except (OSError, EOFError, ValueError):
             valid = False
         if path == exact and valid:
-            return "covered", path, f"validated exact {EXTERNAL_SRT_SUFFIX}"
+            return "covered", path, f"validated exact {EXTERNAL_SRT_SUFFIX}", REASON_COVERED
         if valid:
             return (
                 "review", path,
                 f"'{path.name}' is a valid English SRT but not the exact {EXTERNAL_SRT_SUFFIX} sidecar; "
                 "rename or remove it to let this movie be fetched",
+                REASON_SIDECAR_NAME,
             )
     broken = candidates[0]
     return (
         "review", broken,
         f"'{broken.name}' exists but is unusable (empty, truncated, or not an SRT); "
         "delete it and re-run to allow a replacement download",
+        REASON_SIDECAR_UNUSABLE,
     )
 
 
@@ -1205,6 +1230,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     results: list[JobResult] = []
     client: OpenSubtitlesClient | None = None
     deferred_remaining = 0
+    deferred_videos: list[Path] = []
 
     videos = discover_videos(cfg.library, cfg.min_bytes)
     if cfg.limit > 0:
@@ -1226,19 +1252,19 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     for index, video in enumerate(videos, start=1):
         layout_issue = canonical_movie_layout_issue(video, cfg.library)
         if layout_issue:
-            result = JobResult(video, "skip", layout_issue)
+            result = JobResult(video, "skip", layout_issue, reason=REASON_LAYOUT)
             results.append(result)
             emit(index, "SKIP", video, layout_issue)
             continue
-        sidecar_status, existing, sidecar_detail = inspect_existing_sidecars(video)
+        sidecar_status, existing, sidecar_detail, sidecar_reason = inspect_existing_sidecars(video)
         if sidecar_status == "covered" and existing is not None:
             ledger["already_have"] += 1
-            result = JobResult(video, "have", sidecar_detail, existing)
+            result = JobResult(video, "have", sidecar_detail, existing, reason=REASON_COVERED)
             results.append(result)
             emit(index, "HAVE", video, sidecar_detail)
             continue
         if sidecar_status == "review":
-            result = JobResult(video, "review", sidecar_detail, existing)
+            result = JobResult(video, "review", sidecar_detail, existing, reason=sidecar_reason)
             results.append(result)
             emit(index, "REVIEW", video, sidecar_detail)
             continue
@@ -1248,30 +1274,34 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             key = movie_key(video, snapshot)
         except OSError as exc:
             ledger["errors"] += 1
-            result = JobResult(video, "error", str(exc))
+            result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
             results.append(result)
             emit(index, "ERROR", video, str(exc))
             continue
         record = state_movie(state, key, video)
         old_status = str(record.get("status") or "pending")
         if old_status == "no_match" and not (cfg.retry_no_match or cfg.identity_fallback):
-            result = JobResult(video, "skip", "previous strict moviehash search had no match")
+            result = JobResult(video, "skip", "previous strict moviehash search had no match",
+                               reason=REASON_NO_MATCH)
             results.append(result)
             emit(index, "SKIP", video, result.detail)
             continue
         if old_status == "manual_review" and not cfg.retry_no_match:
-            result = JobResult(video, "review", "previous identity fallback was intentionally held for review")
+            result = JobResult(video, "review", "previous identity fallback was intentionally held for review",
+                               reason=REASON_REVIEW)
             results.append(result)
             emit(index, "REVIEW", video, result.detail)
             continue
         if old_status == "reserved" and str(record.get("updated_utc") or "").startswith(today):
-            result = JobResult(video, "skip", "download request was already reserved today; waiting for next UTC day")
+            result = JobResult(video, "skip", "download request was already reserved today; waiting for next UTC day",
+                               reason=REASON_QUOTA)
             results.append(result)
             emit(index, "SKIP", video, result.detail)
             continue
 
         if ledger["download_requests_reserved"] >= cfg.daily_cap:
             deferred_remaining = total - index + 1
+            deferred_videos = list(videos[index - 1:])
             log(
                 f"QUOTA REACHED: {ledger['download_requests_reserved']}/{cfg.daily_cap} requests reserved. "
                 f"{deferred_remaining} movie(s) remain for the next UTC day.",
@@ -1300,7 +1330,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             set_movie_status(record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1)
             ledger["errors"] += 1
             persist_state(state, cfg.log_file)
-            result = JobResult(video, "error", str(exc))
+            result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
             results.append(result)
             emit(index, "ERROR", video, str(exc))
             continue
@@ -1314,7 +1344,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                                  attempts=int(record.get("attempts", 0) or 0) + 1)
                 ledger["no_match"] += 1
                 persist_state(state, cfg.log_file)
-                result = JobResult(video, "skip", detail)
+                result = JobResult(video, "skip", detail, reason=REASON_NO_MATCH)
                 results.append(result)
                 emit(index, "NO MATCH", video, detail)
                 continue
@@ -1325,7 +1355,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                                  attempts=int(record.get("attempts", 0) or 0) + 1)
                 ledger["identity_review"] += 1
                 persist_state(state, cfg.log_file)
-                result = JobResult(video, "review", detail)
+                result = JobResult(video, "review", detail, reason=REASON_REVIEW)
                 results.append(result)
                 emit(index, "REVIEW", video, detail)
                 continue
@@ -1337,7 +1367,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 set_movie_status(record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1)
                 ledger["errors"] += 1
                 persist_state(state, cfg.log_file)
-                result = JobResult(video, "error", str(exc))
+                result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
                 results.append(result)
                 emit(index, "ERROR", video, str(exc))
                 continue
@@ -1347,7 +1377,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                                  attempts=int(record.get("attempts", 0) or 0) + 1)
                 ledger["identity_review"] += 1
                 persist_state(state, cfg.log_file)
-                result = JobResult(video, "review", detail)
+                result = JobResult(video, "review", detail, reason=REASON_REVIEW)
                 results.append(result)
                 emit(index, "REVIEW", video, detail)
                 continue
@@ -1357,7 +1387,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         note = (f"method={selection_method}; id={pick.file_id}; trusted={'yes' if pick.trusted else 'no'}; "
                 f"rating={pick.rating:g}/{pick.votes}; {selection_reason}; {pick.release or 'unnamed release'}")
         if cfg.dry_run:
-            result = JobResult(video, "dry-run", note, dest)
+            result = JobResult(video, "dry-run", note, dest, reason=REASON_DRY_RUN)
             results.append(result)
             emit(index, "WOULD GET", video, note)
             continue
@@ -1375,7 +1405,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         except ConcurrentSidecarError as exc:
             set_movie_status(record, "have", str(exc), sidecar=str(dest))
             ledger["already_have"] += 1
-            result = JobResult(video, "have", str(exc), dest)
+            result = JobResult(video, "have", str(exc), dest, reason=REASON_COVERED)
             results.append(result)
             emit(index, "HAVE", video, str(exc))
         except (RuntimeError, ValueError) as exc:
@@ -1384,13 +1414,13 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             # corrupt provider payload must not abort the rest of the library.
             set_movie_status(record, "error", str(exc))
             ledger["errors"] += 1
-            result = JobResult(video, "error", str(exc))
+            result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
             results.append(result)
             emit(index, "ERROR", video, str(exc))
         else:
             set_movie_status(record, "downloaded", note, sidecar=str(dest))
             ledger["successful_downloads"] += 1
-            result = JobResult(video, "download", note, dest)
+            result = JobResult(video, "download", note, dest, reason=REASON_DOWNLOADED)
             results.append(result)
             emit(index, "SAVED", video, dest.name)
         persist_state(state, cfg.log_file)
@@ -1404,60 +1434,274 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         "deferred_remaining": deferred_remaining,
         "ledger_log": str(cfg.log_file),
         "movies_discovered": total,
+        # Which movies, not just how many: the report has to be able to name
+        # what was never reached when the UTC cap cut the batch short.
+        "deferred_videos": deferred_videos,
     }
     return results, summary
 
 
-def write_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[str, Any]) -> None:
-    counts: dict[str, int] = {}
-    identity_reviews = 0
+@dataclass(frozen=True)
+class NeedsBucket:
+    """One reason a movie still has no usable external English SRT.
+
+    ``order`` is implicit in the tuple order of :data:`NEEDS_SUBTITLE_BUCKETS`:
+    the cheapest, most certain fix comes first, so the top of the report is
+    always the thing to do next.
+    """
+
+    reason: str
+    title: str
+    quick: str
+    fix: str
+
+
+NEEDS_SUBTITLE_BUCKETS: tuple[NeedsBucket, ...] = (
+    NeedsBucket(
+        REASON_SIDECAR_UNUSABLE,
+        "SIDECAR EXISTS BUT IS UNUSABLE",
+        "delete the file, then re-run",
+        "Delete the named file, then re-run this tool. Nothing replaces a sidecar it "
+        "believes is already present, so a corrupt file blocks a good download forever.",
+    ),
+    NeedsBucket(
+        REASON_SIDECAR_NAME,
+        "SIDECAR NAME IS NOT CANONICAL",
+        f"rename it to <movie>{EXTERNAL_SRT_SUFFIX}, or delete it",
+        f"Rename the file to \"<movie>{EXTERNAL_SRT_SUFFIX}\" (or delete it) and re-run. "
+        "Jellyfin and Plex only direct play that exact name, and this tool will not "
+        "download a second copy over a subtitle that is already there.",
+    ),
+    NeedsBucket(
+        REASON_LAYOUT,
+        "LIBRARY LAYOUT MUST BE FIXED FIRST",
+        "run movie_standardizer.py on that folder",
+        "Each movie must be one MKV in a folder of the same name: "
+        "\"Title (Year)/Title (Year).mkv\". Run movie_standardizer.py, or fix the "
+        "folder by hand, and this movie will be picked up on the next run.",
+    ),
+    NeedsBucket(
+        REASON_REVIEW,
+        "HELD FOR MANUAL REVIEW",
+        "inspect the title/year candidate yourself",
+        "The exact moviehash missed and only a title/year match was found, so the "
+        "download was deliberately not made. Inspect the candidate, then either place "
+        "the subtitle yourself or re-run with --retry-no-match to accept the match.",
+    ),
+    NeedsBucket(
+        REASON_NO_MATCH,
+        "NO MATCHING SUBTITLE ON OPENSUBTITLES",
+        "re-run on a later day, or add the SRT by hand",
+        "No English, human-authored SRT matched this file's moviehash. The provider "
+        "catalogue grows every day, so a later run often succeeds; otherwise add the "
+        "subtitle yourself.",
+    ),
+    NeedsBucket(
+        REASON_QUOTA,
+        "DEFERRED TO THE NEXT UTC DAY",
+        "nothing to fix - re-run after the UTC day rolls over",
+        "The daily OpenSubtitles request cap was reached, so these movies were not "
+        "searched. Re-run after the UTC day rolls over; no request is wasted.",
+    ),
+    NeedsBucket(
+        REASON_ERROR,
+        "ERRORS",
+        "read the log entry for each one",
+        "Something failed while reading the movie or talking to the provider. The log "
+        "carries the exact error; fix the cause and re-run.",
+    ),
+)
+
+DEFERRED_NOT_SCANNED = "never scanned: the UTC request cap was reached before this movie"
+
+
+def movie_label(video: Path, library: Path) -> str:
+    """The movie's folder, relative to the library.
+
+    The layout contract is ``Title (Year)/Title (Year).mkv``, so the folder
+    already names the movie; repeating the ``.mkv`` beside it only made every
+    line longer without saying anything new.
+    """
+    if video.parent != library:
+        return relative_text(video.parent, library)
+    return relative_text(video, library)
+
+
+def group_results(
+    results: Sequence[JobResult], summary: dict[str, Any]
+) -> tuple[dict[str, list[tuple[Path, str]]], list[JobResult], list[JobResult], list[JobResult]]:
+    """Split one run into (needs buckets, covered, downloaded, dry-run).
+
+    Movies the quota cut off before they were scanned join the quota bucket so
+    the report names them instead of only reporting a count.
+    """
+    buckets: dict[str, list[tuple[Path, str]]] = {bucket.reason: [] for bucket in NEEDS_SUBTITLE_BUCKETS}
+    covered: list[JobResult] = []
+    downloaded: list[JobResult] = []
+    dry_run: list[JobResult] = []
     for result in results:
-        counts[result.status] = counts.get(result.status, 0) + 1
-        if result.status == "review" and (
-            "identity fallback" in result.detail.casefold()
-            or "previous identity fallback" in result.detail.casefold()
-            or "no strict hash match" in result.detail.casefold()
-        ):
-            identity_reviews += 1
-    sidecar_reviews = counts.get("review", 0) - identity_reviews
-    layout_skips = sum(
-        1 for result in results
-        if result.status == "skip" and result.detail.casefold().startswith("noncanonical layout:")
-    )
-    strict_skips = counts.get("skip", 0) - layout_skips
-    lines = [
-        "=" * 78,
+        if result.reason == REASON_COVERED:
+            covered.append(result)
+        elif result.reason == REASON_DOWNLOADED:
+            downloaded.append(result)
+        elif result.reason == REASON_DRY_RUN:
+            dry_run.append(result)
+        elif result.reason in buckets:
+            buckets[result.reason].append((result.video, result.detail))
+        else:  # a reason nobody knows about must still be visible, not dropped
+            buckets.setdefault(REASON_ERROR, []).append((result.video, result.detail or result.status))
+    for video in summary.get("deferred_videos") or ():
+        buckets[REASON_QUOTA].append((Path(video), DEFERRED_NOT_SCANNED))
+    for items in buckets.values():
+        items.sort(key=lambda item: str(item[0]).casefold())
+    covered.sort(key=lambda item: str(item.video).casefold())
+    downloaded.sort(key=lambda item: str(item.video).casefold())
+    dry_run.sort(key=lambda item: str(item.video).casefold())
+    return buckets, covered, downloaded, dry_run
+
+
+def build_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[str, Any]) -> str:
+    """Render the whole run as one report a human can act on in ten seconds.
+
+    The two questions this report exists to answer come first and in full:
+    which movies still need a subtitle, and which already have their external
+    ``.eng.srt``.
+    """
+    buckets, covered, downloaded, dry_run = group_results(results, summary)
+    needs = sum(len(items) for items in buckets.values())
+    total = int(summary.get("movies_discovered") or len(results))
+    reserved = int(summary.get("download_requests_reserved") or 0)
+    cap = int(summary.get("daily_cap") or 0)
+    remaining_quota = max(0, cap - reserved)
+
+    report = Report(
         "JELLYFIN DAILY SUBTITLE QUEUE REPORT",
-        f"Generated UTC         : {utc_timestamp()}",
-        f"Library               : {cfg.library}",
-        f"UTC quota day         : {summary['utc_day']}",
-        f"Request reservations  : {summary['download_requests_reserved']}/{summary['daily_cap']}",
-        f"Successful downloads  : {summary['successful_downloads']}",
-        f"Quota reached         : {'yes' if summary['quota_reached'] else 'no'}",
-        "Policy                : English human-authored UTF-8 SRT only; exact moviehash first" + (
-            "; conservative title/year fallback enabled" if cfg.identity_fallback else "; no identity fallback"
-        ),
-        "=" * 78,
-        f"Already covered       : {counts.get('have', 0)}",
-        f"Downloaded            : {counts.get('download', 0)}",
-        f"No strict match       : {strict_skips}",
-        f"Layout skipped        : {layout_skips}",
-        f"Identity review held  : {identity_reviews}",
-        f"Deferred by quota     : {summary.get('deferred_remaining', 0)}",
-        f"Manual sidecar review : {sidecar_reviews}",
-        f"Errors                : {counts.get('error', 0)}",
-        f"Dry-run candidates    : {counts.get('dry-run', 0)}",
-        "-" * 78,
+        f"One validated external English {EXTERNAL_SRT_SUFFIX} beside every movie "
+        "\u00b7 exact OpenSubtitles moviehash match first",
+    )
+    report.metas([
+        ("Generated", f"{utc_timestamp()} (UTC)"),
+        ("Library", cfg.library),
+        ("Quota", f"{summary['utc_day']}  \u00b7  {reserved} of {cap} download requests reserved"
+                  f"  \u00b7  {remaining_quota} left today"),
+        ("Downloads", f"{summary.get('successful_downloads', 0)} successful this run"),
+        ("Policy", "English human-authored UTF-8 SRT only  \u00b7  exact moviehash first  \u00b7  "
+                   + ("conservative title/year fallback enabled" if cfg.identity_fallback
+                      else "no title/year fallback")),
+        ("Ledger", cfg.log_file or "(none)"),
+    ])
+
+    rows: list[tuple[object, str, str]] = [
+        (len(covered), "Already have .eng.srt", "validated sidecar beside the movie"),
+        (len(downloaded), "Downloaded this run", f"written as <movie>{EXTERNAL_SRT_SUFFIX}"),
     ]
-    for result in results:
-        lines.append(f"[{result.status.upper():8}] {relative_text(result.video, cfg.library)}")
-        lines.append(f"           {result.detail}")
-    lines.extend(["=" * 78, f"Durable quota/retry ledger: {cfg.log_file}", "=" * 78, ""])
-    atomic_write_text(cfg.report_file, "\n".join(lines), replace=True)
-    print("\n".join(lines), flush=True)
+    if dry_run or cfg.dry_run:
+        rows.append((len(dry_run), "Dry-run candidates", "no files were written"))
+    rows.append((needs, "NEED A SUBTITLE", "action required \u00b7 every one is listed below"))
+    rows.append((total, "Movies in the library", "every folder holding an eligible MKV"))
+    report.blank()
+    report.scorecard(rows)
+
+    first_action = next(
+        (bucket for bucket in NEEDS_SUBTITLE_BUCKETS if buckets.get(bucket.reason)), None
+    )
+    if first_action is not None:
+        count = len(buckets[first_action.reason])
+        report.paragraph(
+            f"Start here: {count} movie(s) in \"{first_action.title}\" \u00b7 {first_action.quick}."
+        )
+    elif needs == 0:
+        report.paragraph(
+            f"Nothing to do: every one of the {total} movie(s) in the library has a "
+            f"validated external English {EXTERNAL_SRT_SUFFIX}."
+        )
+
+    # ---- what still needs a subtitle -------------------------------------
+    report.section(
+        "MOVIES THAT NEED A SUBTITLE",
+        count=needs,
+        total=total,
+        intro=(
+            "Jellyfin and Plex direct play an external subtitle only when it is named exactly "
+            f"\"<movie folder>{EXTERNAL_SRT_SUFFIX}\" and sits beside the MKV. Every movie below is "
+            "missing one. Groups are ordered cheapest fix first."
+        ),
+    )
+    if needs == 0:
+        report.paragraph("None. Every movie already has a validated external English subtitle.")
+    else:
+        for bucket in NEEDS_SUBTITLE_BUCKETS:
+            items = buckets.get(bucket.reason) or []
+            if not items:
+                continue
+            report.subsection(bucket.title, count=len(items))
+            report.paragraph(bucket.fix)
+            report.blank()
+            report.entries(
+                [(movie_label(video, cfg.library), detail) for video, detail in items],
+            )
+
+    # ---- what this run changed -------------------------------------------
+    if downloaded:
+        report.section(
+            "DOWNLOADED DURING THIS RUN",
+            count=len(downloaded),
+            total=total,
+            intro="Each of these was matched, validated and written this run.",
+        )
+        report.entries(
+            [{"text": movie_label(result.video, cfg.library),
+              "detail": (result.dest.name if result.dest else "")}
+             for result in downloaded],
+            detail_column=48,
+        )
+    if dry_run:
+        report.section(
+            "DRY-RUN CANDIDATES (NOTHING WAS WRITTEN)",
+            count=len(dry_run),
+            total=total,
+            intro="Re-run without --dry-run to actually download these.",
+        )
+        report.entries(
+            [{"text": movie_label(result.video, cfg.library), "detail": result.detail}
+             for result in dry_run],
+        )
+
+    # ---- what is already covered -----------------------------------------
+    report.section(
+        f"MOVIES THAT ALREADY HAVE AN EXTERNAL {EXTERNAL_SRT_SUFFIX}",
+        count=len(covered),
+        total=total,
+        intro=(
+            "Every movie here has a validated sidecar with the exact canonical name, so "
+            "Jellyfin and Plex will direct play it. No action needed."
+        ),
+    )
+    if not covered:
+        report.paragraph("None yet.")
+    else:
+        report.entries(
+            [{"text": movie_label(result.video, cfg.library),
+              "detail": (result.dest.name if result.dest else f"<movie>{EXTERNAL_SRT_SUFFIX}")}
+             for result in covered],
+            detail_column=48,
+        )
+
+    report.footer([
+        f"Durable quota and retry ledger  {cfg.log_file or '(none)'}",
+        f"This report  {cfg.report_file}",
+        "Re-running is always safe: covered movies are skipped without spending a request, and "
+        "the ledger keeps every run inside the provider's UTC cap.",
+    ])
+    return report.render()
+
+
+def write_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[str, Any]) -> None:
+    """Publish the report: written atomically, then echoed to the console."""
+    text = build_report(results, cfg, summary)
+    atomic_write_text(cfg.report_file, text, replace=True)
+    print_text(text)
     log(f"Report written: {cfg.report_file}", log_file=cfg.log_file)
-
-
 
 
 # =============================================================================
@@ -1578,15 +1822,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             for error in errors:
                 print(f"Configuration error: {error}", file=sys.stderr)
             return 2
-        mode = "DRY-RUN" if cfg.dry_run else "LIVE"
-        print("=" * 78)
-        print("JELLYFIN EXTERNAL ENGLISH SRT FETCHER")
-        print(f"Mode: {mode} | Library: {cfg.library}")
-        print(f"Policy: English human-authored UTF-8 SRT; hash first; "
-              f"identity fallback={'on' if cfg.identity_fallback else 'off'}")
-        print(f"OpenSubtitles mode: {cfg.auth_mode} | UTC request cap: {cfg.daily_cap} | Ledger: {cfg.log_file}")
-        print(f"Report: {cfg.report_file} | Log: {cfg.log_file}")
-        print("=" * 78, flush=True)
+        mode = "DRY-RUN (nothing will be written)" if cfg.dry_run else "LIVE"
+        print_text(report_banner(
+            "JELLYFIN EXTERNAL ENGLISH SRT FETCHER",
+            f"One validated external English {EXTERNAL_SRT_SUFFIX} per movie",
+            [
+                ("Mode", mode),
+                ("Library", cfg.library),
+                ("Policy", "English human-authored UTF-8 SRT; exact moviehash first; "
+                           f"title/year fallback {'on' if cfg.identity_fallback else 'off'}"),
+                ("Provider", f"OpenSubtitles {cfg.auth_mode}; UTC request cap {cfg.daily_cap}"),
+                ("Ledger", cfg.log_file),
+                ("Report", cfg.report_file),
+            ],
+        ))
         with CoordinationLock(cfg.library, timeout_seconds=cfg.lock_timeout_seconds):
             results, summary = queue_run(cfg)
             write_report(results, cfg, summary)

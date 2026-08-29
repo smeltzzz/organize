@@ -447,5 +447,90 @@ class PromoteLegacySidecarTests(unittest.TestCase):
         self.assertTrue((self.root / f"Film (2002){LEGACY_EXTERNAL_SRT_SUFFIX}").exists())
 
 
+class ReportRendererTests(unittest.TestCase):
+    """The shared renderer is what makes five tools' reports read alike.
+
+    These pin the invariants every tool's report depends on: a boxed header,
+    a scorecard whose counts sit in one right-aligned column, banners that
+    delimit sections, and nothing that ever overflows the report width.
+    """
+
+    WIDTH = common.REPORT_WIDTH
+
+    def test_header_is_a_box_the_exact_report_width(self) -> None:
+        report = common.Report("TITLE", "subtitle")
+        for line in report.render_header().splitlines():
+            self.assertEqual(len(line), self.WIDTH)
+        self.assertTrue(report.render_header().startswith("\u2554"))
+        self.assertTrue(report.render_header().endswith("\u255d"))
+
+    def test_long_metadata_wraps_inside_the_box(self) -> None:
+        report = common.Report("T")
+        report.meta("Ledger", "E:\\reports\\logs\\" + "x" * 200)
+        for line in report.render_header().splitlines():
+            self.assertEqual(len(line), self.WIDTH)
+
+    def test_scorecard_counts_share_one_right_aligned_column(self) -> None:
+        report = common.Report("T")
+        report.scorecard([(3, "Needs a subtitle", "fix these"), (12, "Covered", "")])
+        lines = [line for line in report.render().splitlines() if "Covered" in line or "Needs" in line]
+        self.assertEqual(len(lines), 2)
+        columns = {line.index("   ") for line in lines}
+        self.assertEqual(len(columns), 1, lines)
+
+    def test_no_rendered_line_exceeds_the_report_width(self) -> None:
+        report = common.Report("T", "s")
+        report.meta("Library", "E:\\" + "very-long-segment\\" * 12)
+        report.scorecard([(1, "A very long scorecard label indeed", "a hint that is also long")])
+        report.section("A SECTION TITLE", count=1, total=2, intro="word " * 200)
+        report.subsection("A GROUP", count=1)
+        report.entry("x" * 300, detail="y " * 200, ordinal=1)
+        report.entry("short", detail="d", detail_column=40)
+        report.table(["One", "Two"], [["a" * 200, "b" * 200]])
+        report.footer(["z " * 200])
+        for line in report.render().splitlines():
+            self.assertLessEqual(len(line), self.WIDTH, line)
+
+    def test_a_partial_run_never_reports_more_items_than_the_total(self) -> None:
+        report = common.Report("T")
+        report.section("GROUP", count=5, total=3)
+        self.assertIn(" 5 ", report.render())
+        self.assertNotIn("5 of 3", report.render())
+
+    def test_entries_are_separated_by_a_blank_line(self) -> None:
+        report = common.Report("T")
+        report.entries([("first", "one"), ("second", "two")])
+        body = report.render().splitlines()
+        first = next(i for i, line in enumerate(body) if "first" in line)
+        second = next(i for i, line in enumerate(body) if "second" in line)
+        self.assertEqual(body[second - 1].strip(), "")
+        self.assertGreater(second - first, 2)
+
+    def test_table_columns_are_clipped_not_overflowed(self) -> None:
+        report = common.Report("T", width=common.REPORT_MIN_WIDTH)
+        report.table(["Folder", "Detail"], [["A" * 100, "B" * 100], ["short", "short"]])
+        for line in report.render().splitlines():
+            self.assertLessEqual(len(line), common.REPORT_MIN_WIDTH, line)
+
+    def test_report_always_ends_with_exactly_one_newline(self) -> None:
+        report = common.Report("T")
+        report.paragraph("hello")
+        self.assertTrue(report.render().endswith("hello\n"))
+
+    def test_banner_helper_renders_only_the_header(self) -> None:
+        banner = common.report_banner("TITLE", "subtitle", [("Library", "/lib")])
+        self.assertIn("TITLE", banner)
+        self.assertIn("/lib", banner)
+        self.assertTrue(banner.endswith("\u255d"))
+
+    def test_byte_and_duration_formatters(self) -> None:
+        self.assertEqual(common.format_bytes(0), "0 B")
+        self.assertEqual(common.format_bytes(2048), "2.00 KiB")
+        self.assertEqual(common.format_bytes(5 * 1024 ** 3), "5.00 GiB")
+        self.assertEqual(common.format_duration(None), "-")
+        self.assertEqual(common.format_duration(65), "1:05")
+        self.assertEqual(common.format_duration(3725), "1:02:05")
+
+
 if __name__ == "__main__":
     unittest.main()

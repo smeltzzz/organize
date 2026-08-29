@@ -107,12 +107,14 @@ from common import (
     EXTERNAL_SRT_SUFFIX,
     CoordinationLock,
     LockTimeoutError,
+    Report,
     atomic_write_text,
     decode_srt_bytes,
     normalize_srt_newlines,
     path_is_within,
     path_norm,
     paths_equal,
+    print_text,
 )
 
 # =====================================================================
@@ -599,47 +601,129 @@ def write_manifest() -> None:
         LOG.error("Could not write manifest %s: %s", CFG.manifest_file, exc)
 
 
-def write_report() -> None:
-    """Write a human-readable run report (and echo it) for the terminal/user."""
-    width = 70
-    lines = [
-        "=" * width,
-        "MOVIE STANDARDIZER REPORT",
-        f"Generated            : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"Mode                 : {'DRY-RUN (no files written)' if CFG.dry_run else 'LIVE (hardlinks created)'}",
-        f"Source (torrents)    : {CFG.source_dir}",
-        f"Target library       : {CFG.target_dir}",
-        "=" * width,
-        f"Organized (placed)   : {RUN_SUMMARY.completed}",
-        f"Skipped              : {RUN_SUMMARY.skipped}",
-        f"Reported (no change) : {RUN_SUMMARY.reported}",
-        f"Quarantined          : {RUN_SUMMARY.quarantined}",
-        f"Deleted              : {RUN_SUMMARY.deleted}",
-        f"Failed               : {RUN_SUMMARY.failed}",
-        "-" * width,
-    ]
-    for ev in RUN_EVENTS:
-        where = ev.get("destination") or ev.get("source") or ""
-        reason = ev.get("reason") or ""
-        detail = where + (f"  ({reason})" if reason else "")
-        lines.append(f"[{ev['status'].upper():9}] {ev['action']}: {detail}".rstrip())
+def build_report() -> str:
+    """Render the run report: what needs a decision first, then the full ledger.
+
+    The one thing this report has to make unmissable is the set of items still
+    sitting in the torrent folder, because nothing else will ever move them.
+    """
     declined = [ev for ev in RUN_EVENTS if ev.get("action") == "left in source"]
-    if declined:
-        lines += [
-            "-" * width,
-            "ITEMS LEFT IN SOURCE (not organized; each needs a decision)",
-            "-" * width,
-        ]
-        for ev in declined:
-            lines.append(f"  {ev['source']}")
-            lines.append(f"      reason: {ev['reason']}")
-        lines.append(
-            "  These stay in the torrent folder indefinitely unless acted on:"
-            " lower --min-size, place the release yourself, or delete it."
+    placed = [ev for ev in RUN_EVENTS if ev.get("status") == "completed"]
+    failed = [ev for ev in RUN_EVENTS if ev.get("status") == "failed"]
+    # RUN_SUMMARY.attempted counts top-level source items that reached the
+    # placement stage, so it is not a denominator for anything here: every
+    # section is a share of the recorded outcomes instead.
+    outcomes = len(RUN_EVENTS)
+
+    report = Report(
+        "MOVIE STANDARDIZER REPORT",
+        "Scene release names parsed into canonical \"Title (Year)/Title (Year).mkv\" "
+        "\u00b7 hardlinked, never copied",
+    )
+    report.metas([
+        ("Generated", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")),
+        ("Mode", "DRY-RUN (no files written)" if CFG.dry_run else "LIVE (hardlinks created)"),
+        ("Source (torrents)", CFG.source_dir),
+        ("Target library", CFG.target_dir),
+        ("Maintenance", CFG.maintenance_mode),
+    ])
+
+    rows: list[tuple[object, str, str]] = [
+        (RUN_SUMMARY.completed, "Organized (placed)", "hardlinked into the library"),
+        (RUN_SUMMARY.reported, "Reported (no change)", "already in place or a duplicate"),
+        (RUN_SUMMARY.skipped, "Left in source", "declined; needs a decision below"),
+        (RUN_SUMMARY.quarantined, "Quarantined", "moved outside the library"),
+        (RUN_SUMMARY.deleted, "Deleted", "removed by the maintenance policy"),
+        (RUN_SUMMARY.failed, "Failed", "an operation did not complete"),
+        (outcomes, "Outcomes recorded", "every event in the ledger below"),
+    ]
+    report.blank()
+    report.scorecard(rows)
+
+    if declined or failed:
+        report.paragraph(
+            f"Start here: {len(declined)} item(s) left in the torrent folder"
+            + (f" and {len(failed)} failure(s)" if failed else "")
+            + " \u00b7 each is listed below with its reason."
         )
-    lines += ["=" * width, ""]
-    text = "\n".join(lines)
-    print(text)
+    elif outcomes:
+        report.paragraph(
+            f"Nothing left behind: all {outcomes} recorded outcome(s) were placements, "
+            "duplicates already in the library, or deliberate reports."
+        )
+
+    if declined:
+        report.section(
+            "ITEMS LEFT IN SOURCE",
+            count=len(declined),
+            total=outcomes or None,
+            intro=(
+                "These stay in the torrent folder indefinitely unless acted on: lower "
+                "--min-size, place the release yourself, or delete it. Nothing is silently "
+                "lost and nothing here was deleted."
+            ),
+        )
+        report.entries(
+            [{"text": ev.get("source") or "(unknown)", "detail": ev.get("reason") or ""}
+             for ev in declined],
+        )
+    if failed:
+        report.section(
+            "FAILED OPERATIONS",
+            count=len(failed),
+            total=outcomes or None,
+            intro=(
+                "An operation did not complete. Nothing was half-written: every placement is "
+                "staged and swapped atomically."
+            ),
+        )
+        report.entries(
+            [{"text": ev.get("destination") or ev.get("source") or "(unknown)",
+              "detail": ev.get("reason") or ev.get("action") or ""}
+             for ev in failed],
+        )
+    if placed:
+        report.section(
+            "ORGANIZED INTO THE LIBRARY",
+            count=len(placed),
+            total=outcomes or None,
+            intro="Hardlinks share disk sectors with the seed, so this added no duplicate bytes.",
+        )
+        report.entries(
+            [{"text": ev.get("source") or "(unknown)",
+              "detail": ev.get("destination") or ""}
+             for ev in placed],
+        )
+
+    report.section(
+        "EVERY OUTCOME THIS RUN",
+        count=outcomes,
+        intro="The complete ledger, in the order it happened.",
+    )
+    if not RUN_EVENTS:
+        report.paragraph("No events recorded.")
+    else:
+        report.table(
+            ["Status", "Action", "Where", "Reason"],
+            [[ev.get("status", "").upper(),
+              ev.get("action", ""),
+              ev.get("destination") or ev.get("source") or "",
+              ev.get("reason") or ""]
+             for ev in RUN_EVENTS],
+            aligns="<<<<",
+        )
+
+    report.footer([
+        f"Log: {CFG.log_file or '(none)'}",
+        f"Report: {CFG.report_file or '(none)'}",
+    ])
+    return report.render()
+
+
+def write_report() -> None:
+    """Write the human-readable run report (and echo it) for the terminal/user."""
+    text = build_report()
+    print_text(text)
     if CFG.report_file:
         try:
             atomic_write_text(CFG.report_file, text)

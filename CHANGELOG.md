@@ -7,12 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Every report now shares one layout.** A new renderer in `common.py` (`Report`, `report_banner`, `print_text`) draws all six reports — `subtitle_fetcher.py`, `library_auditor.py`, `mkv_track_cleaner.py`, `movie_standardizer.py`, `10bit.py` and the `pipeline.py` summary — with the same boxed header, the same right-aligned scorecard, and the same titled sections. Each report leads with the counts, then a one-line "Start here:", then the groups ordered by how cheap the fix is, then the full inventory. Nothing overflows the page and no line carries trailing whitespace.
+- **`subtitle_fetcher.py`'s report answers the two questions you actually ask.** Movies are no longer dumped into one flat list tagged with a status word: every result now carries a machine-readable reason, so the report splits cleanly into **MOVIES THAT NEED A SUBTITLE** (grouped by the fix — unusable sidecar, misnamed sidecar, layout defect, held for review, no provider match, deferred by quota, error) and **MOVIES THAT ALREADY HAVE AN EXTERNAL `.eng.srt`** (every covered movie listed with its sidecar file name). Movies the UTC cap cut off before they were scanned are now *named* in the report instead of only counted.
+- **`library_auditor.py` leads with defects.** "Folders that need attention" now comes first, grouped by fix, with the full folder-by-folder inventory and the file-type table moved behind it.
+- **`10bit.py` leads with the queue.** The HandBrake queue and the two REVIEW groups come first; native-HDR and already-high-bit-depth movies are listed last, as confirmation that nothing should be touched.
+- **`mkv_track_cleaner.py` leads with what needs a decision** — errors, movies remuxed without a validated `.eng.srt` (moviehash now invalidated), hardlink-deferred movies and layout skips — before the per-movie remux detail.
+- **`movie_standardizer.py` leads with `ITEMS LEFT IN SOURCE`**, the only section where inaction silently leaves files in the torrent folder forever.
 - **Tool output no longer clutters the torrents root on Windows**: logs, reports, and probe-cache JSON now default to `E:\torrents\tools\ReportsAndLogs\<tool>\` (e.g. `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner.log`) instead of five folders at the root of `E:\torrents`. Existing hooks scheduled with direct tool paths pick this up automatically; anything using explicit `--log`/`--report`/`--cache` paths is unaffected.
 - **Foreign films with a validated `.eng.srt` are now cleaned** by `mkv_track_cleaner.py`: the best non-commentary audio of any language is kept, commentary/DVS is dropped, and every embedded subtitle is stripped so the external SRT is the sole subtitle option. Foreign films *without* a validated sidecar remain untouched.
 - **Canonical external subtitle suffix is now `.eng.srt`** (ISO 639-2/B) instead of `.en.srt`.
   `subtitle_fetcher.py` writes `.eng.srt`, `mkv_track_cleaner.py` requires it before stripping embeds,
   `library_auditor.py` and `movie_standardizer.py` treat it as the sole canonical sidecar name.
   A validated legacy `.en.srt` is automatically renamed to `.eng.srt` on the next fetcher, cleaner, or auditor run.
+
+### Added
+- **24 new report tests** (240 total): `tests/reporttext.py` parses the scorecard and sections back out of a rendered report, `tests/test_reports.py` builds one report per tool and asserts the shared contract, and `tests/test_common.py` covers the renderer itself (width invariants, wrapping, clipping, partial-run tallies).
 
 ## [3.1.0] - 2026-08-29
 

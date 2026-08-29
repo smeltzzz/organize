@@ -43,7 +43,15 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Sequence
 
-from common import MediaProbeCache, atomic_write_text, path_is_within, try_file_lock
+from common import (
+    MediaProbeCache,
+    Report,
+    atomic_write_text,
+    format_bytes,
+    format_duration,
+    path_is_within,
+    try_file_lock,
+)
 
 # =============================================================================
 # CONFIGURATION  (CLI flags override these)
@@ -687,127 +695,160 @@ def inspect_movie(
 
 
 def fmt_size(n: int) -> str:
-    if n <= 0:
-        return "—"
-    for unit, div in (("GiB", 1024 ** 3), ("MiB", 1024 ** 2)):
-        if n >= div:
-            return f"{n / div:.2f} {unit}"
-    return f"{n} B"
+    """Human file size, formatted the same way in every tool's report."""
+    return format_bytes(n)
 
 
 def fmt_dur(seconds: float | None) -> str:
-    if not seconds or seconds <= 0:
-        return "—"
-    s = int(round(seconds))
-    h, s = divmod(s, 3600)
-    m, s = divmod(s, 60)
-    if h:
-        return f"{h}:{m:02d}:{s:02d}"
-    return f"{m}:{s:02d}"
+    """Human duration, formatted the same way in every tool's report."""
+    return format_duration(seconds)
+
+
+@dataclass(frozen=True)
+class ActionGroup:
+    """One classification bucket as the report presents it.
+
+    ``order`` is the tuple order of :data:`ACTION_GROUPS`: the work to do comes
+    first, then the things a human must decide, then the categories that only
+    confirm nothing should be touched.
+    """
+
+    status: str
+    title: str
+    scorecard_label: str
+    scorecard_hint: str
+    action: str
+
+
+ACTION_GROUPS: tuple[ActionGroup, ...] = (
+    ActionGroup(
+        STATUS_QUEUE,
+        "QUEUE FOR HANDBRAKE (8-BIT SDR)",
+        "8-bit SDR (QUEUE)",
+        "re-encode these to 10-bit",
+        "Re-encode in HandBrake with H.265 (x265 / NVENC / QSV) 10-bit, or AV1 10-bit.",
+    ),
+    ActionGroup(
+        STATUS_REVIEW_8BIT_HDR,
+        "8-BIT TAGGED HDR (REVIEW)",
+        "8-bit tagged HDR (REVIEW)",
+        "never queue automatically",
+        "Inspect manually. These carry HDR metadata on 8-bit video, so dumping them "
+        "into the SDR queue would tone-map a film that was never mastered that way.",
+    ),
+    ActionGroup(
+        STATUS_REVIEW_UNKNOWN_DEPTH,
+        "UNKNOWN BIT DEPTH (REVIEW)",
+        "Unknown bit depth (REVIEW)",
+        "inspect the metadata",
+        "Bit depth could not be established with confidence. Read the evidence line "
+        "below each file before deciding anything.",
+    ),
+    ActionGroup(
+        STATUS_ERROR,
+        "UNREADABLE / ERRORS",
+        "Errors",
+        "ffprobe could not read them",
+        "ffprobe could not read these. Corrupt, incomplete, or an unsupported container.",
+    ),
+    ActionGroup(
+        STATUS_SKIP_HDR,
+        "NATIVE HDR (KEEP - DO NOT RE-ENCODE)",
+        "Native HDR (KEEP)",
+        "protected from tone-mapping",
+        "Keep the original. HandBrake tone-maps or strips HDR10 / HDR10+ / Dolby "
+        "Vision dynamic metadata unless you know exactly what you are doing.",
+    ),
+    ActionGroup(
+        STATUS_SKIP_SDR,
+        "HIGH BIT-DEPTH SDR (SKIP - NOTHING TO DO)",
+        "10/12/16-bit SDR (SKIP)",
+        "already high bit depth",
+        "Do nothing. Re-encoding an already high bit-depth file only loses quality.",
+    ),
+)
 
 
 def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) -> str:
-    groups = {
-        STATUS_QUEUE: [],
-        STATUS_SKIP_SDR: [],
-        STATUS_SKIP_HDR: [],
-        STATUS_REVIEW_8BIT_HDR: [],
-        STATUS_REVIEW_UNKNOWN_DEPTH: [],
-        STATUS_ERROR: [],
-    }
+    """Render the inspector report: what to re-encode first, what never to touch last."""
+    groups: dict[str, list[ProbeResult]] = {group.status: [] for group in ACTION_GROUPS}
     for item in results:
         groups.setdefault(item.status, []).append(item)
     for bucket in groups.values():
-        bucket.sort(key=lambda r: r.path.casefold())
+        bucket.sort(key=lambda r: Path(r.path).name.casefold())
 
-    q = groups[STATUS_QUEUE]
-    sdr = groups[STATUS_SKIP_SDR]
-    hdr = groups[STATUS_SKIP_HDR]
-    rev_hdr = groups[STATUS_REVIEW_8BIT_HDR]
-    rev_unknown = groups[STATUS_REVIEW_UNKNOWN_DEPTH]
-    review = rev_hdr + rev_unknown
-    err = groups[STATUS_ERROR]
+    report = Report(
+        "HANDBRAKE WORKFLOW ACTION REPORT",
+        "Bit-depth and HDR classification for every movie \u00b7 fail-closed: anything "
+        "uncertain is never queued",
+    )
+    report.metas([
+        ("Generated", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")),
+        ("Target directory", cfg.source_dir),
+        ("Movies inspected", len(results)),
+        ("Elapsed", f"{elapsed:.1f}s"),
+        ("Report", cfg.report_file),
+    ])
 
-    lines: list[str] = []
-    a = lines.append
-    a("=" * 79)
-    a("HANDBRAKE WORKFLOW ACTION REPORT")
-    a(f"Generated                 : {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    a(f"Target directory          : {cfg.source_dir}")
-    a(f"Movies inspected          : {len(results)}")
-    a(f"Elapsed                   : {elapsed:.1f}s")
-    a(f"8-bit SDR (QUEUE)         : {len(q)}   ← HandBrake these")
-    a(f"10/12/16-bit SDR (SKIP)   : {len(sdr)}")
-    a(f"Native HDR (KEEP)         : {len(hdr)}")
-    a(f"8-bit tagged HDR (REVIEW) : {len(rev_hdr)}")
-    a(f"Unknown bit depth (REVIEW): {len(rev_unknown)}")
-    a(f"Total review required     : {len(review)}")
-    a(f"Errors                    : {len(err)}")
-    a("=" * 79)
-    a("")
-    a("Rules:")
-    a("  • QUEUE   = 8-bit SDR. Re-encode H.265 10-bit (or AV1 10-bit) in HandBrake.")
-    a("  • SKIP    = already 10-bit+ SDR. Re-encoding only loses quality.")
-    a("  • KEEP    = HDR10 / HDR10+ / Dolby Vision / HLG. HandBrake will tone-map")
-    a("              or strip dynamic metadata unless you know exactly what you are doing.")
-    a("  • REVIEW  = HDR-tagged 8-bit or metadata-uncertain. Never queue automatically.")
-    a("  • BT.2020 primaries without PQ/HLG is wide-gamut SDR, not HDR.")
-    a("")
+    rows: list[tuple[object, str, str]] = [
+        (len(groups[group.status]), group.scorecard_label, group.scorecard_hint)
+        for group in ACTION_GROUPS
+    ]
+    rows.append((len(results), "Movies inspected", "every movie-sized video found"))
+    report.blank()
+    report.scorecard(rows)
 
-    def dump(title: str, action: str, items: list[ProbeResult]) -> None:
-        a("=" * 79)
-        a(f"{title}  ({len(items)})")
-        a(f"Action: {action}")
-        a("=" * 79)
+    queue = groups[STATUS_QUEUE]
+    review = groups[STATUS_REVIEW_8BIT_HDR] + groups[STATUS_REVIEW_UNKNOWN_DEPTH]
+    if queue or review:
+        report.paragraph(
+            f"Start here: {len(queue)} movie(s) to re-encode"
+            + (f" and {len(review)} needing a human decision" if review else "")
+            + " \u00b7 both groups are listed first, below."
+        )
+    else:
+        report.paragraph(
+            "Nothing to queue: no 8-bit SDR movie was found, and nothing is uncertain "
+            "enough to need a decision."
+        )
+
+    for group in ACTION_GROUPS:
+        items = groups.get(group.status) or []
+        report.section(
+            group.title,
+            count=len(items),
+            total=len(results),
+            intro=f"Action: {group.action}",
+        )
         if not items:
-            a("None found.")
-            a("")
-            return
-        for idx, item in enumerate(items, 1):
-            a(f"{idx:4d}. {Path(item.path).name}")
-            a(f"      Path : {item.path}")
-            a(f"      Info : {item.info}")
-            extra = f"      Size : {fmt_size(item.size_bytes)}    Duration : {fmt_dur(item.duration_sec)}"
-            a(extra)
+            report.paragraph("None found.")
+            continue
+        for position, item in enumerate(items, start=1):
+            fields: list[tuple[str, str]] = [
+                ("Path", item.path),
+                ("Info", item.info),
+                ("Size", f"{fmt_size(item.size_bytes)}   \u00b7   duration {fmt_dur(item.duration_sec)}"),
+            ]
             if item.hdr_flavors:
-                a(f"      HDR  : {', '.join(item.hdr_flavors)}")
+                fields.append(("HDR", ", ".join(item.hdr_flavors)))
             if item.hdr_evidence:
-                a(f"      HDR evidence   : {'; '.join(item.hdr_evidence)}")
+                fields.append(("HDR evidence", "; ".join(item.hdr_evidence)))
             if item.bit_depth_evidence:
-                a(f"      Depth evidence : {item.bit_depth_evidence}")
-            a("")
+                fields.append(("Depth evidence", item.bit_depth_evidence))
+            if item.error:
+                fields.append(("Error", item.error))
+            report.entry(Path(item.path).name, ordinal=position, fields=fields)
 
-    dump(
-        CATEGORY_LABELS[STATUS_QUEUE],
-        "Re-encode in HandBrake → H.265 (x265 / NVEnc / QSV) 10-bit, or AV1 10-bit.",
-        q,
-    )
-    dump(
-        CATEGORY_LABELS[STATUS_SKIP_SDR],
-        "Do nothing. Already high bit-depth SDR.",
-        sdr,
-    )
-    dump(
-        CATEGORY_LABELS[STATUS_SKIP_HDR],
-        "Keep the original. Do not run a default HandBrake preset.",
-        hdr,
-    )
-    dump(
-        CATEGORY_LABELS[STATUS_REVIEW_8BIT_HDR],
-        "Inspect manually. Do not dump these into the 8-bit SDR queue.",
-        rev_hdr,
-    )
-    dump(
-        CATEGORY_LABELS[STATUS_REVIEW_UNKNOWN_DEPTH],
-        "Inspect metadata manually. Bit depth was not established with confidence.",
-        rev_unknown,
-    )
-    dump(
-        CATEGORY_LABELS[STATUS_ERROR],
-        "ffprobe could not read these. Corrupt, incomplete, or unsupported.",
-        err,
-    )
-    return "\n".join(lines) + "\n"
+    report.footer([
+        "QUEUE = 8-bit SDR. Re-encode to H.265 10-bit (or AV1 10-bit) in HandBrake.",
+        "SKIP = already 10-bit or better SDR. Re-encoding only loses quality.",
+        "KEEP = HDR10 / HDR10+ / Dolby Vision / HLG. HandBrake tone-maps or strips "
+        "dynamic metadata.",
+        "REVIEW = HDR-tagged 8-bit, or metadata too uncertain to trust. Never queued "
+        "automatically.",
+        "BT.2020 primaries without PQ or HLG is wide-gamut SDR, not HDR.",
+    ])
+    return report.render()
 
 
 def write_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) -> bool:

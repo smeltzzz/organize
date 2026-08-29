@@ -77,6 +77,7 @@ from common import (
     EXTERNAL_SRT_SUFFIX,
     CoordinationLock,
     MediaProbeCache,
+    Report,
     decode_srt_bytes,
     exact_external_english_srt_path,
     normalize_srt_newlines,
@@ -2361,158 +2362,237 @@ def generate_and_save_report(
     stats: Dict[str, Any], dry_run: bool, report_file: str,
     log_file_path: Optional[str] = LOG_FILE, meta: Optional[Dict[str, Any]] = None,
 ) -> str:
+    """Render and publish the run report.
+
+    Layout follows the shared renderer so this reads like every other report in
+    the toolkit: scorecard first, then anything that needs a decision, then the
+    per-movie detail, then the inventory of what was left alone.
+    """
     if _console is not None:
         _console.finish_progress()
     end_time = datetime.now()
     duration = end_time - stats["start_time"]
     dur_str = str(duration).split(".")[0]
     meta = meta or {}
-    lines = [
-        "=" * 85,
-        "                     JELLYFIN MKV TRACK CLEANUP REPORT",
-        "=" * 85,
-        f"Execution Mode  : {'DRY-RUN (Simulation - No files modified)' if dry_run else 'LIVE RUN (Modifications Applied)'}",
+
+    cleaned: List[Dict[str, Any]] = list(stats.get("cleaned") or [])
+    already_clean: List[Any] = list(stats.get("already_clean") or [])
+    remux_without_srt: List[Any] = list(stats.get("remux_without_srt") or [])
+    deferred: List[Any] = list(stats.get("deferred_hardlinked") or [])
+    skipped_english: List[Any] = list(stats.get("skipped_no_english") or [])
+    skipped_layout: List[Any] = list(stats.get("skipped_layout") or [])
+    errors: List[Dict[str, Any]] = list(stats.get("errors") or [])
+    attention = len(remux_without_srt) + len(deferred) + len(skipped_layout) + len(errors)
+    total = int(stats.get("total_scanned") or 0)
+
+    report = Report(
+        "JELLYFIN MKV TRACK CLEANUP REPORT",
+        "Lossless mkvmerge remux \u00b7 commentary, dubs and embedded bitmaps removed; "
+        "video bytes never touched",
+    )
+    header: List[Tuple[str, Any]] = [
+        ("Mode", "DRY-RUN (simulation, no files modified)" if dry_run else "LIVE RUN (changes applied)"),
     ]
     if meta.get("interrupted"):
-        lines.append("Run Status      : INTERRUPTED by user (partial results below)")
+        header.append(("Run status", "INTERRUPTED by user (partial results below)"))
     if meta.get("target_dir"):
-        lines.append(f"Target Directory: {meta['target_dir']}")
-    if meta.get("report_file"):
-        lines.append(f"Report File     : {meta['report_file']}")
+        header.append(("Target", meta["target_dir"]))
     if meta.get("mkvmerge"):
-        lines.append(f"mkvmerge Binary : {meta['mkvmerge']}")
-    if meta.get("mkvmerge_version"):
-        lines.append(f"mkvmerge Version: {meta['mkvmerge_version']}")
+        version = f"  \u00b7  {meta['mkvmerge_version']}" if meta.get("mkvmerge_version") else ""
+        header.append(("mkvmerge", f"{meta['mkvmerge']}{version}"))
     if meta.get("audio_langs"):
-        lines.append(f"Audio Languages : {', '.join(sorted(meta['audio_langs']))}")
+        header.append(("Audio languages", ", ".join(sorted(meta["audio_langs"]))))
     if meta.get("sub_langs"):
-        lines.append(f"Subtitle Langs  : {', '.join(sorted(meta['sub_langs']))}")
+        header.append(("Subtitle languages", ", ".join(sorted(meta["sub_langs"]))))
     if "remove_commentary" in meta:
-        lines.append(f"Commentary / DVS Removal: {'Enabled (fixed policy)' if meta['remove_commentary'] else 'Disabled'}")
-    lines.append("Hardlinked Movies : Always deferred until qBittorrent removes the seeded source")
+        header.append(("Commentary / DVS", "removed (fixed policy)" if meta["remove_commentary"] else "kept"))
     if meta.get("external_srt_auto_preference"):
-        lines.append(
-            f"External English SRT: Validated exact {EXTERNAL_SRT_SUFFIX} automatically becomes the sole subtitle option"
-        )
+        header.append(("External SRT", f"a validated exact {EXTERNAL_SRT_SUFFIX} becomes the sole subtitle option"))
     if "standardizer_lock_acquired" in meta:
-        lines.append(
-            "Standardizer Lock : "
-            f"{'Acquired' if meta['standardizer_lock_acquired'] else 'Not acquired'} "
-            f"(timeout {meta.get('standardizer_lock_timeout_seconds', '?')} s)"
-        )
-    lines += [
-        f"Start Time      : {stats['start_time'].strftime('%Y-%m-%d %H:%M:%S')}",
-        f"End Time        : {end_time.strftime('%Y-%m-%d %H:%M:%S')}",
-        f"Total Duration  : {dur_str}",
-        "-" * 85,
-        "SUMMARY TOTALS:",
-        f"  • Total Movies Scanned     : {stats['total_scanned']}",
-        f"  • Movies Cleaned / Remuxed : {len(stats['cleaned'])}",
-        f"  • Movies Already Clean     : {len(stats['already_clean'])}",
-        f"  • Deferred (Hardlinked)    : {len(stats.get('deferred_hardlinked', []))}",
-        f"  • Skipped (Foreign / No Eng): {len(stats['skipped_no_english'])}",
-        f"  • Skipped (Layout Contract) : {len(stats.get('skipped_layout', []))}",
-        f"  • Remuxed Without SRT       : {len(stats.get('remux_without_srt', []))}",
-        f"  • Errors / Unreadable Files : {len(stats['errors'])}",
+        header.append((
+            "Standardizer lock",
+            f"{'acquired' if meta['standardizer_lock_acquired'] else 'NOT acquired'} "
+            f"(timeout {meta.get('standardizer_lock_timeout_seconds', '?')} s)",
+        ))
+    header += [
+        ("Started", stats["start_time"].strftime("%Y-%m-%d %H:%M:%S")),
+        ("Finished", end_time.strftime("%Y-%m-%d %H:%M:%S")),
+        ("Duration", dur_str),
+        ("Report", report_file),
     ]
-    if stats["cleaned"]:
-        total_before = sum(int(i.get("size_before", 0) or 0) for i in stats["cleaned"])
-        total_after = sum(int(i.get("size_after", 0) or 0) for i in stats["cleaned"])
-        lines.append(f"  • Total Size Before        : {format_size(total_before)}")
-        if not dry_run:
-            lines.append(f"  • Total Size After         : {format_size(total_after)}")
-            lines.append(f"  • Total Disk Space Freed   : {format_size(stats['total_space_saved_bytes'])}")
-        else:
-            lines.append(f"  • Total Size After (est.)  : {format_size(total_after)}")
-    elif not dry_run:
-        lines.append(f"  • Total Disk Space Freed   : {format_size(stats['total_space_saved_bytes'])}")
-    lines.append("=" * 85)
+    report.metas(header)
 
-    if stats["cleaned"]:
-        header_title = " CLEANED MOVIES (SIMULATED) " if dry_run else " CLEANED MOVIES "
-        padding = (85 - len(header_title)) // 2
-        lines.append("\n" + "=" * padding + header_title + "=" * (85 - len(header_title) - padding))
-        for item in stats["cleaned"]:
-            lines.append(f"\n[✓] {item['name']}")
-            lines.append(f"    Kept Audio       : {item['kept_audio']}")
-            lines.append(
-                f"    Removed Audio    : {', '.join(item['removed_audio_desc'])}"
-                if item.get("removed_audio_desc") else "    Removed Audio    : (none - single English audio already)"
+    rows: List[Tuple[Any, str, str]] = [
+        (len(cleaned), "Cleaned / remuxed", "simulated" if dry_run else "tracks pruned, video untouched"),
+        (len(already_clean), "Already clean", "no writes needed"),
+        (len(errors), "Errors", "unreadable or failed"),
+        (len(remux_without_srt), "Remuxed without SRT", "moviehash now invalidated"),
+        (len(deferred), "Deferred (hardlinked)", "still being seeded"),
+        (len(skipped_layout), "Skipped (layout)", "folder is not canonical"),
+        (len(skipped_english), "Skipped (no English)", "foreign film, kept as-is"),
+        (total, "Movies scanned", "every MKV found in the target"),
+    ]
+    report.blank()
+    report.scorecard(rows)
+
+    if cleaned:
+        before = sum(int(item.get("size_before", 0) or 0) for item in cleaned)
+        after = sum(int(item.get("size_after", 0) or 0) for item in cleaned)
+        saved = int(stats.get("total_space_saved_bytes") or 0)
+        if dry_run:
+            report.paragraph(
+                f"Projected: {format_size(before)} before  \u00b7  {format_size(after)} after  \u00b7  "
+                f"{format_size(saved)} would be reclaimed across {len(cleaned)} movie(s)."
             )
-            if item.get("external_srt"):
-                lines.append(f"    External SRT     : {Path(str(item['external_srt']['path'])).name} (validated; preserved)")
-            if item.get("kept_subs_desc"):
-                lines.append(f"    Subtitles Kept   : {item['kept_subs_count']}")
-                for d in item["kept_subs_desc"]:
-                    lines.append(f"        Keep  {d}")
-            else:
-                lines.append("    Subtitles Kept   : 0")
-            if item.get("removed_subs_desc"):
-                lines.append(f"    Subtitles Removed: {item['removed_subs_count']}")
-                for d in item["removed_subs_desc"]:
-                    lines.append(f"        Drop  {d}")
-            else:
-                lines.append("    Subtitles Removed: 0")
-            if not dry_run and "space_saved" in item:
-                lines.append(
-                    f"    File Size        : {format_size(item['size_before'])} -> "
-                    f"{format_size(item['size_after'])} (Saved: {format_size(item['space_saved'])})"
-                )
-            elif dry_run and item.get("size_before", 0) > 0:
-                lines.append(f"    Current File Size: {format_size(item['size_before'])}")
-            if item.get("elapsed_seconds") is not None:
-                lines.append(f"    Processing Time : {item['elapsed_seconds']:.2f} s")
+        else:
+            report.paragraph(
+                f"Reclaimed {format_size(saved)} across {len(cleaned)} movie(s): "
+                f"{format_size(before)} before  \u00b7  {format_size(after)} after."
+            )
+    if attention:
+        report.paragraph(
+            f"Start here: {attention} movie(s) need a decision \u00b7 they are listed first, below."
+        )
+    elif not cleaned:
+        report.paragraph("Nothing to do: every movie scanned was already clean.")
 
-    if stats["already_clean"]:
-        lines.append("\n" + "=" * 32 + " ALREADY CLEAN MOVIES " + "=" * 31)
-        lines.append(f"  ({len(stats['already_clean'])} files required no changes - skipped with 0 disk writes)")
-        for name in stats["already_clean"]:
-            lines.append(f"  [=] {name}")
-    if stats.get("remux_without_srt"):
-        header = " REMUXED WITH NO EXTERNAL SRT (MOVIEHASH INVALIDATED) "
-        lines.append("\n" + "=" * ((85 - len(header)) // 2) + header + "=" * ((85 - len(header) + 1) // 2))
-        lines.append(
-            "  These movies were remuxed without a validated external English SRT beside them.\n"
-            "  A remux rewrites the container bytes, which permanently changes the OpenSubtitles\n"
-            "  moviehash (file size + first/last 64 KiB) for the file. subtitle_fetcher.py can no\n"
-            "  longer find an exact hash match for any movie listed here and will fall back to the\n"
-            "  less reliable title/year search, which is held for review rather than downloaded.\n"
-            "  To keep exact-hash matching, run subtitle_fetcher.py BEFORE this cleaner."
+    # ---- anything needing a decision --------------------------------------
+    if attention:
+        report.section(
+            "NEEDS YOUR ATTENTION",
+            count=attention,
+            total=total,
+            intro="Ordered by how much it costs you to leave it alone.",
         )
-        for name in stats["remux_without_srt"]:
-            lines.append(f"  [!] {name}")
-    if stats.get("deferred_hardlinked"):
-        lines.append("\n" + "=" * 25 + " DEFERRED (STILL HARDLINKED / SEEDED) " + "=" * 24)
-        lines.append(
-            "  These movies were NOT cleaned because they still have multiple hardlinks\n"
-            "  (the qBittorrent source copy is still present). Cleaning is safe for seeding\n"
-            "  either way - qBittorrent keeps seeding its own copy - but it would consume\n"
-            "  another full movie allocation until the source is deleted.\n"
-            "  IMPORTANT: qBittorrent's default 'stop seeding' action only PAUSES the torrent\n"
-            "  and leaves the file in place, so this list can persist indefinitely. Either\n"
-            "  configure qBittorrent to delete the content when seeding stops, delete the\n"
-            "  source from E:\\torrents\\final yourself. There is no flag to force it: this\n"
-            "  tool never remuxes a movie that is still being seeded."
-        )
-        for item in stats["deferred_hardlinked"]:
-            lines.append(f"  [~] {item.get('name', '?')}  ({item.get('hardlinks', '?')} hardlinks)")
-    if stats["skipped_no_english"]:
-        lines.append("\n" + "=" * 27 + " SKIPPED (FOREIGN / NO ENG AUDIO) " + "=" * 26)
-        for item in stats["skipped_no_english"]:
-            if isinstance(item, dict):
-                lines.append(f"  [-] {item.get('name', '?')}  ({item.get('reason', 'no English audio')})")
-            else:
-                lines.append(f"  [-] {item}")
-    if stats.get("skipped_layout"):
-        lines.append("\n" + "=" * 29 + " SKIPPED (LAYOUT CONTRACT) " + "=" * 29)
-        for item in stats["skipped_layout"]:
-            lines.append(f"  [-] {item.get('name', '?')}  ({item.get('reason', 'noncanonical layout')})")
-    if stats["errors"]:
-        lines.append("\n" + "=" * 33 + " ERRORS ENCOUNTERED " + "=" * 32)
-        for err in stats["errors"]:
-            lines.append(f"  [!] {err['name']}: {err['error']}")
-    lines += ["\n" + "=" * 85, "                               END OF REPORT", "=" * 85]
-    report_text = "\n".join(lines)
+        if errors:
+            report.subsection("ERRORS ENCOUNTERED", count=len(errors))
+            report.paragraph(
+                "These files could not be processed. Nothing was written for them; read the "
+                "error, fix the cause, and re-run."
+            )
+            report.blank()
+            report.entries([(str(item.get("name", "?")), str(item.get("error", ""))) for item in errors])
+        if remux_without_srt:
+            report.subsection("REMUXED WITH NO EXTERNAL SRT (MOVIEHASH INVALIDATED)", count=len(remux_without_srt))
+            report.paragraph(
+                "These movies were remuxed without a validated external English SRT beside "
+                "them. A remux rewrites the container bytes, which permanently changes the "
+                "OpenSubtitles moviehash (file size plus the first and last 64 KiB). "
+                "subtitle_fetcher.py can no longer find an exact hash match for any movie "
+                "listed here and falls back to the less reliable title/year search, which is "
+                "held for review rather than downloaded. To keep exact-hash matching, run "
+                "subtitle_fetcher.py BEFORE this cleaner."
+            )
+            report.blank()
+            report.entries([(str(name), "moviehash no longer matches the original release")
+                            for name in remux_without_srt])
+        if deferred:
+            report.subsection("DEFERRED (STILL HARDLINKED / SEEDED)", count=len(deferred))
+            report.paragraph(
+                "These movies were NOT cleaned because they still have multiple hardlinks: "
+                "the qBittorrent source copy is still present. Cleaning is safe for seeding "
+                "either way - qBittorrent keeps seeding its own copy - but it would consume "
+                "another full movie allocation until the source is deleted. qBittorrent's "
+                "default 'stop seeding' action only PAUSES the torrent and leaves the file in "
+                "place, so this list can persist indefinitely. Either configure qBittorrent to "
+                "delete the content when seeding stops, or delete the source yourself. There "
+                "is no flag to force it: this tool never remuxes a movie that is still seeded."
+            )
+            report.blank()
+            report.entries([
+                (str(item.get("name", "?")) if isinstance(item, dict) else str(item),
+                 f"{item.get('hardlinks', '?')} hardlinks" if isinstance(item, dict) else "")
+                for item in deferred
+            ])
+        if skipped_layout:
+            report.subsection("SKIPPED (LAYOUT CONTRACT)", count=len(skipped_layout))
+            report.paragraph(
+                "One MKV per folder, named exactly like the folder. Run movie_standardizer.py, "
+                "or fix the folder by hand, and these will be cleaned on the next run."
+            )
+            report.blank()
+            report.entries([
+                (str(item.get("name", "?")), str(item.get("reason", "noncanonical layout")))
+                for item in skipped_layout
+            ])
+
+    # ---- what the run changed ---------------------------------------------
+    report.section(
+        "CLEANED THIS RUN (SIMULATED)" if dry_run else "CLEANED THIS RUN",
+        count=len(cleaned),
+        total=total,
+        intro=(
+            "Nothing would be written." if dry_run
+            else "Each remux kept the best English audio and dropped everything else; the "
+                 "video stream was copied untouched."
+        ),
+    )
+    if not cleaned:
+        report.paragraph("None.")
+    else:
+        for position, item in enumerate(cleaned, start=1):
+            fields: List[Tuple[str, str]] = [
+                ("Kept audio", str(item.get("kept_audio", ""))),
+                ("Removed audio",
+                 ", ".join(item.get("removed_audio_desc") or [])
+                 or "(none - a single English audio track was already the only one)"),
+            ]
+            if item.get("external_srt"):
+                fields.append(("External SRT", f"{Path(str(item['external_srt']['path'])).name} (validated; preserved)"))
+            kept = item.get("kept_subs_desc") or []
+            fields.append(("Subtitles kept", str(item.get("kept_subs_count", len(kept)))))
+            fields.extend([("", f"\u00b7  {desc}") for desc in kept])
+            removed = item.get("removed_subs_desc") or []
+            fields.append(("Subtitles removed", str(item.get("removed_subs_count", len(removed)))))
+            fields.extend([("", f"\u00b7  {desc}") for desc in removed])
+            if not dry_run and "space_saved" in item:
+                fields.append((
+                    "File size",
+                    f"{format_size(item.get('size_before', 0))} \u00b7  "
+                    f"{format_size(item.get('size_after', 0))}  \u00b7  "
+                    f"saved {format_size(item.get('space_saved', 0))}",
+                ))
+            elif dry_run and item.get("size_before", 0) > 0:
+                fields.append(("File size", f"{format_size(item['size_before'])} (unchanged in a dry run)"))
+            if item.get("elapsed_seconds") is not None:
+                fields.append(("Elapsed", f"{item['elapsed_seconds']:.2f} s"))
+            report.entry(str(item.get("name", "?")), ordinal=position, fields=fields)
+
+    # ---- inventory ---------------------------------------------------------
+    report.section(
+        "ALREADY CLEAN (NO WRITES)",
+        count=len(already_clean),
+        total=total,
+        intro="These needed no changes and were skipped with zero disk writes.",
+    )
+    if not already_clean:
+        report.paragraph("None.")
+    else:
+        report.entries([(str(name), "") for name in already_clean])
+
+    report.section(
+        "SKIPPED (FOREIGN / NO ENGLISH AUDIO)",
+        count=len(skipped_english),
+        total=total,
+        intro=(
+            "Policy, not a fault: a film with no usable English audio is left exactly as it "
+            "is unless it already has a validated external English SRT."
+        ),
+    )
+    if not skipped_english:
+        report.paragraph("None.")
+    else:
+        report.entries([
+            (str(item.get("name", "?")) if isinstance(item, dict) else str(item),
+             str(item.get("reason", "no English audio")) if isinstance(item, dict) else "")
+            for item in skipped_english
+        ])
+
+    report.footer([
+        "Hardlinked movies are always deferred until qBittorrent removes the seeded source.",
+        f"Log: {log_file_path or '(none)'}",
+    ])
+    report_text = report.render()
     _print_safe("\n" + report_text)
     try:
         destination = Path(report_file)
@@ -2520,7 +2600,7 @@ def generate_and_save_report(
         stage = destination.with_name(f".{destination.name}.partial.{os.getpid()}.{uuid.uuid4().hex}")
         try:
             with stage.open("x", encoding="utf-8", errors="replace", newline="\n") as handle:
-                handle.write(report_text + "\n")
+                handle.write(report_text)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(stage, destination)

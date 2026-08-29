@@ -41,6 +41,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
+from common import Report
+
 VERSION = "1.0.0"
 
 HERE = Path(__file__).resolve().parent
@@ -253,36 +255,56 @@ def run_pipeline(cfg: Config, dry_run: bool = False) -> Run:
 
 
 def build_summary(run: Run, cfg: Config) -> str:
-    lines = [
-        "=" * 78,
-        "JELLYFIN MOVIE PIPELINE SUMMARY",
-        "=" * 78,
-        f"Library : {cfg.library}",
-        f"Steps   : {', '.join(cfg.steps)}",
-        f"Mode    : {'DRY-RUN (showing commands only)' if cfg.dry_run else 'LIVE'}",
-        "-" * 78,
-    ]
+    """Render the pipeline summary with the same layout as every tool's report."""
     label = {"ran": "RAN", "skipped": "SKIP", "missing": "MISSING"}
-    for result in run.results:
-        marker = label.get(result.status, result.status.upper())
-        if result.status == "ran":
-            outcome = "ok" if not result.returncode else f"exit {result.returncode}"
-            lines.append(f"  [{marker:<7}] {result.key:<9} {result.title:<32} {outcome}"
-                         f"  ({result.seconds:.1f}s)")
-        else:
-            lines.append(f"  [{marker:<7}] {result.key:<9} {result.title:<32} {result.detail}")
-    lines.append("-" * 78)
     failed = [r.key for r in run.results if r.status == "ran" and r.returncode]
     skipped = [r.key for r in run.results if r.status != "ran"]
+    succeeded = [r.key for r in run.results if r.status == "ran" and not r.returncode]
+
+    report = Report(
+        "JELLYFIN MOVIE PIPELINE SUMMARY",
+        "Every tool, in the order that keeps exact-hash subtitle matching possible",
+    )
+    report.metas([
+        ("Library", cfg.library),
+        ("Steps", ", ".join(cfg.steps) or "(none selected)"),
+        ("Mode", "DRY-RUN (showing commands only)" if cfg.dry_run else "LIVE"),
+        ("Elapsed", f"{run.elapsed:.1f}s"),
+    ])
+    report.blank()
+    report.scorecard([
+        (len(succeeded), "Completed", "exited 0"),
+        (len(failed), "Failed", "exited non-zero; read that tool's report"),
+        (len(skipped), "Not run", "skipped or a required binary is missing"),
+        (len(run.results), "Steps attempted", "in the canonical order"),
+    ])
     if failed:
-        lines.append(f"Failed steps : {', '.join(failed)}")
+        report.paragraph(f"Start here: {len(failed)} step(s) failed \u00b7 their own report files "
+                         "carry the per-movie detail.")
+
+    report.section("STEP RESULTS", count=len(run.results),
+                   intro="In pipeline order. Each tool writes its own report and log.")
+    if not run.results:
+        report.paragraph("No steps ran.")
+    else:
+        report.table(
+            ["Status", "Step", "Tool", "Outcome"],
+            [[label.get(r.status, r.status.upper()), r.key, r.title,
+              (f"ok ({r.seconds:.1f}s)" if not r.returncode else f"exit {r.returncode}")
+              if r.status == "ran" else r.detail]
+             for r in run.results],
+            aligns="<<<<",
+        )
+
+    closing: list[str] = []
+    if failed:
+        closing.append(f"Failed steps : {', '.join(failed)}")
     if skipped:
-        lines.append(f"Not run      : {', '.join(skipped)}")
+        closing.append(f"Not run      : {', '.join(skipped)}")
     if not failed and not skipped:
-        lines.append("All steps completed.")
-    lines.append(f"Elapsed      : {run.elapsed:.1f}s")
-    lines.append("=" * 78)
-    return "\n".join(lines)
+        closing.append("All steps completed.")
+    report.footer(closing)
+    return report.render()
 
 
 def resolve_steps(requested: Sequence[str]) -> tuple[str, ...]:
