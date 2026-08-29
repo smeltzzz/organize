@@ -1,0 +1,1305 @@
+[2026-08-28 21:56:19] [INFO] ===============================================================================
+[2026-08-28 21:56:19] [INFO]   LOSSLESS JELLYFIN MKV TRACK CLEANER
+[2026-08-28 21:56:19] [INFO] ===============================================================================
+[2026-08-28 21:56:19] [INFO]   Target directory    : E:\torrents\final_organized
+[2026-08-28 21:56:19] [INFO]   Execution mode      : LIVE RUN (modifications will be applied)
+[2026-08-28 21:56:19] [INFO]   mkvmerge            : C:\Program Files\MKVToolNix\mkvmerge.EXE
+[2026-08-28 21:56:19] [INFO]   mkvmerge version    : mkvmerge v100.0 ('Do Hot Girls Like Chords') 64-bit
+[2026-08-28 21:56:19] [INFO]   Audio languages     : en, eng
+[2026-08-28 21:56:19] [INFO]   Subtitle languages  : en, eng
+[2026-08-28 21:56:19] [INFO]   Commentary / DVS    : remove (fixed policy)
+[2026-08-28 21:56:19] [INFO]   Accessibility subs  : retained only when no valid external .en.srt exists
+[2026-08-28 21:56:19] [INFO]   External .en.srt   : validated exact sidecar automatically becomes sole subtitle option
+[2026-08-28 21:56:19] [INFO]   Sidecar subtitles   : never modified by this cleaner
+[2026-08-28 21:56:19] [INFO]   Pipeline order      : movie_standardizer.py -> subtitle_fetcher.py -> this cleaner
+[2026-08-28 21:56:19] [INFO]   (remuxing first invalidates the OpenSubtitles moviehash; a warning is logged per file)
+[2026-08-28 21:56:19] [INFO]   Hardlinked movies   : always deferred (never remuxed while seeding)
+[2026-08-28 21:56:19] [INFO]   Process priority    : normal
+[2026-08-28 21:56:19] [INFO]   Log file            : E:\torrents\mkv_track_cleaner\mkv_track_cleaner.log
+[2026-08-28 21:56:19] [INFO] ===============================================================================
+[2026-08-28 21:56:19] [INFO] --- Starting Scan on 'E:\torrents\final_organized' ---
+[2026-08-28 21:56:19] [INFO] Single report file: 'E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt'
+[2026-08-28 21:56:19] [INFO] movie_standardizer.py coordination lock acquired.
+[2026-08-28 21:56:19] [INFO] Single-instance lock acquired (PID 27752).
+[2026-08-28 21:56:19] [INFO] Checking for orphaned remux transactions from previous runs...
+[2026-08-28 21:56:19] [INFO] No orphaned remux transactions found.
+[2026-08-28 21:56:19] [INFO] Metadata cache: E:\torrents\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json (0 entries loaded)
+[2026-08-28 21:56:19] [INFO] Scanning 'E:\torrents\final_organized' for MKV files...
+[2026-08-28 21:56:19] [INFO] Found 382 MKV file(s) totaling 1.78 TB
+[2026-08-28 21:56:19] [INFO] [  1/382] Already clean: 10 Cloverfield Lane (2016)\10 Cloverfield Lane (2016).mkv
+[2026-08-28 21:56:20] [INFO] [  2/382] Already clean: 10 Things I Hate About You (1999)\10 Things I Hate About You (1999).mkv
+[2026-08-28 21:56:20] [INFO] [  3/382] Already clean: 12 Years a Slave (2013)\12 Years a Slave (2013).mkv
+[2026-08-28 21:56:20] [INFO] [  4/382] Already clean: 13 Hours - The Secret Soldiers of Benghazi (2016)\13 Hours - The Secret Soldiers of Benghazi (2016).mkv
+[2026-08-28 21:56:20] [INFO] [  5/382] Already clean: 1917 (2019)\1917 (2019).mkv
+[2026-08-28 21:56:20] [INFO] [  6/382] Already clean: 2001 - A Space Odyssey (1968)\2001 - A Space Odyssey (1968).mkv
+[2026-08-28 21:56:20] [INFO] [  7/382] Already clean: 21 Jump Street (2012)\21 Jump Street (2012).mkv
+[2026-08-28 21:56:21] [INFO] [  8/382] Already clean: 22 Jump Street (2014)\22 Jump Street (2014).mkv
+[2026-08-28 21:56:21] [INFO] [  9/382] Already clean: 300 (2006)\300 (2006).mkv
+[2026-08-28 21:56:21] [INFO] [ 10/382] Already clean: 42 (2013)\42 (2013).mkv
+[2026-08-28 21:56:21] [INFO] [ 11/382] Already clean: 50 First Dates (2004)\50 First Dates (2004).mkv
+[2026-08-28 21:56:21] [INFO] [ 12/382] Already clean: 500 Days of Summer (2009)\500 Days of Summer (2009).mkv
+[2026-08-28 21:56:21] [INFO] [ 13/382] Already clean: 8 Mile (2002)\8 Mile (2002).mkv
+[2026-08-28 21:56:22] [INFO] [ 14/382] Already clean: 9 (2009)\9 (2009).mkv
+[2026-08-28 21:56:22] [INFO] [ 15/382] Already clean: A Beautiful Mind (2001)\A Beautiful Mind (2001).mkv
+[2026-08-28 21:56:22] [INFO] [ 16/382] Already clean: A Christmas Story (1983)\A Christmas Story (1983).mkv
+[2026-08-28 21:56:22] [INFO] [ 17/382] Already clean: A I Artificial Intelligence (2001)\A I Artificial Intelligence (2001).mkv
+[2026-08-28 21:56:22] [INFO] [ 18/382] Already clean: A Quiet Place (2018)\A Quiet Place (2018).mkv
+[2026-08-28 21:56:22] [INFO] [ 19/382] Already clean: A Quiet Place Part II (2021)\A Quiet Place Part II (2021).mkv
+[2026-08-28 21:56:22] [INFO] [ 20/382] Already clean: About Time (2013)\About Time (2013).mkv
+[2026-08-28 21:56:23] [INFO] [ 21/382] Already clean: Accepted (2006)\Accepted (2006).mkv
+[2026-08-28 21:56:23] [INFO] [ 22/382] Already clean: Air (2023)\Air (2023).mkv
+[2026-08-28 21:56:23] [INFO] [ 23/382] Already clean: Aladdin (1992)\Aladdin (1992).mkv
+[2026-08-28 21:56:23] [INFO] [ 24/382] Already clean: Alien (1979)\Alien (1979).mkv
+[2026-08-28 21:56:23] [INFO] [ 25/382] Already clean: Aliens (1986)\Aliens (1986).mkv
+[2026-08-28 21:56:23] [INFO] -- 25/382  cleaned 0  already 25  deferred 0  skipped 0  layout 0  errors 0  saved 0 Bytes  126.62 GB/1.78 TB  elapsed 4.2s  ~56s left
+[2026-08-28 21:56:23] [INFO] [ 26/382] Already clean: All Quiet on the Western Front (2022)\All Quiet on the Western Front (2022).mkv
+[2026-08-28 21:56:24] [INFO] [ 27/382] Already clean: American History X (1998)\American History X (1998).mkv
+[2026-08-28 21:56:24] [INFO] [ 28/382] Already clean: American Pie (1999)\American Pie (1999).mkv
+[2026-08-28 21:56:24] [INFO] [ 29/382] Already clean: American Psycho (2000)\American Psycho (2000).mkv
+[2026-08-28 21:56:24] [INFO] [ 30/382] Already clean: American Sniper (2014)\American Sniper (2014).mkv
+[2026-08-28 21:56:24] [INFO] [ 31/382] Already clean: Annihilation (2018)\Annihilation (2018).mkv
+[2026-08-28 21:56:24] [INFO] [ 32/382] Already clean: Apollo 13 (1995)\Apollo 13 (1995).mkv
+[2026-08-28 21:56:25] [INFO] [ 33/382] Already clean: Arrival (2016)\Arrival (2016).mkv
+[2026-08-28 21:56:25] [INFO] [ 34/382] Already clean: Avatar (2009)\Avatar (2009).mkv
+[2026-08-28 21:56:25] [INFO] [ 35/382] Already clean: Avengers Age of Ultron (2015)\Avengers Age of Ultron (2015).mkv
+[2026-08-28 21:56:25] [INFO] [ 36/382] Already clean: Avengers Endgame (2019)\Avengers Endgame (2019).mkv
+[2026-08-28 21:56:25] [INFO] [ 37/382] Already clean: Avengers Infinity War (2018)\Avengers Infinity War (2018).mkv
+[2026-08-28 21:56:26] [INFO] [ 38/382] Already clean: Back to the Future (1985)\Back to the Future (1985).mkv
+[2026-08-28 21:56:26] [INFO] [ 39/382] Already clean: Back to the Future Part II (1989)\Back to the Future Part II (1989).mkv
+[2026-08-28 21:56:26] [INFO] [ 40/382] Already clean: Back to the Future Part III (1990)\Back to the Future Part III (1990).mkv
+[2026-08-28 21:56:26] [INFO] [ 41/382] Already clean: Backrooms (2026)\Backrooms (2026).mkv
+[2026-08-28 21:56:27] [INFO] [ 42/382] Already clean: Barbie (2023)\Barbie (2023).mkv
+[2026-08-28 21:56:27] [INFO] [ 43/382] Already clean: Batman Begins (2005)\Batman Begins (2005).mkv
+[2026-08-28 21:56:27] [INFO] [ 44/382] Already clean: Bee Movie (2007)\Bee Movie (2007).mkv
+[2026-08-28 21:56:27] [INFO] [ 45/382] Already clean: Black Hawk Down (2001)\Black Hawk Down (2001).mkv
+[2026-08-28 21:56:27] [INFO] [ 46/382] Already clean: Black Panther (2018)\Black Panther (2018).mkv
+[2026-08-28 21:56:27] [INFO] [ 47/382] Already clean: Blade Runner (1982)\Blade Runner (1982).mkv
+[2026-08-28 21:56:27] [INFO] [ 48/382] Already clean: Blade Runner 2049 (2017)\Blade Runner 2049 (2017).mkv
+[2026-08-28 21:56:28] [INFO] [ 49/382] Already clean: Blended (2014)\Blended (2014).mkv
+[2026-08-28 21:56:28] [INFO] [ 50/382] Already clean: Bohemian Rhapsody (2018)\Bohemian Rhapsody (2018).mkv
+[2026-08-28 21:56:28] [INFO] -- 50/382  cleaned 0  already 50  deferred 0  skipped 0  layout 0  errors 0  saved 0 Bytes  238.11 GB/1.78 TB  elapsed 8.7s  ~58s left
+[2026-08-28 21:56:28] [INFO] [ 51/382] Already clean: Borat (2006)\Borat (2006).mkv
+[2026-08-28 21:56:28] [INFO] [ 52/382] Already clean: Boyhood (2014)\Boyhood (2014).mkv
+[2026-08-28 21:56:28] [INFO] [ 53/382] Already clean: Boyz N the Hood (1991)\Boyz N the Hood (1991).mkv
+[2026-08-28 21:56:29] [INFO] [ 54/382] Already clean: Braveheart (1995)\Braveheart (1995).mkv
+[2026-08-28 21:56:29] [INFO] [ 55/382] Already clean: Bugonia (2025)\Bugonia (2025).mkv
+[2026-08-28 21:56:29] [INFO] [ 56/382] Already clean: Captain America Civil War (2016)\Captain America Civil War (2016).mkv
+[2026-08-28 21:56:29] [INFO] [ 57/382] Already clean: Captain America The First Avenger (2011)\Captain America The First Avenger (2011).mkv
+[2026-08-28 21:56:29] [INFO] [ 58/382] Already clean: Captain America The Winter Soldier (2014)\Captain America The Winter Soldier (2014).mkv
+[2026-08-28 21:56:29] [INFO] [ 59/382] Already clean: Cars (2006)\Cars (2006).mkv
+[2026-08-28 21:56:30] [INFO] [ 60/382] Already clean: Casino Royale (2006)\Casino Royale (2006).mkv
+[2026-08-28 21:56:30] [INFO] [ 61/382] Already clean: Cast Away (2000)\Cast Away (2000).mkv
+[2026-08-28 21:56:30] [INFO] [ 62/382] Already clean: Catch Me If You Can (2002)\Catch Me If You Can (2002).mkv
+[2026-08-28 21:56:30] [INFO] [ 63/382] Already clean: Charlie and the Chocolate Factory (2005)\Charlie and the Chocolate Factory (2005).mkv
+[2026-08-28 21:56:30] [INFO] [ 64/382] Already clean: Chicken Little (2005)\Chicken Little (2005).mkv
+[2026-08-28 21:56:30] [INFO] [ 65/382] Already clean: Children of Men (2006)\Children of Men (2006).mkv
+[2026-08-28 21:56:31] [INFO] [ 66/382] Already clean: Chronicle (2012)\Chronicle (2012).mkv
+[2026-08-28 21:56:31] [INFO] [ 67/382] Already clean: Civil War (2024)\Civil War (2024).mkv
+[2026-08-28 21:56:31] [INFO] [ 68/382] Already clean: Cloudy with a Chance of Meatballs (2009)\Cloudy with a Chance of Meatballs (2009).mkv
+[2026-08-28 21:56:31] [INFO] [ 69/382] Already clean: Cloverfield (2008)\Cloverfield (2008).mkv
+[2026-08-28 21:56:31] [INFO] [ 70/382] Already clean: Coach Carter (2005)\Coach Carter (2005).mkv
+[2026-08-28 21:56:32] [INFO] [ 71/382] Already clean: Coco (2017)\Coco (2017).mkv
+[2026-08-28 21:56:32] [INFO] [ 72/382] Already clean: Contact (1997)\Contact (1997).mkv
+[2026-08-28 21:56:32] [INFO] [ 73/382] Already clean: Contagion (2011)\Contagion (2011).mkv
+[2026-08-28 21:56:32] [INFO] [ 74/382] Already clean: Coraline (2009)\Coraline (2009).mkv
+[2026-08-28 21:56:32] [INFO] [ 75/382] Already clean: Crazy Rich Asians (2018)\Crazy Rich Asians (2018).mkv
+[2026-08-28 21:56:32] [INFO] -- 75/382  cleaned 0  already 75  deferred 0  skipped 0  layout 0  errors 0  saved 0 Bytes  348.34 GB/1.78 TB  elapsed 13s  ~56s left
+[2026-08-28 21:56:33] [INFO] [ 76/382] Already clean: Creed (2015)\Creed (2015).mkv
+[2026-08-28 21:56:33] [INFO] [ 77/382] Already clean: Dawn of the Planet of the Apes (2014)\Dawn of the Planet of the Apes (2014).mkv
+[2026-08-28 21:56:33] [WARNING] [ 78/382] Skipping 'Dead Poets Society (1989)\Dead Poets Society (1989).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 21:56:33] [INFO] [ 79/382] Already clean: Deadpool (2016)\Deadpool (2016).mkv
+[2026-08-28 21:56:33] [INFO] [ 80/382] Already clean: Deadpool 2 (2018)\Deadpool 2 (2018).mkv
+[2026-08-28 21:56:34] [INFO] [ 81/382] Already clean: Despicable Me (2010)\Despicable Me (2010).mkv
+[2026-08-28 21:56:34] [INFO] [ 82/382] Already clean: Die Hard (1988)\Die Hard (1988).mkv
+[2026-08-28 21:56:34] [INFO] [ 83/382] Already clean: District 9 (2009)\District 9 (2009).mkv
+[2026-08-28 21:56:34] [INFO] [ 84/382] Already clean: Django Unchained (2012)\Django Unchained (2012).mkv
+[2026-08-28 21:56:34] [INFO] [ 85/382] Already clean: Donnie Darko (2001)\Donnie Darko (2001).mkv
+[2026-08-28 21:56:34] [INFO] [ 86/382] Already clean: Dune (2021)\Dune (2021).mkv
+[2026-08-28 21:56:34] [INFO] [ 87/382] Already clean: Dune - Part Two (2024)\Dune - Part Two (2024).mkv
+[2026-08-28 21:56:35] [INFO] [ 88/382] Already clean: Dunkirk (2017)\Dunkirk (2017).mkv
+[2026-08-28 21:56:35] [INFO] [ 89/382] Already clean: E T the Extra-Terrestrial (1982)\E T the Extra-Terrestrial (1982).mkv
+[2026-08-28 21:56:35] [INFO] [ 90/382] Already clean: Easy A (2010)\Easy A (2010).mkv
+[2026-08-28 21:56:35] [INFO] [ 91/382] Already clean: Edge of Tomorrow (2014)\Edge of Tomorrow (2014).mkv
+[2026-08-28 21:56:35] [INFO] [ 92/382] Already clean: Edward Scissorhands (1990)\Edward Scissorhands (1990).mkv
+[2026-08-28 21:56:36] [INFO] [ 93/382] Already clean: Elemental (2023)\Elemental (2023).mkv
+[2026-08-28 21:56:36] [INFO] [ 94/382] Already clean: Elysium (2013)\Elysium (2013).mkv
+[2026-08-28 21:56:36] [INFO] [ 95/382] Already clean: Enchanted (2007)\Enchanted (2007).mkv
+[2026-08-28 21:56:36] [INFO] [ 96/382] Already clean: Enemy (2013)\Enemy (2013).mkv
+[2026-08-28 21:56:36] [INFO] [ 97/382] Already clean: Eternal Sunshine of the Spotless Mind (2004)\Eternal Sunshine of the Spotless Mind (2004).mkv
+[2026-08-28 21:56:36] [INFO] [ 98/382] Already clean: Ex Machina (2015)\Ex Machina (2015).mkv
+[2026-08-28 21:56:36] [INFO] [ 99/382] Already clean: Fargo (1996)\Fargo (1996).mkv
+[2026-08-28 21:56:37] [INFO] [100/382] Already clean: Fast Five (2011)\Fast Five (2011).mkv
+[2026-08-28 21:56:37] [INFO] -- 100/382  cleaned 0  already 99  deferred 0  skipped 1  layout 0  errors 0  saved 0 Bytes  465.29 GB/1.78 TB  elapsed 17s  ~51s left
+[2026-08-28 21:56:37] [INFO] [101/382] Already clean: Ferris Bueller's Day Off (1986)\Ferris Bueller's Day Off (1986).mkv
+[2026-08-28 21:56:37] [INFO] [102/382] Already clean: Fight Club (1999)\Fight Club (1999).mkv
+[2026-08-28 21:56:37] [INFO] [103/382] Already clean: Finding Nemo (2003)\Finding Nemo (2003).mkv
+[2026-08-28 21:56:37] [INFO] [104/382] Already clean: First Man (2018)\First Man (2018).mkv
+[2026-08-28 21:56:38] [INFO] [105/382] Already clean: Ford v Ferrari (2019)\Ford v Ferrari (2019).mkv
+[2026-08-28 21:56:38] [INFO] [106/382] Already clean: Forrest Gump (1994)\Forrest Gump (1994).mkv
+[2026-08-28 21:56:38] [INFO] [107/382] Already clean: Fractured (2019)\Fractured (2019).mkv
+[2026-08-28 21:56:38] [INFO] [108/382] Already clean: Fury (2014)\Fury (2014).mkv
+[2026-08-28 21:56:38] [INFO] [109/382] Already clean: Get Out (2017)\Get Out (2017).mkv
+[2026-08-28 21:56:38] [INFO] [110/382] Already clean: Ghostbusters (1984)\Ghostbusters (1984).mkv
+[2026-08-28 21:56:39] [INFO] [111/382] Already clean: Gladiator (2000)\Gladiator (2000).mkv
+[2026-08-28 21:56:39] [INFO] [112/382] Already clean: Gone Girl (2014)\Gone Girl (2014).mkv
+[2026-08-28 21:56:39] [INFO] [113/382] Already clean: Good Will Hunting (1997)\Good Will Hunting (1997).mkv
+[2026-08-28 21:56:39] [INFO] [114/382] Already clean: Goodfellas (1990)\Goodfellas (1990).mkv
+[2026-08-28 21:56:39] [INFO] [115/382] Already clean: Gravity (2013)\Gravity (2013).mkv
+[2026-08-28 21:56:40] [INFO] [116/382] Already clean: Green Book (2018)\Green Book (2018).mkv
+[2026-08-28 21:56:40] [INFO] [117/382] Already clean: Greenland (2020)\Greenland (2020).mkv
+[2026-08-28 21:56:40] [INFO] [118/382] Already clean: Groundhog Day (1993)\Groundhog Day (1993).mkv
+[2026-08-28 21:56:40] [INFO] [119/382] Already clean: Grown Ups (2010)\Grown Ups (2010).mkv
+[2026-08-28 21:56:40] [INFO] [120/382] Already clean: Guardians of the Galaxy (2014)\Guardians of the Galaxy (2014).mkv
+[2026-08-28 21:56:40] [INFO] [121/382] Already clean: Hacksaw Ridge (2016)\Hacksaw Ridge (2016).mkv
+[2026-08-28 21:56:41] [INFO] [122/382] Already clean: Happy Feet (2006)\Happy Feet (2006).mkv
+[2026-08-28 21:56:41] [INFO] [123/382] Already clean: Happy Gilmore (1996)\Happy Gilmore (1996).mkv
+[2026-08-28 21:56:41] [INFO] [124/382] Already clean: Harry Potter and the Chamber of Secrets (2002)\Harry Potter and the Chamber of Secrets (2002).mkv
+[2026-08-28 21:56:41] [INFO] [125/382] Already clean: Harry Potter and the Deathly Hallows - Part 1 (2010)\Harry Potter and the Deathly Hallows - Part 1 (2010).mkv
+[2026-08-28 21:56:41] [INFO] -- 125/382  cleaned 0  already 124  deferred 0  skipped 1  layout 0  errors 0  saved 0 Bytes  587.00 GB/1.78 TB  elapsed 21s  ~46s left
+[2026-08-28 21:56:41] [INFO] [126/382] Already clean: Harry Potter and the Deathly Hallows - Part 2 (2011)\Harry Potter and the Deathly Hallows - Part 2 (2011).mkv
+[2026-08-28 21:56:41] [INFO] [127/382] Already clean: Harry Potter and the Goblet of Fire (2005)\Harry Potter and the Goblet of Fire (2005).mkv
+[2026-08-28 21:56:41] [INFO] [128/382] Already clean: Harry Potter and the Half-Blood Prince (2009)\Harry Potter and the Half-Blood Prince (2009).mkv
+[2026-08-28 21:56:42] [INFO] [129/382] Already clean: Harry Potter and the Order of the Phoenix (2007)\Harry Potter and the Order of the Phoenix (2007).mkv
+[2026-08-28 21:56:42] [INFO] [130/382] Already clean: Harry Potter and the Prisoner of Azkaban (2004)\Harry Potter and the Prisoner of Azkaban (2004).mkv
+[2026-08-28 21:56:42] [INFO] [131/382] Already clean: Harry Potter and the Sorcerer's Stone (2001)\Harry Potter and the Sorcerer's Stone (2001).mkv
+[2026-08-28 21:56:42] [INFO] [132/382] Already clean: Heat (1995)\Heat (1995).mkv
+[2026-08-28 21:56:42] [INFO] [133/382] Already clean: Her (2013)\Her (2013).mkv
+[2026-08-28 21:56:42] [INFO] [134/382] Already clean: Hercules (1997)\Hercules (1997).mkv
+[2026-08-28 21:56:43] [INFO] [135/382] Already clean: Hereditary (2018)\Hereditary (2018).mkv
+[2026-08-28 21:56:43] [INFO] [136/382] Already clean: Hidden Figures (2016)\Hidden Figures (2016).mkv
+[2026-08-28 21:56:43] [INFO] [137/382] Already clean: Holes (2003)\Holes (2003).mkv
+[2026-08-28 21:56:43] [INFO] [138/382] Already clean: Home Alone (1990)\Home Alone (1990).mkv
+[2026-08-28 21:56:43] [INFO] [139/382] Already clean: Home Alone 2 - Lost in New York (1992)\Home Alone 2 - Lost in New York (1992).mkv
+[2026-08-28 21:56:43] [INFO] [140/382] Already clean: How to Train Your Dragon (2010)\How to Train Your Dragon (2010).mkv
+[2026-08-28 21:56:43] [INFO] [141/382] Already clean: I Am Legend (2007)\I Am Legend (2007).mkv
+[2026-08-28 21:56:44] [INFO] [142/382] Already clean: I, Robot (2004)\I, Robot (2004).mkv
+[2026-08-28 21:56:44] [INFO] [143/382] Already clean: I, Tonya (2017)\I, Tonya (2017).mkv
+[2026-08-28 21:56:44] [INFO] [144/382] Already clean: Ice Age (2002)\Ice Age (2002).mkv
+[2026-08-28 21:56:44] [INFO] [145/382] Already clean: Idiocracy (2006)\Idiocracy (2006).mkv
+[2026-08-28 21:56:45] [INFO] [146/382] Already clean: Inception (2010)\Inception (2010).mkv
+[2026-08-28 21:56:45] [INFO] [147/382] Already clean: Incredibles 2 (2018)\Incredibles 2 (2018).mkv
+[2026-08-28 21:56:45] [INFO] [148/382] Already clean: Independence Day (1996)\Independence Day (1996).mkv
+[2026-08-28 21:56:45] [INFO] [149/382] Already clean: Indiana Jones and the Last Crusade (1989)\Indiana Jones and the Last Crusade (1989).mkv
+[2026-08-28 21:56:45] [INFO] [150/382] Already clean: Indiana Jones and the Raiders of the Lost Ark (1981)\Indiana Jones and the Raiders of the Lost Ark (1981).mkv
+[2026-08-28 21:56:45] [INFO] -- 150/382  cleaned 0  already 149  deferred 0  skipped 1  layout 0  errors 0  saved 0 Bytes  708.24 GB/1.78 TB  elapsed 26s  ~40s left
+[2026-08-28 21:56:45] [INFO] [151/382] Already clean: Indiana Jones and the Temple of Doom (1984)\Indiana Jones and the Temple of Doom (1984).mkv
+[2026-08-28 21:56:45] [INFO] [152/382] Already clean: Inglourious Basterds (2009)\Inglourious Basterds (2009).mkv
+[2026-08-28 21:56:46] [INFO] [153/382] Already clean: Insomnia (2002)\Insomnia (2002).mkv
+[2026-08-28 21:56:46] [INFO] [154/382] Already clean: Interstellar (2014)\Interstellar (2014).mkv
+[2026-08-28 21:56:46] [INFO] [155/382] Already clean: Into the Wild (2007)\Into the Wild (2007).mkv
+[2026-08-28 21:56:46] [INFO] [156/382] Already clean: Iron Man (2008)\Iron Man (2008).mkv
+[2026-08-28 21:56:46] [INFO] [157/382] Already clean: Iron Man 2 (2010)\Iron Man 2 (2010).mkv
+[2026-08-28 21:56:47] [WARNING] [158/382] Skipping 'IT (2017)\IT (2017).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 21:56:47] [INFO] [159/382] Already clean: James and the Giant Peach (1996)\James and the Giant Peach (1996).mkv
+[2026-08-28 21:56:47] [INFO] [160/382] Already clean: Jaws (1975)\Jaws (1975).mkv
+[2026-08-28 21:56:47] [INFO] [161/382] Already clean: Jimmy Neutron Boy Genius (2001)\Jimmy Neutron Boy Genius (2001).mkv
+[2026-08-28 21:56:48] [INFO] [162/382] Already clean: John Q (2002)\John Q (2002).mkv
+[2026-08-28 21:56:48] [INFO] [163/382] Already clean: Joker (2019)\Joker (2019).mkv
+[2026-08-28 21:56:48] [INFO] [164/382] Already clean: Jumanji (1995)\Jumanji (1995).mkv
+[2026-08-28 21:56:48] [INFO] [165/382] Already clean: Juno (2007)\Juno (2007).mkv
+[2026-08-28 21:56:48] [INFO] [166/382] Already clean: Jurassic Park (1993)\Jurassic Park (1993).mkv
+[2026-08-28 21:56:48] [INFO] [167/382] Already clean: Jurassic World (2015)\Jurassic World (2015).mkv
+[2026-08-28 21:56:49] [INFO] [168/382] Already clean: Kick-Ass (2010)\Kick-Ass (2010).mkv
+[2026-08-28 21:56:49] [INFO] [169/382] Already clean: King Richard (2021)\King Richard (2021).mkv
+[2026-08-28 21:56:49] [INFO] [170/382] Already clean: Knives Out (2019)\Knives Out (2019).mkv
+[2026-08-28 21:56:49] [INFO] [171/382] Already clean: Knowing (2009)\Knowing (2009).mkv
+[2026-08-28 21:56:49] [INFO] [172/382] Already clean: Kung Fu Panda (2008)\Kung Fu Panda (2008).mkv
+[2026-08-28 21:56:50] [INFO] [173/382] Already clean: Legally Blonde (2001)\Legally Blonde (2001).mkv
+[2026-08-28 21:56:50] [INFO] [174/382] Already clean: Logan (2017)\Logan (2017).mkv
+[2026-08-28 21:56:50] [INFO] [175/382] Already clean: Lone Survivor (2013)\Lone Survivor (2013).mkv
+[2026-08-28 21:56:50] [INFO] -- 175/382  cleaned 0  already 173  deferred 0  skipped 2  layout 0  errors 0  saved 0 Bytes  838.59 GB/1.78 TB  elapsed 30s  ~36s left
+[2026-08-28 21:56:50] [INFO] [176/382] Already clean: Madagascar (2005)\Madagascar (2005).mkv
+[2026-08-28 21:56:50] [INFO] [177/382] Already clean: Magnolia (1999)\Magnolia (1999).mkv
+[2026-08-28 21:56:50] [INFO] [178/382] Already clean: Marty Supreme (2025)\Marty Supreme (2025).mkv
+[2026-08-28 21:56:51] [INFO] [179/382] Already clean: Mean Girls (2004)\Mean Girls (2004).mkv
+[2026-08-28 21:56:51] [INFO] [180/382] Already clean: Meet the Robinsons (2007)\Meet the Robinsons (2007).mkv
+[2026-08-28 21:56:51] [INFO] [181/382] Already clean: Megamind (2010)\Megamind (2010).mkv
+[2026-08-28 21:56:51] [INFO] [182/382] Already clean: Memento (2000)\Memento (2000).mkv
+[2026-08-28 21:56:51] [INFO] [183/382] Already clean: Minority Report (2002)\Minority Report (2002).mkv
+[2026-08-28 21:56:51] [INFO] [184/382] Already clean: Mission - Impossible - Fallout (2018)\Mission - Impossible - Fallout (2018).mkv
+[2026-08-28 21:56:51] [INFO] [185/382] Already clean: Monsters University (2013)\Monsters University (2013).mkv
+[2026-08-28 21:56:52] [INFO] [186/382] Processing: Monsters, Inc (2001)\Monsters, Inc (2001).mkv (3.82 GB)
+[2026-08-28 21:56:52] [INFO]   -> Retaining Audio: ID 1: AAC 8ch [eng]
+[2026-08-28 21:56:52] [INFO]   -> Validated External SRT: Monsters, Inc (2001).en.srt (sole subtitle option; embedded subtitles removed)
+[2026-08-28 21:56:52] [INFO]   -> Subtitles Kept: 0 | Removed: 1
+[2026-08-28 21:58:20] [INFO]   -> Verifying remux integrity...
+[2026-08-28 21:58:20] [INFO]   -> Atomic swap over original...
+[2026-08-28 21:58:21] [INFO]   -> Successfully cleaned: Monsters, Inc (2001)\Monsters, Inc (2001).mkv (3.82 GB -> 3.82 GB | Saved: 4.59 MB | 1m 29s)
+[2026-08-28 21:58:21] [INFO] -- 186/382  cleaned 1  already 183  deferred 0  skipped 2  layout 0  errors 0  saved 4.59 MB  888.16 GB/1.78 TB  elapsed 2m 01s  ~2m 08s left
+[2026-08-28 21:58:21] [INFO] [187/382] Already clean: Moon (2009)\Moon (2009).mkv
+[2026-08-28 21:58:22] [INFO] [188/382] Already clean: Mulan (1998)\Mulan (1998).mkv
+[2026-08-28 21:58:22] [INFO] [189/382] Already clean: Napoleon Dynamite (2004)\Napoleon Dynamite (2004).mkv
+[2026-08-28 21:58:22] [INFO] [190/382] Already clean: National Lampoon's Christmas Vacation (1989)\National Lampoon's Christmas Vacation (1989).mkv
+[2026-08-28 21:58:22] [INFO] [191/382] Already clean: National Treasure (2004)\National Treasure (2004).mkv
+[2026-08-28 21:58:22] [INFO] [192/382] Already clean: National Treasure Book of Secrets (2007)\National Treasure Book of Secrets (2007).mkv
+[2026-08-28 21:58:22] [INFO] [193/382] Already clean: Night at the Museum (2006)\Night at the Museum (2006).mkv
+[2026-08-28 21:58:23] [INFO] [194/382] Already clean: Nightcrawler (2014)\Nightcrawler (2014).mkv
+[2026-08-28 21:58:23] [INFO] [195/382] Already clean: No Country for Old Men (2007)\No Country for Old Men (2007).mkv
+[2026-08-28 21:58:23] [INFO] [196/382] Already clean: Now You See Me (2013)\Now You See Me (2013).mkv
+[2026-08-28 21:58:23] [INFO] [197/382] Already clean: Oblivion (2013)\Oblivion (2013).mkv
+[2026-08-28 21:58:23] [INFO] [198/382] Already clean: Obsession (2026)\Obsession (2026).mkv
+[2026-08-28 21:58:24] [INFO] [199/382] Already clean: October Sky (1999)\October Sky (1999).mkv
+[2026-08-28 21:58:24] [INFO] [200/382] Already clean: Office Space (1999)\Office Space (1999).mkv
+[2026-08-28 21:58:24] [INFO] -- 200/382  cleaned 1  already 197  deferred 0  skipped 2  layout 0  errors 0  saved 4.59 MB  944.42 GB/1.78 TB  elapsed 2m 04s  ~1m 55s left
+[2026-08-28 21:58:24] [INFO] [201/382] Already clean: One Flew Over the Cuckoo's Nest (1975)\One Flew Over the Cuckoo's Nest (1975).mkv
+[2026-08-28 21:58:24] [INFO] [202/382] Already clean: Open Season (2006)\Open Season (2006).mkv
+[2026-08-28 21:58:24] [INFO] [203/382] Already clean: Oppenheimer (2023)\Oppenheimer (2023).mkv
+[2026-08-28 21:58:25] [INFO] [204/382] Already clean: Osmosis Jones (2001)\Osmosis Jones (2001).mkv
+[2026-08-28 21:58:25] [INFO] [205/382] Already clean: Over the Hedge (2006)\Over the Hedge (2006).mkv
+[2026-08-28 21:58:25] [WARNING] [206/382] Skipping 'Parasite (2019)\Parasite (2019).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 21:58:25] [INFO] [207/382] Already clean: Pearl (2022)\Pearl (2022).mkv
+[2026-08-28 21:58:25] [INFO] [208/382] Already clean: Pineapple Express (2008)\Pineapple Express (2008).mkv
+[2026-08-28 21:58:26] [INFO] [209/382] Already clean: Pirates of the Caribbean At World's End (2007)\Pirates of the Caribbean At World's End (2007).mkv
+[2026-08-28 21:58:26] [INFO] [210/382] Already clean: Pirates of the Caribbean Dead Man's Chest (2006)\Pirates of the Caribbean Dead Man's Chest (2006).mkv
+[2026-08-28 21:58:26] [INFO] [211/382] Already clean: Pirates of the Caribbean The Curse of the Black Pearl (2003)\Pirates of the Caribbean The Curse of the Black Pearl (2003).mkv
+[2026-08-28 21:58:26] [INFO] [212/382] Already clean: Pitch Perfect (2012)\Pitch Perfect (2012).mkv
+[2026-08-28 21:58:26] [INFO] [213/382] Already clean: Prisoners (2013)\Prisoners (2013).mkv
+[2026-08-28 21:58:26] [INFO] [214/382] Already clean: Project Hail Mary (2026)\Project Hail Mary (2026).mkv
+[2026-08-28 21:58:26] [INFO] [215/382] Already clean: Project X (2012)\Project X (2012).mkv
+[2026-08-28 21:58:27] [INFO] [216/382] Already clean: Pulp Fiction (1994)\Pulp Fiction (1994).mkv
+[2026-08-28 21:58:27] [INFO] [217/382] Already clean: Ratatouille (2007)\Ratatouille (2007).mkv
+[2026-08-28 21:58:27] [INFO] [218/382] Already clean: Ready Player One (2018)\Ready Player One (2018).mkv
+[2026-08-28 21:58:27] [INFO] [219/382] Already clean: Real Steel (2011)\Real Steel (2011).mkv
+[2026-08-28 21:58:27] [INFO] [220/382] Already clean: Remember the Titans (2000)\Remember the Titans (2000).mkv
+[2026-08-28 21:58:28] [INFO] [221/382] Already clean: Requiem for a Dream (2000)\Requiem for a Dream (2000).mkv
+[2026-08-28 21:58:28] [INFO] [222/382] Already clean: Rise of the Planet of the Apes (2011)\Rise of the Planet of the Apes (2011).mkv
+[2026-08-28 21:58:28] [INFO] [223/382] Already clean: Robots (2005)\Robots (2005).mkv
+[2026-08-28 21:58:28] [INFO] [224/382] Already clean: Rocky (1976)\Rocky (1976).mkv
+[2026-08-28 21:58:28] [INFO] [225/382] Already clean: Room (2015)\Room (2015).mkv
+[2026-08-28 21:58:28] [INFO] -- 225/382  cleaned 1  already 221  deferred 0  skipped 3  layout 0  errors 0  saved 4.59 MB  1.03 TB/1.78 TB  elapsed 2m 08s  ~1m 33s left
+[2026-08-28 21:58:28] [INFO] [226/382] Already clean: Sausage Party (2016)\Sausage Party (2016).mkv
+[2026-08-28 21:58:28] [INFO] [227/382] Already clean: Saving Private Ryan (1998)\Saving Private Ryan (1998).mkv
+[2026-08-28 21:58:29] [INFO] [228/382] Already clean: Saw (2004)\Saw (2004).mkv
+[2026-08-28 21:58:29] [INFO] [229/382] Already clean: Scarface (1983)\Scarface (1983).mkv
+[2026-08-28 21:58:29] [INFO] [230/382] Already clean: Schindler's List (1993)\Schindler's List (1993).mkv
+[2026-08-28 21:58:29] [INFO] [231/382] Already clean: Scream (1996)\Scream (1996).mkv
+[2026-08-28 21:58:29] [INFO] [232/382] Already clean: Se7en (1995)\Se7en (1995).mkv
+[2026-08-28 21:58:30] [INFO] [233/382] Already clean: Shark Tale (2004)\Shark Tale (2004).mkv
+[2026-08-28 21:58:30] [INFO] [234/382] Already clean: Shazam! (2019)\Shazam! (2019).mkv
+[2026-08-28 21:58:30] [INFO] [235/382] Already clean: Shrek (2001)\Shrek (2001).mkv
+[2026-08-28 21:58:30] [INFO] [236/382] Already clean: Shrek 2 (2004)\Shrek 2 (2004).mkv
+[2026-08-28 21:58:30] [INFO] [237/382] Already clean: Shrek Forever After (2010)\Shrek Forever After (2010).mkv
+[2026-08-28 21:58:31] [INFO] [238/382] Already clean: Shutter Island (2010)\Shutter Island (2010).mkv
+[2026-08-28 21:58:31] [INFO] [239/382] Already clean: Sicario (2015)\Sicario (2015).mkv
+[2026-08-28 21:58:31] [INFO] [240/382] Already clean: Signs (2002)\Signs (2002).mkv
+[2026-08-28 21:58:31] [INFO] [241/382] Already clean: Sinister (2012)\Sinister (2012).mkv
+[2026-08-28 21:58:32] [INFO] [242/382] Already clean: Sinners (2025)\Sinners (2025).mkv
+[2026-08-28 21:58:32] [INFO] [243/382] Already clean: Skyfall (2012)\Skyfall (2012).mkv
+[2026-08-28 21:58:32] [INFO] [244/382] Already clean: Slumdog Millionaire (2008)\Slumdog Millionaire (2008).mkv
+[2026-08-28 21:58:32] [INFO] [245/382] Already clean: Snatch (2000)\Snatch (2000).mkv
+[2026-08-28 21:58:32] [INFO] [246/382] Already clean: Snowden (2016)\Snowden (2016).mkv
+[2026-08-28 21:58:33] [INFO] [247/382] Already clean: Source Code (2011)\Source Code (2011).mkv
+[2026-08-28 21:58:33] [INFO] [248/382] Already clean: Spaceballs (1987)\Spaceballs (1987).mkv
+[2026-08-28 21:58:33] [INFO] [249/382] Already clean: Spider-Man (2002)\Spider-Man (2002).mkv
+[2026-08-28 21:58:33] [INFO] [250/382] Already clean: Spider-Man - Across the Spider-Verse (2023)\Spider-Man - Across the Spider-Verse (2023).mkv
+[2026-08-28 21:58:33] [INFO] -- 250/382  cleaned 1  already 246  deferred 0  skipped 3  layout 0  errors 0  saved 4.59 MB  1.15 TB/1.78 TB  elapsed 2m 13s  ~1m 12s left
+[2026-08-28 21:58:33] [INFO] [251/382] Already clean: Spider-Man - Homecoming (2017)\Spider-Man - Homecoming (2017).mkv
+[2026-08-28 21:58:33] [INFO] [252/382] Already clean: Spider-Man - Into the Spider-Verse (2018)\Spider-Man - Into the Spider-Verse (2018).mkv
+[2026-08-28 21:58:33] [INFO] [253/382] Already clean: Spider-Man 2 (2004)\Spider-Man 2 (2004).mkv
+[2026-08-28 21:58:34] [INFO] [254/382] Already clean: Spider-Man No Way Home (2021)\Spider-Man No Way Home (2021).mkv
+[2026-08-28 21:58:34] [INFO] [255/382] Already clean: Spirited Away (2001)\Spirited Away (2001).mkv
+[2026-08-28 21:58:34] [INFO] [256/382] Already clean: Split (2016)\Split (2016).mkv
+[2026-08-28 21:58:34] [WARNING] [257/382] Skipping 'Stalker (1979)\Stalker (1979).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 21:58:34] [INFO] [258/382] Already clean: Stand by Me (1986)\Stand by Me (1986).mkv
+[2026-08-28 21:58:34] [INFO] [259/382] Already clean: Star Trek (2009)\Star Trek (2009).mkv
+[2026-08-28 21:58:35] [INFO] [260/382] Already clean: Star Trek - Into Darkness (2013)\Star Trek - Into Darkness (2013).mkv
+[2026-08-28 21:58:35] [INFO] [261/382] Already clean: Star Wars - Episode I - The Phantom Menace (1999)\Star Wars - Episode I - The Phantom Menace (1999).mkv
+[2026-08-28 21:58:35] [INFO] [262/382] Already clean: Star Wars - Episode II - Attack of the Clones (2002)\Star Wars - Episode II - Attack of the Clones (2002).mkv
+[2026-08-28 21:58:35] [INFO] [263/382] Already clean: Star Wars - Episode III - Revenge of the Sith (2005)\Star Wars - Episode III - Revenge of the Sith (2005).mkv
+[2026-08-28 21:58:35] [INFO] [264/382] Already clean: Star Wars - Episode IV - A New Hope (1977)\Star Wars - Episode IV - A New Hope (1977).mkv
+[2026-08-28 21:58:36] [INFO] [265/382] Already clean: Star Wars - Episode V - The Empire Strikes Back (1980)\Star Wars - Episode V - The Empire Strikes Back (1980).mkv
+[2026-08-28 21:58:36] [INFO] [266/382] Already clean: Star Wars - Episode VI - Return of the Jedi (1983)\Star Wars - Episode VI - Return of the Jedi (1983).mkv
+[2026-08-28 21:58:36] [INFO] [267/382] Already clean: Straight Outta Compton (2015)\Straight Outta Compton (2015).mkv
+[2026-08-28 21:58:36] [INFO] [268/382] Already clean: Super 8 (2011)\Super 8 (2011).mkv
+[2026-08-28 21:58:36] [INFO] [269/382] Already clean: Superbad (2007)\Superbad (2007).mkv
+[2026-08-28 21:58:36] [INFO] [270/382] Already clean: Surfs Up (2007)\Surfs Up (2007).mkv
+[2026-08-28 21:58:37] [INFO] [271/382] Already clean: Taken (2008)\Taken (2008).mkv
+[2026-08-28 21:58:37] [INFO] [272/382] Already clean: Tangled (2010)\Tangled (2010).mkv
+[2026-08-28 21:58:37] [INFO] [273/382] Already clean: Taxi Driver (1976)\Taxi Driver (1976).mkv
+[2026-08-28 21:58:37] [INFO] [274/382] Already clean: Ted (2012)\Ted (2012).mkv
+[2026-08-28 21:58:37] [INFO] [275/382] Already clean: Tenet (2020)\Tenet (2020).mkv
+[2026-08-28 21:58:37] [INFO] -- 275/382  cleaned 1  already 270  deferred 0  skipped 4  layout 0  errors 0  saved 4.59 MB  1.27 TB/1.78 TB  elapsed 2m 18s  ~55s left
+[2026-08-28 21:58:38] [INFO] [276/382] Already clean: Terminator 2 - Judgment Day (1991)\Terminator 2 - Judgment Day (1991).mkv
+[2026-08-28 21:58:38] [INFO] [277/382] Already clean: Tetris (2023)\Tetris (2023).mkv
+[2026-08-28 21:58:38] [INFO] [278/382] Already clean: The Accountant (2016)\The Accountant (2016).mkv
+[2026-08-28 21:58:38] [INFO] [279/382] Already clean: The Amazing Spider-Man (2012)\The Amazing Spider-Man (2012).mkv
+[2026-08-28 21:58:38] [INFO] [280/382] Already clean: The Avengers (2012)\The Avengers (2012).mkv
+[2026-08-28 21:58:39] [INFO] [281/382] Already clean: The Batman (2022)\The Batman (2022).mkv
+[2026-08-28 21:58:39] [INFO] [282/382] Already clean: The Big Lebowski (1998)\The Big Lebowski (1998).mkv
+[2026-08-28 21:58:39] [INFO] [283/382] Already clean: The Big Short (2015)\The Big Short (2015).mkv
+[2026-08-28 21:58:39] [INFO] [284/382] Already clean: The Book of Eli (2010)\The Book of Eli (2010).mkv
+[2026-08-28 21:58:39] [INFO] [285/382] Already clean: The Bourne Identity (2002)\The Bourne Identity (2002).mkv
+[2026-08-28 21:58:39] [INFO] [286/382] Already clean: The Bourne Supremacy (2004)\The Bourne Supremacy (2004).mkv
+[2026-08-28 21:58:40] [INFO] [287/382] Already clean: The Bourne Ultimatum (2007)\The Bourne Ultimatum (2007).mkv
+[2026-08-28 21:58:40] [INFO] [288/382] Already clean: The Boy in the Striped Pyjamas (2008)\The Boy in the Striped Pyjamas (2008).mkv
+[2026-08-28 21:58:40] [INFO] [289/382] Already clean: The Breakfast Club (1985)\The Breakfast Club (1985).mkv
+[2026-08-28 21:58:40] [INFO] [290/382] Already clean: The Curious Case of Benjamin Button (2008)\The Curious Case of Benjamin Button (2008).mkv
+[2026-08-28 21:58:41] [INFO] [291/382] Processing: The Dark Knight (2008)\The Dark Knight (2008).mkv (5.91 GB)
+[2026-08-28 21:58:41] [INFO]   -> Retaining Audio: ID 1: AAC 6ch [eng]
+[2026-08-28 21:58:41] [INFO]   -> Validated External SRT: The Dark Knight (2008).en.srt (sole subtitle option; embedded subtitles removed)
+[2026-08-28 21:58:41] [INFO]   -> Subtitles Kept: 0 | Removed: 1
+[2026-08-28 22:01:14] [INFO]   -> Verifying remux integrity...
+[2026-08-28 22:01:14] [INFO]   -> Atomic swap over original...
+[2026-08-28 22:01:15] [INFO]   -> Successfully cleaned: The Dark Knight (2008)\The Dark Knight (2008).mkv (5.91 GB -> 5.90 GB | Saved: 7.48 MB | 2m 34s)
+[2026-08-28 22:01:15] [INFO] -- 291/382  cleaned 2  already 285  deferred 0  skipped 4  layout 0  errors 0  saved 12.08 MB  1.35 TB/1.78 TB  elapsed 4m 55s  ~1m 35s left
+[2026-08-28 22:01:15] [INFO] [292/382] Already clean: The Dark Knight Rises (2012)\The Dark Knight Rises (2012).mkv
+[2026-08-28 22:01:16] [INFO] [293/382] Already clean: The Departed (2006)\The Departed (2006).mkv
+[2026-08-28 22:01:16] [INFO] [294/382] Already clean: The Edge of Seventeen (2016)\The Edge of Seventeen (2016).mkv
+[2026-08-28 22:01:16] [INFO] [295/382] Already clean: The Emperor's New Groove (2000)\The Emperor's New Groove (2000).mkv
+[2026-08-28 22:01:16] [INFO] [296/382] Already clean: The Fast and the Furious (2001)\The Fast and the Furious (2001).mkv
+[2026-08-28 22:01:17] [INFO] [297/382] Already clean: The Founder (2016)\The Founder (2016).mkv
+[2026-08-28 22:01:17] [INFO] [298/382] Already clean: The Godfather (1972)\The Godfather (1972).mkv
+[2026-08-28 22:01:17] [INFO] [299/382] Already clean: The Godfather - Part II (1974)\The Godfather - Part II (1974).mkv
+[2026-08-28 22:01:17] [INFO] [300/382] Already clean: The Goonies (1985)\The Goonies (1985).mkv
+[2026-08-28 22:01:17] [INFO] -- 300/382  cleaned 2  already 294  deferred 0  skipped 4  layout 0  errors 0  saved 12.08 MB  1.40 TB/1.78 TB  elapsed 4m 57s  ~1m 19s left
+[2026-08-28 22:01:17] [INFO] [301/382] Already clean: The Green Mile (1999)\The Green Mile (1999).mkv
+[2026-08-28 22:01:18] [INFO] [302/382] Already clean: The Hangover (2009)\The Hangover (2009).mkv
+[2026-08-28 22:01:18] [INFO] [303/382] Already clean: The Help (2011)\The Help (2011).mkv
+[2026-08-28 22:01:18] [INFO] [304/382] Already clean: The Hunger Games (2012)\The Hunger Games (2012).mkv
+[2026-08-28 22:01:18] [INFO] [305/382] Already clean: The Hunger Games - Mockingjay - Part 1 (2014)\The Hunger Games - Mockingjay - Part 1 (2014).mkv
+[2026-08-28 22:01:18] [INFO] [306/382] Already clean: The Hunger Games - Mockingjay - Part 2 (2015)\The Hunger Games - Mockingjay - Part 2 (2015).mkv
+[2026-08-28 22:01:19] [INFO] [307/382] Already clean: The Hunger Games Catching Fire (2013)\The Hunger Games Catching Fire (2013).mkv
+[2026-08-28 22:01:19] [INFO] [308/382] Already clean: The Hurt Locker (2008)\The Hurt Locker (2008).mkv
+[2026-08-28 22:01:19] [INFO] [309/382] Already clean: The Imitation Game (2014)\The Imitation Game (2014).mkv
+[2026-08-28 22:01:19] [INFO] [310/382] Already clean: The Incredibles (2004)\The Incredibles (2004).mkv
+[2026-08-28 22:01:19] [INFO] [311/382] Already clean: The Interview (2014)\The Interview (2014).mkv
+[2026-08-28 22:01:20] [INFO] [312/382] Already clean: The Invisible Man (2020)\The Invisible Man (2020).mkv
+[2026-08-28 22:01:20] [INFO] [313/382] Already clean: The Invite (2026)\The Invite (2026).mkv
+[2026-08-28 22:01:20] [INFO] [314/382] Already clean: The Karate Kid (1984)\The Karate Kid (1984).mkv
+[2026-08-28 22:01:20] [INFO] [315/382] Already clean: The Longest Yard (2005)\The Longest Yard (2005).mkv
+[2026-08-28 22:01:21] [INFO] [316/382] Already clean: The Lord of the Rings The Fellowship of the Ring (2001)\The Lord of the Rings The Fellowship of the Ring (2001).mkv
+[2026-08-28 22:01:21] [INFO] [317/382] Already clean: The Lord of the Rings The Return of the King (2003)\The Lord of the Rings The Return of the King (2003).mkv
+[2026-08-28 22:01:21] [INFO] [318/382] Already clean: The Lord of the Rings The Two Towers (2002)\The Lord of the Rings The Two Towers (2002).mkv
+[2026-08-28 22:01:21] [INFO] [319/382] Already clean: The Martian (2015)\The Martian (2015).mkv
+[2026-08-28 22:01:21] [INFO] [320/382] Already clean: The Matrix (1999)\The Matrix (1999).mkv
+[2026-08-28 22:01:21] [INFO] [321/382] Already clean: The Maze Runner (2014)\The Maze Runner (2014).mkv
+[2026-08-28 22:01:22] [INFO] [322/382] Already clean: The Nightmare Before Christmas (1993)\The Nightmare Before Christmas (1993).mkv
+[2026-08-28 22:01:22] [INFO] [323/382] Already clean: The Polar Express (2004)\The Polar Express (2004).mkv
+[2026-08-28 22:01:22] [INFO] [324/382] Already clean: The Prestige (2006)\The Prestige (2006).mkv
+[2026-08-28 22:01:22] [INFO] [325/382] Already clean: The Princess and the Frog (2009)\The Princess and the Frog (2009).mkv
+[2026-08-28 22:01:22] [INFO] -- 325/382  cleaned 2  already 319  deferred 0  skipped 4  layout 0  errors 0  saved 12.08 MB  1.51 TB/1.78 TB  elapsed 5m 03s  ~53s left
+[2026-08-28 22:01:23] [INFO] [326/382] Already clean: The Proposal (2009)\The Proposal (2009).mkv
+[2026-08-28 22:01:23] [INFO] [327/382] Already clean: The Revenant (2015)\The Revenant (2015).mkv
+[2026-08-28 22:01:23] [INFO] [328/382] Already clean: The Sandlot (1993)\The Sandlot (1993).mkv
+[2026-08-28 22:01:23] [INFO] [329/382] Already clean: The Shawshank Redemption (1994)\The Shawshank Redemption (1994).mkv
+[2026-08-28 22:01:23] [INFO] [330/382] Processing: The Silence of the Lambs (1991)\The Silence of the Lambs (1991).mkv (4.61 GB)
+[2026-08-28 22:01:23] [INFO]   -> Retaining Audio: ID 1: AAC 6ch [eng]
+[2026-08-28 22:01:23] [INFO]   -> Validated External SRT: The Silence of the Lambs (1991).en.srt (sole subtitle option; embedded subtitles removed)
+[2026-08-28 22:01:23] [INFO]   -> Subtitles Kept: 0 | Removed: 1
+[2026-08-28 22:03:53] [INFO]   -> Verifying remux integrity...
+[2026-08-28 22:03:54] [INFO]   -> Atomic swap over original...
+[2026-08-28 22:03:54] [INFO]   -> Successfully cleaned: The Silence of the Lambs (1991)\The Silence of the Lambs (1991).mkv (4.61 GB -> 4.60 GB | Saved: 5.96 MB | 2m 30s)
+[2026-08-28 22:03:54] [INFO] -- 330/382  cleaned 3  already 323  deferred 0  skipped 4  layout 0  errors 0  saved 18.03 MB  1.54 TB/1.78 TB  elapsed 7m 34s  ~1m 11s left
+[2026-08-28 22:03:54] [INFO] [331/382] Already clean: The Sixth Sense (1999)\The Sixth Sense (1999).mkv
+[2026-08-28 22:03:54] [INFO] [332/382] Already clean: The Social Network (2010)\The Social Network (2010).mkv
+[2026-08-28 22:03:55] [INFO] [333/382] Already clean: The Substance (2024)\The Substance (2024).mkv
+[2026-08-28 22:03:55] [INFO] [334/382] Already clean: The Terminator (1984)\The Terminator (1984).mkv
+[2026-08-28 22:03:55] [INFO] [335/382] Already clean: The Theory of Everything (2014)\The Theory of Everything (2014).mkv
+[2026-08-28 22:03:55] [INFO] [336/382] Already clean: The Thing (1982)\The Thing (1982).mkv
+[2026-08-28 22:03:55] [INFO] [337/382] Already clean: The Truman Show (1998)\The Truman Show (1998).mkv
+[2026-08-28 22:03:55] [INFO] [338/382] Already clean: The Usual Suspects (1995)\The Usual Suspects (1995).mkv
+[2026-08-28 22:03:56] [INFO] [339/382] Already clean: The Wild Robot (2024)\The Wild Robot (2024).mkv
+[2026-08-28 22:03:56] [INFO] [340/382] Already clean: The Wolf of Wall Street (2013)\The Wolf of Wall Street (2013).mkv
+[2026-08-28 22:03:56] [INFO] [341/382] Already clean: There Will Be Blood (2007)\There Will Be Blood (2007).mkv
+[2026-08-28 22:03:56] [INFO] [342/382] Already clean: This Christmas (2007)\This Christmas (2007).mkv
+[2026-08-28 22:03:56] [INFO] [343/382] Already clean: This Is the End (2013)\This Is the End (2013).mkv
+[2026-08-28 22:03:57] [INFO] [344/382] Already clean: Thor - Ragnarok (2017)\Thor - Ragnarok (2017).mkv
+[2026-08-28 22:03:57] [INFO] [345/382] Already clean: Threads (1984)\Threads (1984).mkv
+[2026-08-28 22:03:57] [INFO] [346/382] Already clean: Titanic (1997)\Titanic (1997).mkv
+[2026-08-28 22:03:57] [INFO] [347/382] Already clean: Top Gun (1986)\Top Gun (1986).mkv
+[2026-08-28 22:03:57] [INFO] [348/382] Already clean: Top Gun - Maverick (2022)\Top Gun - Maverick (2022).mkv
+[2026-08-28 22:03:57] [INFO] [349/382] Already clean: Toy Story (1995)\Toy Story (1995).mkv
+[2026-08-28 22:03:58] [INFO] [350/382] Already clean: Toy Story 2 (1999)\Toy Story 2 (1999).mkv
+[2026-08-28 22:03:58] [INFO] -- 350/382  cleaned 3  already 343  deferred 0  skipped 4  layout 0  errors 0  saved 18.03 MB  1.63 TB/1.78 TB  elapsed 7m 38s  ~41s left
+[2026-08-28 22:03:58] [INFO] [351/382] Already clean: Toy Story 3 (2010)\Toy Story 3 (2010).mkv
+[2026-08-28 22:03:58] [INFO] [352/382] Already clean: Toy Story 4 (2019)\Toy Story 4 (2019).mkv
+[2026-08-28 22:03:58] [INFO] [353/382] Already clean: Toy Story 5 (2026)\Toy Story 5 (2026).mkv
+[2026-08-28 22:03:58] [INFO] [354/382] Already clean: Training Day (2001)\Training Day (2001).mkv
+[2026-08-28 22:03:59] [INFO] [355/382] Already clean: Transformers (2007)\Transformers (2007).mkv
+[2026-08-28 22:03:59] [WARNING] [356/382] Skipping 'Transformers Dark Of The Moon (2011)\Transformers Dark Of The Moon (2011).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 22:03:59] [INFO] [357/382] Already clean: Transformers Revenge of the Fallen (2009)\Transformers Revenge of the Fallen (2009).mkv
+[2026-08-28 22:03:59] [INFO] [358/382] Already clean: Treasure Planet (2002)\Treasure Planet (2002).mkv
+[2026-08-28 22:03:59] [INFO] [359/382] Already clean: TRON - Legacy (2010)\TRON - Legacy (2010).mkv
+[2026-08-28 22:04:00] [INFO] [360/382] Already clean: Turtles Forever (2009)\Turtles Forever (2009).mkv
+[2026-08-28 22:04:00] [INFO] [361/382] Already clean: Twelve Monkeys (1995)\Twelve Monkeys (1995).mkv
+[2026-08-28 22:04:00] [INFO] [362/382] Already clean: Uncut Gems (2019)\Uncut Gems (2019).mkv
+[2026-08-28 22:04:00] [INFO] [363/382] Already clean: United 93 (2006)\United 93 (2006).mkv
+[2026-08-28 22:04:00] [INFO] [364/382] Already clean: Us (2019)\Us (2019).mkv
+[2026-08-28 22:04:01] [INFO] [365/382] Already clean: V for Vendetta (2005)\V for Vendetta (2005).mkv
+[2026-08-28 22:04:01] [INFO] [366/382] Already clean: WALL-E (2008)\WALL-E (2008).mkv
+[2026-08-28 22:04:01] [INFO] [367/382] Already clean: Wallace & Gromit - The Curse of the Were-Rabbit (2005)\Wallace & Gromit - The Curse of the Were-Rabbit (2005).mkv
+[2026-08-28 22:04:01] [INFO] [368/382] Already clean: War Dogs (2016)\War Dogs (2016).mkv
+[2026-08-28 22:04:02] [INFO] [369/382] Already clean: War for the Planet of the Apes (2017)\War for the Planet of the Apes (2017).mkv
+[2026-08-28 22:04:02] [INFO] [370/382] Already clean: WarGames (1983)\WarGames (1983).mkv
+[2026-08-28 22:04:02] [INFO] [371/382] Already clean: Warrior (2011)\Warrior (2011).mkv
+[2026-08-28 22:04:02] [INFO] [372/382] Already clean: We're the Millers (2013)\We're the Millers (2013).mkv
+[2026-08-28 22:04:02] [INFO] [373/382] Already clean: Weapons (2025)\Weapons (2025).mkv
+[2026-08-28 22:04:02] [INFO] [374/382] Already clean: When Harry Met Sally (1989)\When Harry Met Sally (1989).mkv
+[2026-08-28 22:04:03] [INFO] [375/382] Already clean: Whiplash (2014)\Whiplash (2014).mkv
+[2026-08-28 22:04:03] [INFO] -- 375/382  cleaned 3  already 367  deferred 0  skipped 5  layout 0  errors 0  saved 18.03 MB  1.75 TB/1.78 TB  elapsed 7m 43s  ~8.3s left
+[2026-08-28 22:04:03] [INFO] [376/382] Already clean: Willy Wonka & the Chocolate Factory (1971)\Willy Wonka & the Chocolate Factory (1971).mkv
+[2026-08-28 22:04:03] [INFO] [377/382] Already clean: World War Z (2013)\World War Z (2013).mkv
+[2026-08-28 22:04:03] [INFO] [378/382] Already clean: Wreck-It Ralph (2012)\Wreck-It Ralph (2012).mkv
+[2026-08-28 22:04:03] [INFO] [379/382] Already clean: Zathura - A Space Adventure (2005)\Zathura - A Space Adventure (2005).mkv
+[2026-08-28 22:04:03] [INFO] [380/382] Already clean: Zero Dark Thirty (2012)\Zero Dark Thirty (2012).mkv
+[2026-08-28 22:04:04] [INFO] [381/382] Already clean: Zootopia (2016)\Zootopia (2016).mkv
+[2026-08-28 22:04:04] [INFO] [382/382] Already clean: Zootopia 2 (2025)\Zootopia 2 (2025).mkv
+[2026-08-28 22:04:04] [INFO] -- 382/382  cleaned 3  already 374  deferred 0  skipped 5  layout 0  errors 0  saved 18.03 MB  1.78 TB/1.78 TB  elapsed 7m 44s  ~0.0s left
+[2026-08-28 22:04:04] [INFO] Metadata cache: 0 reused, 382 read from mkvmerge.
+[2026-08-28 22:04:04] [INFO] Detailed summary report saved to: 'E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt'
+[2026-08-28 22:57:11] [INFO] ===============================================================================
+[2026-08-28 22:57:11] [INFO]   LOSSLESS JELLYFIN MKV TRACK CLEANER
+[2026-08-28 22:57:11] [INFO] ===============================================================================
+[2026-08-28 22:57:11] [INFO]   Target directory    : E:\torrents\final_organized
+[2026-08-28 22:57:11] [INFO]   Execution mode      : LIVE RUN (modifications will be applied)
+[2026-08-28 22:57:11] [INFO]   mkvmerge            : C:\Program Files\MKVToolNix\mkvmerge.EXE
+[2026-08-28 22:57:11] [INFO]   mkvmerge version    : mkvmerge v100.0 ('Do Hot Girls Like Chords') 64-bit
+[2026-08-28 22:57:11] [INFO]   Audio languages     : en, eng
+[2026-08-28 22:57:11] [INFO]   Subtitle languages  : en, eng
+[2026-08-28 22:57:11] [INFO]   Commentary / DVS    : remove (fixed policy)
+[2026-08-28 22:57:11] [INFO]   Accessibility subs  : retained only when no valid external .en.srt exists
+[2026-08-28 22:57:11] [INFO]   External .en.srt   : validated exact sidecar automatically becomes sole subtitle option
+[2026-08-28 22:57:11] [INFO]   Sidecar subtitles   : never modified by this cleaner
+[2026-08-28 22:57:11] [INFO]   Pipeline order      : movie_standardizer.py -> subtitle_fetcher.py -> this cleaner
+[2026-08-28 22:57:11] [INFO]   (remuxing first invalidates the OpenSubtitles moviehash; a warning is logged per file)
+[2026-08-28 22:57:11] [INFO]   Hardlinked movies   : always deferred (never remuxed while seeding)
+[2026-08-28 22:57:11] [INFO]   Process priority    : normal
+[2026-08-28 22:57:11] [INFO]   Log file            : E:\torrents\mkv_track_cleaner\mkv_track_cleaner.log
+[2026-08-28 22:57:11] [INFO] ===============================================================================
+[2026-08-28 22:57:11] [INFO] --- Starting Scan on 'E:\torrents\final_organized' ---
+[2026-08-28 22:57:11] [INFO] Single report file: 'E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt'
+[2026-08-28 22:57:11] [INFO] movie_standardizer.py coordination lock acquired.
+[2026-08-28 22:57:11] [INFO] Single-instance lock acquired (PID 25108).
+[2026-08-28 22:57:11] [INFO] Checking for orphaned remux transactions from previous runs...
+[2026-08-28 22:57:11] [INFO] No orphaned remux transactions found.
+[2026-08-28 22:57:11] [INFO] Metadata cache: E:\torrents\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json (382 entries loaded)
+[2026-08-28 22:57:11] [INFO] Scanning 'E:\torrents\final_organized' for MKV files...
+[2026-08-28 22:57:11] [INFO] Found 382 MKV file(s) totaling 1.78 TB
+[2026-08-28 22:57:11] [INFO] [  1/382] Already clean: 10 Cloverfield Lane (2016)\10 Cloverfield Lane (2016).mkv
+[2026-08-28 22:57:11] [INFO] [  2/382] Already clean: 10 Things I Hate About You (1999)\10 Things I Hate About You (1999).mkv
+[2026-08-28 22:57:11] [INFO] [  3/382] Already clean: 12 Years a Slave (2013)\12 Years a Slave (2013).mkv
+[2026-08-28 22:57:11] [INFO] [  4/382] Already clean: 13 Hours - The Secret Soldiers of Benghazi (2016)\13 Hours - The Secret Soldiers of Benghazi (2016).mkv
+[2026-08-28 22:57:11] [INFO] [  5/382] Already clean: 1917 (2019)\1917 (2019).mkv
+[2026-08-28 22:57:11] [INFO] [  6/382] Already clean: 2001 - A Space Odyssey (1968)\2001 - A Space Odyssey (1968).mkv
+[2026-08-28 22:57:11] [INFO] [  7/382] Already clean: 21 Jump Street (2012)\21 Jump Street (2012).mkv
+[2026-08-28 22:57:11] [INFO] [  8/382] Already clean: 22 Jump Street (2014)\22 Jump Street (2014).mkv
+[2026-08-28 22:57:11] [INFO] [  9/382] Already clean: 300 (2006)\300 (2006).mkv
+[2026-08-28 22:57:11] [INFO] [ 10/382] Already clean: 42 (2013)\42 (2013).mkv
+[2026-08-28 22:57:11] [INFO] [ 11/382] Already clean: 50 First Dates (2004)\50 First Dates (2004).mkv
+[2026-08-28 22:57:11] [INFO] [ 12/382] Already clean: 500 Days of Summer (2009)\500 Days of Summer (2009).mkv
+[2026-08-28 22:57:11] [INFO] [ 13/382] Already clean: 8 Mile (2002)\8 Mile (2002).mkv
+[2026-08-28 22:57:11] [INFO] [ 14/382] Already clean: 9 (2009)\9 (2009).mkv
+[2026-08-28 22:57:11] [INFO] [ 15/382] Already clean: A Beautiful Mind (2001)\A Beautiful Mind (2001).mkv
+[2026-08-28 22:57:11] [INFO] [ 16/382] Already clean: A Christmas Story (1983)\A Christmas Story (1983).mkv
+[2026-08-28 22:57:11] [INFO] [ 17/382] Already clean: A I Artificial Intelligence (2001)\A I Artificial Intelligence (2001).mkv
+[2026-08-28 22:57:11] [INFO] [ 18/382] Already clean: A Quiet Place (2018)\A Quiet Place (2018).mkv
+[2026-08-28 22:57:11] [INFO] [ 19/382] Already clean: A Quiet Place Part II (2021)\A Quiet Place Part II (2021).mkv
+[2026-08-28 22:57:11] [INFO] [ 20/382] Already clean: About Time (2013)\About Time (2013).mkv
+[2026-08-28 22:57:11] [INFO] [ 21/382] Already clean: Accepted (2006)\Accepted (2006).mkv
+[2026-08-28 22:57:11] [INFO] [ 22/382] Already clean: Air (2023)\Air (2023).mkv
+[2026-08-28 22:57:11] [INFO] [ 23/382] Already clean: Aladdin (1992)\Aladdin (1992).mkv
+[2026-08-28 22:57:11] [INFO] [ 24/382] Already clean: Alien (1979)\Alien (1979).mkv
+[2026-08-28 22:57:11] [INFO] [ 25/382] Already clean: Aliens (1986)\Aliens (1986).mkv
+[2026-08-28 22:57:11] [INFO] -- 25/382  cleaned 0  already 25  deferred 0  skipped 0  layout 0  errors 0  saved 0 Bytes  126.62 GB/1.78 TB  elapsed 0.1s  ~1.3s left
+[2026-08-28 22:57:11] [INFO] [ 26/382] Already clean: All Quiet on the Western Front (2022)\All Quiet on the Western Front (2022).mkv
+[2026-08-28 22:57:11] [INFO] [ 27/382] Already clean: American History X (1998)\American History X (1998).mkv
+[2026-08-28 22:57:11] [INFO] [ 28/382] Already clean: American Pie (1999)\American Pie (1999).mkv
+[2026-08-28 22:57:11] [INFO] [ 29/382] Already clean: American Psycho (2000)\American Psycho (2000).mkv
+[2026-08-28 22:57:11] [INFO] [ 30/382] Already clean: American Sniper (2014)\American Sniper (2014).mkv
+[2026-08-28 22:57:11] [INFO] [ 31/382] Already clean: Annihilation (2018)\Annihilation (2018).mkv
+[2026-08-28 22:57:11] [INFO] [ 32/382] Already clean: Apollo 13 (1995)\Apollo 13 (1995).mkv
+[2026-08-28 22:57:11] [INFO] [ 33/382] Already clean: Arrival (2016)\Arrival (2016).mkv
+[2026-08-28 22:57:11] [INFO] [ 34/382] Already clean: Avatar (2009)\Avatar (2009).mkv
+[2026-08-28 22:57:11] [INFO] [ 35/382] Already clean: Avengers Age of Ultron (2015)\Avengers Age of Ultron (2015).mkv
+[2026-08-28 22:57:11] [INFO] [ 36/382] Already clean: Avengers Endgame (2019)\Avengers Endgame (2019).mkv
+[2026-08-28 22:57:11] [INFO] [ 37/382] Already clean: Avengers Infinity War (2018)\Avengers Infinity War (2018).mkv
+[2026-08-28 22:57:11] [INFO] [ 38/382] Already clean: Back to the Future (1985)\Back to the Future (1985).mkv
+[2026-08-28 22:57:11] [INFO] [ 39/382] Already clean: Back to the Future Part II (1989)\Back to the Future Part II (1989).mkv
+[2026-08-28 22:57:11] [INFO] [ 40/382] Already clean: Back to the Future Part III (1990)\Back to the Future Part III (1990).mkv
+[2026-08-28 22:57:11] [INFO] [ 41/382] Already clean: Backrooms (2026)\Backrooms (2026).mkv
+[2026-08-28 22:57:11] [INFO] [ 42/382] Already clean: Barbie (2023)\Barbie (2023).mkv
+[2026-08-28 22:57:11] [INFO] [ 43/382] Already clean: Batman Begins (2005)\Batman Begins (2005).mkv
+[2026-08-28 22:57:11] [INFO] [ 44/382] Already clean: Bee Movie (2007)\Bee Movie (2007).mkv
+[2026-08-28 22:57:11] [INFO] [ 45/382] Already clean: Black Hawk Down (2001)\Black Hawk Down (2001).mkv
+[2026-08-28 22:57:11] [INFO] [ 46/382] Already clean: Black Panther (2018)\Black Panther (2018).mkv
+[2026-08-28 22:57:11] [INFO] [ 47/382] Already clean: Blade Runner (1982)\Blade Runner (1982).mkv
+[2026-08-28 22:57:11] [INFO] [ 48/382] Already clean: Blade Runner 2049 (2017)\Blade Runner 2049 (2017).mkv
+[2026-08-28 22:57:11] [INFO] [ 49/382] Already clean: Blended (2014)\Blended (2014).mkv
+[2026-08-28 22:57:11] [INFO] [ 50/382] Already clean: Bohemian Rhapsody (2018)\Bohemian Rhapsody (2018).mkv
+[2026-08-28 22:57:11] [INFO] -- 50/382  cleaned 0  already 50  deferred 0  skipped 0  layout 0  errors 0  saved 0 Bytes  238.11 GB/1.78 TB  elapsed 0.1s  ~0.8s left
+[2026-08-28 22:57:11] [INFO] [ 51/382] Already clean: Borat (2006)\Borat (2006).mkv
+[2026-08-28 22:57:11] [INFO] [ 52/382] Already clean: Boyhood (2014)\Boyhood (2014).mkv
+[2026-08-28 22:57:11] [INFO] [ 53/382] Already clean: Boyz N the Hood (1991)\Boyz N the Hood (1991).mkv
+[2026-08-28 22:57:11] [INFO] [ 54/382] Already clean: Braveheart (1995)\Braveheart (1995).mkv
+[2026-08-28 22:57:11] [INFO] [ 55/382] Already clean: Bugonia (2025)\Bugonia (2025).mkv
+[2026-08-28 22:57:11] [INFO] [ 56/382] Already clean: Captain America Civil War (2016)\Captain America Civil War (2016).mkv
+[2026-08-28 22:57:11] [INFO] [ 57/382] Already clean: Captain America The First Avenger (2011)\Captain America The First Avenger (2011).mkv
+[2026-08-28 22:57:11] [INFO] [ 58/382] Already clean: Captain America The Winter Soldier (2014)\Captain America The Winter Soldier (2014).mkv
+[2026-08-28 22:57:11] [INFO] [ 59/382] Already clean: Cars (2006)\Cars (2006).mkv
+[2026-08-28 22:57:11] [INFO] [ 60/382] Already clean: Casino Royale (2006)\Casino Royale (2006).mkv
+[2026-08-28 22:57:11] [INFO] [ 61/382] Already clean: Cast Away (2000)\Cast Away (2000).mkv
+[2026-08-28 22:57:11] [INFO] [ 62/382] Already clean: Catch Me If You Can (2002)\Catch Me If You Can (2002).mkv
+[2026-08-28 22:57:11] [INFO] [ 63/382] Already clean: Charlie and the Chocolate Factory (2005)\Charlie and the Chocolate Factory (2005).mkv
+[2026-08-28 22:57:11] [INFO] [ 64/382] Already clean: Chicken Little (2005)\Chicken Little (2005).mkv
+[2026-08-28 22:57:11] [INFO] [ 65/382] Already clean: Children of Men (2006)\Children of Men (2006).mkv
+[2026-08-28 22:57:11] [INFO] [ 66/382] Already clean: Chronicle (2012)\Chronicle (2012).mkv
+[2026-08-28 22:57:11] [INFO] [ 67/382] Already clean: Civil War (2024)\Civil War (2024).mkv
+[2026-08-28 22:57:11] [INFO] [ 68/382] Already clean: Cloudy with a Chance of Meatballs (2009)\Cloudy with a Chance of Meatballs (2009).mkv
+[2026-08-28 22:57:11] [INFO] [ 69/382] Already clean: Cloverfield (2008)\Cloverfield (2008).mkv
+[2026-08-28 22:57:11] [INFO] [ 70/382] Already clean: Coach Carter (2005)\Coach Carter (2005).mkv
+[2026-08-28 22:57:11] [INFO] [ 71/382] Already clean: Coco (2017)\Coco (2017).mkv
+[2026-08-28 22:57:11] [INFO] [ 72/382] Already clean: Contact (1997)\Contact (1997).mkv
+[2026-08-28 22:57:11] [INFO] [ 73/382] Already clean: Contagion (2011)\Contagion (2011).mkv
+[2026-08-28 22:57:11] [INFO] [ 74/382] Already clean: Coraline (2009)\Coraline (2009).mkv
+[2026-08-28 22:57:11] [INFO] [ 75/382] Already clean: Crazy Rich Asians (2018)\Crazy Rich Asians (2018).mkv
+[2026-08-28 22:57:11] [INFO] -- 75/382  cleaned 0  already 75  deferred 0  skipped 0  layout 0  errors 0  saved 0 Bytes  348.34 GB/1.78 TB  elapsed 0.1s  ~0.6s left
+[2026-08-28 22:57:11] [INFO] [ 76/382] Already clean: Creed (2015)\Creed (2015).mkv
+[2026-08-28 22:57:11] [INFO] [ 77/382] Already clean: Dawn of the Planet of the Apes (2014)\Dawn of the Planet of the Apes (2014).mkv
+[2026-08-28 22:57:11] [WARNING] [ 78/382] Skipping 'Dead Poets Society (1989)\Dead Poets Society (1989).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 22:57:11] [INFO] [ 79/382] Already clean: Deadpool (2016)\Deadpool (2016).mkv
+[2026-08-28 22:57:11] [INFO] [ 80/382] Already clean: Deadpool 2 (2018)\Deadpool 2 (2018).mkv
+[2026-08-28 22:57:11] [INFO] [ 81/382] Already clean: Despicable Me (2010)\Despicable Me (2010).mkv
+[2026-08-28 22:57:11] [INFO] [ 82/382] Already clean: Die Hard (1988)\Die Hard (1988).mkv
+[2026-08-28 22:57:11] [INFO] [ 83/382] Already clean: District 9 (2009)\District 9 (2009).mkv
+[2026-08-28 22:57:11] [INFO] [ 84/382] Already clean: Django Unchained (2012)\Django Unchained (2012).mkv
+[2026-08-28 22:57:11] [INFO] [ 85/382] Already clean: Donnie Darko (2001)\Donnie Darko (2001).mkv
+[2026-08-28 22:57:11] [INFO] [ 86/382] Already clean: Dune (2021)\Dune (2021).mkv
+[2026-08-28 22:57:11] [INFO] [ 87/382] Already clean: Dune - Part Two (2024)\Dune - Part Two (2024).mkv
+[2026-08-28 22:57:11] [INFO] [ 88/382] Already clean: Dunkirk (2017)\Dunkirk (2017).mkv
+[2026-08-28 22:57:11] [INFO] [ 89/382] Already clean: E T the Extra-Terrestrial (1982)\E T the Extra-Terrestrial (1982).mkv
+[2026-08-28 22:57:11] [INFO] [ 90/382] Already clean: Easy A (2010)\Easy A (2010).mkv
+[2026-08-28 22:57:11] [INFO] [ 91/382] Already clean: Edge of Tomorrow (2014)\Edge of Tomorrow (2014).mkv
+[2026-08-28 22:57:11] [INFO] [ 92/382] Already clean: Edward Scissorhands (1990)\Edward Scissorhands (1990).mkv
+[2026-08-28 22:57:11] [INFO] [ 93/382] Already clean: Elemental (2023)\Elemental (2023).mkv
+[2026-08-28 22:57:11] [INFO] [ 94/382] Already clean: Elysium (2013)\Elysium (2013).mkv
+[2026-08-28 22:57:11] [INFO] [ 95/382] Already clean: Enchanted (2007)\Enchanted (2007).mkv
+[2026-08-28 22:57:11] [INFO] [ 96/382] Already clean: Enemy (2013)\Enemy (2013).mkv
+[2026-08-28 22:57:11] [INFO] [ 97/382] Already clean: Eternal Sunshine of the Spotless Mind (2004)\Eternal Sunshine of the Spotless Mind (2004).mkv
+[2026-08-28 22:57:11] [INFO] [ 98/382] Already clean: Ex Machina (2015)\Ex Machina (2015).mkv
+[2026-08-28 22:57:11] [INFO] [ 99/382] Already clean: Fargo (1996)\Fargo (1996).mkv
+[2026-08-28 22:57:11] [INFO] [100/382] Already clean: Fast Five (2011)\Fast Five (2011).mkv
+[2026-08-28 22:57:11] [INFO] -- 100/382  cleaned 0  already 99  deferred 0  skipped 1  layout 0  errors 0  saved 0 Bytes  465.29 GB/1.78 TB  elapsed 0.2s  ~0.5s left
+[2026-08-28 22:57:11] [INFO] [101/382] Already clean: Ferris Bueller's Day Off (1986)\Ferris Bueller's Day Off (1986).mkv
+[2026-08-28 22:57:11] [INFO] [102/382] Already clean: Fight Club (1999)\Fight Club (1999).mkv
+[2026-08-28 22:57:11] [INFO] [103/382] Already clean: Finding Nemo (2003)\Finding Nemo (2003).mkv
+[2026-08-28 22:57:11] [INFO] [104/382] Already clean: First Man (2018)\First Man (2018).mkv
+[2026-08-28 22:57:11] [INFO] [105/382] Already clean: Ford v Ferrari (2019)\Ford v Ferrari (2019).mkv
+[2026-08-28 22:57:11] [INFO] [106/382] Already clean: Forrest Gump (1994)\Forrest Gump (1994).mkv
+[2026-08-28 22:57:11] [INFO] [107/382] Already clean: Fractured (2019)\Fractured (2019).mkv
+[2026-08-28 22:57:11] [INFO] [108/382] Already clean: Fury (2014)\Fury (2014).mkv
+[2026-08-28 22:57:11] [INFO] [109/382] Already clean: Get Out (2017)\Get Out (2017).mkv
+[2026-08-28 22:57:11] [INFO] [110/382] Already clean: Ghostbusters (1984)\Ghostbusters (1984).mkv
+[2026-08-28 22:57:11] [INFO] [111/382] Already clean: Gladiator (2000)\Gladiator (2000).mkv
+[2026-08-28 22:57:11] [INFO] [112/382] Already clean: Gone Girl (2014)\Gone Girl (2014).mkv
+[2026-08-28 22:57:11] [INFO] [113/382] Already clean: Good Will Hunting (1997)\Good Will Hunting (1997).mkv
+[2026-08-28 22:57:11] [INFO] [114/382] Already clean: Goodfellas (1990)\Goodfellas (1990).mkv
+[2026-08-28 22:57:11] [INFO] [115/382] Already clean: Gravity (2013)\Gravity (2013).mkv
+[2026-08-28 22:57:11] [INFO] [116/382] Already clean: Green Book (2018)\Green Book (2018).mkv
+[2026-08-28 22:57:11] [INFO] [117/382] Already clean: Greenland (2020)\Greenland (2020).mkv
+[2026-08-28 22:57:11] [INFO] [118/382] Already clean: Groundhog Day (1993)\Groundhog Day (1993).mkv
+[2026-08-28 22:57:11] [INFO] [119/382] Already clean: Grown Ups (2010)\Grown Ups (2010).mkv
+[2026-08-28 22:57:11] [INFO] [120/382] Already clean: Guardians of the Galaxy (2014)\Guardians of the Galaxy (2014).mkv
+[2026-08-28 22:57:11] [INFO] [121/382] Already clean: Hacksaw Ridge (2016)\Hacksaw Ridge (2016).mkv
+[2026-08-28 22:57:11] [INFO] [122/382] Already clean: Happy Feet (2006)\Happy Feet (2006).mkv
+[2026-08-28 22:57:11] [INFO] [123/382] Already clean: Happy Gilmore (1996)\Happy Gilmore (1996).mkv
+[2026-08-28 22:57:11] [INFO] [124/382] Already clean: Harry Potter and the Chamber of Secrets (2002)\Harry Potter and the Chamber of Secrets (2002).mkv
+[2026-08-28 22:57:11] [INFO] [125/382] Already clean: Harry Potter and the Deathly Hallows - Part 1 (2010)\Harry Potter and the Deathly Hallows - Part 1 (2010).mkv
+[2026-08-28 22:57:11] [INFO] -- 125/382  cleaned 0  already 124  deferred 0  skipped 1  layout 0  errors 0  saved 0 Bytes  587.00 GB/1.78 TB  elapsed 0.2s  ~0.4s left
+[2026-08-28 22:57:11] [INFO] [126/382] Already clean: Harry Potter and the Deathly Hallows - Part 2 (2011)\Harry Potter and the Deathly Hallows - Part 2 (2011).mkv
+[2026-08-28 22:57:11] [INFO] [127/382] Already clean: Harry Potter and the Goblet of Fire (2005)\Harry Potter and the Goblet of Fire (2005).mkv
+[2026-08-28 22:57:11] [INFO] [128/382] Already clean: Harry Potter and the Half-Blood Prince (2009)\Harry Potter and the Half-Blood Prince (2009).mkv
+[2026-08-28 22:57:11] [INFO] [129/382] Already clean: Harry Potter and the Order of the Phoenix (2007)\Harry Potter and the Order of the Phoenix (2007).mkv
+[2026-08-28 22:57:11] [INFO] [130/382] Already clean: Harry Potter and the Prisoner of Azkaban (2004)\Harry Potter and the Prisoner of Azkaban (2004).mkv
+[2026-08-28 22:57:11] [INFO] [131/382] Already clean: Harry Potter and the Sorcerer's Stone (2001)\Harry Potter and the Sorcerer's Stone (2001).mkv
+[2026-08-28 22:57:11] [INFO] [132/382] Already clean: Heat (1995)\Heat (1995).mkv
+[2026-08-28 22:57:11] [INFO] [133/382] Already clean: Her (2013)\Her (2013).mkv
+[2026-08-28 22:57:11] [INFO] [134/382] Already clean: Hercules (1997)\Hercules (1997).mkv
+[2026-08-28 22:57:11] [INFO] [135/382] Already clean: Hereditary (2018)\Hereditary (2018).mkv
+[2026-08-28 22:57:11] [INFO] [136/382] Already clean: Hidden Figures (2016)\Hidden Figures (2016).mkv
+[2026-08-28 22:57:11] [INFO] [137/382] Already clean: Holes (2003)\Holes (2003).mkv
+[2026-08-28 22:57:11] [INFO] [138/382] Already clean: Home Alone (1990)\Home Alone (1990).mkv
+[2026-08-28 22:57:11] [INFO] [139/382] Already clean: Home Alone 2 - Lost in New York (1992)\Home Alone 2 - Lost in New York (1992).mkv
+[2026-08-28 22:57:11] [INFO] [140/382] Already clean: How to Train Your Dragon (2010)\How to Train Your Dragon (2010).mkv
+[2026-08-28 22:57:11] [INFO] [141/382] Already clean: I Am Legend (2007)\I Am Legend (2007).mkv
+[2026-08-28 22:57:11] [INFO] [142/382] Already clean: I, Robot (2004)\I, Robot (2004).mkv
+[2026-08-28 22:57:11] [INFO] [143/382] Already clean: I, Tonya (2017)\I, Tonya (2017).mkv
+[2026-08-28 22:57:11] [INFO] [144/382] Already clean: Ice Age (2002)\Ice Age (2002).mkv
+[2026-08-28 22:57:11] [INFO] [145/382] Already clean: Idiocracy (2006)\Idiocracy (2006).mkv
+[2026-08-28 22:57:11] [INFO] [146/382] Already clean: Inception (2010)\Inception (2010).mkv
+[2026-08-28 22:57:11] [INFO] [147/382] Already clean: Incredibles 2 (2018)\Incredibles 2 (2018).mkv
+[2026-08-28 22:57:11] [INFO] [148/382] Already clean: Independence Day (1996)\Independence Day (1996).mkv
+[2026-08-28 22:57:11] [INFO] [149/382] Already clean: Indiana Jones and the Last Crusade (1989)\Indiana Jones and the Last Crusade (1989).mkv
+[2026-08-28 22:57:11] [INFO] [150/382] Already clean: Indiana Jones and the Raiders of the Lost Ark (1981)\Indiana Jones and the Raiders of the Lost Ark (1981).mkv
+[2026-08-28 22:57:11] [INFO] -- 150/382  cleaned 0  already 149  deferred 0  skipped 1  layout 0  errors 0  saved 0 Bytes  708.24 GB/1.78 TB  elapsed 0.2s  ~0.3s left
+[2026-08-28 22:57:11] [INFO] [151/382] Already clean: Indiana Jones and the Temple of Doom (1984)\Indiana Jones and the Temple of Doom (1984).mkv
+[2026-08-28 22:57:11] [INFO] [152/382] Already clean: Inglourious Basterds (2009)\Inglourious Basterds (2009).mkv
+[2026-08-28 22:57:11] [INFO] [153/382] Already clean: Insomnia (2002)\Insomnia (2002).mkv
+[2026-08-28 22:57:11] [INFO] [154/382] Already clean: Interstellar (2014)\Interstellar (2014).mkv
+[2026-08-28 22:57:11] [INFO] [155/382] Already clean: Into the Wild (2007)\Into the Wild (2007).mkv
+[2026-08-28 22:57:11] [INFO] [156/382] Already clean: Iron Man (2008)\Iron Man (2008).mkv
+[2026-08-28 22:57:11] [INFO] [157/382] Already clean: Iron Man 2 (2010)\Iron Man 2 (2010).mkv
+[2026-08-28 22:57:11] [WARNING] [158/382] Skipping 'IT (2017)\IT (2017).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 22:57:11] [INFO] [159/382] Already clean: James and the Giant Peach (1996)\James and the Giant Peach (1996).mkv
+[2026-08-28 22:57:11] [INFO] [160/382] Already clean: Jaws (1975)\Jaws (1975).mkv
+[2026-08-28 22:57:11] [INFO] [161/382] Already clean: Jimmy Neutron Boy Genius (2001)\Jimmy Neutron Boy Genius (2001).mkv
+[2026-08-28 22:57:11] [INFO] [162/382] Already clean: John Q (2002)\John Q (2002).mkv
+[2026-08-28 22:57:11] [INFO] [163/382] Already clean: Joker (2019)\Joker (2019).mkv
+[2026-08-28 22:57:11] [INFO] [164/382] Already clean: Jumanji (1995)\Jumanji (1995).mkv
+[2026-08-28 22:57:11] [INFO] [165/382] Already clean: Juno (2007)\Juno (2007).mkv
+[2026-08-28 22:57:11] [INFO] [166/382] Already clean: Jurassic Park (1993)\Jurassic Park (1993).mkv
+[2026-08-28 22:57:11] [INFO] [167/382] Already clean: Jurassic World (2015)\Jurassic World (2015).mkv
+[2026-08-28 22:57:11] [INFO] [168/382] Already clean: Kick-Ass (2010)\Kick-Ass (2010).mkv
+[2026-08-28 22:57:11] [INFO] [169/382] Already clean: King Richard (2021)\King Richard (2021).mkv
+[2026-08-28 22:57:11] [INFO] [170/382] Already clean: Knives Out (2019)\Knives Out (2019).mkv
+[2026-08-28 22:57:11] [INFO] [171/382] Already clean: Knowing (2009)\Knowing (2009).mkv
+[2026-08-28 22:57:11] [INFO] [172/382] Already clean: Kung Fu Panda (2008)\Kung Fu Panda (2008).mkv
+[2026-08-28 22:57:11] [INFO] [173/382] Already clean: Legally Blonde (2001)\Legally Blonde (2001).mkv
+[2026-08-28 22:57:11] [INFO] [174/382] Already clean: Logan (2017)\Logan (2017).mkv
+[2026-08-28 22:57:11] [INFO] [175/382] Already clean: Lone Survivor (2013)\Lone Survivor (2013).mkv
+[2026-08-28 22:57:11] [INFO] -- 175/382  cleaned 0  already 173  deferred 0  skipped 2  layout 0  errors 0  saved 0 Bytes  838.59 GB/1.78 TB  elapsed 0.2s  ~0.3s left
+[2026-08-28 22:57:11] [INFO] [176/382] Already clean: Madagascar (2005)\Madagascar (2005).mkv
+[2026-08-28 22:57:11] [INFO] [177/382] Already clean: Magnolia (1999)\Magnolia (1999).mkv
+[2026-08-28 22:57:11] [INFO] [178/382] Already clean: Marty Supreme (2025)\Marty Supreme (2025).mkv
+[2026-08-28 22:57:11] [INFO] [179/382] Already clean: Mean Girls (2004)\Mean Girls (2004).mkv
+[2026-08-28 22:57:11] [INFO] [180/382] Already clean: Meet the Robinsons (2007)\Meet the Robinsons (2007).mkv
+[2026-08-28 22:57:11] [INFO] [181/382] Already clean: Megamind (2010)\Megamind (2010).mkv
+[2026-08-28 22:57:11] [INFO] [182/382] Already clean: Memento (2000)\Memento (2000).mkv
+[2026-08-28 22:57:11] [INFO] [183/382] Already clean: Minority Report (2002)\Minority Report (2002).mkv
+[2026-08-28 22:57:11] [INFO] [184/382] Already clean: Mission - Impossible - Fallout (2018)\Mission - Impossible - Fallout (2018).mkv
+[2026-08-28 22:57:11] [INFO] [185/382] Already clean: Monsters University (2013)\Monsters University (2013).mkv
+[2026-08-28 22:57:11] [INFO] [186/382] Already clean: Monsters, Inc (2001)\Monsters, Inc (2001).mkv
+[2026-08-28 22:57:11] [INFO] [187/382] Already clean: Moon (2009)\Moon (2009).mkv
+[2026-08-28 22:57:11] [INFO] [188/382] Already clean: Mulan (1998)\Mulan (1998).mkv
+[2026-08-28 22:57:11] [INFO] [189/382] Already clean: Napoleon Dynamite (2004)\Napoleon Dynamite (2004).mkv
+[2026-08-28 22:57:11] [INFO] [190/382] Already clean: National Lampoon's Christmas Vacation (1989)\National Lampoon's Christmas Vacation (1989).mkv
+[2026-08-28 22:57:11] [INFO] [191/382] Already clean: National Treasure (2004)\National Treasure (2004).mkv
+[2026-08-28 22:57:11] [INFO] [192/382] Already clean: National Treasure Book of Secrets (2007)\National Treasure Book of Secrets (2007).mkv
+[2026-08-28 22:57:11] [INFO] [193/382] Already clean: Night at the Museum (2006)\Night at the Museum (2006).mkv
+[2026-08-28 22:57:11] [INFO] [194/382] Already clean: Nightcrawler (2014)\Nightcrawler (2014).mkv
+[2026-08-28 22:57:11] [INFO] [195/382] Already clean: No Country for Old Men (2007)\No Country for Old Men (2007).mkv
+[2026-08-28 22:57:11] [INFO] [196/382] Already clean: Now You See Me (2013)\Now You See Me (2013).mkv
+[2026-08-28 22:57:11] [INFO] [197/382] Already clean: Oblivion (2013)\Oblivion (2013).mkv
+[2026-08-28 22:57:11] [INFO] [198/382] Already clean: Obsession (2026)\Obsession (2026).mkv
+[2026-08-28 22:57:11] [INFO] [199/382] Already clean: October Sky (1999)\October Sky (1999).mkv
+[2026-08-28 22:57:11] [INFO] [200/382] Already clean: Office Space (1999)\Office Space (1999).mkv
+[2026-08-28 22:57:11] [INFO] -- 200/382  cleaned 0  already 198  deferred 0  skipped 2  layout 0  errors 0  saved 0 Bytes  944.41 GB/1.78 TB  elapsed 0.4s  ~0.3s left
+[2026-08-28 22:57:11] [INFO] [201/382] Already clean: One Flew Over the Cuckoo's Nest (1975)\One Flew Over the Cuckoo's Nest (1975).mkv
+[2026-08-28 22:57:11] [INFO] [202/382] Already clean: Open Season (2006)\Open Season (2006).mkv
+[2026-08-28 22:57:11] [INFO] [203/382] Already clean: Oppenheimer (2023)\Oppenheimer (2023).mkv
+[2026-08-28 22:57:11] [INFO] [204/382] Already clean: Osmosis Jones (2001)\Osmosis Jones (2001).mkv
+[2026-08-28 22:57:11] [INFO] [205/382] Already clean: Over the Hedge (2006)\Over the Hedge (2006).mkv
+[2026-08-28 22:57:11] [WARNING] [206/382] Skipping 'Parasite (2019)\Parasite (2019).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 22:57:11] [INFO] [207/382] Already clean: Pearl (2022)\Pearl (2022).mkv
+[2026-08-28 22:57:11] [INFO] [208/382] Already clean: Pineapple Express (2008)\Pineapple Express (2008).mkv
+[2026-08-28 22:57:11] [INFO] [209/382] Already clean: Pirates of the Caribbean At World's End (2007)\Pirates of the Caribbean At World's End (2007).mkv
+[2026-08-28 22:57:11] [INFO] [210/382] Already clean: Pirates of the Caribbean Dead Man's Chest (2006)\Pirates of the Caribbean Dead Man's Chest (2006).mkv
+[2026-08-28 22:57:11] [INFO] [211/382] Already clean: Pirates of the Caribbean The Curse of the Black Pearl (2003)\Pirates of the Caribbean The Curse of the Black Pearl (2003).mkv
+[2026-08-28 22:57:11] [INFO] [212/382] Already clean: Pitch Perfect (2012)\Pitch Perfect (2012).mkv
+[2026-08-28 22:57:11] [INFO] [213/382] Already clean: Prisoners (2013)\Prisoners (2013).mkv
+[2026-08-28 22:57:11] [INFO] [214/382] Already clean: Project Hail Mary (2026)\Project Hail Mary (2026).mkv
+[2026-08-28 22:57:11] [INFO] [215/382] Already clean: Project X (2012)\Project X (2012).mkv
+[2026-08-28 22:57:11] [INFO] [216/382] Already clean: Pulp Fiction (1994)\Pulp Fiction (1994).mkv
+[2026-08-28 22:57:11] [INFO] [217/382] Already clean: Ratatouille (2007)\Ratatouille (2007).mkv
+[2026-08-28 22:57:11] [INFO] [218/382] Already clean: Ready Player One (2018)\Ready Player One (2018).mkv
+[2026-08-28 22:57:11] [INFO] [219/382] Already clean: Real Steel (2011)\Real Steel (2011).mkv
+[2026-08-28 22:57:11] [INFO] [220/382] Already clean: Remember the Titans (2000)\Remember the Titans (2000).mkv
+[2026-08-28 22:57:11] [INFO] [221/382] Already clean: Requiem for a Dream (2000)\Requiem for a Dream (2000).mkv
+[2026-08-28 22:57:11] [INFO] [222/382] Already clean: Rise of the Planet of the Apes (2011)\Rise of the Planet of the Apes (2011).mkv
+[2026-08-28 22:57:11] [INFO] [223/382] Already clean: Robots (2005)\Robots (2005).mkv
+[2026-08-28 22:57:11] [INFO] [224/382] Already clean: Rocky (1976)\Rocky (1976).mkv
+[2026-08-28 22:57:11] [INFO] [225/382] Already clean: Room (2015)\Room (2015).mkv
+[2026-08-28 22:57:11] [INFO] -- 225/382  cleaned 0  already 222  deferred 0  skipped 3  layout 0  errors 0  saved 0 Bytes  1.03 TB/1.78 TB  elapsed 0.4s  ~0.3s left
+[2026-08-28 22:57:11] [INFO] [226/382] Already clean: Sausage Party (2016)\Sausage Party (2016).mkv
+[2026-08-28 22:57:11] [INFO] [227/382] Already clean: Saving Private Ryan (1998)\Saving Private Ryan (1998).mkv
+[2026-08-28 22:57:11] [INFO] [228/382] Already clean: Saw (2004)\Saw (2004).mkv
+[2026-08-28 22:57:11] [INFO] [229/382] Already clean: Scarface (1983)\Scarface (1983).mkv
+[2026-08-28 22:57:11] [INFO] [230/382] Already clean: Schindler's List (1993)\Schindler's List (1993).mkv
+[2026-08-28 22:57:11] [INFO] [231/382] Already clean: Scream (1996)\Scream (1996).mkv
+[2026-08-28 22:57:11] [INFO] [232/382] Already clean: Se7en (1995)\Se7en (1995).mkv
+[2026-08-28 22:57:11] [INFO] [233/382] Already clean: Shark Tale (2004)\Shark Tale (2004).mkv
+[2026-08-28 22:57:11] [INFO] [234/382] Already clean: Shazam! (2019)\Shazam! (2019).mkv
+[2026-08-28 22:57:11] [INFO] [235/382] Already clean: Shrek (2001)\Shrek (2001).mkv
+[2026-08-28 22:57:11] [INFO] [236/382] Already clean: Shrek 2 (2004)\Shrek 2 (2004).mkv
+[2026-08-28 22:57:11] [INFO] [237/382] Already clean: Shrek Forever After (2010)\Shrek Forever After (2010).mkv
+[2026-08-28 22:57:11] [INFO] [238/382] Already clean: Shutter Island (2010)\Shutter Island (2010).mkv
+[2026-08-28 22:57:11] [INFO] [239/382] Already clean: Sicario (2015)\Sicario (2015).mkv
+[2026-08-28 22:57:11] [INFO] [240/382] Already clean: Signs (2002)\Signs (2002).mkv
+[2026-08-28 22:57:11] [INFO] [241/382] Already clean: Sinister (2012)\Sinister (2012).mkv
+[2026-08-28 22:57:11] [INFO] [242/382] Already clean: Sinners (2025)\Sinners (2025).mkv
+[2026-08-28 22:57:11] [INFO] [243/382] Already clean: Skyfall (2012)\Skyfall (2012).mkv
+[2026-08-28 22:57:11] [INFO] [244/382] Already clean: Slumdog Millionaire (2008)\Slumdog Millionaire (2008).mkv
+[2026-08-28 22:57:11] [INFO] [245/382] Already clean: Snatch (2000)\Snatch (2000).mkv
+[2026-08-28 22:57:11] [INFO] [246/382] Already clean: Snowden (2016)\Snowden (2016).mkv
+[2026-08-28 22:57:11] [INFO] [247/382] Already clean: Source Code (2011)\Source Code (2011).mkv
+[2026-08-28 22:57:11] [INFO] [248/382] Already clean: Spaceballs (1987)\Spaceballs (1987).mkv
+[2026-08-28 22:57:11] [INFO] [249/382] Already clean: Spider-Man (2002)\Spider-Man (2002).mkv
+[2026-08-28 22:57:11] [INFO] [250/382] Already clean: Spider-Man - Across the Spider-Verse (2023)\Spider-Man - Across the Spider-Verse (2023).mkv
+[2026-08-28 22:57:11] [INFO] -- 250/382  cleaned 0  already 247  deferred 0  skipped 3  layout 0  errors 0  saved 0 Bytes  1.15 TB/1.78 TB  elapsed 0.4s  ~0.2s left
+[2026-08-28 22:57:11] [INFO] [251/382] Already clean: Spider-Man - Homecoming (2017)\Spider-Man - Homecoming (2017).mkv
+[2026-08-28 22:57:11] [INFO] [252/382] Already clean: Spider-Man - Into the Spider-Verse (2018)\Spider-Man - Into the Spider-Verse (2018).mkv
+[2026-08-28 22:57:12] [INFO] [253/382] Already clean: Spider-Man 2 (2004)\Spider-Man 2 (2004).mkv
+[2026-08-28 22:57:12] [INFO] [254/382] Already clean: Spider-Man No Way Home (2021)\Spider-Man No Way Home (2021).mkv
+[2026-08-28 22:57:12] [INFO] [255/382] Already clean: Spirited Away (2001)\Spirited Away (2001).mkv
+[2026-08-28 22:57:12] [INFO] [256/382] Already clean: Split (2016)\Split (2016).mkv
+[2026-08-28 22:57:12] [WARNING] [257/382] Skipping 'Stalker (1979)\Stalker (1979).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 22:57:12] [INFO] [258/382] Already clean: Stand by Me (1986)\Stand by Me (1986).mkv
+[2026-08-28 22:57:12] [INFO] [259/382] Already clean: Star Trek (2009)\Star Trek (2009).mkv
+[2026-08-28 22:57:12] [INFO] [260/382] Already clean: Star Trek - Into Darkness (2013)\Star Trek - Into Darkness (2013).mkv
+[2026-08-28 22:57:12] [INFO] [261/382] Already clean: Star Wars - Episode I - The Phantom Menace (1999)\Star Wars - Episode I - The Phantom Menace (1999).mkv
+[2026-08-28 22:57:12] [INFO] [262/382] Already clean: Star Wars - Episode II - Attack of the Clones (2002)\Star Wars - Episode II - Attack of the Clones (2002).mkv
+[2026-08-28 22:57:12] [INFO] [263/382] Already clean: Star Wars - Episode III - Revenge of the Sith (2005)\Star Wars - Episode III - Revenge of the Sith (2005).mkv
+[2026-08-28 22:57:12] [INFO] [264/382] Already clean: Star Wars - Episode IV - A New Hope (1977)\Star Wars - Episode IV - A New Hope (1977).mkv
+[2026-08-28 22:57:12] [INFO] [265/382] Already clean: Star Wars - Episode V - The Empire Strikes Back (1980)\Star Wars - Episode V - The Empire Strikes Back (1980).mkv
+[2026-08-28 22:57:12] [INFO] [266/382] Already clean: Star Wars - Episode VI - Return of the Jedi (1983)\Star Wars - Episode VI - Return of the Jedi (1983).mkv
+[2026-08-28 22:57:12] [INFO] [267/382] Already clean: Straight Outta Compton (2015)\Straight Outta Compton (2015).mkv
+[2026-08-28 22:57:12] [INFO] [268/382] Already clean: Super 8 (2011)\Super 8 (2011).mkv
+[2026-08-28 22:57:12] [INFO] [269/382] Already clean: Superbad (2007)\Superbad (2007).mkv
+[2026-08-28 22:57:12] [INFO] [270/382] Already clean: Surfs Up (2007)\Surfs Up (2007).mkv
+[2026-08-28 22:57:12] [INFO] [271/382] Already clean: Taken (2008)\Taken (2008).mkv
+[2026-08-28 22:57:12] [INFO] [272/382] Already clean: Tangled (2010)\Tangled (2010).mkv
+[2026-08-28 22:57:12] [INFO] [273/382] Already clean: Taxi Driver (1976)\Taxi Driver (1976).mkv
+[2026-08-28 22:57:12] [INFO] [274/382] Already clean: Ted (2012)\Ted (2012).mkv
+[2026-08-28 22:57:12] [INFO] [275/382] Already clean: Tenet (2020)\Tenet (2020).mkv
+[2026-08-28 22:57:12] [INFO] -- 275/382  cleaned 0  already 271  deferred 0  skipped 4  layout 0  errors 0  saved 0 Bytes  1.27 TB/1.78 TB  elapsed 0.4s  ~0.2s left
+[2026-08-28 22:57:12] [INFO] [276/382] Already clean: Terminator 2 - Judgment Day (1991)\Terminator 2 - Judgment Day (1991).mkv
+[2026-08-28 22:57:12] [INFO] [277/382] Already clean: Tetris (2023)\Tetris (2023).mkv
+[2026-08-28 22:57:12] [INFO] [278/382] Already clean: The Accountant (2016)\The Accountant (2016).mkv
+[2026-08-28 22:57:12] [INFO] [279/382] Already clean: The Amazing Spider-Man (2012)\The Amazing Spider-Man (2012).mkv
+[2026-08-28 22:57:12] [INFO] [280/382] Already clean: The Avengers (2012)\The Avengers (2012).mkv
+[2026-08-28 22:57:12] [INFO] [281/382] Already clean: The Batman (2022)\The Batman (2022).mkv
+[2026-08-28 22:57:12] [INFO] [282/382] Already clean: The Big Lebowski (1998)\The Big Lebowski (1998).mkv
+[2026-08-28 22:57:12] [INFO] [283/382] Already clean: The Big Short (2015)\The Big Short (2015).mkv
+[2026-08-28 22:57:12] [INFO] [284/382] Already clean: The Book of Eli (2010)\The Book of Eli (2010).mkv
+[2026-08-28 22:57:12] [INFO] [285/382] Already clean: The Bourne Identity (2002)\The Bourne Identity (2002).mkv
+[2026-08-28 22:57:12] [INFO] [286/382] Already clean: The Bourne Supremacy (2004)\The Bourne Supremacy (2004).mkv
+[2026-08-28 22:57:12] [INFO] [287/382] Already clean: The Bourne Ultimatum (2007)\The Bourne Ultimatum (2007).mkv
+[2026-08-28 22:57:12] [INFO] [288/382] Already clean: The Boy in the Striped Pyjamas (2008)\The Boy in the Striped Pyjamas (2008).mkv
+[2026-08-28 22:57:12] [INFO] [289/382] Already clean: The Breakfast Club (1985)\The Breakfast Club (1985).mkv
+[2026-08-28 22:57:12] [INFO] [290/382] Already clean: The Curious Case of Benjamin Button (2008)\The Curious Case of Benjamin Button (2008).mkv
+[2026-08-28 22:57:12] [INFO] [291/382] Already clean: The Dark Knight (2008)\The Dark Knight (2008).mkv
+[2026-08-28 22:57:12] [INFO] [292/382] Already clean: The Dark Knight Rises (2012)\The Dark Knight Rises (2012).mkv
+[2026-08-28 22:57:12] [INFO] [293/382] Already clean: The Departed (2006)\The Departed (2006).mkv
+[2026-08-28 22:57:12] [INFO] [294/382] Already clean: The Edge of Seventeen (2016)\The Edge of Seventeen (2016).mkv
+[2026-08-28 22:57:12] [INFO] [295/382] Already clean: The Emperor's New Groove (2000)\The Emperor's New Groove (2000).mkv
+[2026-08-28 22:57:12] [INFO] [296/382] Already clean: The Fast and the Furious (2001)\The Fast and the Furious (2001).mkv
+[2026-08-28 22:57:12] [INFO] [297/382] Already clean: The Founder (2016)\The Founder (2016).mkv
+[2026-08-28 22:57:12] [INFO] [298/382] Already clean: The Godfather (1972)\The Godfather (1972).mkv
+[2026-08-28 22:57:12] [INFO] [299/382] Already clean: The Godfather - Part II (1974)\The Godfather - Part II (1974).mkv
+[2026-08-28 22:57:12] [INFO] [300/382] Already clean: The Goonies (1985)\The Goonies (1985).mkv
+[2026-08-28 22:57:12] [INFO] -- 300/382  cleaned 0  already 296  deferred 0  skipped 4  layout 0  errors 0  saved 0 Bytes  1.40 TB/1.78 TB  elapsed 0.6s  ~0.2s left
+[2026-08-28 22:57:12] [INFO] [301/382] Already clean: The Green Mile (1999)\The Green Mile (1999).mkv
+[2026-08-28 22:57:12] [INFO] [302/382] Already clean: The Hangover (2009)\The Hangover (2009).mkv
+[2026-08-28 22:57:12] [INFO] [303/382] Already clean: The Help (2011)\The Help (2011).mkv
+[2026-08-28 22:57:12] [INFO] [304/382] Already clean: The Hunger Games (2012)\The Hunger Games (2012).mkv
+[2026-08-28 22:57:12] [INFO] [305/382] Already clean: The Hunger Games - Mockingjay - Part 1 (2014)\The Hunger Games - Mockingjay - Part 1 (2014).mkv
+[2026-08-28 22:57:12] [INFO] [306/382] Already clean: The Hunger Games - Mockingjay - Part 2 (2015)\The Hunger Games - Mockingjay - Part 2 (2015).mkv
+[2026-08-28 22:57:12] [INFO] [307/382] Already clean: The Hunger Games Catching Fire (2013)\The Hunger Games Catching Fire (2013).mkv
+[2026-08-28 22:57:12] [INFO] [308/382] Already clean: The Hurt Locker (2008)\The Hurt Locker (2008).mkv
+[2026-08-28 22:57:12] [INFO] [309/382] Already clean: The Imitation Game (2014)\The Imitation Game (2014).mkv
+[2026-08-28 22:57:12] [INFO] [310/382] Already clean: The Incredibles (2004)\The Incredibles (2004).mkv
+[2026-08-28 22:57:12] [INFO] [311/382] Already clean: The Interview (2014)\The Interview (2014).mkv
+[2026-08-28 22:57:12] [INFO] [312/382] Already clean: The Invisible Man (2020)\The Invisible Man (2020).mkv
+[2026-08-28 22:57:12] [INFO] [313/382] Already clean: The Invite (2026)\The Invite (2026).mkv
+[2026-08-28 22:57:12] [INFO] [314/382] Already clean: The Karate Kid (1984)\The Karate Kid (1984).mkv
+[2026-08-28 22:57:12] [INFO] [315/382] Already clean: The Longest Yard (2005)\The Longest Yard (2005).mkv
+[2026-08-28 22:57:12] [INFO] [316/382] Already clean: The Lord of the Rings The Fellowship of the Ring (2001)\The Lord of the Rings The Fellowship of the Ring (2001).mkv
+[2026-08-28 22:57:12] [INFO] [317/382] Already clean: The Lord of the Rings The Return of the King (2003)\The Lord of the Rings The Return of the King (2003).mkv
+[2026-08-28 22:57:12] [INFO] [318/382] Already clean: The Lord of the Rings The Two Towers (2002)\The Lord of the Rings The Two Towers (2002).mkv
+[2026-08-28 22:57:12] [INFO] [319/382] Already clean: The Martian (2015)\The Martian (2015).mkv
+[2026-08-28 22:57:12] [INFO] [320/382] Already clean: The Matrix (1999)\The Matrix (1999).mkv
+[2026-08-28 22:57:12] [INFO] [321/382] Already clean: The Maze Runner (2014)\The Maze Runner (2014).mkv
+[2026-08-28 22:57:12] [INFO] [322/382] Already clean: The Nightmare Before Christmas (1993)\The Nightmare Before Christmas (1993).mkv
+[2026-08-28 22:57:12] [INFO] [323/382] Already clean: The Polar Express (2004)\The Polar Express (2004).mkv
+[2026-08-28 22:57:12] [INFO] [324/382] Already clean: The Prestige (2006)\The Prestige (2006).mkv
+[2026-08-28 22:57:12] [INFO] [325/382] Already clean: The Princess and the Frog (2009)\The Princess and the Frog (2009).mkv
+[2026-08-28 22:57:12] [INFO] -- 325/382  cleaned 0  already 321  deferred 0  skipped 4  layout 0  errors 0  saved 0 Bytes  1.51 TB/1.78 TB  elapsed 0.7s  ~0.1s left
+[2026-08-28 22:57:12] [INFO] [326/382] Already clean: The Proposal (2009)\The Proposal (2009).mkv
+[2026-08-28 22:57:12] [INFO] [327/382] Already clean: The Revenant (2015)\The Revenant (2015).mkv
+[2026-08-28 22:57:12] [INFO] [328/382] Already clean: The Sandlot (1993)\The Sandlot (1993).mkv
+[2026-08-28 22:57:12] [INFO] [329/382] Already clean: The Shawshank Redemption (1994)\The Shawshank Redemption (1994).mkv
+[2026-08-28 22:57:12] [INFO] [330/382] Already clean: The Silence of the Lambs (1991)\The Silence of the Lambs (1991).mkv
+[2026-08-28 22:57:12] [INFO] [331/382] Already clean: The Sixth Sense (1999)\The Sixth Sense (1999).mkv
+[2026-08-28 22:57:12] [INFO] [332/382] Already clean: The Social Network (2010)\The Social Network (2010).mkv
+[2026-08-28 22:57:12] [INFO] [333/382] Already clean: The Substance (2024)\The Substance (2024).mkv
+[2026-08-28 22:57:12] [INFO] [334/382] Already clean: The Terminator (1984)\The Terminator (1984).mkv
+[2026-08-28 22:57:12] [INFO] [335/382] Already clean: The Theory of Everything (2014)\The Theory of Everything (2014).mkv
+[2026-08-28 22:57:12] [INFO] [336/382] Already clean: The Thing (1982)\The Thing (1982).mkv
+[2026-08-28 22:57:12] [INFO] [337/382] Already clean: The Truman Show (1998)\The Truman Show (1998).mkv
+[2026-08-28 22:57:12] [INFO] [338/382] Already clean: The Usual Suspects (1995)\The Usual Suspects (1995).mkv
+[2026-08-28 22:57:12] [INFO] [339/382] Already clean: The Wild Robot (2024)\The Wild Robot (2024).mkv
+[2026-08-28 22:57:12] [INFO] [340/382] Already clean: The Wolf of Wall Street (2013)\The Wolf of Wall Street (2013).mkv
+[2026-08-28 22:57:12] [INFO] [341/382] Already clean: There Will Be Blood (2007)\There Will Be Blood (2007).mkv
+[2026-08-28 22:57:12] [INFO] [342/382] Already clean: This Christmas (2007)\This Christmas (2007).mkv
+[2026-08-28 22:57:12] [INFO] [343/382] Already clean: This Is the End (2013)\This Is the End (2013).mkv
+[2026-08-28 22:57:12] [INFO] [344/382] Already clean: Thor - Ragnarok (2017)\Thor - Ragnarok (2017).mkv
+[2026-08-28 22:57:12] [INFO] [345/382] Already clean: Threads (1984)\Threads (1984).mkv
+[2026-08-28 22:57:12] [INFO] [346/382] Already clean: Titanic (1997)\Titanic (1997).mkv
+[2026-08-28 22:57:12] [INFO] [347/382] Already clean: Top Gun (1986)\Top Gun (1986).mkv
+[2026-08-28 22:57:12] [INFO] [348/382] Already clean: Top Gun - Maverick (2022)\Top Gun - Maverick (2022).mkv
+[2026-08-28 22:57:12] [INFO] [349/382] Already clean: Toy Story (1995)\Toy Story (1995).mkv
+[2026-08-28 22:57:12] [INFO] [350/382] Already clean: Toy Story 2 (1999)\Toy Story 2 (1999).mkv
+[2026-08-28 22:57:12] [INFO] -- 350/382  cleaned 0  already 346  deferred 0  skipped 4  layout 0  errors 0  saved 0 Bytes  1.63 TB/1.78 TB  elapsed 0.7s  ~0.1s left
+[2026-08-28 22:57:12] [INFO] [351/382] Already clean: Toy Story 3 (2010)\Toy Story 3 (2010).mkv
+[2026-08-28 22:57:12] [INFO] [352/382] Already clean: Toy Story 4 (2019)\Toy Story 4 (2019).mkv
+[2026-08-28 22:57:12] [INFO] [353/382] Already clean: Toy Story 5 (2026)\Toy Story 5 (2026).mkv
+[2026-08-28 22:57:12] [INFO] [354/382] Already clean: Training Day (2001)\Training Day (2001).mkv
+[2026-08-28 22:57:12] [INFO] [355/382] Already clean: Transformers (2007)\Transformers (2007).mkv
+[2026-08-28 22:57:12] [WARNING] [356/382] Skipping 'Transformers Dark Of The Moon (2011)\Transformers Dark Of The Moon (2011).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 22:57:12] [INFO] [357/382] Already clean: Transformers Revenge of the Fallen (2009)\Transformers Revenge of the Fallen (2009).mkv
+[2026-08-28 22:57:12] [INFO] [358/382] Already clean: Treasure Planet (2002)\Treasure Planet (2002).mkv
+[2026-08-28 22:57:12] [INFO] [359/382] Already clean: TRON - Legacy (2010)\TRON - Legacy (2010).mkv
+[2026-08-28 22:57:12] [INFO] [360/382] Already clean: Turtles Forever (2009)\Turtles Forever (2009).mkv
+[2026-08-28 22:57:12] [INFO] [361/382] Already clean: Twelve Monkeys (1995)\Twelve Monkeys (1995).mkv
+[2026-08-28 22:57:12] [INFO] [362/382] Already clean: Uncut Gems (2019)\Uncut Gems (2019).mkv
+[2026-08-28 22:57:12] [INFO] [363/382] Already clean: United 93 (2006)\United 93 (2006).mkv
+[2026-08-28 22:57:12] [INFO] [364/382] Already clean: Us (2019)\Us (2019).mkv
+[2026-08-28 22:57:12] [INFO] [365/382] Already clean: V for Vendetta (2005)\V for Vendetta (2005).mkv
+[2026-08-28 22:57:12] [INFO] [366/382] Already clean: WALL-E (2008)\WALL-E (2008).mkv
+[2026-08-28 22:57:12] [INFO] [367/382] Already clean: Wallace & Gromit - The Curse of the Were-Rabbit (2005)\Wallace & Gromit - The Curse of the Were-Rabbit (2005).mkv
+[2026-08-28 22:57:12] [INFO] [368/382] Already clean: War Dogs (2016)\War Dogs (2016).mkv
+[2026-08-28 22:57:12] [INFO] [369/382] Already clean: War for the Planet of the Apes (2017)\War for the Planet of the Apes (2017).mkv
+[2026-08-28 22:57:12] [INFO] [370/382] Already clean: WarGames (1983)\WarGames (1983).mkv
+[2026-08-28 22:57:12] [INFO] [371/382] Already clean: Warrior (2011)\Warrior (2011).mkv
+[2026-08-28 22:57:12] [INFO] [372/382] Already clean: We're the Millers (2013)\We're the Millers (2013).mkv
+[2026-08-28 22:57:12] [INFO] [373/382] Already clean: Weapons (2025)\Weapons (2025).mkv
+[2026-08-28 22:57:12] [INFO] [374/382] Already clean: When Harry Met Sally (1989)\When Harry Met Sally (1989).mkv
+[2026-08-28 22:57:12] [INFO] [375/382] Already clean: Whiplash (2014)\Whiplash (2014).mkv
+[2026-08-28 22:57:12] [INFO] -- 375/382  cleaned 0  already 370  deferred 0  skipped 5  layout 0  errors 0  saved 0 Bytes  1.75 TB/1.78 TB  elapsed 0.8s  ~0.0s left
+[2026-08-28 22:57:12] [INFO] [376/382] Already clean: Willy Wonka & the Chocolate Factory (1971)\Willy Wonka & the Chocolate Factory (1971).mkv
+[2026-08-28 22:57:12] [INFO] [377/382] Already clean: World War Z (2013)\World War Z (2013).mkv
+[2026-08-28 22:57:12] [INFO] [378/382] Already clean: Wreck-It Ralph (2012)\Wreck-It Ralph (2012).mkv
+[2026-08-28 22:57:12] [INFO] [379/382] Already clean: Zathura - A Space Adventure (2005)\Zathura - A Space Adventure (2005).mkv
+[2026-08-28 22:57:12] [INFO] [380/382] Already clean: Zero Dark Thirty (2012)\Zero Dark Thirty (2012).mkv
+[2026-08-28 22:57:12] [INFO] [381/382] Already clean: Zootopia (2016)\Zootopia (2016).mkv
+[2026-08-28 22:57:12] [INFO] [382/382] Already clean: Zootopia 2 (2025)\Zootopia 2 (2025).mkv
+[2026-08-28 22:57:12] [INFO] -- 382/382  cleaned 0  already 377  deferred 0  skipped 5  layout 0  errors 0  saved 0 Bytes  1.78 TB/1.78 TB  elapsed 0.8s  ~0.0s left
+[2026-08-28 22:57:12] [INFO] Metadata cache: 379 reused, 3 read from mkvmerge.
+[2026-08-28 22:57:12] [INFO] Detailed summary report saved to: 'E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt'
+[2026-08-28 23:18:57] [INFO] ===============================================================================
+[2026-08-28 23:18:57] [INFO]   LOSSLESS JELLYFIN MKV TRACK CLEANER
+[2026-08-28 23:18:57] [INFO] ===============================================================================
+[2026-08-28 23:18:57] [INFO]   Target directory    : E:\torrents\final_organized
+[2026-08-28 23:18:57] [INFO]   Execution mode      : LIVE RUN (modifications will be applied)
+[2026-08-28 23:18:57] [INFO]   mkvmerge            : C:\Program Files\MKVToolNix\mkvmerge.EXE
+[2026-08-28 23:18:57] [INFO]   mkvmerge version    : mkvmerge v100.0 ('Do Hot Girls Like Chords') 64-bit
+[2026-08-28 23:18:57] [INFO]   Audio languages     : en, eng
+[2026-08-28 23:18:57] [INFO]   Subtitle languages  : en, eng
+[2026-08-28 23:18:57] [INFO]   Commentary / DVS    : remove (fixed policy)
+[2026-08-28 23:18:57] [INFO]   Accessibility subs  : retained only when no valid external .en.srt exists
+[2026-08-28 23:18:57] [INFO]   External .en.srt   : validated exact sidecar automatically becomes sole subtitle option
+[2026-08-28 23:18:57] [INFO]   Sidecar subtitles   : never modified by this cleaner
+[2026-08-28 23:18:57] [INFO]   Pipeline order      : movie_standardizer.py -> subtitle_fetcher.py -> this cleaner
+[2026-08-28 23:18:57] [INFO]   (remuxing first invalidates the OpenSubtitles moviehash; a warning is logged per file)
+[2026-08-28 23:18:57] [INFO]   Hardlinked movies   : always deferred (never remuxed while seeding)
+[2026-08-28 23:18:57] [INFO]   Process priority    : normal
+[2026-08-28 23:18:57] [INFO]   Log file            : E:\torrents\mkv_track_cleaner\mkv_track_cleaner.log
+[2026-08-28 23:18:57] [INFO] ===============================================================================
+[2026-08-28 23:18:57] [INFO] --- Starting Scan on 'E:\torrents\final_organized' ---
+[2026-08-28 23:18:57] [INFO] Single report file: 'E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt'
+[2026-08-28 23:18:57] [INFO] movie_standardizer.py coordination lock acquired.
+[2026-08-28 23:18:57] [INFO] Single-instance lock acquired (PID 6984).
+[2026-08-28 23:18:57] [INFO] Checking for orphaned remux transactions from previous runs...
+[2026-08-28 23:18:57] [INFO] No orphaned remux transactions found.
+[2026-08-28 23:18:57] [INFO] Metadata cache: E:\torrents\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json (382 entries loaded)
+[2026-08-28 23:18:57] [INFO] Scanning 'E:\torrents\final_organized' for MKV files...
+[2026-08-28 23:18:57] [INFO] Found 382 MKV file(s) totaling 1.78 TB
+[2026-08-28 23:18:57] [INFO] [  1/382] Already clean: 10 Cloverfield Lane (2016)\10 Cloverfield Lane (2016).mkv
+[2026-08-28 23:18:57] [INFO] [  2/382] Already clean: 10 Things I Hate About You (1999)\10 Things I Hate About You (1999).mkv
+[2026-08-28 23:18:57] [INFO] [  3/382] Already clean: 12 Years a Slave (2013)\12 Years a Slave (2013).mkv
+[2026-08-28 23:18:57] [INFO] [  4/382] Already clean: 13 Hours - The Secret Soldiers of Benghazi (2016)\13 Hours - The Secret Soldiers of Benghazi (2016).mkv
+[2026-08-28 23:18:57] [INFO] [  5/382] Already clean: 1917 (2019)\1917 (2019).mkv
+[2026-08-28 23:18:57] [INFO] [  6/382] Already clean: 2001 - A Space Odyssey (1968)\2001 - A Space Odyssey (1968).mkv
+[2026-08-28 23:18:57] [INFO] [  7/382] Already clean: 21 Jump Street (2012)\21 Jump Street (2012).mkv
+[2026-08-28 23:18:57] [INFO] [  8/382] Already clean: 22 Jump Street (2014)\22 Jump Street (2014).mkv
+[2026-08-28 23:18:57] [INFO] [  9/382] Already clean: 300 (2006)\300 (2006).mkv
+[2026-08-28 23:18:57] [INFO] [ 10/382] Already clean: 42 (2013)\42 (2013).mkv
+[2026-08-28 23:18:57] [INFO] [ 11/382] Already clean: 50 First Dates (2004)\50 First Dates (2004).mkv
+[2026-08-28 23:18:57] [INFO] [ 12/382] Already clean: 500 Days of Summer (2009)\500 Days of Summer (2009).mkv
+[2026-08-28 23:18:57] [INFO] [ 13/382] Already clean: 8 Mile (2002)\8 Mile (2002).mkv
+[2026-08-28 23:18:57] [INFO] [ 14/382] Already clean: 9 (2009)\9 (2009).mkv
+[2026-08-28 23:18:57] [INFO] [ 15/382] Already clean: A Beautiful Mind (2001)\A Beautiful Mind (2001).mkv
+[2026-08-28 23:18:57] [INFO] [ 16/382] Already clean: A Christmas Story (1983)\A Christmas Story (1983).mkv
+[2026-08-28 23:18:57] [INFO] [ 17/382] Already clean: A I Artificial Intelligence (2001)\A I Artificial Intelligence (2001).mkv
+[2026-08-28 23:18:57] [INFO] [ 18/382] Already clean: A Quiet Place (2018)\A Quiet Place (2018).mkv
+[2026-08-28 23:18:57] [INFO] [ 19/382] Already clean: A Quiet Place Part II (2021)\A Quiet Place Part II (2021).mkv
+[2026-08-28 23:18:57] [INFO] [ 20/382] Already clean: About Time (2013)\About Time (2013).mkv
+[2026-08-28 23:18:57] [INFO] [ 21/382] Already clean: Accepted (2006)\Accepted (2006).mkv
+[2026-08-28 23:18:57] [INFO] [ 22/382] Already clean: Air (2023)\Air (2023).mkv
+[2026-08-28 23:18:57] [INFO] [ 23/382] Already clean: Aladdin (1992)\Aladdin (1992).mkv
+[2026-08-28 23:18:57] [INFO] [ 24/382] Already clean: Alien (1979)\Alien (1979).mkv
+[2026-08-28 23:18:57] [INFO] [ 25/382] Already clean: Aliens (1986)\Aliens (1986).mkv
+[2026-08-28 23:18:57] [INFO] -- 25/382  cleaned 0  already 25  deferred 0  skipped 0  layout 0  errors 0  saved 0 Bytes  126.62 GB/1.78 TB  elapsed 0.2s  ~3.2s left
+[2026-08-28 23:18:57] [INFO] [ 26/382] Already clean: All Quiet on the Western Front (2022)\All Quiet on the Western Front (2022).mkv
+[2026-08-28 23:18:57] [INFO] [ 27/382] Already clean: American History X (1998)\American History X (1998).mkv
+[2026-08-28 23:18:57] [INFO] [ 28/382] Already clean: American Pie (1999)\American Pie (1999).mkv
+[2026-08-28 23:18:57] [INFO] [ 29/382] Already clean: American Psycho (2000)\American Psycho (2000).mkv
+[2026-08-28 23:18:57] [INFO] [ 30/382] Already clean: American Sniper (2014)\American Sniper (2014).mkv
+[2026-08-28 23:18:57] [INFO] [ 31/382] Already clean: Annihilation (2018)\Annihilation (2018).mkv
+[2026-08-28 23:18:57] [INFO] [ 32/382] Already clean: Apollo 13 (1995)\Apollo 13 (1995).mkv
+[2026-08-28 23:18:57] [INFO] [ 33/382] Already clean: Arrival (2016)\Arrival (2016).mkv
+[2026-08-28 23:18:57] [INFO] [ 34/382] Already clean: Avatar (2009)\Avatar (2009).mkv
+[2026-08-28 23:18:57] [INFO] [ 35/382] Already clean: Avengers Age of Ultron (2015)\Avengers Age of Ultron (2015).mkv
+[2026-08-28 23:18:57] [INFO] [ 36/382] Already clean: Avengers Endgame (2019)\Avengers Endgame (2019).mkv
+[2026-08-28 23:18:57] [INFO] [ 37/382] Already clean: Avengers Infinity War (2018)\Avengers Infinity War (2018).mkv
+[2026-08-28 23:18:57] [INFO] [ 38/382] Already clean: Back to the Future (1985)\Back to the Future (1985).mkv
+[2026-08-28 23:18:57] [INFO] [ 39/382] Already clean: Back to the Future Part II (1989)\Back to the Future Part II (1989).mkv
+[2026-08-28 23:18:57] [INFO] [ 40/382] Already clean: Back to the Future Part III (1990)\Back to the Future Part III (1990).mkv
+[2026-08-28 23:18:57] [INFO] [ 41/382] Already clean: Backrooms (2026)\Backrooms (2026).mkv
+[2026-08-28 23:18:57] [INFO] [ 42/382] Already clean: Barbie (2023)\Barbie (2023).mkv
+[2026-08-28 23:18:57] [INFO] [ 43/382] Already clean: Batman Begins (2005)\Batman Begins (2005).mkv
+[2026-08-28 23:18:57] [INFO] [ 44/382] Already clean: Bee Movie (2007)\Bee Movie (2007).mkv
+[2026-08-28 23:18:57] [INFO] [ 45/382] Already clean: Black Hawk Down (2001)\Black Hawk Down (2001).mkv
+[2026-08-28 23:18:57] [INFO] [ 46/382] Already clean: Black Panther (2018)\Black Panther (2018).mkv
+[2026-08-28 23:18:57] [INFO] [ 47/382] Already clean: Blade Runner (1982)\Blade Runner (1982).mkv
+[2026-08-28 23:18:57] [INFO] [ 48/382] Already clean: Blade Runner 2049 (2017)\Blade Runner 2049 (2017).mkv
+[2026-08-28 23:18:57] [INFO] [ 49/382] Already clean: Blended (2014)\Blended (2014).mkv
+[2026-08-28 23:18:57] [INFO] [ 50/382] Already clean: Bohemian Rhapsody (2018)\Bohemian Rhapsody (2018).mkv
+[2026-08-28 23:18:57] [INFO] -- 50/382  cleaned 0  already 50  deferred 0  skipped 0  layout 0  errors 0  saved 0 Bytes  238.11 GB/1.78 TB  elapsed 0.4s  ~2.9s left
+[2026-08-28 23:18:57] [INFO] [ 51/382] Already clean: Borat (2006)\Borat (2006).mkv
+[2026-08-28 23:18:57] [INFO] [ 52/382] Already clean: Boyhood (2014)\Boyhood (2014).mkv
+[2026-08-28 23:18:57] [INFO] [ 53/382] Already clean: Boyz N the Hood (1991)\Boyz N the Hood (1991).mkv
+[2026-08-28 23:18:57] [INFO] [ 54/382] Already clean: Braveheart (1995)\Braveheart (1995).mkv
+[2026-08-28 23:18:57] [INFO] [ 55/382] Already clean: Bugonia (2025)\Bugonia (2025).mkv
+[2026-08-28 23:18:58] [INFO] [ 56/382] Already clean: Captain America Civil War (2016)\Captain America Civil War (2016).mkv
+[2026-08-28 23:18:58] [INFO] [ 57/382] Already clean: Captain America The First Avenger (2011)\Captain America The First Avenger (2011).mkv
+[2026-08-28 23:18:58] [INFO] [ 58/382] Already clean: Captain America The Winter Soldier (2014)\Captain America The Winter Soldier (2014).mkv
+[2026-08-28 23:18:58] [INFO] [ 59/382] Already clean: Cars (2006)\Cars (2006).mkv
+[2026-08-28 23:18:58] [INFO] [ 60/382] Already clean: Casino Royale (2006)\Casino Royale (2006).mkv
+[2026-08-28 23:18:58] [INFO] [ 61/382] Already clean: Cast Away (2000)\Cast Away (2000).mkv
+[2026-08-28 23:18:58] [INFO] [ 62/382] Already clean: Catch Me If You Can (2002)\Catch Me If You Can (2002).mkv
+[2026-08-28 23:18:58] [INFO] [ 63/382] Already clean: Charlie and the Chocolate Factory (2005)\Charlie and the Chocolate Factory (2005).mkv
+[2026-08-28 23:18:58] [INFO] [ 64/382] Already clean: Chicken Little (2005)\Chicken Little (2005).mkv
+[2026-08-28 23:18:58] [INFO] [ 65/382] Already clean: Children of Men (2006)\Children of Men (2006).mkv
+[2026-08-28 23:18:58] [INFO] [ 66/382] Already clean: Chronicle (2012)\Chronicle (2012).mkv
+[2026-08-28 23:18:58] [INFO] [ 67/382] Already clean: Civil War (2024)\Civil War (2024).mkv
+[2026-08-28 23:18:58] [INFO] [ 68/382] Already clean: Cloudy with a Chance of Meatballs (2009)\Cloudy with a Chance of Meatballs (2009).mkv
+[2026-08-28 23:18:58] [INFO] [ 69/382] Already clean: Cloverfield (2008)\Cloverfield (2008).mkv
+[2026-08-28 23:18:58] [INFO] [ 70/382] Already clean: Coach Carter (2005)\Coach Carter (2005).mkv
+[2026-08-28 23:18:58] [INFO] [ 71/382] Already clean: Coco (2017)\Coco (2017).mkv
+[2026-08-28 23:18:58] [INFO] [ 72/382] Already clean: Contact (1997)\Contact (1997).mkv
+[2026-08-28 23:18:58] [INFO] [ 73/382] Already clean: Contagion (2011)\Contagion (2011).mkv
+[2026-08-28 23:18:58] [INFO] [ 74/382] Already clean: Coraline (2009)\Coraline (2009).mkv
+[2026-08-28 23:18:58] [INFO] [ 75/382] Already clean: Crazy Rich Asians (2018)\Crazy Rich Asians (2018).mkv
+[2026-08-28 23:18:58] [INFO] -- 75/382  cleaned 0  already 75  deferred 0  skipped 0  layout 0  errors 0  saved 0 Bytes  348.34 GB/1.78 TB  elapsed 0.6s  ~2.6s left
+[2026-08-28 23:18:58] [INFO] [ 76/382] Already clean: Creed (2015)\Creed (2015).mkv
+[2026-08-28 23:18:58] [INFO] [ 77/382] Already clean: Dawn of the Planet of the Apes (2014)\Dawn of the Planet of the Apes (2014).mkv
+[2026-08-28 23:18:58] [WARNING] [ 78/382] Skipping 'Dead Poets Society (1989)\Dead Poets Society (1989).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 23:18:58] [INFO] [ 79/382] Already clean: Deadpool (2016)\Deadpool (2016).mkv
+[2026-08-28 23:18:58] [INFO] [ 80/382] Already clean: Deadpool 2 (2018)\Deadpool 2 (2018).mkv
+[2026-08-28 23:18:58] [INFO] [ 81/382] Already clean: Despicable Me (2010)\Despicable Me (2010).mkv
+[2026-08-28 23:18:58] [INFO] [ 82/382] Already clean: Die Hard (1988)\Die Hard (1988).mkv
+[2026-08-28 23:18:58] [INFO] [ 83/382] Already clean: District 9 (2009)\District 9 (2009).mkv
+[2026-08-28 23:18:58] [INFO] [ 84/382] Already clean: Django Unchained (2012)\Django Unchained (2012).mkv
+[2026-08-28 23:18:58] [INFO] [ 85/382] Already clean: Donnie Darko (2001)\Donnie Darko (2001).mkv
+[2026-08-28 23:18:58] [INFO] [ 86/382] Already clean: Dune (2021)\Dune (2021).mkv
+[2026-08-28 23:18:58] [INFO] [ 87/382] Already clean: Dune - Part Two (2024)\Dune - Part Two (2024).mkv
+[2026-08-28 23:18:58] [INFO] [ 88/382] Already clean: Dunkirk (2017)\Dunkirk (2017).mkv
+[2026-08-28 23:18:58] [INFO] [ 89/382] Already clean: E T the Extra-Terrestrial (1982)\E T the Extra-Terrestrial (1982).mkv
+[2026-08-28 23:18:58] [INFO] [ 90/382] Already clean: Easy A (2010)\Easy A (2010).mkv
+[2026-08-28 23:18:58] [INFO] [ 91/382] Already clean: Edge of Tomorrow (2014)\Edge of Tomorrow (2014).mkv
+[2026-08-28 23:18:58] [INFO] [ 92/382] Already clean: Edward Scissorhands (1990)\Edward Scissorhands (1990).mkv
+[2026-08-28 23:18:58] [INFO] [ 93/382] Already clean: Elemental (2023)\Elemental (2023).mkv
+[2026-08-28 23:18:58] [INFO] [ 94/382] Already clean: Elysium (2013)\Elysium (2013).mkv
+[2026-08-28 23:18:58] [INFO] [ 95/382] Already clean: Enchanted (2007)\Enchanted (2007).mkv
+[2026-08-28 23:18:58] [INFO] [ 96/382] Already clean: Enemy (2013)\Enemy (2013).mkv
+[2026-08-28 23:18:58] [INFO] [ 97/382] Already clean: Eternal Sunshine of the Spotless Mind (2004)\Eternal Sunshine of the Spotless Mind (2004).mkv
+[2026-08-28 23:18:58] [INFO] [ 98/382] Already clean: Ex Machina (2015)\Ex Machina (2015).mkv
+[2026-08-28 23:18:58] [INFO] [ 99/382] Already clean: Fargo (1996)\Fargo (1996).mkv
+[2026-08-28 23:18:58] [INFO] [100/382] Already clean: Fast Five (2011)\Fast Five (2011).mkv
+[2026-08-28 23:18:58] [INFO] -- 100/382  cleaned 0  already 99  deferred 0  skipped 1  layout 0  errors 0  saved 0 Bytes  465.29 GB/1.78 TB  elapsed 0.8s  ~2.5s left
+[2026-08-28 23:18:58] [INFO] [101/382] Already clean: Ferris Bueller's Day Off (1986)\Ferris Bueller's Day Off (1986).mkv
+[2026-08-28 23:18:58] [INFO] [102/382] Already clean: Fight Club (1999)\Fight Club (1999).mkv
+[2026-08-28 23:18:58] [INFO] [103/382] Already clean: Finding Nemo (2003)\Finding Nemo (2003).mkv
+[2026-08-28 23:18:58] [INFO] [104/382] Already clean: First Man (2018)\First Man (2018).mkv
+[2026-08-28 23:18:58] [INFO] [105/382] Already clean: Ford v Ferrari (2019)\Ford v Ferrari (2019).mkv
+[2026-08-28 23:18:58] [INFO] [106/382] Already clean: Forrest Gump (1994)\Forrest Gump (1994).mkv
+[2026-08-28 23:18:58] [INFO] [107/382] Already clean: Fractured (2019)\Fractured (2019).mkv
+[2026-08-28 23:18:58] [INFO] [108/382] Already clean: Fury (2014)\Fury (2014).mkv
+[2026-08-28 23:18:58] [INFO] [109/382] Already clean: Get Out (2017)\Get Out (2017).mkv
+[2026-08-28 23:18:58] [INFO] [110/382] Already clean: Ghostbusters (1984)\Ghostbusters (1984).mkv
+[2026-08-28 23:18:58] [INFO] [111/382] Already clean: Gladiator (2000)\Gladiator (2000).mkv
+[2026-08-28 23:18:58] [INFO] [112/382] Already clean: Gone Girl (2014)\Gone Girl (2014).mkv
+[2026-08-28 23:18:58] [INFO] [113/382] Already clean: Good Will Hunting (1997)\Good Will Hunting (1997).mkv
+[2026-08-28 23:18:58] [INFO] [114/382] Already clean: Goodfellas (1990)\Goodfellas (1990).mkv
+[2026-08-28 23:18:58] [INFO] [115/382] Already clean: Gravity (2013)\Gravity (2013).mkv
+[2026-08-28 23:18:58] [INFO] [116/382] Already clean: Green Book (2018)\Green Book (2018).mkv
+[2026-08-28 23:18:58] [INFO] [117/382] Already clean: Greenland (2020)\Greenland (2020).mkv
+[2026-08-28 23:18:58] [INFO] [118/382] Already clean: Groundhog Day (1993)\Groundhog Day (1993).mkv
+[2026-08-28 23:18:58] [INFO] [119/382] Already clean: Grown Ups (2010)\Grown Ups (2010).mkv
+[2026-08-28 23:18:58] [INFO] [120/382] Already clean: Guardians of the Galaxy (2014)\Guardians of the Galaxy (2014).mkv
+[2026-08-28 23:18:58] [INFO] [121/382] Already clean: Hacksaw Ridge (2016)\Hacksaw Ridge (2016).mkv
+[2026-08-28 23:18:58] [INFO] [122/382] Already clean: Happy Feet (2006)\Happy Feet (2006).mkv
+[2026-08-28 23:18:58] [INFO] [123/382] Already clean: Happy Gilmore (1996)\Happy Gilmore (1996).mkv
+[2026-08-28 23:18:58] [INFO] [124/382] Already clean: Harry Potter and the Chamber of Secrets (2002)\Harry Potter and the Chamber of Secrets (2002).mkv
+[2026-08-28 23:18:58] [INFO] [125/382] Already clean: Harry Potter and the Deathly Hallows - Part 1 (2010)\Harry Potter and the Deathly Hallows - Part 1 (2010).mkv
+[2026-08-28 23:18:58] [INFO] -- 125/382  cleaned 0  already 124  deferred 0  skipped 1  layout 0  errors 0  saved 0 Bytes  587.00 GB/1.78 TB  elapsed 1.1s  ~2.3s left
+[2026-08-28 23:18:58] [INFO] [126/382] Already clean: Harry Potter and the Deathly Hallows - Part 2 (2011)\Harry Potter and the Deathly Hallows - Part 2 (2011).mkv
+[2026-08-28 23:18:58] [INFO] [127/382] Already clean: Harry Potter and the Goblet of Fire (2005)\Harry Potter and the Goblet of Fire (2005).mkv
+[2026-08-28 23:18:58] [INFO] [128/382] Already clean: Harry Potter and the Half-Blood Prince (2009)\Harry Potter and the Half-Blood Prince (2009).mkv
+[2026-08-28 23:18:58] [INFO] [129/382] Already clean: Harry Potter and the Order of the Phoenix (2007)\Harry Potter and the Order of the Phoenix (2007).mkv
+[2026-08-28 23:18:58] [INFO] [130/382] Already clean: Harry Potter and the Prisoner of Azkaban (2004)\Harry Potter and the Prisoner of Azkaban (2004).mkv
+[2026-08-28 23:18:58] [INFO] [131/382] Already clean: Harry Potter and the Sorcerer's Stone (2001)\Harry Potter and the Sorcerer's Stone (2001).mkv
+[2026-08-28 23:18:58] [INFO] [132/382] Already clean: Heat (1995)\Heat (1995).mkv
+[2026-08-28 23:18:58] [INFO] [133/382] Already clean: Her (2013)\Her (2013).mkv
+[2026-08-28 23:18:58] [INFO] [134/382] Already clean: Hercules (1997)\Hercules (1997).mkv
+[2026-08-28 23:18:58] [INFO] [135/382] Already clean: Hereditary (2018)\Hereditary (2018).mkv
+[2026-08-28 23:18:58] [INFO] [136/382] Already clean: Hidden Figures (2016)\Hidden Figures (2016).mkv
+[2026-08-28 23:18:58] [INFO] [137/382] Already clean: Holes (2003)\Holes (2003).mkv
+[2026-08-28 23:18:58] [INFO] [138/382] Already clean: Home Alone (1990)\Home Alone (1990).mkv
+[2026-08-28 23:18:58] [INFO] [139/382] Already clean: Home Alone 2 - Lost in New York (1992)\Home Alone 2 - Lost in New York (1992).mkv
+[2026-08-28 23:18:58] [INFO] [140/382] Already clean: How to Train Your Dragon (2010)\How to Train Your Dragon (2010).mkv
+[2026-08-28 23:18:58] [INFO] [141/382] Already clean: I Am Legend (2007)\I Am Legend (2007).mkv
+[2026-08-28 23:18:58] [INFO] [142/382] Already clean: I, Robot (2004)\I, Robot (2004).mkv
+[2026-08-28 23:18:58] [INFO] [143/382] Already clean: I, Tonya (2017)\I, Tonya (2017).mkv
+[2026-08-28 23:18:58] [INFO] [144/382] Already clean: Ice Age (2002)\Ice Age (2002).mkv
+[2026-08-28 23:18:58] [INFO] [145/382] Already clean: Idiocracy (2006)\Idiocracy (2006).mkv
+[2026-08-28 23:18:58] [INFO] [146/382] Already clean: Inception (2010)\Inception (2010).mkv
+[2026-08-28 23:18:58] [INFO] [147/382] Already clean: Incredibles 2 (2018)\Incredibles 2 (2018).mkv
+[2026-08-28 23:18:58] [INFO] [148/382] Already clean: Independence Day (1996)\Independence Day (1996).mkv
+[2026-08-28 23:18:58] [INFO] [149/382] Already clean: Indiana Jones and the Last Crusade (1989)\Indiana Jones and the Last Crusade (1989).mkv
+[2026-08-28 23:18:58] [INFO] [150/382] Already clean: Indiana Jones and the Raiders of the Lost Ark (1981)\Indiana Jones and the Raiders of the Lost Ark (1981).mkv
+[2026-08-28 23:18:58] [INFO] -- 150/382  cleaned 0  already 149  deferred 0  skipped 1  layout 0  errors 0  saved 0 Bytes  708.24 GB/1.78 TB  elapsed 1.3s  ~2.1s left
+[2026-08-28 23:18:58] [INFO] [151/382] Already clean: Indiana Jones and the Temple of Doom (1984)\Indiana Jones and the Temple of Doom (1984).mkv
+[2026-08-28 23:18:58] [INFO] [152/382] Already clean: Inglourious Basterds (2009)\Inglourious Basterds (2009).mkv
+[2026-08-28 23:18:58] [INFO] [153/382] Already clean: Insomnia (2002)\Insomnia (2002).mkv
+[2026-08-28 23:18:58] [INFO] [154/382] Already clean: Interstellar (2014)\Interstellar (2014).mkv
+[2026-08-28 23:18:58] [INFO] [155/382] Already clean: Into the Wild (2007)\Into the Wild (2007).mkv
+[2026-08-28 23:18:58] [INFO] [156/382] Already clean: Iron Man (2008)\Iron Man (2008).mkv
+[2026-08-28 23:18:58] [INFO] [157/382] Already clean: Iron Man 2 (2010)\Iron Man 2 (2010).mkv
+[2026-08-28 23:18:58] [WARNING] [158/382] Skipping 'IT (2017)\IT (2017).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 23:18:58] [INFO] [159/382] Already clean: James and the Giant Peach (1996)\James and the Giant Peach (1996).mkv
+[2026-08-28 23:18:58] [INFO] [160/382] Already clean: Jaws (1975)\Jaws (1975).mkv
+[2026-08-28 23:18:58] [INFO] [161/382] Already clean: Jimmy Neutron Boy Genius (2001)\Jimmy Neutron Boy Genius (2001).mkv
+[2026-08-28 23:18:58] [INFO] [162/382] Already clean: John Q (2002)\John Q (2002).mkv
+[2026-08-28 23:18:58] [INFO] [163/382] Already clean: Joker (2019)\Joker (2019).mkv
+[2026-08-28 23:18:58] [INFO] [164/382] Already clean: Jumanji (1995)\Jumanji (1995).mkv
+[2026-08-28 23:18:59] [INFO] [165/382] Already clean: Juno (2007)\Juno (2007).mkv
+[2026-08-28 23:18:59] [INFO] [166/382] Already clean: Jurassic Park (1993)\Jurassic Park (1993).mkv
+[2026-08-28 23:18:59] [INFO] [167/382] Already clean: Jurassic World (2015)\Jurassic World (2015).mkv
+[2026-08-28 23:18:59] [INFO] [168/382] Already clean: Kick-Ass (2010)\Kick-Ass (2010).mkv
+[2026-08-28 23:18:59] [INFO] [169/382] Already clean: King Richard (2021)\King Richard (2021).mkv
+[2026-08-28 23:18:59] [INFO] [170/382] Already clean: Knives Out (2019)\Knives Out (2019).mkv
+[2026-08-28 23:18:59] [INFO] [171/382] Already clean: Knowing (2009)\Knowing (2009).mkv
+[2026-08-28 23:18:59] [INFO] [172/382] Already clean: Kung Fu Panda (2008)\Kung Fu Panda (2008).mkv
+[2026-08-28 23:18:59] [INFO] [173/382] Already clean: Legally Blonde (2001)\Legally Blonde (2001).mkv
+[2026-08-28 23:18:59] [INFO] [174/382] Already clean: Logan (2017)\Logan (2017).mkv
+[2026-08-28 23:18:59] [INFO] [175/382] Already clean: Lone Survivor (2013)\Lone Survivor (2013).mkv
+[2026-08-28 23:18:59] [INFO] -- 175/382  cleaned 0  already 173  deferred 0  skipped 2  layout 0  errors 0  saved 0 Bytes  838.59 GB/1.78 TB  elapsed 1.6s  ~1.9s left
+[2026-08-28 23:18:59] [INFO] [176/382] Already clean: Madagascar (2005)\Madagascar (2005).mkv
+[2026-08-28 23:18:59] [INFO] [177/382] Already clean: Magnolia (1999)\Magnolia (1999).mkv
+[2026-08-28 23:18:59] [INFO] [178/382] Already clean: Marty Supreme (2025)\Marty Supreme (2025).mkv
+[2026-08-28 23:18:59] [INFO] [179/382] Already clean: Mean Girls (2004)\Mean Girls (2004).mkv
+[2026-08-28 23:18:59] [INFO] [180/382] Already clean: Meet the Robinsons (2007)\Meet the Robinsons (2007).mkv
+[2026-08-28 23:18:59] [INFO] [181/382] Already clean: Megamind (2010)\Megamind (2010).mkv
+[2026-08-28 23:18:59] [INFO] [182/382] Already clean: Memento (2000)\Memento (2000).mkv
+[2026-08-28 23:18:59] [INFO] [183/382] Already clean: Minority Report (2002)\Minority Report (2002).mkv
+[2026-08-28 23:18:59] [INFO] [184/382] Already clean: Mission - Impossible - Fallout (2018)\Mission - Impossible - Fallout (2018).mkv
+[2026-08-28 23:18:59] [INFO] [185/382] Already clean: Monsters University (2013)\Monsters University (2013).mkv
+[2026-08-28 23:18:59] [INFO] [186/382] Already clean: Monsters, Inc (2001)\Monsters, Inc (2001).mkv
+[2026-08-28 23:18:59] [INFO] [187/382] Already clean: Moon (2009)\Moon (2009).mkv
+[2026-08-28 23:18:59] [INFO] [188/382] Already clean: Mulan (1998)\Mulan (1998).mkv
+[2026-08-28 23:18:59] [INFO] [189/382] Already clean: Napoleon Dynamite (2004)\Napoleon Dynamite (2004).mkv
+[2026-08-28 23:18:59] [INFO] [190/382] Already clean: National Lampoon's Christmas Vacation (1989)\National Lampoon's Christmas Vacation (1989).mkv
+[2026-08-28 23:18:59] [INFO] [191/382] Already clean: National Treasure (2004)\National Treasure (2004).mkv
+[2026-08-28 23:18:59] [INFO] [192/382] Already clean: National Treasure Book of Secrets (2007)\National Treasure Book of Secrets (2007).mkv
+[2026-08-28 23:18:59] [INFO] [193/382] Already clean: Night at the Museum (2006)\Night at the Museum (2006).mkv
+[2026-08-28 23:18:59] [INFO] [194/382] Already clean: Nightcrawler (2014)\Nightcrawler (2014).mkv
+[2026-08-28 23:18:59] [INFO] [195/382] Already clean: No Country for Old Men (2007)\No Country for Old Men (2007).mkv
+[2026-08-28 23:18:59] [INFO] [196/382] Already clean: Now You See Me (2013)\Now You See Me (2013).mkv
+[2026-08-28 23:18:59] [INFO] [197/382] Already clean: Oblivion (2013)\Oblivion (2013).mkv
+[2026-08-28 23:18:59] [INFO] [198/382] Already clean: Obsession (2026)\Obsession (2026).mkv
+[2026-08-28 23:18:59] [INFO] [199/382] Already clean: October Sky (1999)\October Sky (1999).mkv
+[2026-08-28 23:18:59] [INFO] [200/382] Already clean: Office Space (1999)\Office Space (1999).mkv
+[2026-08-28 23:18:59] [INFO] -- 200/382  cleaned 0  already 198  deferred 0  skipped 2  layout 0  errors 0  saved 0 Bytes  944.41 GB/1.78 TB  elapsed 1.8s  ~1.7s left
+[2026-08-28 23:18:59] [INFO] [201/382] Already clean: One Flew Over the Cuckoo's Nest (1975)\One Flew Over the Cuckoo's Nest (1975).mkv
+[2026-08-28 23:18:59] [INFO] [202/382] Already clean: Open Season (2006)\Open Season (2006).mkv
+[2026-08-28 23:18:59] [INFO] [203/382] Already clean: Oppenheimer (2023)\Oppenheimer (2023).mkv
+[2026-08-28 23:18:59] [INFO] [204/382] Already clean: Osmosis Jones (2001)\Osmosis Jones (2001).mkv
+[2026-08-28 23:18:59] [INFO] [205/382] Already clean: Over the Hedge (2006)\Over the Hedge (2006).mkv
+[2026-08-28 23:18:59] [WARNING] [206/382] Skipping 'Parasite (2019)\Parasite (2019).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 23:18:59] [INFO] [207/382] Already clean: Pearl (2022)\Pearl (2022).mkv
+[2026-08-28 23:18:59] [INFO] [208/382] Already clean: Pineapple Express (2008)\Pineapple Express (2008).mkv
+[2026-08-28 23:18:59] [INFO] [209/382] Already clean: Pirates of the Caribbean At World's End (2007)\Pirates of the Caribbean At World's End (2007).mkv
+[2026-08-28 23:18:59] [INFO] [210/382] Already clean: Pirates of the Caribbean Dead Man's Chest (2006)\Pirates of the Caribbean Dead Man's Chest (2006).mkv
+[2026-08-28 23:18:59] [INFO] [211/382] Already clean: Pirates of the Caribbean The Curse of the Black Pearl (2003)\Pirates of the Caribbean The Curse of the Black Pearl (2003).mkv
+[2026-08-28 23:18:59] [INFO] [212/382] Already clean: Pitch Perfect (2012)\Pitch Perfect (2012).mkv
+[2026-08-28 23:18:59] [INFO] [213/382] Already clean: Prisoners (2013)\Prisoners (2013).mkv
+[2026-08-28 23:18:59] [INFO] [214/382] Already clean: Project Hail Mary (2026)\Project Hail Mary (2026).mkv
+[2026-08-28 23:18:59] [INFO] [215/382] Already clean: Project X (2012)\Project X (2012).mkv
+[2026-08-28 23:18:59] [INFO] [216/382] Already clean: Pulp Fiction (1994)\Pulp Fiction (1994).mkv
+[2026-08-28 23:18:59] [INFO] [217/382] Already clean: Ratatouille (2007)\Ratatouille (2007).mkv
+[2026-08-28 23:18:59] [INFO] [218/382] Already clean: Ready Player One (2018)\Ready Player One (2018).mkv
+[2026-08-28 23:18:59] [INFO] [219/382] Already clean: Real Steel (2011)\Real Steel (2011).mkv
+[2026-08-28 23:18:59] [INFO] [220/382] Already clean: Remember the Titans (2000)\Remember the Titans (2000).mkv
+[2026-08-28 23:18:59] [INFO] [221/382] Already clean: Requiem for a Dream (2000)\Requiem for a Dream (2000).mkv
+[2026-08-28 23:18:59] [INFO] [222/382] Already clean: Rise of the Planet of the Apes (2011)\Rise of the Planet of the Apes (2011).mkv
+[2026-08-28 23:18:59] [INFO] [223/382] Already clean: Robots (2005)\Robots (2005).mkv
+[2026-08-28 23:18:59] [INFO] [224/382] Already clean: Rocky (1976)\Rocky (1976).mkv
+[2026-08-28 23:18:59] [INFO] [225/382] Already clean: Room (2015)\Room (2015).mkv
+[2026-08-28 23:18:59] [INFO] -- 225/382  cleaned 0  already 222  deferred 0  skipped 3  layout 0  errors 0  saved 0 Bytes  1.03 TB/1.78 TB  elapsed 1.9s  ~1.4s left
+[2026-08-28 23:18:59] [INFO] [226/382] Already clean: Sausage Party (2016)\Sausage Party (2016).mkv
+[2026-08-28 23:18:59] [INFO] [227/382] Already clean: Saving Private Ryan (1998)\Saving Private Ryan (1998).mkv
+[2026-08-28 23:18:59] [INFO] [228/382] Already clean: Saw (2004)\Saw (2004).mkv
+[2026-08-28 23:18:59] [INFO] [229/382] Already clean: Scarface (1983)\Scarface (1983).mkv
+[2026-08-28 23:18:59] [INFO] [230/382] Already clean: Schindler's List (1993)\Schindler's List (1993).mkv
+[2026-08-28 23:18:59] [INFO] [231/382] Already clean: Scream (1996)\Scream (1996).mkv
+[2026-08-28 23:18:59] [INFO] [232/382] Already clean: Se7en (1995)\Se7en (1995).mkv
+[2026-08-28 23:18:59] [INFO] [233/382] Already clean: Shark Tale (2004)\Shark Tale (2004).mkv
+[2026-08-28 23:18:59] [INFO] [234/382] Already clean: Shazam! (2019)\Shazam! (2019).mkv
+[2026-08-28 23:18:59] [INFO] [235/382] Already clean: Shrek (2001)\Shrek (2001).mkv
+[2026-08-28 23:18:59] [INFO] [236/382] Already clean: Shrek 2 (2004)\Shrek 2 (2004).mkv
+[2026-08-28 23:18:59] [INFO] [237/382] Already clean: Shrek Forever After (2010)\Shrek Forever After (2010).mkv
+[2026-08-28 23:18:59] [INFO] [238/382] Already clean: Shutter Island (2010)\Shutter Island (2010).mkv
+[2026-08-28 23:18:59] [INFO] [239/382] Already clean: Sicario (2015)\Sicario (2015).mkv
+[2026-08-28 23:18:59] [INFO] [240/382] Already clean: Signs (2002)\Signs (2002).mkv
+[2026-08-28 23:18:59] [INFO] [241/382] Already clean: Sinister (2012)\Sinister (2012).mkv
+[2026-08-28 23:18:59] [INFO] [242/382] Already clean: Sinners (2025)\Sinners (2025).mkv
+[2026-08-28 23:18:59] [INFO] [243/382] Already clean: Skyfall (2012)\Skyfall (2012).mkv
+[2026-08-28 23:18:59] [INFO] [244/382] Already clean: Slumdog Millionaire (2008)\Slumdog Millionaire (2008).mkv
+[2026-08-28 23:18:59] [INFO] [245/382] Already clean: Snatch (2000)\Snatch (2000).mkv
+[2026-08-28 23:18:59] [INFO] [246/382] Already clean: Snowden (2016)\Snowden (2016).mkv
+[2026-08-28 23:18:59] [INFO] [247/382] Already clean: Source Code (2011)\Source Code (2011).mkv
+[2026-08-28 23:18:59] [INFO] [248/382] Already clean: Spaceballs (1987)\Spaceballs (1987).mkv
+[2026-08-28 23:18:59] [INFO] [249/382] Already clean: Spider-Man (2002)\Spider-Man (2002).mkv
+[2026-08-28 23:18:59] [INFO] [250/382] Already clean: Spider-Man - Across the Spider-Verse (2023)\Spider-Man - Across the Spider-Verse (2023).mkv
+[2026-08-28 23:18:59] [INFO] -- 250/382  cleaned 0  already 247  deferred 0  skipped 3  layout 0  errors 0  saved 0 Bytes  1.15 TB/1.78 TB  elapsed 2.2s  ~1.2s left
+[2026-08-28 23:18:59] [INFO] [251/382] Already clean: Spider-Man - Homecoming (2017)\Spider-Man - Homecoming (2017).mkv
+[2026-08-28 23:18:59] [INFO] [252/382] Already clean: Spider-Man - Into the Spider-Verse (2018)\Spider-Man - Into the Spider-Verse (2018).mkv
+[2026-08-28 23:18:59] [INFO] [253/382] Already clean: Spider-Man 2 (2004)\Spider-Man 2 (2004).mkv
+[2026-08-28 23:18:59] [INFO] [254/382] Already clean: Spider-Man No Way Home (2021)\Spider-Man No Way Home (2021).mkv
+[2026-08-28 23:18:59] [INFO] [255/382] Already clean: Spirited Away (2001)\Spirited Away (2001).mkv
+[2026-08-28 23:18:59] [INFO] [256/382] Already clean: Split (2016)\Split (2016).mkv
+[2026-08-28 23:18:59] [WARNING] [257/382] Skipping 'Stalker (1979)\Stalker (1979).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 23:18:59] [INFO] [258/382] Already clean: Stand by Me (1986)\Stand by Me (1986).mkv
+[2026-08-28 23:18:59] [INFO] [259/382] Already clean: Star Trek (2009)\Star Trek (2009).mkv
+[2026-08-28 23:18:59] [INFO] [260/382] Already clean: Star Trek - Into Darkness (2013)\Star Trek - Into Darkness (2013).mkv
+[2026-08-28 23:18:59] [INFO] [261/382] Already clean: Star Wars - Episode I - The Phantom Menace (1999)\Star Wars - Episode I - The Phantom Menace (1999).mkv
+[2026-08-28 23:18:59] [INFO] [262/382] Already clean: Star Wars - Episode II - Attack of the Clones (2002)\Star Wars - Episode II - Attack of the Clones (2002).mkv
+[2026-08-28 23:18:59] [INFO] [263/382] Already clean: Star Wars - Episode III - Revenge of the Sith (2005)\Star Wars - Episode III - Revenge of the Sith (2005).mkv
+[2026-08-28 23:18:59] [INFO] [264/382] Already clean: Star Wars - Episode IV - A New Hope (1977)\Star Wars - Episode IV - A New Hope (1977).mkv
+[2026-08-28 23:18:59] [INFO] [265/382] Already clean: Star Wars - Episode V - The Empire Strikes Back (1980)\Star Wars - Episode V - The Empire Strikes Back (1980).mkv
+[2026-08-28 23:18:59] [INFO] [266/382] Already clean: Star Wars - Episode VI - Return of the Jedi (1983)\Star Wars - Episode VI - Return of the Jedi (1983).mkv
+[2026-08-28 23:18:59] [INFO] [267/382] Already clean: Straight Outta Compton (2015)\Straight Outta Compton (2015).mkv
+[2026-08-28 23:18:59] [INFO] [268/382] Already clean: Super 8 (2011)\Super 8 (2011).mkv
+[2026-08-28 23:18:59] [INFO] [269/382] Already clean: Superbad (2007)\Superbad (2007).mkv
+[2026-08-28 23:18:59] [INFO] [270/382] Already clean: Surfs Up (2007)\Surfs Up (2007).mkv
+[2026-08-28 23:18:59] [INFO] [271/382] Already clean: Taken (2008)\Taken (2008).mkv
+[2026-08-28 23:18:59] [INFO] [272/382] Already clean: Tangled (2010)\Tangled (2010).mkv
+[2026-08-28 23:18:59] [INFO] [273/382] Already clean: Taxi Driver (1976)\Taxi Driver (1976).mkv
+[2026-08-28 23:18:59] [INFO] [274/382] Already clean: Ted (2012)\Ted (2012).mkv
+[2026-08-28 23:18:59] [INFO] [275/382] Already clean: Tenet (2020)\Tenet (2020).mkv
+[2026-08-28 23:18:59] [INFO] -- 275/382  cleaned 0  already 271  deferred 0  skipped 4  layout 0  errors 0  saved 0 Bytes  1.27 TB/1.78 TB  elapsed 2.5s  ~1.0s left
+[2026-08-28 23:18:59] [INFO] [276/382] Already clean: Terminator 2 - Judgment Day (1991)\Terminator 2 - Judgment Day (1991).mkv
+[2026-08-28 23:19:00] [INFO] [277/382] Already clean: Tetris (2023)\Tetris (2023).mkv
+[2026-08-28 23:19:00] [INFO] [278/382] Already clean: The Accountant (2016)\The Accountant (2016).mkv
+[2026-08-28 23:19:00] [INFO] [279/382] Already clean: The Amazing Spider-Man (2012)\The Amazing Spider-Man (2012).mkv
+[2026-08-28 23:19:00] [INFO] [280/382] Already clean: The Avengers (2012)\The Avengers (2012).mkv
+[2026-08-28 23:19:00] [INFO] [281/382] Already clean: The Batman (2022)\The Batman (2022).mkv
+[2026-08-28 23:19:00] [INFO] [282/382] Already clean: The Big Lebowski (1998)\The Big Lebowski (1998).mkv
+[2026-08-28 23:19:00] [INFO] [283/382] Already clean: The Big Short (2015)\The Big Short (2015).mkv
+[2026-08-28 23:19:00] [INFO] [284/382] Already clean: The Book of Eli (2010)\The Book of Eli (2010).mkv
+[2026-08-28 23:19:00] [INFO] [285/382] Already clean: The Bourne Identity (2002)\The Bourne Identity (2002).mkv
+[2026-08-28 23:19:00] [INFO] [286/382] Already clean: The Bourne Supremacy (2004)\The Bourne Supremacy (2004).mkv
+[2026-08-28 23:19:00] [INFO] [287/382] Already clean: The Bourne Ultimatum (2007)\The Bourne Ultimatum (2007).mkv
+[2026-08-28 23:19:00] [INFO] [288/382] Already clean: The Boy in the Striped Pyjamas (2008)\The Boy in the Striped Pyjamas (2008).mkv
+[2026-08-28 23:19:00] [INFO] [289/382] Already clean: The Breakfast Club (1985)\The Breakfast Club (1985).mkv
+[2026-08-28 23:19:00] [INFO] [290/382] Already clean: The Curious Case of Benjamin Button (2008)\The Curious Case of Benjamin Button (2008).mkv
+[2026-08-28 23:19:00] [INFO] [291/382] Already clean: The Dark Knight (2008)\The Dark Knight (2008).mkv
+[2026-08-28 23:19:00] [INFO] [292/382] Already clean: The Dark Knight Rises (2012)\The Dark Knight Rises (2012).mkv
+[2026-08-28 23:19:00] [INFO] [293/382] Already clean: The Departed (2006)\The Departed (2006).mkv
+[2026-08-28 23:19:00] [INFO] [294/382] Already clean: The Edge of Seventeen (2016)\The Edge of Seventeen (2016).mkv
+[2026-08-28 23:19:00] [INFO] [295/382] Already clean: The Emperor's New Groove (2000)\The Emperor's New Groove (2000).mkv
+[2026-08-28 23:19:00] [INFO] [296/382] Already clean: The Fast and the Furious (2001)\The Fast and the Furious (2001).mkv
+[2026-08-28 23:19:00] [INFO] [297/382] Already clean: The Founder (2016)\The Founder (2016).mkv
+[2026-08-28 23:19:00] [INFO] [298/382] Already clean: The Godfather (1972)\The Godfather (1972).mkv
+[2026-08-28 23:19:00] [INFO] [299/382] Already clean: The Godfather - Part II (1974)\The Godfather - Part II (1974).mkv
+[2026-08-28 23:19:00] [INFO] [300/382] Already clean: The Goonies (1985)\The Goonies (1985).mkv
+[2026-08-28 23:19:00] [INFO] -- 300/382  cleaned 0  already 296  deferred 0  skipped 4  layout 0  errors 0  saved 0 Bytes  1.40 TB/1.78 TB  elapsed 2.7s  ~0.7s left
+[2026-08-28 23:19:00] [INFO] [301/382] Already clean: The Green Mile (1999)\The Green Mile (1999).mkv
+[2026-08-28 23:19:00] [INFO] [302/382] Already clean: The Hangover (2009)\The Hangover (2009).mkv
+[2026-08-28 23:19:00] [INFO] [303/382] Already clean: The Help (2011)\The Help (2011).mkv
+[2026-08-28 23:19:00] [INFO] [304/382] Already clean: The Hunger Games (2012)\The Hunger Games (2012).mkv
+[2026-08-28 23:19:00] [INFO] [305/382] Already clean: The Hunger Games - Mockingjay - Part 1 (2014)\The Hunger Games - Mockingjay - Part 1 (2014).mkv
+[2026-08-28 23:19:00] [INFO] [306/382] Already clean: The Hunger Games - Mockingjay - Part 2 (2015)\The Hunger Games - Mockingjay - Part 2 (2015).mkv
+[2026-08-28 23:19:00] [INFO] [307/382] Already clean: The Hunger Games Catching Fire (2013)\The Hunger Games Catching Fire (2013).mkv
+[2026-08-28 23:19:00] [INFO] [308/382] Already clean: The Hurt Locker (2008)\The Hurt Locker (2008).mkv
+[2026-08-28 23:19:00] [INFO] [309/382] Already clean: The Imitation Game (2014)\The Imitation Game (2014).mkv
+[2026-08-28 23:19:00] [INFO] [310/382] Already clean: The Incredibles (2004)\The Incredibles (2004).mkv
+[2026-08-28 23:19:00] [INFO] [311/382] Already clean: The Interview (2014)\The Interview (2014).mkv
+[2026-08-28 23:19:00] [INFO] [312/382] Already clean: The Invisible Man (2020)\The Invisible Man (2020).mkv
+[2026-08-28 23:19:00] [INFO] [313/382] Already clean: The Invite (2026)\The Invite (2026).mkv
+[2026-08-28 23:19:00] [INFO] [314/382] Already clean: The Karate Kid (1984)\The Karate Kid (1984).mkv
+[2026-08-28 23:19:00] [INFO] [315/382] Already clean: The Longest Yard (2005)\The Longest Yard (2005).mkv
+[2026-08-28 23:19:00] [INFO] [316/382] Already clean: The Lord of the Rings The Fellowship of the Ring (2001)\The Lord of the Rings The Fellowship of the Ring (2001).mkv
+[2026-08-28 23:19:00] [INFO] [317/382] Already clean: The Lord of the Rings The Return of the King (2003)\The Lord of the Rings The Return of the King (2003).mkv
+[2026-08-28 23:19:00] [INFO] [318/382] Already clean: The Lord of the Rings The Two Towers (2002)\The Lord of the Rings The Two Towers (2002).mkv
+[2026-08-28 23:19:00] [INFO] [319/382] Already clean: The Martian (2015)\The Martian (2015).mkv
+[2026-08-28 23:19:00] [INFO] [320/382] Already clean: The Matrix (1999)\The Matrix (1999).mkv
+[2026-08-28 23:19:00] [INFO] [321/382] Already clean: The Maze Runner (2014)\The Maze Runner (2014).mkv
+[2026-08-28 23:19:00] [INFO] [322/382] Already clean: The Nightmare Before Christmas (1993)\The Nightmare Before Christmas (1993).mkv
+[2026-08-28 23:19:00] [INFO] [323/382] Already clean: The Polar Express (2004)\The Polar Express (2004).mkv
+[2026-08-28 23:19:00] [INFO] [324/382] Already clean: The Prestige (2006)\The Prestige (2006).mkv
+[2026-08-28 23:19:00] [INFO] [325/382] Already clean: The Princess and the Frog (2009)\The Princess and the Frog (2009).mkv
+[2026-08-28 23:19:00] [INFO] -- 325/382  cleaned 0  already 321  deferred 0  skipped 4  layout 0  errors 0  saved 0 Bytes  1.51 TB/1.78 TB  elapsed 3.0s  ~0.5s left
+[2026-08-28 23:19:00] [INFO] [326/382] Already clean: The Proposal (2009)\The Proposal (2009).mkv
+[2026-08-28 23:19:00] [INFO] [327/382] Already clean: The Revenant (2015)\The Revenant (2015).mkv
+[2026-08-28 23:19:00] [INFO] [328/382] Already clean: The Sandlot (1993)\The Sandlot (1993).mkv
+[2026-08-28 23:19:00] [INFO] [329/382] Already clean: The Shawshank Redemption (1994)\The Shawshank Redemption (1994).mkv
+[2026-08-28 23:19:00] [INFO] [330/382] Already clean: The Silence of the Lambs (1991)\The Silence of the Lambs (1991).mkv
+[2026-08-28 23:19:00] [INFO] [331/382] Already clean: The Sixth Sense (1999)\The Sixth Sense (1999).mkv
+[2026-08-28 23:19:00] [INFO] [332/382] Already clean: The Social Network (2010)\The Social Network (2010).mkv
+[2026-08-28 23:19:00] [INFO] [333/382] Already clean: The Substance (2024)\The Substance (2024).mkv
+[2026-08-28 23:19:00] [INFO] [334/382] Already clean: The Terminator (1984)\The Terminator (1984).mkv
+[2026-08-28 23:19:00] [INFO] [335/382] Already clean: The Theory of Everything (2014)\The Theory of Everything (2014).mkv
+[2026-08-28 23:19:00] [INFO] [336/382] Already clean: The Thing (1982)\The Thing (1982).mkv
+[2026-08-28 23:19:00] [INFO] [337/382] Already clean: The Truman Show (1998)\The Truman Show (1998).mkv
+[2026-08-28 23:19:00] [INFO] [338/382] Already clean: The Usual Suspects (1995)\The Usual Suspects (1995).mkv
+[2026-08-28 23:19:00] [INFO] [339/382] Already clean: The Wild Robot (2024)\The Wild Robot (2024).mkv
+[2026-08-28 23:19:00] [INFO] [340/382] Already clean: The Wolf of Wall Street (2013)\The Wolf of Wall Street (2013).mkv
+[2026-08-28 23:19:00] [INFO] [341/382] Already clean: There Will Be Blood (2007)\There Will Be Blood (2007).mkv
+[2026-08-28 23:19:00] [INFO] [342/382] Already clean: This Christmas (2007)\This Christmas (2007).mkv
+[2026-08-28 23:19:00] [INFO] [343/382] Already clean: This Is the End (2013)\This Is the End (2013).mkv
+[2026-08-28 23:19:00] [INFO] [344/382] Already clean: Thor - Ragnarok (2017)\Thor - Ragnarok (2017).mkv
+[2026-08-28 23:19:00] [INFO] [345/382] Already clean: Threads (1984)\Threads (1984).mkv
+[2026-08-28 23:19:00] [INFO] [346/382] Already clean: Titanic (1997)\Titanic (1997).mkv
+[2026-08-28 23:19:00] [INFO] [347/382] Already clean: Top Gun (1986)\Top Gun (1986).mkv
+[2026-08-28 23:19:00] [INFO] [348/382] Already clean: Top Gun - Maverick (2022)\Top Gun - Maverick (2022).mkv
+[2026-08-28 23:19:00] [INFO] [349/382] Already clean: Toy Story (1995)\Toy Story (1995).mkv
+[2026-08-28 23:19:00] [INFO] [350/382] Already clean: Toy Story 2 (1999)\Toy Story 2 (1999).mkv
+[2026-08-28 23:19:00] [INFO] -- 350/382  cleaned 0  already 346  deferred 0  skipped 4  layout 0  errors 0  saved 0 Bytes  1.63 TB/1.78 TB  elapsed 3.1s  ~0.3s left
+[2026-08-28 23:19:00] [INFO] [351/382] Already clean: Toy Story 3 (2010)\Toy Story 3 (2010).mkv
+[2026-08-28 23:19:00] [INFO] [352/382] Already clean: Toy Story 4 (2019)\Toy Story 4 (2019).mkv
+[2026-08-28 23:19:00] [INFO] [353/382] Already clean: Toy Story 5 (2026)\Toy Story 5 (2026).mkv
+[2026-08-28 23:19:00] [INFO] [354/382] Already clean: Training Day (2001)\Training Day (2001).mkv
+[2026-08-28 23:19:00] [INFO] [355/382] Already clean: Transformers (2007)\Transformers (2007).mkv
+[2026-08-28 23:19:00] [WARNING] [356/382] Skipping 'Transformers Dark Of The Moon (2011)\Transformers Dark Of The Moon (2011).mkv' (foreign film / no tagged or explicitly named English audio)
+[2026-08-28 23:19:00] [INFO] [357/382] Already clean: Transformers Revenge of the Fallen (2009)\Transformers Revenge of the Fallen (2009).mkv
+[2026-08-28 23:19:00] [INFO] [358/382] Already clean: Treasure Planet (2002)\Treasure Planet (2002).mkv
+[2026-08-28 23:19:00] [INFO] [359/382] Already clean: TRON - Legacy (2010)\TRON - Legacy (2010).mkv
+[2026-08-28 23:19:00] [INFO] [360/382] Already clean: Turtles Forever (2009)\Turtles Forever (2009).mkv
+[2026-08-28 23:19:00] [INFO] [361/382] Already clean: Twelve Monkeys (1995)\Twelve Monkeys (1995).mkv
+[2026-08-28 23:19:00] [INFO] [362/382] Already clean: Uncut Gems (2019)\Uncut Gems (2019).mkv
+[2026-08-28 23:19:00] [INFO] [363/382] Already clean: United 93 (2006)\United 93 (2006).mkv
+[2026-08-28 23:19:00] [INFO] [364/382] Already clean: Us (2019)\Us (2019).mkv
+[2026-08-28 23:19:00] [INFO] [365/382] Already clean: V for Vendetta (2005)\V for Vendetta (2005).mkv
+[2026-08-28 23:19:00] [INFO] [366/382] Already clean: WALL-E (2008)\WALL-E (2008).mkv
+[2026-08-28 23:19:00] [INFO] [367/382] Already clean: Wallace & Gromit - The Curse of the Were-Rabbit (2005)\Wallace & Gromit - The Curse of the Were-Rabbit (2005).mkv
+[2026-08-28 23:19:00] [INFO] [368/382] Already clean: War Dogs (2016)\War Dogs (2016).mkv
+[2026-08-28 23:19:00] [INFO] [369/382] Already clean: War for the Planet of the Apes (2017)\War for the Planet of the Apes (2017).mkv
+[2026-08-28 23:19:00] [INFO] [370/382] Already clean: WarGames (1983)\WarGames (1983).mkv
+[2026-08-28 23:19:00] [INFO] [371/382] Already clean: Warrior (2011)\Warrior (2011).mkv
+[2026-08-28 23:19:00] [INFO] [372/382] Already clean: We're the Millers (2013)\We're the Millers (2013).mkv
+[2026-08-28 23:19:00] [INFO] [373/382] Already clean: Weapons (2025)\Weapons (2025).mkv
+[2026-08-28 23:19:00] [INFO] [374/382] Already clean: When Harry Met Sally (1989)\When Harry Met Sally (1989).mkv
+[2026-08-28 23:19:00] [INFO] [375/382] Already clean: Whiplash (2014)\Whiplash (2014).mkv
+[2026-08-28 23:19:00] [INFO] -- 375/382  cleaned 0  already 370  deferred 0  skipped 5  layout 0  errors 0  saved 0 Bytes  1.75 TB/1.78 TB  elapsed 3.2s  ~0.1s left
+[2026-08-28 23:19:00] [INFO] [376/382] Already clean: Willy Wonka & the Chocolate Factory (1971)\Willy Wonka & the Chocolate Factory (1971).mkv
+[2026-08-28 23:19:00] [INFO] [377/382] Already clean: World War Z (2013)\World War Z (2013).mkv
+[2026-08-28 23:19:00] [INFO] [378/382] Already clean: Wreck-It Ralph (2012)\Wreck-It Ralph (2012).mkv
+[2026-08-28 23:19:00] [INFO] [379/382] Already clean: Zathura - A Space Adventure (2005)\Zathura - A Space Adventure (2005).mkv
+[2026-08-28 23:19:00] [INFO] [380/382] Already clean: Zero Dark Thirty (2012)\Zero Dark Thirty (2012).mkv
+[2026-08-28 23:19:00] [INFO] [381/382] Already clean: Zootopia (2016)\Zootopia (2016).mkv
+[2026-08-28 23:19:00] [INFO] [382/382] Already clean: Zootopia 2 (2025)\Zootopia 2 (2025).mkv
+[2026-08-28 23:19:00] [INFO] -- 382/382  cleaned 0  already 377  deferred 0  skipped 5  layout 0  errors 0  saved 0 Bytes  1.78 TB/1.78 TB  elapsed 3.3s  ~0.0s left
+[2026-08-28 23:19:00] [INFO] Metadata cache: 382 reused, 0 read from mkvmerge.
+[2026-08-28 23:19:00] [INFO] Detailed summary report saved to: 'E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt'

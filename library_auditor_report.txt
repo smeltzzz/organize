@@ -1,0 +1,638 @@
+====================================================================================================================
+JELLYFIN MOVIE FOLDER FILE-TYPE AUDIT
+Generated       : 2026-08-28 22:04:47 Central Daylight Time
+Library         : E:\torrents\final_organized
+Report file     : E:\torrents\library_auditor\library_auditor_report.txt
+Folders checked : 383
+Canonical MKV   : 162
+Missing Eng SRT : 220
+Invalid Eng SRT : 0
+MKV stem mismatch: 0
+Noncanonical SRT: 0
+Single other    : 1
+Multiple files  : 0
+No movie file   : 0
+Inaccessible    : 0
+Elapsed         : 2.84s
+====================================================================================================================
+Scope: direct feature containers plus direct SRT sidecar names. Artwork, NFO files, and nested extras are ignored.
+Container labels are file extensions only; they do not verify codecs or Jellyfin client direct-play support.
+
+SUMMARY BY DIRECT MOVIE FILE TYPE
+--------------------------------------------------------------------------------------------------------------------
+Type              Files
+--------------------------------------------------------------------------------------------------------------------
+.MKV                382
+.MP4                  1
+
+FOLDER-BY-FOLDER RESULTS
+--------------------------------------------------------------------------------------------------------------------
+Folder                               Status                         Type(s)            Movie file(s) / detail
+--------------------------------------------------------------------------------------------------------------------
+10 Cloverfield Lane (2016)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+10 Things I Hate About You (1999)    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+12 Years a Slave (2013)              CANONICAL MKV                  .MKV               12 Years a Slave (2013).mkv
+13 Hours - The Secret Soldiers of Be MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+1917 (2019)                          CANONICAL MKV                  .MKV               1917 (2019).mkv
+2001 - A Space Odyssey (1968)        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+21 Jump Street (2012)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+22 Jump Street (2014)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+300 (2006)                           CANONICAL MKV                  .MKV               300 (2006).mkv
+42 (2013)                            MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+50 First Dates (2004)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+500 Days of Summer (2009)            CANONICAL MKV                  .MKV               500 Days of Summer (2009).mkv
+8 Mile (2002)                        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+9 (2009)                             MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+A Beautiful Mind (2001)              MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+A Christmas Story (1983)             MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+A I Artificial Intelligence (2001)   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+A Quiet Place (2018)                 CANONICAL MKV                  .MKV               A Quiet Place (2018).mkv
+A Quiet Place Part II (2021)         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+About Time (2013)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Accepted (2006)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Air (2023)                           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Aladdin (1992)                       CANONICAL MKV                  .MKV               Aladdin (1992).mkv
+Alien (1979)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Aliens (1986)                        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+All Quiet on the Western Front (2022 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+American History X (1998)            MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+American Pie (1999)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+American Psycho (2000)               CANONICAL MKV                  .MKV               American Psycho (2000).mkv
+American Sniper (2014)               CANONICAL MKV                  .MKV               American Sniper (2014).mkv
+Annihilation (2018)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Apollo 13 (1995)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Arrival (2016)                       CANONICAL MKV                  .MKV               Arrival (2016).mkv
+Avatar (2009)                        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Avengers Age of Ultron (2015)        CANONICAL MKV                  .MKV               Avengers Age of Ultron (2015).mkv
+Avengers Endgame (2019)              CANONICAL MKV                  .MKV               Avengers Endgame (2019).mkv
+Avengers Infinity War (2018)         CANONICAL MKV                  .MKV               Avengers Infinity War (2018).mkv
+Back to the Future (1985)            CANONICAL MKV                  .MKV               Back to the Future (1985).mkv
+Back to the Future Part II (1989)    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Back to the Future Part III (1990)   CANONICAL MKV                  .MKV               Back to the Future Part III (1990).mkv
+Backrooms (2026)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Barbie (2023)                        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Batman Begins (2005)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Bee Movie (2007)                     CANONICAL MKV                  .MKV               Bee Movie (2007).mkv
+Black Hawk Down (2001)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Black Panther (2018)                 CANONICAL MKV                  .MKV               Black Panther (2018).mkv
+Blade Runner (1982)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Blade Runner 2049 (2017)             CANONICAL MKV                  .MKV               Blade Runner 2049 (2017).mkv
+Blended (2014)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Bohemian Rhapsody (2018)             CANONICAL MKV                  .MKV               Bohemian Rhapsody (2018).mkv
+Borat (2006)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Boyhood (2014)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Boyz N the Hood (1991)               CANONICAL MKV                  .MKV               Boyz N the Hood (1991).mkv
+Braveheart (1995)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Bugonia (2025)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Captain America Civil War (2016)     CANONICAL MKV                  .MKV               Captain America Civil War (2016).mkv
+Captain America The First Avenger (2 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Captain America The Winter Soldier ( CANONICAL MKV                  .MKV               Captain America The Winter Soldier (2014).mkv
+Cars (2006)                          CANONICAL MKV                  .MKV               Cars (2006).mkv
+Casino Royale (2006)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Cast Away (2000)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Catch Me If You Can (2002)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Charlie and the Chocolate Factory (2 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Chicken Little (2005)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Children of Men (2006)               CANONICAL MKV                  .MKV               Children of Men (2006).mkv
+Chronicle (2012)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Civil War (2024)                     CANONICAL MKV                  .MKV               Civil War (2024).mkv
+Cloudy with a Chance of Meatballs (2 CANONICAL MKV                  .MKV               Cloudy with a Chance of Meatballs (2009).mkv
+Cloverfield (2008)                   CANONICAL MKV                  .MKV               Cloverfield (2008).mkv
+Coach Carter (2005)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Coco (2017)                          CANONICAL MKV                  .MKV               Coco (2017).mkv
+Contact (1997)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Contagion (2011)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Coraline (2009)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Crazy Rich Asians (2018)             CANONICAL MKV                  .MKV               Crazy Rich Asians (2018).mkv
+Creed (2015)                         CANONICAL MKV                  .MKV               Creed (2015).mkv
+Dawn of the Planet of the Apes (2014 CANONICAL MKV                  .MKV               Dawn of the Planet of the Apes (2014).mkv
+Dead Poets Society (1989)            MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Deadpool (2016)                      CANONICAL MKV                  .MKV               Deadpool (2016).mkv
+Deadpool 2 (2018)                    CANONICAL MKV                  .MKV               Deadpool 2 (2018).mkv
+Despicable Me (2010)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Die Hard (1988)                      CANONICAL MKV                  .MKV               Die Hard (1988).mkv
+District 9 (2009)                    CANONICAL MKV                  .MKV               District 9 (2009).mkv
+Django Unchained (2012)              MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Donnie Darko (2001)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Dune (2021)                          MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Dune - Part Two (2024)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Dunkirk (2017)                       CANONICAL MKV                  .MKV               Dunkirk (2017).mkv
+E T the Extra-Terrestrial (1982)     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Easy A (2010)                        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Edge of Tomorrow (2014)              CANONICAL MKV                  .MKV               Edge of Tomorrow (2014).mkv
+Edward Scissorhands (1990)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Elemental (2023)                     CANONICAL MKV                  .MKV               Elemental (2023).mkv
+Elysium (2013)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Enchanted (2007)                     CANONICAL MKV                  .MKV               Enchanted (2007).mkv
+Enemy (2013)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Eternal Sunshine of the Spotless Min MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Ex Machina (2015)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Fargo (1996)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Fast Five (2011)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Ferris Bueller's Day Off (1986)      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Fight Club (1999)                    CANONICAL MKV                  .MKV               Fight Club (1999).mkv
+Finding Nemo (2003)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+First Man (2018)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Ford v Ferrari (2019)                CANONICAL MKV                  .MKV               Ford v Ferrari (2019).mkv
+Forrest Gump (1994)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Fractured (2019)                     CANONICAL MKV                  .MKV               Fractured (2019).mkv
+Fury (2014)                          CANONICAL MKV                  .MKV               Fury (2014).mkv
+Get Out (2017)                       CANONICAL MKV                  .MKV               Get Out (2017).mkv
+Ghostbusters (1984)                  CANONICAL MKV                  .MKV               Ghostbusters (1984).mkv
+Gladiator (2000)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Gone Girl (2014)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Good Will Hunting (1997)             MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Goodfellas (1990)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Gravity (2013)                       CANONICAL MKV                  .MKV               Gravity (2013).mkv
+Green Book (2018)                    CANONICAL MKV                  .MKV               Green Book (2018).mkv
+Greenland (2020)                     CANONICAL MKV                  .MKV               Greenland (2020).mkv
+Groundhog Day (1993)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Grown Ups (2010)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Guardians of the Galaxy (2014)       CANONICAL MKV                  .MKV               Guardians of the Galaxy (2014).mkv
+Hacksaw Ridge (2016)                 CANONICAL MKV                  .MKV               Hacksaw Ridge (2016).mkv
+Happy Feet (2006)                    CANONICAL MKV                  .MKV               Happy Feet (2006).mkv
+Happy Gilmore (1996)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Harry Potter and the Chamber of Secr CANONICAL MKV                  .MKV               Harry Potter and the Chamber of Secrets (2002).mkv
+Harry Potter and the Deathly Hallows MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Harry Potter and the Deathly Hallows MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Harry Potter and the Goblet of Fire  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Harry Potter and the Half-Blood Prin MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Harry Potter and the Order of the Ph CANONICAL MKV                  .MKV               Harry Potter and the Order of the Phoenix (2007).mkv
+Harry Potter and the Prisoner of Azk CANONICAL MKV                  .MKV               Harry Potter and the Prisoner of Azkaban (2004).mkv
+Harry Potter and the Sorcerer's Ston MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Heat (1995)                          MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Her (2013)                           CANONICAL MKV                  .MKV               Her (2013).mkv
+Hercules (1997)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Hereditary (2018)                    CANONICAL MKV                  .MKV               Hereditary (2018).mkv
+Hidden Figures (2016)                CANONICAL MKV                  .MKV               Hidden Figures (2016).mkv
+Holes (2003)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Home Alone (1990)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Home Alone 2 - Lost in New York (199 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+How to Train Your Dragon (2010)      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+I Am Legend (2007)                   CANONICAL MKV                  .MKV               I Am Legend (2007).mkv
+I, Robot (2004)                      CANONICAL MKV                  .MKV               I, Robot (2004).mkv
+I, Tonya (2017)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Ice Age (2002)                       CANONICAL MKV                  .MKV               Ice Age (2002).mkv
+Idiocracy (2006)                     CANONICAL MKV                  .MKV               Idiocracy (2006).mkv
+Inception (2010)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Incredibles 2 (2018)                 CANONICAL MKV                  .MKV               Incredibles 2 (2018).mkv
+Independence Day (1996)              MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Indiana Jones and the Last Crusade ( CANONICAL MKV                  .MKV               Indiana Jones and the Last Crusade (1989).mkv
+Indiana Jones and the Raiders of the MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Indiana Jones and the Temple of Doom MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Inglourious Basterds (2009)          CANONICAL MKV                  .MKV               Inglourious Basterds (2009).mkv
+Insomnia (2002)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Interstellar (2014)                  CANONICAL MKV                  .MKV               Interstellar (2014).mkv
+Into the Wild (2007)                 CANONICAL MKV                  .MKV               Into the Wild (2007).mkv
+Iron Man (2008)                      CANONICAL MKV                  .MKV               Iron Man (2008).mkv
+Iron Man 2 (2010)                    CANONICAL MKV                  .MKV               Iron Man 2 (2010).mkv
+IT (2017)                            CANONICAL MKV                  .MKV               IT (2017).mkv
+James and the Giant Peach (1996)     CANONICAL MKV                  .MKV               James and the Giant Peach (1996).mkv
+Jaws (1975)                          CANONICAL MKV                  .MKV               Jaws (1975).mkv
+Jimmy Neutron Boy Genius (2001)      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+John Q (2002)                        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Joker (2019)                         CANONICAL MKV                  .MKV               Joker (2019).mkv
+Jumanji (1995)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Juno (2007)                          CANONICAL MKV                  .MKV               Juno (2007).mkv
+Jurassic Park (1993)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Jurassic World (2015)                CANONICAL MKV                  .MKV               Jurassic World (2015).mkv
+Kick-Ass (2010)                      CANONICAL MKV                  .MKV               Kick-Ass (2010).mkv
+King Richard (2021)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Knives Out (2019)                    CANONICAL MKV                  .MKV               Knives Out (2019).mkv
+Knowing (2009)                       CANONICAL MKV                  .MKV               Knowing (2009).mkv
+Kung Fu Panda (2008)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Legally Blonde (2001)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Logan (2017)                         CANONICAL MKV                  .MKV               Logan (2017).mkv
+Lone Survivor (2013)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Madagascar (2005)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Magnolia (1999)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Marty Supreme (2025)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Mean Girls (2004)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Meet the Robinsons (2007)            CANONICAL MKV                  .MKV               Meet the Robinsons (2007).mkv
+Megamind (2010)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Memento (2000)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Minority Report (2002)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Mission - Impossible - Fallout (2018 CANONICAL MKV                  .MKV               Mission - Impossible - Fallout (2018).mkv
+Monsters University (2013)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Monsters, Inc (2001)                 CANONICAL MKV                  .MKV               Monsters, Inc (2001).mkv
+Moon (2009)                          CANONICAL MKV                  .MKV               Moon (2009).mkv
+Mulan (1998)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Napoleon Dynamite (2004)             MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+National Lampoon's Christmas Vacatio MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+National Treasure (2004)             CANONICAL MKV                  .MKV               National Treasure (2004).mkv
+National Treasure Book of Secrets (2 CANONICAL MKV                  .MKV               National Treasure Book of Secrets (2007).mkv
+Night at the Museum (2006)           CANONICAL MKV                  .MKV               Night at the Museum (2006).mkv
+Nightcrawler (2014)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+No Country for Old Men (2007)        CANONICAL MKV                  .MKV               No Country for Old Men (2007).mkv
+Now You See Me (2013)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Oblivion (2013)                      CANONICAL MKV                  .MKV               Oblivion (2013).mkv
+Obsession (2026)                     CANONICAL MKV                  .MKV               Obsession (2026).mkv
+October Sky (1999)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Office Space (1999)                  CANONICAL MKV                  .MKV               Office Space (1999).mkv
+One Flew Over the Cuckoo's Nest (197 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Open Season (2006)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Oppenheimer (2023)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Osmosis Jones (2001)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Over the Hedge (2006)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Parasite (2019)                      CANONICAL MKV                  .MKV               Parasite (2019).mkv
+Pearl (2022)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Pineapple Express (2008)             MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Pirates of the Caribbean At World's  CANONICAL MKV                  .MKV               Pirates of the Caribbean At World's End (2007).mkv
+Pirates of the Caribbean Dead Man's  CANONICAL MKV                  .MKV               Pirates of the Caribbean Dead Man's Chest (2006).mkv
+Pirates of the Caribbean The Curse o MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Pitch Perfect (2012)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Prisoners (2013)                     CANONICAL MKV                  .MKV               Prisoners (2013).mkv
+Project Hail Mary (2026)             MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Project X (2012)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Pulp Fiction (1994)                  CANONICAL MKV                  .MKV               Pulp Fiction (1994).mkv
+Ratatouille (2007)                   CANONICAL MKV                  .MKV               Ratatouille (2007).mkv
+Ready Player One (2018)              CANONICAL MKV                  .MKV               Ready Player One (2018).mkv
+Real Steel (2011)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Remember the Titans (2000)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Requiem for a Dream (2000)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Rise of the Planet of the Apes (2011 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Robots (2005)                        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Rocky (1976)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Room (2015)                          CANONICAL MKV                  .MKV               Room (2015).mkv
+Sausage Party (2016)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Saving Private Ryan (1998)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Saw (2004)                           CANONICAL MKV                  .MKV               Saw (2004).mkv
+Scarface (1983)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Schindler's List (1993)              MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Scream (1996)                        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Se7en (1995)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Shark Tale (2004)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Shazam! (2019)                       CANONICAL MKV                  .MKV               Shazam! (2019).mkv
+Shrek (2001)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Shrek 2 (2004)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Shrek Forever After (2010)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Shutter Island (2010)                CANONICAL MKV                  .MKV               Shutter Island (2010).mkv
+Sicario (2015)                       CANONICAL MKV                  .MKV               Sicario (2015).mkv
+Signs (2002)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Sinister (2012)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Sinners (2025)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Skyfall (2012)                       CANONICAL MKV                  .MKV               Skyfall (2012).mkv
+Slumdog Millionaire (2008)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Snatch (2000)                        CANONICAL MKV                  .MKV               Snatch (2000).mkv
+Snowden (2016)                       CANONICAL MKV                  .MKV               Snowden (2016).mkv
+Source Code (2011)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Spaceballs (1987)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Spider-Man (2002)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Spider-Man - Across the Spider-Verse MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Spider-Man - Homecoming (2017)       CANONICAL MKV                  .MKV               Spider-Man - Homecoming (2017).mkv
+Spider-Man - Into the Spider-Verse ( MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Spider-Man 2 (2004)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Spider-Man No Way Home (2021)        CANONICAL MKV                  .MKV               Spider-Man No Way Home (2021).mkv
+Spirited Away (2001)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Split (2016)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Stalker (1979)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Stand by Me (1986)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Star Trek (2009)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Star Trek - Into Darkness (2013)     CANONICAL MKV                  .MKV               Star Trek - Into Darkness (2013).mkv
+Star Wars - Episode I - The Phantom  CANONICAL MKV                  .MKV               Star Wars - Episode I - The Phantom Menace (1999).mkv
+Star Wars - Episode II - Attack of t CANONICAL MKV                  .MKV               Star Wars - Episode II - Attack of the Clones (2002).mkv
+Star Wars - Episode III - Revenge of CANONICAL MKV                  .MKV               Star Wars - Episode III - Revenge of the Sith (2005).mkv
+Star Wars - Episode IV - A New Hope  CANONICAL MKV                  .MKV               Star Wars - Episode IV - A New Hope (1977).mkv
+Star Wars - Episode V - The Empire S CANONICAL MKV                  .MKV               Star Wars - Episode V - The Empire Strikes Back (1980).mkv
+Star Wars - Episode VI - Return of t CANONICAL MKV                  .MKV               Star Wars - Episode VI - Return of the Jedi (1983).mkv
+Straight Outta Compton (2015)        MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Super 8 (2011)                       CANONICAL MKV                  .MKV               Super 8 (2011).mkv
+Superbad (2007)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Surfs Up (2007)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Taken (2008)                         MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Tangled (2010)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Taxi Driver (1976)                   CANONICAL MKV                  .MKV               Taxi Driver (1976).mkv
+Ted (2012)                           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Tenet (2020)                         CANONICAL MKV                  .MKV               Tenet (2020).mkv
+Terminator 2 - Judgment Day (1991)   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Tetris (2023)                        CANONICAL MKV                  .MKV               Tetris (2023).mkv
+The Accountant (2016)                CANONICAL MKV                  .MKV               The Accountant (2016).mkv
+The Amazing Spider-Man (2012)        CANONICAL MKV                  .MKV               The Amazing Spider-Man (2012).mkv
+The Avengers (2012)                  CANONICAL MKV                  .MKV               The Avengers (2012).mkv
+The Batman (2022)                    CANONICAL MKV                  .MKV               The Batman (2022).mkv
+The Big Lebowski (1998)              MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Big Short (2015)                 CANONICAL MKV                  .MKV               The Big Short (2015).mkv
+The Book of Eli (2010)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Bourne Identity (2002)           MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Bourne Supremacy (2004)          CANONICAL MKV                  .MKV               The Bourne Supremacy (2004).mkv
+The Bourne Ultimatum (2007)          MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Boy in the Striped Pyjamas (2008 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Breakfast Club (1985)            MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Curious Case of Benjamin Button  CANONICAL MKV                  .MKV               The Curious Case of Benjamin Button (2008).mkv
+The Dark Knight (2008)               CANONICAL MKV                  .MKV               The Dark Knight (2008).mkv
+The Dark Knight Rises (2012)         CANONICAL MKV                  .MKV               The Dark Knight Rises (2012).mkv
+The Day After (1983)                 SINGLE OTHER CONTAINER         .MP4               The Day After (1983) {tmdb-7012} [Bluray-1080p][AAC 2.0][h265].mp4
+The Departed (2006)                  CANONICAL MKV                  .MKV               The Departed (2006).mkv
+The Edge of Seventeen (2016)         CANONICAL MKV                  .MKV               The Edge of Seventeen (2016).mkv
+The Emperor's New Groove (2000)      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Fast and the Furious (2001)      CANONICAL MKV                  .MKV               The Fast and the Furious (2001).mkv
+The Founder (2016)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Godfather (1972)                 CANONICAL MKV                  .MKV               The Godfather (1972).mkv
+The Godfather - Part II (1974)       CANONICAL MKV                  .MKV               The Godfather - Part II (1974).mkv
+The Goonies (1985)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Green Mile (1999)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Hangover (2009)                  CANONICAL MKV                  .MKV               The Hangover (2009).mkv
+The Help (2011)                      CANONICAL MKV                  .MKV               The Help (2011).mkv
+The Hunger Games (2012)              MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Hunger Games - Mockingjay - Part CANONICAL MKV                  .MKV               The Hunger Games - Mockingjay - Part 1 (2014).mkv
+The Hunger Games - Mockingjay - Part MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Hunger Games Catching Fire (2013 CANONICAL MKV                  .MKV               The Hunger Games Catching Fire (2013).mkv
+The Hurt Locker (2008)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Imitation Game (2014)            CANONICAL MKV                  .MKV               The Imitation Game (2014).mkv
+The Incredibles (2004)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Interview (2014)                 CANONICAL MKV                  .MKV               The Interview (2014).mkv
+The Invisible Man (2020)             CANONICAL MKV                  .MKV               The Invisible Man (2020).mkv
+The Invite (2026)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Karate Kid (1984)                CANONICAL MKV                  .MKV               The Karate Kid (1984).mkv
+The Longest Yard (2005)              CANONICAL MKV                  .MKV               The Longest Yard (2005).mkv
+The Lord of the Rings The Fellowship CANONICAL MKV                  .MKV               The Lord of the Rings The Fellowship of the Ring (2001).mkv
+The Lord of the Rings The Return of  CANONICAL MKV                  .MKV               The Lord of the Rings The Return of the King (2003).mkv
+The Lord of the Rings The Two Towers MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Martian (2015)                   CANONICAL MKV                  .MKV               The Martian (2015).mkv
+The Matrix (1999)                    CANONICAL MKV                  .MKV               The Matrix (1999).mkv
+The Maze Runner (2014)               CANONICAL MKV                  .MKV               The Maze Runner (2014).mkv
+The Nightmare Before Christmas (1993 CANONICAL MKV                  .MKV               The Nightmare Before Christmas (1993).mkv
+The Polar Express (2004)             MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Prestige (2006)                  CANONICAL MKV                  .MKV               The Prestige (2006).mkv
+The Princess and the Frog (2009)     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Proposal (2009)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Revenant (2015)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Sandlot (1993)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Shawshank Redemption (1994)      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Silence of the Lambs (1991)      CANONICAL MKV                  .MKV               The Silence of the Lambs (1991).mkv
+The Sixth Sense (1999)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Social Network (2010)            MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Substance (2024)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Terminator (1984)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Theory of Everything (2014)      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Thing (1982)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Truman Show (1998)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Usual Suspects (1995)            MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Wild Robot (2024)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+The Wolf of Wall Street (2013)       CANONICAL MKV                  .MKV               The Wolf of Wall Street (2013).mkv
+There Will Be Blood (2007)           CANONICAL MKV                  .MKV               There Will Be Blood (2007).mkv
+This Christmas (2007)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+This Is the End (2013)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Thor - Ragnarok (2017)               CANONICAL MKV                  .MKV               Thor - Ragnarok (2017).mkv
+Threads (1984)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Titanic (1997)                       CANONICAL MKV                  .MKV               Titanic (1997).mkv
+Top Gun (1986)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Top Gun - Maverick (2022)            CANONICAL MKV                  .MKV               Top Gun - Maverick (2022).mkv
+Toy Story (1995)                     MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Toy Story 2 (1999)                   CANONICAL MKV                  .MKV               Toy Story 2 (1999).mkv
+Toy Story 3 (2010)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Toy Story 4 (2019)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Toy Story 5 (2026)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Training Day (2001)                  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Transformers (2007)                  CANONICAL MKV                  .MKV               Transformers (2007).mkv
+Transformers Dark Of The Moon (2011) MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Transformers Revenge of the Fallen ( MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Treasure Planet (2002)               CANONICAL MKV                  .MKV               Treasure Planet (2002).mkv
+TRON - Legacy (2010)                 MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Turtles Forever (2009)               MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Twelve Monkeys (1995)                CANONICAL MKV                  .MKV               Twelve Monkeys (1995).mkv
+Uncut Gems (2019)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+United 93 (2006)                     CANONICAL MKV                  .MKV               United 93 (2006).mkv
+Us (2019)                            MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+V for Vendetta (2005)                CANONICAL MKV                  .MKV               V for Vendetta (2005).mkv
+WALL-E (2008)                        CANONICAL MKV                  .MKV               WALL-E (2008).mkv
+Wallace & Gromit - The Curse of the  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+War Dogs (2016)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+War for the Planet of the Apes (2017 CANONICAL MKV                  .MKV               War for the Planet of the Apes (2017).mkv
+WarGames (1983)                      MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Warrior (2011)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+We're the Millers (2013)             MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Weapons (2025)                       MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+When Harry Met Sally (1989)          MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Whiplash (2014)                      CANONICAL MKV                  .MKV               Whiplash (2014).mkv
+Willy Wonka & the Chocolate Factory  MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+World War Z (2013)                   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Wreck-It Ralph (2012)                MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Zathura - A Space Adventure (2005)   MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Zero Dark Thirty (2012)              MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+Zootopia (2016)                      CANONICAL MKV                  .MKV               Zootopia (2016).mkv
+Zootopia 2 (2025)                    MISSING SIDECAR                .MKV               no English .en.srt sidecar; subtitle_fetcher.py can still fetch one
+
+MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)
+--------------------------------------------------------------------------------------------------------------------
+These folders have a canonical MKV but no working English .en.srt. Run subtitle_fetcher.py before mkv_track_cleaner.py: fetching first keeps the pristine release moviehash, which is what makes an exact subtitle match possible. An INVALID entry means a sidecar exists but is unusable - delete that file first, because no tool will replace a sidecar it believes is already present.
+  [ ] 10 Cloverfield Lane (2016)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] 10 Things I Hate About You (1999)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] 13 Hours - The Secret Soldiers of Benghazi (2016)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] 2001 - A Space Odyssey (1968)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] 21 Jump Street (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] 22 Jump Street (2014)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] 42 (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] 50 First Dates (2004)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] 8 Mile (2002)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] 9 (2009)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] A Beautiful Mind (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] A Christmas Story (1983)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] A I Artificial Intelligence (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] A Quiet Place Part II (2021)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] About Time (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Accepted (2006)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Air (2023)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Alien (1979)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Aliens (1986)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] All Quiet on the Western Front (2022)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] American History X (1998)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] American Pie (1999)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Annihilation (2018)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Apollo 13 (1995)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Avatar (2009)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Back to the Future Part II (1989)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Backrooms (2026)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Barbie (2023)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Batman Begins (2005)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Black Hawk Down (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Blade Runner (1982)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Blended (2014)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Borat (2006)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Boyhood (2014)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Braveheart (1995)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Bugonia (2025)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Captain America The First Avenger (2011)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Casino Royale (2006)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Cast Away (2000)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Catch Me If You Can (2002)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Charlie and the Chocolate Factory (2005)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Chicken Little (2005)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Chronicle (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Coach Carter (2005)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Contact (1997)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Contagion (2011)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Coraline (2009)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Dead Poets Society (1989)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Despicable Me (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Django Unchained (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Donnie Darko (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Dune (2021)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Dune - Part Two (2024)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] E T the Extra-Terrestrial (1982)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Easy A (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Edward Scissorhands (1990)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Elysium (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Enemy (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Eternal Sunshine of the Spotless Mind (2004)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Ex Machina (2015)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Fargo (1996)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Fast Five (2011)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Ferris Bueller's Day Off (1986)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Finding Nemo (2003)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] First Man (2018)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Forrest Gump (1994)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Gladiator (2000)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Gone Girl (2014)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Good Will Hunting (1997)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Goodfellas (1990)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Groundhog Day (1993)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Grown Ups (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Happy Gilmore (1996)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Harry Potter and the Deathly Hallows - Part 1 (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Harry Potter and the Deathly Hallows - Part 2 (2011)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Harry Potter and the Goblet of Fire (2005)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Harry Potter and the Half-Blood Prince (2009)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Harry Potter and the Sorcerer's Stone (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Heat (1995)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Hercules (1997)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Holes (2003)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Home Alone (1990)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Home Alone 2 - Lost in New York (1992)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] How to Train Your Dragon (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] I, Tonya (2017)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Inception (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Independence Day (1996)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Indiana Jones and the Raiders of the Lost Ark (1981)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Indiana Jones and the Temple of Doom (1984)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Insomnia (2002)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Jimmy Neutron Boy Genius (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] John Q (2002)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Jumanji (1995)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Jurassic Park (1993)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] King Richard (2021)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Kung Fu Panda (2008)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Legally Blonde (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Lone Survivor (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Madagascar (2005)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Magnolia (1999)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Marty Supreme (2025)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Mean Girls (2004)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Megamind (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Memento (2000)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Minority Report (2002)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Monsters University (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Mulan (1998)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Napoleon Dynamite (2004)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] National Lampoon's Christmas Vacation (1989)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Nightcrawler (2014)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Now You See Me (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] October Sky (1999)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] One Flew Over the Cuckoo's Nest (1975)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Open Season (2006)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Oppenheimer (2023)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Osmosis Jones (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Over the Hedge (2006)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Pearl (2022)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Pineapple Express (2008)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Pirates of the Caribbean The Curse of the Black Pearl (2003)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Pitch Perfect (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Project Hail Mary (2026)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Project X (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Real Steel (2011)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Remember the Titans (2000)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Requiem for a Dream (2000)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Rise of the Planet of the Apes (2011)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Robots (2005)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Rocky (1976)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Sausage Party (2016)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Saving Private Ryan (1998)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Scarface (1983)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Schindler's List (1993)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Scream (1996)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Se7en (1995)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Shark Tale (2004)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Shrek (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Shrek 2 (2004)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Shrek Forever After (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Signs (2002)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Sinister (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Sinners (2025)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Slumdog Millionaire (2008)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Source Code (2011)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Spaceballs (1987)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Spider-Man (2002)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Spider-Man - Across the Spider-Verse (2023)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Spider-Man - Into the Spider-Verse (2018)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Spider-Man 2 (2004)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Spirited Away (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Split (2016)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Stalker (1979)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Stand by Me (1986)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Star Trek (2009)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Straight Outta Compton (2015)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Superbad (2007)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Surfs Up (2007)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Taken (2008)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Tangled (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Ted (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Terminator 2 - Judgment Day (1991)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Big Lebowski (1998)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Book of Eli (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Bourne Identity (2002)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Bourne Ultimatum (2007)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Boy in the Striped Pyjamas (2008)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Breakfast Club (1985)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Emperor's New Groove (2000)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Founder (2016)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Goonies (1985)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Green Mile (1999)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Hunger Games (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Hunger Games - Mockingjay - Part 2 (2015)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Hurt Locker (2008)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Incredibles (2004)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Invite (2026)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Lord of the Rings The Two Towers (2002)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Polar Express (2004)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Princess and the Frog (2009)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Proposal (2009)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Revenant (2015)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Sandlot (1993)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Shawshank Redemption (1994)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Sixth Sense (1999)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Social Network (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Substance (2024)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Terminator (1984)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Theory of Everything (2014)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Thing (1982)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Truman Show (1998)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Usual Suspects (1995)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] The Wild Robot (2024)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] This Christmas (2007)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] This Is the End (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Threads (1984)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Top Gun (1986)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Toy Story (1995)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Toy Story 3 (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Toy Story 4 (2019)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Toy Story 5 (2026)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Training Day (2001)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Transformers Dark Of The Moon (2011)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Transformers Revenge of the Fallen (2009)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] TRON - Legacy (2010)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Turtles Forever (2009)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Uncut Gems (2019)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Us (2019)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Wallace & Gromit - The Curse of the Were-Rabbit (2005)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] War Dogs (2016)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] WarGames (1983)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Warrior (2011)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] We're the Millers (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Weapons (2025)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] When Harry Met Sally (1989)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Willy Wonka & the Chocolate Factory (1971)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] World War Z (2013)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Wreck-It Ralph (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Zathura - A Space Adventure (2005)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Zero Dark Thirty (2012)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
+  [ ] Zootopia 2 (2025)  (no English .en.srt sidecar; subtitle_fetcher.py can still fetch one)
