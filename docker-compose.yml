@@ -1,0 +1,35 @@
+# ==============================================================================
+# Organize — Docker Compose Configuration
+# ==============================================================================
+# Run as an on-demand container or periodic scheduled maintenance container:
+#
+#   docker compose run --rm organize doctor
+#   docker compose run --rm organize run --dry-run
+#   docker compose run --rm organize run
+#   docker compose run --rm organize audit
+# ==============================================================================
+
+services:
+  organize:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: organize:latest
+    container_name: organize
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      # OpenSubtitles Consumer API Key (https://www.opensubtitles.com/en/consumers)
+      - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}
+      - MOVIE_STD_SOURCE=/media/torrents/final
+      - MOVIE_STD_TARGET=/media/torrents/final_organized
+      - MOVIE_STD_LOG=/config/movie_standardizer.log
+      - MOVIE_STD_REPORT=/config/movie_standardizer_report.txt
+    volumes:
+      # IMPORTANT: To allow hardlinks, both source and target MUST be subdirectories
+      # of the SAME host volume mount (e.g. /mnt/storage:/media)
+      - /mnt/storage/torrents/final:/media/torrents/final
+      - /mnt/storage/torrents/final_organized:/media/torrents/final_organized
+      - ./config:/config
+    command: ["doctor"]
