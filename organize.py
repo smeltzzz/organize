@@ -285,8 +285,11 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
         ))
 
     # 5. OpenSubtitles API Configuration
-    import subtitle_fetcher as sf
-    api_key = os.environ.get("OPENSUBTITLES_API_KEY") or sf.OPENSUBTITLES_API_KEY
+    try:
+        import subtitle_fetcher as sf
+        api_key = os.environ.get("OPENSUBTITLES_API_KEY") or sf.OPENSUBTITLES_API_KEY
+    except Exception:
+        api_key = None
     if api_key:
         masked = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
         checks.append(DiagnosticCheck(

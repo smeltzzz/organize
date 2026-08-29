@@ -411,9 +411,9 @@ def run_self_tests() -> int:
         check(resolve_library(None) == Path(DEFAULT_LIBRARY).resolve(),
               "no flag and no env resolves to the documented default library")
         os.environ["MOVIE_STD_TARGET"] = str(Path("/media/movies"))
-        check(resolve_library(None) == Path("/media/movies"),
+        check(resolve_library(None) == Path("/media/movies").resolve(),
               "MOVIE_STD_TARGET is honored when no --source flag is given")
-        check(resolve_library(Path("/srv/library")) == Path("/srv/library"),
+        check(resolve_library(Path("/srv/library")) == Path("/srv/library").resolve(),
               "an explicit --source flag beats MOVIE_STD_TARGET")
     finally:
         if saved_target is not None:
