@@ -90,7 +90,7 @@ class Config:
     dry_run: bool = False
     limit: int = 0
     nice: bool = False
-    continue_on_error: bool = False
+    continue_on_error: bool = True
 
 
 # Shown before a step runs, because the failure mode is silent and easy to
@@ -245,7 +245,7 @@ def run_pipeline(cfg: Config, dry_run: bool = False) -> Run:
         if result.status == "ran" and result.returncode:
             print(f"\n  STEP {key} exited with code {result.returncode}.", flush=True)
             if not cfg.continue_on_error:
-                print("  Stopping. Use --continue-on-error to run the remaining steps anyway.",
+                print("  Stopping. Use --continue-on-error (the default) to run the remaining steps anyway.",
                       flush=True)
                 break
     run.elapsed = time.monotonic() - started
@@ -315,8 +315,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Pass --limit N to the steps that support it (0 = all)")
     parser.add_argument("--nice", action="store_true",
                         help="Lower remux priority so track cleaning does not starve Jellyfin")
-    parser.add_argument("--continue-on-error", action="store_true",
-                        help="Keep going after a step fails instead of stopping")
+    parser.add_argument("--continue-on-error", dest="continue_on_error", action="store_true", default=True,
+                        help="Keep going after a step fails instead of stopping (default)")
+    parser.add_argument("--stop-on-error", dest="continue_on_error", action="store_false",
+                        help="Stop the pipeline on the first step failure")
     parser.add_argument("--list-steps", action="store_true",
                         help="Print the steps, what needs to be installed, and exit")
     parser.add_argument("--self-test", action="store_true")
