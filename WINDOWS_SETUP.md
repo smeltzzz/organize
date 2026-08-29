@@ -81,15 +81,28 @@ environment it was started with.
 
 ## 4. First run (do the dry runs)
 
-Open PowerShell in the script folder and step through:
+Open PowerShell in the script folder and ramp up gradually. Start with
+read-only operations, then try a single movie you do not mind losing:
 
 ```powershell
 cd C:\Tools\organize
 
+py pipeline.py --list-steps            # which of the 4 manual steps can run on this box
+py library_auditor.py --source E:\torrents\final_organized  # read-only health check
 py movie_standardizer.py --dry-run     # what would get hardlinked from E:\torrents\final
 py movie_standardizer.py               # do it for real
-py pipeline.py --list-steps            # which of the 4 manual steps can run on this box
-py pipeline.py --dry-run               # print the exact commands, run nothing
+py pipeline.py --steps fetcher,10bit,auditor --dry-run   # preview subtitle fetch + bit-depth scan + audit
+py pipeline.py --steps fetcher,10bit,auditor             # run the safe read-only steps live
+py mkv_track_cleaner.py --dir E:\torrents\final_organized --limit 1 --dry-run  # preview one remux
+py mkv_track_cleaner.py --dir E:\torrents\final_organized --limit 1  # remux ONE movie you do not care about
+```
+
+After the first remux, play the movie in Jellyfin, then read the
+`HARDLINKED (DEFERRED)` and `ERRORS ENCOUNTERED` sections in the cleaner report
+at `E:\torrents\mkv_track_cleaner\mkv_track_cleaner_report.txt`. Only then
+scale up: remove the `--limit 1` and run the full sweep:
+
+```powershell
 py pipeline.py                         # fetcher → cleaner → 10bit → auditor
 ```
 
@@ -212,5 +225,8 @@ py -m unittest discover -s tests -p "test_*.py"
 py movie_standardizer.py --self-test
 ```
 
-96 unit tests plus one `--self-test` per script, all offline — no media, no
-binaries, no API key. (`run_tests.sh` is the bash equivalent.)
+190 unit tests plus one `--self-test` per script, all offline — no media, no
+binaries, no API key. (`run_tests.sh` is the bash equivalent.) All seven files
+(`10bit.py`, `common.py`, `library_auditor.py`, `mkv_track_cleaner.py`,
+`movie_standardizer.py`, `pipeline.py`, and `subtitle_fetcher.py`) must be kept
+in the same folder because the six main scripts all `from common import ...`.

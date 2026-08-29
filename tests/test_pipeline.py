@@ -209,5 +209,95 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("All steps completed.", pl.build_summary(run, pl.Config(library=Path("/lib"))))
 
 
+class ContinueOnErrorTests(unittest.TestCase):
+    """Tests for the --continue-on-error / --stop-on-error behavior."""
+
+    def test_continue_on_error_defaults_to_true(self) -> None:
+        """The pipeline now continues past failures by default."""
+        cfg = pl.Config()
+        self.assertTrue(cfg.continue_on_error)
+
+    def test_pipeline_continues_past_failure_by_default(self) -> None:
+        """With the default continue_on_error=True, all steps run even if one fails."""
+        cfg = pl.Config(library=pl.HERE, steps=("auditor", "auditor"), continue_on_error=True)
+        original = pl.prerequisite_issue
+        calls: list = []
+        orig_run = subprocess.run
+        def fake_run(command, *_args, **_kwargs):
+            calls.append(list(command))
+            # Simulate first step failing, second succeeding
+            if len(calls) == 1:
+                return subprocess.CompletedProcess(command, 1)
+            return subprocess.CompletedProcess(command, 0)
+        try:
+            pl.prerequisite_issue = lambda step: None
+            subprocess.run = fake_run  # type: ignore[assignment]
+            run = pl.run_pipeline(cfg, dry_run=False)
+            # Both steps should have run
+            self.assertEqual(len([r for r in run.results if r.status == "ran"]), 2)
+            # Pipeline should report failure overall
+            self.assertTrue(any(r.status == "ran" and r.returncode for r in run.results))
+        finally:
+            pl.prerequisite_issue = original
+            subprocess.run = orig_run  # type: ignore[assignment]
+
+    def test_pipeline_stops_on_failure_with_stop_on_error(self) -> None:
+        """With --stop-on-error (continue_on_error=False), pipeline stops at first failure."""
+        cfg = pl.Config(library=pl.HERE, steps=("auditor", "auditor"), continue_on_error=False)
+        original = pl.prerequisite_issue
+        calls: list = []
+        orig_run = subprocess.run
+        def fake_run(command, *_args, **_kwargs):
+            calls.append(list(command))
+            # First step fails
+            return subprocess.CompletedProcess(command, 1)
+        try:
+            pl.prerequisite_issue = lambda step: None
+            subprocess.run = fake_run  # type: ignore[assignment]
+            run = pl.run_pipeline(cfg, dry_run=False)
+            # Only first step should have run
+            self.assertEqual(len([r for r in run.results if r.status == "ran"]), 1)
+        finally:
+            pl.prerequisite_issue = original
+            subprocess.run = orig_run  # type: ignore[assignment]
+
+    def test_summary_reports_failed_steps_when_continuing(self) -> None:
+        """Failed steps are listed in summary even when pipeline continues."""
+        run = pl.Run(results=[
+            pl.StepResult("fetcher", "Fetch", "ran", returncode=1, seconds=0.1),
+            pl.StepResult("cleaner", "Clean", "ran", returncode=0, seconds=0.2),
+            pl.StepResult("10bit", "10bit", "ran", returncode=0, seconds=0.3),
+            pl.StepResult("auditor", "Audit", "ran", returncode=0, seconds=0.4),
+        ])
+        summary = pl.build_summary(run, pl.Config(library=Path("/lib")))
+        self.assertIn("Failed steps : fetcher", summary)
+        self.assertIn("RAN", summary)
+
+    def test_continue_on_error_flag_is_accepted_no_op(self) -> None:
+        """--continue-on-error is still accepted and is now a no-op (default is True)."""
+        # This tests that the argument parser accepts --continue-on-error
+        import argparse
+        parser = pl.build_parser()
+        # Parse with --continue-on-error
+        args = parser.parse_args(["--continue-on-error"])
+        self.assertTrue(args.continue_on_error)
+
+    def test_stop_on_error_flag_sets_false(self) -> None:
+        """--stop-on-error sets continue_on_error to False."""
+        import argparse
+        parser = pl.build_parser()
+        # Parse with --stop-on-error
+        args = parser.parse_args(["--stop-on-error"])
+        self.assertFalse(args.continue_on_error)
+
+    def test_stop_on_error_overrides_default(self) -> None:
+        """--stop-on-error overrides the default True."""
+        import argparse
+        parser = pl.build_parser()
+        # Parse with both flags (--continue-on-error is default, --stop-on-error overrides)
+        args = parser.parse_args(["--stop-on-error"])
+        self.assertFalse(args.continue_on_error)
+
+
 if __name__ == "__main__":
     unittest.main()
