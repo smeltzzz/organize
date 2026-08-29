@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Tool output no longer clutters the torrents root on Windows**: logs, reports, and probe-cache JSON now default to `E:\torrents\tools\ReportsAndLogs\<tool>\` (e.g. `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner.log`) instead of five folders at the root of `E:\torrents`. Existing hooks scheduled with direct tool paths pick this up automatically; anything using explicit `--log`/`--report`/`--cache` paths is unaffected.
 - **Foreign films with a validated `.eng.srt` are now cleaned** by `mkv_track_cleaner.py`: the best non-commentary audio of any language is kept, commentary/DVS is dropped, and every embedded subtitle is stripped so the external SRT is the sole subtitle option. Foreign films *without* a validated sidecar remain untouched.
 - **Canonical external subtitle suffix is now `.eng.srt`** (ISO 639-2/B) instead of `.en.srt`.
   `subtitle_fetcher.py` writes `.eng.srt`, `mkv_track_cleaner.py` requires it before stripping embeds,

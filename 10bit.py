@@ -50,12 +50,14 @@ from common import MediaProbeCache, atomic_write_text, path_is_within, try_file_
 # =============================================================================
 
 SOURCE_DIR = r"E:\torrents\final_organized"
-OUTPUT_DIR = r"E:\torrents\10bit"
-LOG_FILE = r"E:\torrents\10bit\10bit.log"
-REPORT_FILE = r"E:\torrents\10bit\10bit_report.txt"
+# Logs, reports, and the probe cache live under tools\ReportsAndLogs so the
+# root of E:\torrents stays media-only.
+OUTPUT_DIR = r"E:\torrents\tools\ReportsAndLogs\10bit"
+LOG_FILE = r"E:\torrents\tools\ReportsAndLogs\10bit\10bit.log"
+REPORT_FILE = r"E:\torrents\tools\ReportsAndLogs\10bit\10bit_report.txt"
 # Reused ffprobe output for files whose size and mtime have not changed, so a
 # re-scan of an unchanged library does not respawn ffprobe per movie.
-CACHE_FILE = r"E:\torrents\10bit\10bit_probe_cache.json"
+CACHE_FILE = r"E:\torrents\tools\ReportsAndLogs\10bit\10bit_probe_cache.json"
 
 # movie_standardizer.py emits canonical MKV feature files only.
 VIDEO_EXTENSIONS = {".mkv"}

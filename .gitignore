@@ -31,5 +31,6 @@ Screen Shot*.png
 *.stackdump
 
 # Running the tools on a non-Windows host with default config writes literal
-# filenames such as `E:\torrents\10bit\10bit_report.txt` into the CWD.
+# filenames such as `E:\torrents\tools\ReportsAndLogs\10bit\10bit_report.txt`
+# into the CWD.
 E:*

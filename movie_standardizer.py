@@ -143,8 +143,10 @@ ARTWORK_NAMES = {
 }
 ARTWORK_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
-LOG_FILE = r"E:\torrents\movie_standardizer\movie_standardizer.log"
-REPORT_FILE = r"E:\torrents\movie_standardizer\movie_standardizer_report.txt"
+# Logs and reports live under tools\ReportsAndLogs so the root of E:\torrents
+# stays media-only.
+LOG_FILE = r"E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer.log"
+REPORT_FILE = r"E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt"
 # The external-SRT size limit and cue pattern are imported from common.py so
 # this tool cannot drift from the others on what counts as a usable subtitle.
 
