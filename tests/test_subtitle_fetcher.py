@@ -72,7 +72,12 @@ class PerMovieFailureIsolationTests(unittest.TestCase):
             proc = subprocess.run(
                 [sys.executable, "subtitle_fetcher.py", "--source", str(root / "lib"),
                  "--log", str(root / "fetch.log"), "--report", str(report), "--min-size", "0"],
-                capture_output=True, text=True, env=env, timeout=120,
+                capture_output=True, env=env, timeout=120,
+                # The child pins its stdio to UTF-8 (its report is full of
+                # box-drawing characters), so the parent must not decode with
+                # the locale encoding - cp1252 on Windows turns those bytes
+                # into a UnicodeDecodeError.
+                encoding="utf-8", errors="replace",
                 cwd=Path(__file__).resolve().parent.parent,
             )
 

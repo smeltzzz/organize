@@ -137,7 +137,7 @@ class HardlinkDeferralTests(unittest.TestCase):
 
         help_text = subprocess.run(
             [__import__("sys").executable, str(pathlib.Path(tc.__file__)), "--help"],
-            capture_output=True, text=True, check=False,
+            capture_output=True, check=False, encoding="utf-8", errors="replace",
         ).stdout
         self.assertNotIn("--allow-hardlinked", help_text)
         self.assertNotIn("allow_hardlinked", tc.process_mkv.__code__.co_varnames)

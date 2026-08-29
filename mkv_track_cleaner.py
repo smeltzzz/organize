@@ -79,6 +79,7 @@ from common import (
     MediaProbeCache,
     Report,
     decode_srt_bytes,
+    enable_utf8_stdio,
     exact_external_english_srt_path,
     normalize_srt_newlines,
     promote_legacy_external_english_srt,
@@ -2655,6 +2656,7 @@ def _print_startup_banner(
 
 def main(argv: Optional[List[str]] = None) -> int:
     global _console, _target_root, _interrupt_requested
+    enable_utf8_stdio()
     parser = argparse.ArgumentParser(
         description=(
             "Lossless post-standardizer cleanup: keep one best English audio "

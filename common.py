@@ -551,12 +551,38 @@ __all__ += [
     "REPORT_INDENT",
     "Report",
     "report_banner",
+    "enable_utf8_stdio",
     "print_text",
     "clip_text",
     "wrap_text",
     "format_bytes",
     "format_duration",
 ]
+
+
+def enable_utf8_stdio() -> None:
+    """Pin this process's console streams to UTF-8 with replacement errors.
+
+    The reports are full of box-drawing characters, and every tool now prints
+    one.  Two failures follow from leaving the stream encoding to the locale:
+    a console that cannot represent ``\u2550`` raises ``UnicodeEncodeError``
+    half-way through a run, and a parent that captures a child's output with
+    ``text=True`` decodes it with the *locale* encoding - cp1252 on Windows -
+    which turns those same bytes into a ``UnicodeDecodeError``.
+
+    So every tool pins its own output to UTF-8 at startup, and every caller
+    that captures a child decodes it as UTF-8.  ``errors="replace"`` means a
+    console that still cannot cope degrades to ``?`` instead of aborting work
+    that has already been done.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # a replaced stream, e.g. under redirect_stdout
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):  # closed or detached stream
+            pass
 
 
 def print_text(text: str) -> None:

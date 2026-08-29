@@ -47,9 +47,11 @@ from common import (
     MediaProbeCache,
     Report,
     atomic_write_text,
+    enable_utf8_stdio,
     format_bytes,
     format_duration,
     path_is_within,
+    print_text,
     try_file_lock,
 )
 
@@ -192,7 +194,7 @@ def log(msg: str, level: str = "INFO", log_file: Path | None = None) -> None:
     line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{level}] {msg}"
     target = log_file if log_file is not None else _ACTIVE_LOG_FILE
     with PRINT_LOCK:
-        print(line, flush=True)
+        print_text(line)
         if target is None:
             return
         try:
@@ -1263,12 +1265,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.self_test:
         return run_self_tests()
     try:
-        if os.name == "nt":
-            try:
-                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-                sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-            except Exception:
-                pass
+        enable_utf8_stdio()
         cfg = cfg_from_args(args)
         errors = validate_config(cfg)
         if errors:

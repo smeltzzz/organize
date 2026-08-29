@@ -110,6 +110,7 @@ from common import (
     Report,
     atomic_write_text,
     decode_srt_bytes,
+    enable_utf8_stdio,
     normalize_srt_newlines,
     path_is_within,
     path_norm,
@@ -3102,12 +3103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.self_test:
         return run_canonical_self_tests()
     try:
-        if os.name == "nt":
-            try:
-                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-                sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-            except Exception:  # noqa: BLE001, S110 - stdout reconfigure is best-effort
-                pass
+        enable_utf8_stdio()
         return run(args)
     except KeyboardInterrupt:
         LOG.warning("Interrupted")

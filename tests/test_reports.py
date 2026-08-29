@@ -185,5 +185,48 @@ class StandardizerReportContentTests(_SampleReports):
         self.assertIn("Small.1995.mkv", section(text, "ITEMS LEFT IN SOURCE"))
 
 
+class HostileConsoleEncodingTests(unittest.TestCase):
+    """A console that cannot encode box-drawing must not abort a run.
+
+    CI caught this on Windows and macOS: the reports are UTF-8, but a captured
+    child stream is decoded with the *locale* encoding (cp1252 on Windows, and
+    ASCII on a runner with no locale set), which turned the box-drawing bytes
+    into a ``UnicodeDecodeError`` in the parent and a ``UnicodeEncodeError`` in
+    the child.  The contract now is that every tool pins its own stdio to UTF-8
+    with ``errors="replace"``, and every caller that captures a child decodes it
+    as UTF-8 - so the console may degrade, but the run and the report file do
+    not.
+    """
+
+    def test_fetcher_survives_an_ascii_console_and_keeps_the_file_utf8(self) -> None:
+        import os
+        import subprocess
+        import sys
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            movie = root / "lib" / "Covered Movie (2020)"
+            movie.mkdir(parents=True)
+            (movie / "Covered Movie (2020).mkv").write_bytes(b"x")
+            (movie / "Covered Movie (2020).eng.srt").write_text(
+                "1\n00:00:00,000 --> 00:00:04,000\nHi.\n", encoding="utf-8")
+            report = root / "report.txt"
+            env = dict(os.environ, OPENSUBTITLES_API_KEY="test-key-not-used",
+                       PYTHONIOENCODING="ascii")
+            proc = subprocess.run(
+                [sys.executable, "subtitle_fetcher.py", "--source", str(root / "lib"),
+                 "--log", str(root / "fetch.log"), "--report", str(report), "--min-size", "0"],
+                capture_output=True, encoding="utf-8", errors="replace", env=env,
+                timeout=120, cwd=Path(__file__).resolve().parent.parent,
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stdout[-800:] + proc.stderr[-800:])
+            self.assertNotIn("Traceback", proc.stderr, proc.stderr[-800:])
+            # The file is written UTF-8 regardless of what the console could show.
+            text = report.read_bytes().decode("utf-8")
+            self.assertIn(HEAVY * 2, text)
+            self.assertIn("Covered Movie (2020).eng.srt", text)
+
+
 if __name__ == "__main__":
     unittest.main()

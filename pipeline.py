@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
-from common import Report
+from common import Report, enable_utf8_stdio, print_text
 
 VERSION = "1.0.0"
 
@@ -360,6 +360,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    enable_utf8_stdio()
     args = build_parser().parse_args(argv)
 
     if args.self_test:
@@ -396,7 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     run = run_pipeline(cfg, dry_run=cfg.dry_run)
     print()
-    print(build_summary(run, cfg))
+    print_text(build_summary(run, cfg))
     return 1 if any(r.status == "ran" and r.returncode for r in run.results) else 0
 
 

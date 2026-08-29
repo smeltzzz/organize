@@ -10,7 +10,7 @@ cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](requirements.txt)
-[![Tests](https://img.shields.io/badge/tests-240%20passing%20(offline)-2EA44F.svg?style=flat-square)](run_tests.sh)
+[![Tests](https://img.shields.io/badge/tests-241%20passing%20(offline)-2EA44F.svg?style=flat-square)](run_tests.sh)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![Platforms](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20macos%20%7C%20docker-6E40C9.svg?style=flat-square)](docs/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
@@ -353,7 +353,7 @@ python organize.py <command> [options]     # Windows: py organize.py <command>
 | `clean` | `remux` | Lossless remux: keep one best English audio (or best non-commentary audio on foreign films with `.eng.srt`), strip embeds/bloat |
 | `10bit` | `probe` | ffprobe 8-bit vs 10-bit & native-HDR compliance sweep |
 | `audit` | — | Read-only health check of layout, naming, and subtitle sidecars |
-| `test` | `tests` | Run all self-tests (add `--unit` for the 240-test unit suite) |
+| `test` | `tests` | Run all self-tests (add `--unit` for the 241-test unit suite) |
 
 Launchers wrap it for every platform — `organize.sh` (bash), `organize.ps1`
 (PowerShell), `organize.bat` (cmd) — and each underlying script still runs
@@ -411,7 +411,7 @@ The suite runs **100% offline** — no media files, no external binaries, no API
 key, no network:
 
 ```bash
-bash run_tests.sh                      # self-tests + 240 unit tests
+bash run_tests.sh                      # self-tests + 241 unit tests
 python3 -m unittest discover -s tests -p 'test_*.py'
 python3 organize.py test --unit        # same thing through the unified CLI
 ```

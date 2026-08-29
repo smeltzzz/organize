@@ -69,6 +69,7 @@ from common import (
     EXTERNAL_SRT_SUFFIX,
     CoordinationLock,
     Report,
+    enable_utf8_stdio,
     exact_external_english_srt_path,
     normalize_srt_newlines,
     path_norm,
@@ -247,7 +248,9 @@ class ConcurrentSidecarError(RuntimeError):
 
 def log(msg: str, level: str = "INFO", log_file: Path | None = None) -> None:
     line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{level}] {msg}"
-    print(line, flush=True)
+    # Never let a console encoding abort a run: the progress lines carry an em
+    # dash and the report carries box-drawing characters.
+    print_text(line)
     if log_file:
         try:
             log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1811,11 +1814,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.self_test:
         return run_self_tests()
     try:
-        if os.name == "nt":
-            try:
-                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-            except Exception:
-                pass
+        enable_utf8_stdio()
         cfg = compact_config_from_args(args)
         errors = validate_compact_config(cfg)
         if errors:
