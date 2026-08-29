@@ -7,6 +7,10 @@
 #   docker compose run --rm organize run --dry-run
 #   docker compose run --rm organize run
 #   docker compose run --rm organize audit
+#
+# For a nightly schedule, prefer cron/systemd on the host or a scheduler that
+# invokes `docker compose run --rm organize run --nice` (see
+# docs/LINUX_DOCKER_GUIDE.md).
 # ==============================================================================
 
 services:
@@ -22,14 +26,19 @@ services:
       - TZ=UTC
       # OpenSubtitles Consumer API Key (https://www.opensubtitles.com/en/consumers)
       - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}
+      # Library roots INSIDE the container. Both live under the single /media
+      # mount below, so hardlink-only ingestion works.
       - MOVIE_STD_SOURCE=/media/torrents/final
       - MOVIE_STD_TARGET=/media/torrents/final_organized
       - MOVIE_STD_LOG=/config/movie_standardizer.log
       - MOVIE_STD_REPORT=/config/movie_standardizer_report.txt
     volumes:
-      # IMPORTANT: To allow hardlinks, both source and target MUST be subdirectories
-      # of the SAME host volume mount (e.g. /mnt/storage:/media)
-      - /mnt/storage/torrents/final:/media/torrents/final
-      - /mnt/storage/torrents/final_organized:/media/torrents/final_organized
+      # IMPORTANT: mount the COMMON PARENT of downloads and library, not the
+      # two folders separately. Hardlinks cannot cross filesystem mounts, so a
+      # single mount of the shared root keeps them on one device.
+      #   /mnt/storage/torrents/final          -> downloads (qBittorrent)
+      #   /mnt/storage/torrents/final_organized -> the Jellyfin library
+      - /mnt/storage:/media
+      # Logs, reports, and probe caches persist outside the container.
       - ./config:/config
     command: ["doctor"]

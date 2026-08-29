@@ -1,5 +1,11 @@
 # Architecture & Safety Model
 
+<div align="center">
+
+[← Documentation index](../README.md#-documentation)
+
+</div>
+
 The `organize` toolkit is engineered with a strict safety-first philosophy: **it must never lose, truncate, or corrupt user media**, even across power cuts, process crashes, network failures, or concurrent multi-client torrent events.
 
 This document details the architectural mechanisms that enforce these guarantees.
@@ -108,3 +114,11 @@ $$\text{OSHash} = \text{FileSize} + \sum_{i=0}^{8191} \text{uint64le}(\text{chun
 Where $\text{chunk}_{\text{first}}$ and $\text{chunk}_{\text{last}}$ are the first and last 64 KiB ($65,536$ bytes) of the file, read as 64-bit unsigned integers in little-endian byte order, with addition modulo $2^{64}$.
 
 Because this hash relies on the exact first and last 64 KiB of the release, `subtitle_fetcher.py` must run before any remuxing touches the Matroska headers!
+
+---
+
+<div align="center">
+
+[← Documentation index](../README.md#-documentation) · [Configuration reference →](CONFIGURATION_REFERENCE.md) · [FAQ & troubleshooting →](FAQ_TROUBLESHOOTING.md)
+
+</div>

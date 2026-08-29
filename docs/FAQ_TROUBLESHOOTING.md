@@ -1,5 +1,11 @@
 # Frequently Asked Questions & Troubleshooting
 
+<div align="center">
+
+[← Documentation index](../README.md#-documentation)
+
+</div>
+
 This document addresses common questions, edge cases, and troubleshooting steps when using the `organize` toolkit.
 
 ---
@@ -71,3 +77,11 @@ It categorizes files based on their bit-depth and color metadata:
 **A:** No. `movie_standardizer.py` is strictly designed for movies (`Title (Year)/Title (Year).mkv`).
 TV episode names (`S01E02`, `1x04`, etc.) are detected specifically to **exclude** them so TV downloads are never accidentally ingested into your movie library. For TV show management, use dedicated tools like Sonarr.
 *(If a movie is misdetected as TV, use the `--allow-tv` escape hatch).*
+
+---
+
+<div align="center">
+
+[← Documentation index](../README.md#-documentation) · [Configuration reference →](CONFIGURATION_REFERENCE.md) · [Architecture & safety →](ARCHITECTURE_SAFETY.md)
+
+</div>

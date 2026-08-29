@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-08-29
+
+### Added
+- **Continuous Integration is live**: `.github/workflows/ci.yml` runs the entire offline suite on every push and pull request across **Python 3.11 / 3.12 / 3.13 × Ubuntu / Windows / macOS**, plus a CLI smoke job (dashboard, doctor, `--list-steps`) on pristine machines.
+- **Visual identity**: hand-crafted, resolution-independent `docs/assets/banner.svg` and `docs/assets/logo.svg` (stacked movie cases + play emblem), plus a ready-to-upload `docs/assets/social-preview.png` (set it in repo *Settings → Social preview*).
+- **Real terminal screenshots**: `docs/assets/terminal-*.png` rendered from live `organize doctor`, dashboard, and audit output — embedded throughout the README.
+- **`pipeline.py` now honors `MOVIE_STD_TARGET`** as the default library root when `--source` is not passed, so `docker compose run --rm organize run` works without retyping the path (covered by new unit tests and the pipeline self-test).
+- **Community files**: `SECURITY.md` (scoped to the media-safety guarantees, with private reporting guidance), issue-template contact links (`.github/ISSUE_TEMPLATE/config.yml`), and `.editorconfig`.
+- **Expanded `.env.example`**: every supported environment variable with annotations, not just the two most common.
+
+### Changed
+- **README fully restructured**: hero banner, live CI badge, contextual screenshots, consolidated pipeline diagram, tool table, "Why it's different" guarantees table, collapsible deep dives, FAQ quick-hits, and documentation navigation.
+- **Documentation consolidated and navigable**: the duplicated root-level `WINDOWS_SETUP.md` runbook was merged into `docs/WINDOWS_GUIDE.md` (first-run ramp-up, "things that will surprise you", everyday commands included); every guide now carries breadcrumbs back to the index and cross-links to related guides.
+- **Docker Compose is hardlink-foolproof**: mounts the shared parent volume (as the guide already recommended) instead of two sibling submounts, with explanatory comments; the Dockerfile gained OCI labels.
+- `pyproject.toml` now declares project URLs and the author; version bumped to 3.1.0 alongside `organize.py`.
+- Unit suite grew to **208 tests** (library-root resolution coverage for the pipeline).
+
+### Fixed
+- `organize doctor` suggested the wrong flag (`--source`) in the remedy for a missing *library* directory; it now correctly points at `--target` (and the source check mentions `--source`/`MOVIE_STD_SOURCE`).
+
 ## [3.0.0] - 2026-08-29
 
 ### Added

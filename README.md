@@ -1,155 +1,86 @@
 <div align="center">
 
-# 🎬 Organize
+<img src="docs/assets/banner.svg" width="100%" alt="Organize — the definitive media management toolkit for Jellyfin and Plex">
 
-### The Definitive Media Management Toolkit for Jellyfin & Plex
+**A rock-solid, dependency-free pipeline that turns finished torrents into a
+perfectly organized, 100% Direct Play Jellyfin &amp; Plex movie library —
+with zero duplicate disk usage, exact-match subtitles, and lossless track
+cleanup.**
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![Zero Runtime Dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-success.svg?style=for-the-badge)](requirements.txt)
-[![Jellyfin & Plex Ready](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=for-the-badge&logo=jellyfin&logoColor=white)](https://jellyfin.org/)
-[![Tests Passing](https://img.shields.io/badge/tests-205%20passed%20(offline)-brightgreen.svg?style=for-the-badge)](run_tests.sh)
-[![Platform](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20docker-blueviolet.svg?style=for-the-badge)](docs/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](requirements.txt)
+[![Tests](https://img.shields.io/badge/tests-208%20passing%20(offline)-2EA44F.svg?style=flat-square)](run_tests.sh)
+[![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
+[![Platforms](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20macos%20%7C%20docker-6E40C9.svg?style=flat-square)](docs/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
-<p align="center">
-  <b>A rock-solid, dependency-free media ingestion and maintenance pipeline that guarantees 100% Direct Play, zero duplicate disk space, and flawless subtitle matching.</b>
-</p>
-
-[Quickstart](#-quickstart-in-60-seconds) •
-[Architecture](#-pipeline-architecture) •
-[Unified CLI](#-unified-cli-organizepy) •
-[The Five Tools](#-the-five-core-tools) •
-[Core Invariants](#-core-safety-invariants) •
-[Documentation](#-documentation-index)
+[Quickstart](#-quickstart-in-90-seconds) •
+[The Pipeline](#-the-pipeline) •
+[The Five Tools](#-the-five-tools) •
+[Why It's Different](#-why-its-different) •
+[Safety Invariants](#-core-safety-invariants) •
+[Documentation](#-documentation)
 
 </div>
 
 ---
 
-## ⚡ What is Organize?
+## 🧭 What is Organize?
 
-**Organize** is a suite of purpose-built, high-reliability Python tools designed to ingest completed torrents and maintain a canonical **Jellyfin & Plex movie library**.
-
-Unlike bloated container stacks with hundred-megabyte dependencies, SQLite lockups, and unstable Web UIs, **Organize is 100% standard library Python (3.11+)**. It requires **zero pip installs**, writes atomic reports outside your media folders, coordinates concurrent runs with fail-closed advisory locks, and executes with sub-second probe caching.
+**Organize** is a suite of five purpose-built Python tools plus one unified
+CLI that ingest completed torrent downloads and maintain a canonical
+**Jellyfin / Plex movie library**:
 
 ```
-Torrent Completed ──▶ movie_standardizer.py   (Hardlinks into Title (Year)/Title (Year).mkv)
-                          │
-                          ▼
-                      subtitle_fetcher.py     (Fetches exact English SRT via release OSHash)
-                          │
-                          ▼
-                      mkv_track_cleaner.py    (Lossless remux: 1 audio, drops commentary/DVS)
-                          │
-                          ▼
-                      10bit.py                (FFprobe audit: queues 8-bit SDR; keeps native HDR)
-                          │
-                          ▼
-                      library_auditor.py      (Read-only health check & scheduler gate)
+Title (Year)/
+├── Title (Year).mkv        ← one losslessly-cleaned MKV per movie
+└── Title (Year).en.srt     ← one validated, exact-match English subtitle
 ```
+
+Unlike bloated container stacks with hundred-megabyte images, SQLite lockups,
+and fragile web UIs, Organize is **100% standard-library Python 3.11+**:
+
+| | |
+| :--- | :--- |
+| 🫧 **Zero pip installs** | The whole toolkit *is* the checkout. No venv, no Docker required. |
+| 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
+| 💬 **Exact-match subtitles** | OpenSubtitles moviehash matching while container bytes are still pristine, plus a conservative title/year fallback. |
+| ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track and drops commentary, dubs, and embedded bitmap subtitles — video untouched. |
+| 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
+| 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
+| 🛡 **Safety invariants** | Advisory locks, atomic staging, transaction journals, and crash recovery — engineered so a power cut can never corrupt your library. |
+
+<div align="center">
+  <a href="#-quickstart-in-90-seconds"><em>See it run — the doctor verifies your whole setup in one command ↓</em></a>
+</div>
 
 ---
 
-## 🎯 The Jellyfin Direct Play Philosophy
+## 🚀 Quickstart in 90 seconds
 
-Why do media servers transcode, and why does this toolkit exist?
-
-1. **The Subtitle Transcode Trap**: Bitmap subtitles (**PGS**, **VobSub**) and complex **ASS/SSA** styles cannot be rendered natively by web browsers, Smart TVs, or streaming sticks. Jellyfin is forced to burn them into the video frames on the fly, consuming 80–100% of your CPU/GPU.
-   - *The Fix*: `subtitle_fetcher.py` and `mkv_track_cleaner.py` ensure every movie has an external UTF-8 `.en.srt` sidecar. Jellyfin serves plain-text subtitles with **0% server overhead**.
-2. **Audio Track Bloat**: Torrents bundle commentary, descriptive audio, and uncompressed 7.1 tracks that freeze client decoders.
-   - *The Fix*: `mkv_track_cleaner.py` remuxes the container to keep the single highest quality English audio track, purging commentary and foreign dubs.
-3. **8-Bit Banding vs. 10-Bit Color**: 8-bit SDR exhibits color banding in shadows and gradients. Re-encoding 8-bit SDR to 10-bit HEVC or AV1 eliminates banding and cuts file sizes by 20–40%.
-   - *The Fix*: `10bit.py` fail-closed classification safely queues 8-bit SDR for HandBrake while strictly protecting native HDR10/Dolby Vision sources from accidental tone-mapping.
-
----
-
-## 🏗 Pipeline Architecture
-
-```
-                                  [ Completed Torrent ]
-                                            │
-                                            ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│ 1. MOVIE STANDARDIZER                                                                    │
-│    • Matches release name to canonical "Title (Year)"                                   │
-│    • Creates atomic hardlink into library (0 duplicate disk usage, continuous seeding)   │
-│    • Skips TV episodes, multipart splits, and non-MKV files                             │
-└───────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                            │
-                                            ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│ 2. SUBTITLE FETCHER (Must run BEFORE remuxing!)                                         │
-│    • Calculates exact OpenSubtitles OSHash (first & last 64 KiB)                         │
-│    • Queries with moviehash_match=only for guaranteed sync                               │
-│    • Fallback to high-confidence title/year check                                        │
-│    • Writes validated, human-authored UTF-8 .en.srt                                     │
-└───────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                            │
-                                            ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│ 3. MKV TRACK CLEANER                                                                    │
-│    • Defers seeding files (link count > 1) to prevent breaking torrents                 │
-│    • Pre-flight free disk space check (need size * 1.02 + 64 MiB)                        │
-│    • Transaction-journaled lossless remux via mkvmerge                                  │
-│    • Strips commentary, audio descriptions, foreign tracks, and embedded PGS subs       │
-│    • Verifies track fingerprints & duration before atomic swap                          │
-└───────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                            │
-                                            ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│ 4. 10-BIT & HDR INSPECTOR                                                               │
-│    • Reusable JSON ffprobe cache (sub-second sweeps on unchanged libraries)             │
-│    • QUEUE: 8-bit SDR (re-encode to 10-bit H.265/AV1)                                   │
-│    • KEEP: Native HDR10, HDR10+, Dolby Vision, HLG (protects dynamic metadata)          │
-│    • REVIEW: Unknown bit depth or mis-tagged HDR                                        │
-└───────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                            │
-                                            ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│ 5. LIBRARY AUDITOR                                                                      │
-│    • 100% read-only health check of the organized library                               │
-│    • Verifies Title (Year)/Title (Year).mkv structure                                   │
-│    • Validates .en.srt sidecar syntax (flags empty, stub, or HTML error pages)          │
-│    • Gating exit codes for scheduled cron / Task Scheduler tasks                        │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 🚀 Quickstart in 60 Seconds
-
-### 1. Check Your System with `doctor`
-
-Clone the repo and run the automated diagnostics to verify your environment:
+### 1 · Check your machine with `doctor`
 
 ```bash
 git clone https://github.com/smeltzzz/organize.git
 cd organize
-
-# Run system diagnostics
-python3 organize.py doctor
+python3 organize.py doctor            # Windows: py organize.py doctor
 ```
 
-```
-  SYSTEM & PREREQUISITE DIAGNOSTICS (DOCTOR)
-  ────────────────────────────────────────────────────────────────────
-  ✔ Python Runtime               Python 3.11.2 (CPython 64bit)
-  ✔ Operating System             Linux 6.1 / Windows 11
-  ✔ MKVToolNix (mkvmerge)        Found: mkvmerge v82.0
-  ✔ FFmpeg (ffprobe)             Found: ffprobe version 6.1.1
-  ✔ OpenSubtitles API Key        Configured (a1b2...c3d4)
-  ✔ Hardlink Compatibility       Source and library share filesystem device
-  ────────────────────────────────────────────────────────────────────
-  Scorecard: 6 passed, 0 warnings
-  ✔ All systems operational! Ready for the complete Jellyfin media pipeline.
-```
+<img src="docs/assets/terminal-doctor.png" width="86%" alt="organize doctor — an all-green diagnostics scorecard">
 
-### 2. Configure qBittorrent Ingest
+`doctor` verifies Python, `mkvmerge` (MKVToolNix), `ffprobe` (FFmpeg), your
+OpenSubtitles API key, and — crucially — that your download folder and library
+sit on the **same filesystem volume** so hardlinks work. Missing pieces are
+reported with the exact fix, never a crash.
 
-In qBittorrent → **Options → Downloads → Run external program on torrent completion**:
+### 2 · Wire up qBittorrent ingest
+
+In qBittorrent → **Options → Downloads → Run external program on torrent
+completion**, enter:
 
 ```cmd
-# Windows (cmd / PowerShell)
+:: Windows (cmd / PowerShell)
 py "C:\Tools\organize\organize.py" standardize "%F"
 
 # Linux / macOS (bash)
@@ -157,241 +88,326 @@ py "C:\Tools\organize\organize.py" standardize "%F"
 ```
 
 > [!IMPORTANT]
-> In qBittorrent → **Options → BitTorrent → Seeding Limits**, set *"When ratio reaches"* or *"When seeding time reaches"* to **Remove torrent and its content**.
-> Because the organized movie is a hardlink, deleting the download source entry leaves your library file 100% intact while dropping the link count so `mkv_track_cleaner.py` can remux it!
+> In qBittorrent → **Options → BitTorrent → Seeding Limits**, set *"When ratio
+> reaches"* / *"When seeding time reaches"* to **Remove torrent and its content**.
+> The organized movie is a hardlink, so deleting the download entry leaves your
+> library file 100% intact while dropping the link count — which is exactly what
+> unblocks the track cleaner on its next sweep.
 
-### 3. Run the Maintenance Pipeline
+### 3 · Run the maintenance pipeline
 
 ```bash
-# Preview operations without touching files
-python organize.py run --dry-run
-
-# Run the live maintenance sweep (fetch subs -> remux -> 10-bit -> audit)
-python organize.py run
-
-# Run with lowered CPU/IO priority so Jellyfin streaming is never starved
-python organize.py run --nice
+python3 organize.py run --dry-run     # preview every command first
+python3 organize.py run               # subtitles -> remux -> 10-bit -> audit
+python3 organize.py run --nice        # low priority: Jellyfin streaming is never starved
 ```
+
+Then point Jellyfin at your organized folder as a **Movies** library. Done —
+every movie is canonically named, subtitle-complete, and direct-play safe.
+
+> [!TIP]
+> Set `OPENSUBTITLES_API_KEY` to enable subtitle fetching. Grab a free
+> consumer key at [opensubtitles.com/en/consumers](https://www.opensubtitles.com/en/consumers).
+> Full reference: [docs/CONFIGURATION_REFERENCE.md](docs/CONFIGURATION_REFERENCE.md).
 
 ---
 
-## 💻 Unified CLI: `organize.py`
+## 🔄 The pipeline
 
-`organize.py` provides a single command-line interface for the entire toolkit:
+Five tools, one fixed order. The order between **subtitles** and **remux** is
+load-bearing — a remux rewrites the container bytes that OpenSubtitles hashes,
+so fetching subtitles *after* cleaning permanently destroys the exact-match
+search. `pipeline.py` exists so you cannot get this wrong.
 
-```bash
-python organize.py <command> [OPTIONS]
+```
+ torrent finishes
+        │
+        ▼
+┌───────────────────────┐   hardlink into Title (Year)/Title (Year).mkv
+│ 1 · standardize       │   parse scene names, skip TV / discs / splits
+└───────────┬───────────┘
+            ▼
+┌───────────────────────┐   exact OSHash match (moviehash_match=only),
+│ 2 · subtitles         │   conservative title/year fallback, UTF-8 .en.srt
+└───────────┬───────────┘
+            ▼
+┌───────────────────────┐   lossless mkvmerge remux: 1 best English audio,
+│ 3 · clean             │   drop commentary/DVS/dubs/embedded subs (post-SRT)
+└───────────┬───────────┘
+            ▼
+┌───────────────────────┐   ffprobe sweep: QUEUE 8-bit SDR, KEEP native HDR,
+│ 4 · 10bit             │   REVIEW ambiguous metadata — never guess
+└───────────┬───────────┘
+            ▼
+┌───────────────────────┐   100% read-only layout + subtitle health check
+│ 5 · audit             │   gating exit codes for cron / Task Scheduler
+└───────────────────────┘
 ```
 
-| Command | Alias | What It Does |
-| :--- | :--- | :--- |
-| `doctor` | `check` | Verifies Python, binaries (`mkvmerge`, `ffprobe`), API key, and hardlink compatibility |
-| `run` | `pipeline` | Runs the automated maintenance sweep in the exact required order |
-| `standardize` | `std` | Ingests torrent downloads into `Title (Year)/Title (Year).mkv` with hardlinks |
-| `subtitles` | `subs` | Downloads human-authored English UTF-8 SRTs from OpenSubtitles via OSHash |
-| `clean` | `remux` | Lossless remux: selects best English audio, strips commentary/DVS, drops PGS |
-| `10bit` | `probe` | Scans bit-depth and HDR compliance with sub-second probe caching |
-| `audit` | — | Read-only layout, naming, and sidecar integrity check |
-| `test` | `tests` | Runs all 7 script self-tests and 205 unit tests (100% offline) |
+`1 · standardize` fires automatically from the qBittorrent hook; `run`
+executes steps 2 → 5 in order. Every step skips cleanly (with the reason
+printed) when its prerequisite is missing.
 
-*All standalone scripts (`movie_standardizer.py`, `pipeline.py`, etc.) remain 100% backward compatible and can still be invoked directly.*
+<div align="center">
+  <img src="docs/assets/terminal-dashboard.png" width="78%" alt="organize — the dashboard shown when launched with no arguments">
+</div>
 
 ---
 
-## 🛠 The Five Core Tools
+## 🧰 The five tools
 
-| Script | Purpose | External Binary | Output Artifacts |
+| Tool | What it does | Needs | Artifacts (always outside the library) |
 | :--- | :--- | :--- | :--- |
-| **`movie_standardizer.py`** | Ingest torrents into `Title (Year)/Title (Year).mkv` using `os.link()`. Replaces existing copies only on verified same-cut technical quality upgrade. | `ffprobe` *(only for duplicate comparison)* | `movie_standardizer.log`<br>`movie_standardizer_report.txt` |
-| **`subtitle_fetcher.py`** | Downloads exact English UTF-8 `.en.srt` sidecars from OpenSubtitles using 64-bit release OSHashes. Persistent UTC quota ledger. | `OPENSUBTITLES_API_KEY` | `subtitle_fetcher.log`<br>`subtitle_fetcher_report.txt` |
-| **`mkv_track_cleaner.py`** | Lossless remux: keeps best English audio track, purges commentary/DVS, strips embedded subtitles once verified `.en.srt` exists. | `mkvmerge` *(MKVToolNix)* | `mkv_track_cleaner.log`<br>`mkv_track_cleaner_report.txt`<br>`...probe_cache.json` |
-| **`10bit.py`** | Classifies library into action queues: QUEUE (8-bit SDR), KEEP (Native HDR), SKIP (10-bit SDR), REVIEW (ambiguous). Probe cache for sub-second sweeps. | `ffprobe` *(FFmpeg)* | `10bit.log`<br>`10bit_report.txt`<br>`...probe_cache.json` |
-| **`library_auditor.py`** | 100% read-only health check. Verifies direct containers, folder stem matches, and validates `.en.srt` file syntax (catches corrupted/stub subtitles). | *None (stdlib only)* | `library_auditor.log`<br>`library_auditor_report.txt` |
+| **[`movie_standardizer.py`](movie_standardizer.py)** | qBittorrent hook: parses scene/release names into canonical `Title (Year)`, hardlinks into the library (zero duplicate space), skips TV, discs, multipart splits, non-MKV. Existing movies are only replaced after an ffprobe-verified same-cut *technical upgrade* — never on size alone. | *Nothing* (ffprobe optional, for upgrade checks) | `movie_standardizer.log` · `movie_standardizer_report.txt` |
+| **[`subtitle_fetcher.py`](subtitle_fetcher.py)** | Fetches one validated human-authored English UTF-8 SRT per movie. Exact OpenSubtitles **moviehash** first (`moviehash_match=only` — byte-identical release match), then a strict title/year fallback that holds low-confidence candidates for review. Append-only quota ledger prevents wasted API requests. | `OPENSUBTITLES_API_KEY` | `subtitle_fetcher.log` (also the quota ledger) · `subtitle_fetcher_report.txt` |
+| **[`mkv_track_cleaner.py`](mkv_track_cleaner.py)** | Lossless `mkvmerge` remux: keeps the single highest-quality English audio track, purges commentary / descriptive-audio / foreign dubs, strips embedded subtitles once a validated `.en.srt` exists. Transaction-journaled, fingerprint-verified, atomic. | `mkvmerge` *(MKVToolNix)* | `mkv_track_cleaner.log` · `mkv_track_cleaner_report.txt` · probe cache |
+| **[`10bit.py`](10bit.py)** | ffprobe inspection that classifies every movie: **QUEUE** (8-bit SDR → re-encode to 10-bit HEVC/AV1), **SKIP** (already high bit-depth), **KEEP** (native HDR — protected from tone-mapping), **REVIEW** (ambiguous — never auto-queued). Probe cache makes re-sweeps near-instant. | `ffprobe` *(FFmpeg)* | `10bit.log` · `10bit_report.txt` · probe cache |
+| **[`library_auditor.py`](library_auditor.py)** | 100% read-only health check: canonical folder/MKV structure, sidecar syntax validation (catches empty, truncated, and HTML-error-page SRTs), remux-aware (no false alarms mid-cleanup). `--fail-on-defects` / `--fail-on-findings` gate scheduled tasks. | *Nothing* (stdlib only) | `library_auditor.log` · `library_auditor_report.txt` |
 
-<br>
+<img src="docs/assets/terminal-audit.png" width="88%" alt="organize audit — a clean library report: 10 folders checked, 10 canonical MKVs, 0 defects">
 
 <details>
-<summary><b>🔍 Deep Dive: <code>movie_standardizer.py</code> (Ingestion & Hardlink Placement)</b></summary>
+<summary><b>🔍 Deep dive · <code>movie_standardizer.py</code> — ingestion &amp; hardlink placement</b></summary>
 
-### How it works
-- **qBittorrent Hook**: Triggered automatically on torrent completion via `"%F"`. Can also batch-scan `E:\torrents\final` when run with no arguments.
-- **Canonical Naming**: Cleans release tags, audio/video codec tokens, and site prefixes into standard `Title (Year)/Title (Year).mkv`.
-- **Zero Space Hardlinks**: Links the file directly into `final_organized` using `os.link()`. The torrent continues seeding in `final` using the exact same disk sectors.
-- **Technical Quality Upgrades**: If a movie already exists in the library, file size alone never triggers replacement. The tool uses `ffprobe` to ensure runtimes match within 30 seconds or 1% (confirming identical theatrical/extended cut), and calculates a weighted technical quality score (resolution, HDR, bit depth, audio channels). If quality does not meaningfully increase, the existing file is preserved.
-- **Leftover Reporting**: Non-MKV files, multipart splits, or files under `--min-size` are declined and listed under `ITEMS LEFT IN SOURCE` in the text report so nothing is silently lost.
+- **qBittorrent hook** — triggered on torrent completion via `"%F"`; also accepts the older `"%D" "%N"` form, and batch-scans the source folder when run with no arguments.
+- **Canonical naming** — release tags, codec tokens, edition labels, and site prefixes are stripped into standard `Title (Year)/Title (Year).mkv`. Roman numerals, stylized titles (*Se7en*, *WALL·E*, *Mix*), and doctor-style abbreviations survive intact.
+- **Zero-space hardlinks** — `os.link()` places the file into the library referencing the exact same inode. The torrent keeps seeding; disk usage grows by 0 bytes. There is deliberately **no copy/move fallback**: cross-volume setups are rejected with a clear error instead.
+- **Quality-aware upgrades** — if the movie already exists, file size alone never triggers replacement. ffprobe must confirm the same cut (runtime within 30 s or 1%) and a weighted technical score (resolution, HDR, bit depth, channels, codec) must improve meaningfully.
+- **Leftover reporting** — non-MKV files, multipart splits, disc structures, and undersized releases are declined and listed under `ITEMS LEFT IN SOURCE` in the report, each with its reason. Nothing is silently lost or deleted.
 
 ```bash
-# Manual batch scan
-python organize.py standardize
-
-# Preview without hardlinking
-python organize.py standardize --dry-run
+python organize.py standardize              # batch scan
+python organize.py standardize --dry-run    # preview placements
+python movie_standardizer.py "D:\torrents\final\Some.Movie.2023.1080p"   # one folder
 ```
 </details>
 
 <details>
-<summary><b>🔍 Deep Dive: <code>subtitle_fetcher.py</code> (OSHash Matching & Quota Ledger)</b></summary>
+<summary><b>🔍 Deep dive · <code>subtitle_fetcher.py</code> — OSHash matching &amp; quota ledger</b></summary>
 
-### Why it runs BEFORE remuxing
-- OpenSubtitles OSHash is a 64-bit checksum calculated from the file size plus the first and last 64 KiB of the MKV container.
-- Submitting this hash with `moviehash_match=only` returns subtitles uploaded against that exact release, guaranteeing 100% audio-sync accuracy.
-- **Remuxing rewrites the container cues and headers, permanently destroying the release OSHash.** Running the cleaner first forces a fallback to fuzzy title/year matching, resulting in far fewer matches and potential sync drift.
-- **Sidecar Safety**: Downloads human-authored, normal English UTF-8 `.en.srt` sidecars only (no machine translations, no forced-only, no SDH by default).
-- **Persistent Quota Ledger**: The append-only execution log acts as an ACID quota ledger, preventing wasted API quota across runs.
+- **Why it runs before the remux** — the OpenSubtitles moviehash is the file size plus the sum of the first and last 64 KiB. Submitting it with `moviehash_match=only` returns subtitles uploaded against that *exact release*, guaranteeing sync. A remux rewrites those bytes permanently, demoting the movie to the far weaker title/year search.
+- **Strict candidate policy** — only normal (non-SDH, non-forced, non-machine-translated) human English SRTs; trusted flags and ratings outrank raw download counts for a deterministic pick.
+- **Conservative fallback** — after a hash miss, an exact title/year match with high community confidence is allowed; edition-labelled releases (*extended*, *director's cut*, …) are held for manual review instead of guessed.
+- **Durable quota ledger** — the append-only log doubles as an ACID UTC-day ledger: reservations are persisted *before* each download request, so an interrupted run never double-spends quota.
+- **Sidecar safety** — downloads are size-capped, HTTPS-only, gzip-aware, cue-validated, and activated via an atomic create-only link so a concurrent sidecar is never overwritten.
 
 ```bash
-# Preview candidates
-python organize.py subtitles --dry-run
-
-# Run live fetch
-python organize.py subtitles
+python organize.py subtitles --dry-run      # preview candidates
+python organize.py subtitles                # live fetch
+python organize.py subtitles --retry-review # reconsider held-for-review movies
 ```
 </details>
 
 <details>
-<summary><b>🔍 Deep Dive: <code>mkv_track_cleaner.py</code> (Lossless Remux & Seeding Deferral)</b></summary>
+<summary><b>🔍 Deep dive · <code>mkv_track_cleaner.py</code> — lossless remux &amp; seeding deferral</b></summary>
 
-### Lossless Remuxing Mechanics
-- **MKVToolNix (`mkvmerge`)**: Rewrites container headers without re-encoding video.
-- **Seeding Protection**: Refuses to remux any file with a link count > 1 (`st_nlink > 1`), protecting seeding torrents from breaking.
-- **Free Space Preflight**: Checks disk free space and demands at least `size * 1.02 + 64 MiB` before proceeding.
-- **Pre- & Post-Flight Fingerprints**: Fingerprints video duration, frame count, audio tracks, chapters, and attachments before and after remuxing. If anything mismatches, the original file is left untouched.
-- **Crash Recovery**: Staged remuxes use `.track_cleaner.<token>.json` journals. Interrupted runs are recovered or safely flagged on subsequent runs.
+- **Seeding protection** — any file with a hardlink count > 1 (`st_nlink`) is *unconditionally deferred*; there is no override flag. qBittorrent's default seed-limit action only pauses the torrent, so configure it to remove the content — then the deferral clears automatically.
+- **Free-space preflight** — a remux cannot rewrite a container in place, so the cleaner demands `size × 1.02 + 64 MiB` free before starting and refuses otherwise, leaving the original untouched.
+- **Pre/post-flight fingerprints** — video duration, frame counts, audio/subtitle tracks, chapters, and attachments are fingerprinted before and after. Any mismatch aborts the swap, and a JSON diagnostic is logged.
+- **Transaction journals** — every remux stages as a uniquely-named sibling with a `.track_cleaner.<token>.json` journal. Interrupted runs are recovered — or safely flagged for manual review — on the next sweep.
+- **SDH-safe classification** — hearing-impaired and text-description *subtitles* are always kept when embedded subs are needed; commentary, isolated scores, and descriptive *audio* are always dropped.
 
 ```bash
-# Preview remux operations
-python organize.py clean --dry-run
-
-# Run remux on a single test movie
-python organize.py clean --limit 1
+python organize.py clean --dry-run          # preview remux operations
+python organize.py clean --limit 1          # remux exactly one test movie
+python mkv_track_cleaner.py --only "/path/Movie (2020)/Movie (2020).mkv"
 ```
 </details>
 
 <details>
-<summary><b>🔍 Deep Dive: <code>10bit.py</code> (Fail-Closed Bit-Depth & HDR Inspection)</b></summary>
+<summary><b>🔍 Deep dive · <code>10bit.py</code> — fail-closed bit-depth &amp; HDR inspection</b></summary>
 
-### Inspection Heuristics
-- **Probe Cache**: Stores `ffprobe` JSON results in a fast metadata cache. Probing 2,000 unchanged movies drops from minutes to under 0.2 seconds!
-- **Action Queues**:
-  - `QUEUE FOR HANDBRAKE`: Confirmed 8-bit SDR. Re-encode to H.265 10-bit or AV1 10-bit to eliminate color banding and reduce size.
-  - `SKIP (High Bit-Depth SDR)`: Already 10-bit, 12-bit, or 16-bit SDR.
-  - `KEEP (Native HDR)`: HDR10, HDR10+, Dolby Vision, HLG. HandBrake default presets will tone-map or strip dynamic metadata; keep original!
-  - `REVIEW (Ambiguous)`: Mis-tagged or unknown bit-depth. Never dumped into the 8-bit queue automatically.
+- **Action queues** — `QUEUE FOR HANDBRAKE` (confirmed 8-bit SDR), `SKIP` (already 10/12/16-bit SDR), `KEEP` (HDR10 / HDR10+ / Dolby Vision / HLG — a default HandBrake preset would tone-map or strip dynamic metadata), `REVIEW` (8-bit-tagged HDR or unknown depth — never auto-queued).
+- **Fail-closed by design** — BT.2020 primaries alone are *wide gamut*, not HDR; 8-bit + PQ is *not* an SDR candidate; unknown bit depth is never assumed to be 8-bit.
+- **Probe cache** — ffprobe JSON is cached per `(path, size, mtime)`; only raw probe output is cached, never a verdict, so a library sweep of 2,000 unchanged movies drops from minutes to well under a second.
+- **Scheduler gates** — `--fail-if-queue`, `--fail-if-review`, and `--fail-if-error` map findings to exit codes for automation.
 
 ```bash
-# Preview inspection
-python organize.py 10bit --dry-run
-
-# Run bit-depth inspection sweep
-python organize.py 10bit
+python organize.py 10bit --dry-run          # list what would be probed
+python organize.py 10bit                    # full classification sweep
+python organize.py 10bit --fail-if-queue    # exit 3 if 8-bit SDR awaits encoding
 ```
 </details>
 
 <details>
-<summary><b>🔍 Deep Dive: <code>library_auditor.py</code> (Read-Only Health Check & Gates)</b></summary>
+<summary><b>🔍 Deep dive · <code>library_auditor.py</code> — read-only health check &amp; gates</b></summary>
 
-### Audit Checks
-- **Structure**: Verifies that every folder contains exactly one canonical MKV matching the folder stem: `Title (Year)/Title (Year).mkv`.
-- **Sidecar Integrity**: Inspects `.en.srt` contents. Detects and flags empty files, truncated downloads, or provider error pages (e.g. HTML 429).
-- **Remux Awareness**: Ignores in-flight remux sibling temporary files (`temp_clean_*`), preventing false "multiple movie files" alarms during maintenance.
-- **Scheduler Gates**:
-  - `--fail-on-defects`: Exits 1 if layout defects (stem mismatch, invalid SRT, multiple containers) exist.
-  - `--fail-on-findings`: Exits 1 if any movie lacks a valid `.en.srt` sidecar.
+- **Structure** — every top-level folder must hold exactly one canonical MKV whose stem matches the folder name; extra containers, stem mismatches, and missing movies are defects.
+- **Sidecar integrity** — `.en.srt` files are content-validated: empty files, truncated downloads, and provider error pages (HTML 429s) are flagged as `INVALID_SIDECAR` with a fix hint. A missing sidecar is only a *finding* — a freshly standardized movie legitimately has none yet.
+- **Remux awareness** — in-flight cleaner staging files (`temp_clean_*`) are ignored, so an audit mid-maintenance never raises false alarms.
+- **Scheduler gates** — `--fail-on-defects` exits 1 on layout defects; `--fail-on-findings` also fails on missing subtitles. Default stays 0 so report-only automation keeps working.
 
 ```bash
-# Run read-only audit
-python organize.py audit
-
-# Gate automated task (exits 1 if layout defects exist)
-python organize.py audit --fail-on-defects
+python organize.py audit                    # read-only audit
+python organize.py audit --fail-on-defects  # gate a scheduled task
 ```
 </details>
 
 ---
 
-## 🔒 Core Safety Invariants
+## 💎 Why it's different
 
-The toolkit adheres to non-negotiable safety rules:
+Most media automation stacks pull in containers, databases, and web UIs to
+solve problems this pipeline solves with five focused scripts — and several
+of these guarantees are structurally impossible in a copy-based workflow:
 
-### 1. Hardlink-Only Ingestion (No Duplicate Storage)
-`movie_standardizer.py` calls `os.link()` exclusively. It has no copy or move fallback. Completed torrents remain seeding in `final`, while your library in `final_organized` references the exact same inode on disk. Disk usage is zero additional bytes.
+| Guarantee | How Organize delivers it |
+| :--- | :--- |
+| **Zero duplicate disk usage while seeding** | Hardlink-only ingest. A 60 GB remux joins your library as a second *name*, not a second *file*. |
+| **Subtitles that are actually in sync** | Moviehash matching against the untouched release bytes — verified before any remux can invalidate the hash. |
+| **100% Direct Play, no transcode traps** | External UTF-8 SRT sidecars only; embedded PGS/VobSub bitmap subs are stripped after the sidecar is verified. |
+| **No accidental HDR destruction** | The bit-depth inspector fail-closes: native HDR is *kept*, ambiguous metadata goes to a human review queue. |
+| **Crash-safe by construction** | Atomic `os.replace` staging everywhere, transaction-journaled remuxes with orphan recovery, fail-closed advisory locks. |
+| **Auditable** | Every run leaves a plain-text report and an append-only log outside the library. The auditor reads them so you don't have to. |
+| **Runs anywhere Python 3.11 runs** | Stdlib only — Windows, Linux, macOS, Docker, Unraid, TrueNAS. No venv ceremony, no dependency drift, no CVE surface. |
 
-### 2. Subtitles *Must* Run Before Remuxing
-`subtitle_fetcher.py` matches releases using OpenSubtitles **OSHash** (the file size plus the sum of the first and last 64 KiB). This yields exact, verified subtitle synchronization.
-A remux rewrites container headers, permanently altering those bytes. **Running the cleaner first permanently destroys the moviehash match**, demoting the movie to a weaker title/year search. `pipeline.py` and `organize.py` strictly enforce this order.
+Organize complements rather than replaces acquisition tooling: Radarr/qBittorrent
+decide *what* lands in your download folder; Organize turns it into a library
+Jellyfin can serve bit-for-bit.
 
-### 3. Seeding Protection (Hardlink Count > 1 Deferral)
-`mkv_track_cleaner.py` inspects `os.stat().st_nlink`. If a movie has more than 1 link, it is actively seeding and **deferred unconditionally**. Remuxing is only performed once qBittorrent removes the completed torrent or you delete the source file.
+### 🎯 The Jellyfin Direct Play philosophy
 
-### 4. Fail-Closed Concurrency Locks
-All tools coordinate via `common.CoordinationLock`. The lock uses a SHA-256 hash of the normalized target directory in the OS temp directory (`msvcrt` on Windows, `fcntl` on Linux). If a lock cannot be acquired within the timeout, the script safely halts rather than racing another process.
+Why do media servers transcode in the first place?
 
-### 5. Atomic File Staging
-All reports, manifests, subtitle downloads, and remuxed MKVs are written to unique sibling temporary files and swapped using `os.replace`. A crash or power outage mid-write never leaves a truncated or half-written movie.
+1. **The subtitle transcode trap** — bitmap subtitles (PGS, VobSub) and complex
+   ASS styles can't be rendered by browsers, sticks, and smart TVs, so Jellyfin
+   burns them into the video in real time: 80–100% CPU/GPU. *The fix:* a plain
+   external UTF-8 `.en.srt` is rendered by the client natively — **0% server cost**.
+2. **Audio track bloat** — commentary, descriptive audio, and redundant 7.1
+   dubs freeze weak client decoders. *The fix:* one best English track, losslessly kept.
+3. **8-bit banding vs. 10-bit color** — 8-bit SDR posterizes shadows and skies.
+   *The fix:* queue it for a 10-bit HEVC/AV1 re-encode — while never
+   tone-mapping native HDR by mistake.
+
+Full technical breakdown: [docs/JELLYFIN_DIRECT_PLAY.md](docs/JELLYFIN_DIRECT_PLAY.md).
 
 ---
 
-## 📦 Cross-Platform Support
+## 💻 The unified CLI
 
-### Windows 10/11
-Use the built-in PowerShell or Batch launchers:
-```powershell
-.\organize.ps1 doctor
-.\organize.ps1 run --dry-run
-.\organize.ps1 run
-```
-See the [Windows Deployment Guide](docs/WINDOWS_GUIDE.md) for automated Task Scheduler configuration.
-
-### Linux & macOS
-Use the POSIX shell wrapper:
 ```bash
-./organize.sh doctor
-./organize.sh run --nice
+python organize.py <command> [options]     # Windows: py organize.py <command>
 ```
-See the [Linux & Docker Guide](docs/LINUX_DOCKER_GUIDE.md) for systemd timers and cron setup.
 
-### Docker & Docker Compose
-A production-ready `Dockerfile` with `ffmpeg` and `mkvtoolnix` pre-installed is included:
+| Command | Alias | What it does |
+| :--- | :--- | :--- |
+| `doctor` | `check` | Verifies Python, `mkvmerge`, `ffprobe`, API key, paths, and hardlink compatibility — with per-check fixes |
+| `run` | `pipeline` | Runs the maintenance pipeline in the correct, moviehash-safe order |
+| `standardize` | `std` | Rename & hardlink completed torrents into `Title (Year)/Title (Year).mkv` |
+| `subtitles` | `subs` | Fetch validated English UTF-8 SRT sidecars from OpenSubtitles |
+| `clean` | `remux` | Lossless remux: keep one best English audio, strip commentary/DVS/bloat |
+| `10bit` | `probe` | ffprobe 8-bit vs 10-bit & native-HDR compliance sweep |
+| `audit` | — | Read-only health check of layout, naming, and subtitle sidecars |
+| `test` | `tests` | Run all self-tests (add `--unit` for the 208-test unit suite) |
+
+Launchers wrap it for every platform — `organize.sh` (bash), `organize.ps1`
+(PowerShell), `organize.bat` (cmd) — and each underlying script still runs
+standalone with the exact same flags. Complete flag/defaults/env reference:
+[docs/CONFIGURATION_REFERENCE.md](docs/CONFIGURATION_REFERENCE.md).
+
+---
+
+## 🔒 Core safety invariants
+
+Non-negotiable rules every tool obeys — see
+[docs/ARCHITECTURE_SAFETY.md](docs/ARCHITECTURE_SAFETY.md) for the full design
+analysis.
+
+1. **Hardlink-only ingestion** — `movie_standardizer.py` calls `os.link()`
+   exclusively. No copy, no move, no symlink, no cross-device fallback. Your
+   seeds keep seeding on the same bytes.
+2. **Subtitles before remuxing** — a remux permanently rewrites the
+   OpenSubtitles moviehash. `pipeline.py` and the docs enforce the order; the
+   cleaner warns per-file when it must remux without a sidecar.
+3. **Seeding movies are inviolable** — link count > 1 means *deferred,
+   unconditionally*. No override flag exists.
+4. **Fail-closed concurrency** — all tools coordinate through advisory locks
+   keyed by a SHA-256 of the normalized library path. Lock contention halts a
+   tool; it never races.
+5. **Atomic staging everywhere** — reports, manifests, subtitles, probe caches,
+   and remuxed MKVs are written to unique sibling temporaries and swapped with
+   `os.replace`. A crash or power cut never leaves a half-written movie.
+6. **Unique data is never deleted** — declines are reported, duplicates default
+   to `REPORT` mode, and destructive maintenance modes (`QUARANTINE`, `DELETE`)
+   are strictly opt-in.
+
+---
+
+## 📦 Cross-platform support
+
+| Platform | Launcher | Guide |
+| :--- | :--- | :--- |
+| **Windows 10/11** | `organize.ps1` / `organize.bat` | [Windows guide](docs/WINDOWS_GUIDE.md) — Task Scheduler setup included |
+| **Linux** | `organize.sh` | [Linux & Docker guide](docs/LINUX_DOCKER_GUIDE.md) — cron, systemd timers, Unraid, TrueNAS |
+| **macOS** | `organize.sh` | Homebrew `python@3.11`, `mkvtoolnix`, `ffmpeg` |
+| **Docker / Compose** | `docker compose run --rm organize <command>` | [Linux & Docker guide](docs/LINUX_DOCKER_GUIDE.md) |
+
 ```bash
-# Build and run diagnostics
+# Docker: FFmpeg + MKVToolNix baked in, hardlink-safe volume layout
 docker compose run --rm organize doctor
-
-# Run nightly maintenance
 docker compose run --rm organize run --nice
 ```
 
 ---
 
-## 🧪 Testing & Verification
+## 🧪 Testing & verification
 
-The test suite runs **100% offline** without media files, external binaries, or an OpenSubtitles API key:
+The suite runs **100% offline** — no media files, no external binaries, no API
+key, no network:
 
 ```bash
-# Run all self-tests + the 205-test unit suite
-bash run_tests.sh
-
-# Or run via Python unittest
+bash run_tests.sh                      # self-tests + 208 unit tests
 python3 -m unittest discover -s tests -p 'test_*.py'
-
-# Or via organize CLI
-python3 organize.py test --unit
+python3 organize.py test --unit        # same thing through the unified CLI
 ```
 
+CI runs the full matrix on every push: **Python 3.11 / 3.12 / 3.13 ×
+Ubuntu / Windows / macOS** — see
+[the workflow](.github/workflows/ci.yml).
+
 ---
 
-## 📚 Documentation Index
+## 📚 Documentation
 
-| Guide | Description |
+| Guide | What's inside |
 | :--- | :--- |
-| **[Windows Guide](docs/WINDOWS_GUIDE.md)** | Step-by-step setup for Windows 11, PowerShell, and Task Scheduler |
-| **[Linux & Docker Guide](docs/LINUX_DOCKER_GUIDE.md)** | Comprehensive guide for Ubuntu/Debian, Docker, Unraid, and TrueNAS |
-| **[Jellyfin Direct Play Guide](docs/JELLYFIN_DIRECT_PLAY.md)** | Technical breakdown of subtitle burn-in, audio bloat, and 10-bit color |
-| **[Architecture & Safety](docs/ARCHITECTURE_SAFETY.md)** | In-depth analysis of advisory locks, atomic writes, and journals |
-| **[Configuration Reference](docs/CONFIGURATION_REFERENCE.md)** | Full cheat sheet of CLI flags, defaults, and environment variables |
-| **[FAQ & Troubleshooting](docs/FAQ_TROUBLESHOOTING.md)** | Solutions for seeding deferrals, invalid SRTs, and quota limits |
+| **[Windows Guide](docs/WINDOWS_GUIDE.md)** | Windows 11 setup: prerequisites, qBittorrent, Task Scheduler automation |
+| **[Linux & Docker Guide](docs/LINUX_DOCKER_GUIDE.md)** | Debian/Ubuntu/Arch/Fedora, cron & systemd, Docker Compose, Unraid, TrueNAS |
+| **[Jellyfin Direct Play Guide](docs/JELLYFIN_DIRECT_PLAY.md)** | The engineering behind subtitle burn-in, audio bloat, and 10-bit color |
+| **[Architecture & Safety](docs/ARCHITECTURE_SAFETY.md)** | Advisory locks, atomic writes, transaction journals, crash recovery |
+| **[Configuration Reference](docs/CONFIGURATION_REFERENCE.md)** | Every flag, default, environment variable, and exit code |
+| **[FAQ & Troubleshooting](docs/FAQ_TROUBLESHOOTING.md)** | Seeding deferrals, invalid SRTs, quota limits, disk-space refusals |
+
+<details>
+<summary><b>❤ Three questions everyone asks</b></summary>
+
+**Why does the cleaner list every movie as `DEFERRED (STILL HARDLINKED)`?**
+qBittorrent's default seed-limit action only *pauses* the torrent, so the source
+file (and its extra link) never goes away. Set Seeding Limits → **Remove torrent
+and its content** — deleting the source is safe because the library copy is a
+hardlink to the same bytes.
+
+**Why are movies under 300 MB skipped?**
+The standardizer and fetcher default to a 300 MB floor to ignore samples and
+junk. Lower it with `--min-size` if you keep small rips.
+
+**Can it manage TV shows?**
+No — and on purpose. TV-name detection exists purely to *exclude* TV content
+from your movie library. For TV, use Sonarr; Organize is movies-first by design.
+</details>
 
 ---
+
+## 🤝 Contributing
+
+Contributions are welcome — with the invariants respected. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) first (the six architectural invariants are
+non-negotiable), report vulnerabilities via
+[SECURITY.md](SECURITY.md), and check the
+[configuration reference](docs/CONFIGURATION_REFERENCE.md) before proposing new
+flags. Every PR must keep `bash run_tests.sh` fully green offline.
 
 ## 📄 License
 
-Released under the [MIT License](LICENSE). Made with precision for media server enthusiasts.
+Released under the [MIT License](LICENSE). Made with care for media-server
+enthusiasts who believe a library should be *perfect* — and provably so.

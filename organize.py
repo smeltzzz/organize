@@ -43,7 +43,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 
 # ANSI styling helpers (with safe fallbacks)
 _SUPPORTS_COLOR = (
@@ -325,7 +325,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             status="warn",
             message=f"Path not found: {lib_path}",
             detail="This is the target folder where organized movies will be placed",
-            remedy=f"Create directory or set MOVIE_STD_TARGET / pass --source: mkdir {lib_path}",
+            remedy=f"Create it, set MOVIE_STD_TARGET, or pass --target: mkdir {lib_path}",
         ))
 
     # Source directory check
@@ -341,7 +341,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             status="warn",
             message=f"Path not found: {src_path}",
             detail="This is where qBittorrent saves completed downloads",
-            remedy=f"Create directory or configure qBittorrent default save path: {src_path}",
+            remedy=f"Create it, set MOVIE_STD_SOURCE, or pass --source: mkdir {src_path}",
         ))
 
     # Hardlink filesystem compatibility check (crucial invariant)

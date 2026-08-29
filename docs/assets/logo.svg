@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Organize logo">
+  <defs>
+    <linearGradient id="ogCase" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00A4DC"/>
+      <stop offset="1" stop-color="#AA5CC3"/>
+    </linearGradient>
+    <linearGradient id="ogCase2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2DD4BF"/>
+      <stop offset="1" stop-color="#00A4DC"/>
+    </linearGradient>
+    <radialGradient id="ogGlow" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0" stop-color="#123047" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#0B1220" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ogBadge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#131C2E"/>
+      <stop offset="1" stop-color="#0B1220"/>
+    </linearGradient>
+  </defs>
+
+  <!-- badge -->
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#ogBadge)"/>
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#ogGlow)"/>
+  <rect x="19" y="19" width="474" height="474" rx="113" fill="none" stroke="#2A3B52" stroke-width="2"/>
+
+  <!-- back movie case -->
+  <rect x="128" y="118" width="268" height="196" rx="26" fill="none" stroke="#7C5CC3" stroke-width="14" opacity="0.38"/>
+  <!-- middle movie case -->
+  <rect x="116" y="146" width="268" height="196" rx="26" fill="none" stroke="#00A4DC" stroke-width="14" opacity="0.62"/>
+
+  <!-- front movie case -->
+  <rect x="104" y="176" width="272" height="200" rx="28" fill="#101A2C"/>
+  <rect x="104" y="176" width="272" height="200" rx="28" fill="none" stroke="url(#ogCase)" stroke-width="16"/>
+  <!-- play triangle -->
+  <path d="M 221 231 L 221 321 C 221 328 229 332 234 328 L 300 283 C 305 279 305 273 300 269 L 234 224 C 229 220 221 224 221 231 Z" fill="url(#ogCase2)"/>
+
+  <!-- tidy stack baseline -->
+  <rect x="150" y="404" width="212" height="14" rx="7" fill="url(#ogCase)" opacity="0.85"/>
+  <rect x="186" y="428" width="140" height="12" rx="6" fill="#00A4DC" opacity="0.45"/>
+</svg>
