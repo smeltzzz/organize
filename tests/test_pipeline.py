@@ -60,11 +60,11 @@ class LibraryResolutionTests(unittest.TestCase):
 
     def test_env_var_is_honored_without_a_flag(self) -> None:
         os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
-        self.assertEqual(pl.resolve_library(None), Path("/media/torrents/final_organized"))
+        self.assertEqual(pl.resolve_library(None), Path("/media/torrents/final_organized").resolve())
 
     def test_explicit_flag_beats_env_var(self) -> None:
         os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
-        self.assertEqual(pl.resolve_library(Path("/srv/movies")), Path("/srv/movies"))
+        self.assertEqual(pl.resolve_library(Path("/srv/movies")), Path("/srv/movies").resolve())
 
 
 class CommandBuildingTests(unittest.TestCase):
