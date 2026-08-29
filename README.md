@@ -35,7 +35,7 @@ CLI that ingest completed torrent downloads and maintain a canonical
 ```
 Title (Year)/
 ├── Title (Year).mkv        ← one losslessly-cleaned MKV per movie
-└── Title (Year).en.srt     ← one validated, exact-match English subtitle
+└── Title (Year).eng.srt     ← one validated, exact-match English subtitle
 ```
 
 Unlike bloated container stacks with hundred-megabyte images, SQLite lockups,
@@ -46,7 +46,7 @@ and fragile web UIs, Organize is **100% standard-library Python 3.11+**:
 | 🫧 **Zero pip installs** | The whole toolkit *is* the checkout. No venv, no Docker required. |
 | 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
 | 💬 **Exact-match subtitles** | OpenSubtitles moviehash matching while container bytes are still pristine, plus a conservative title/year fallback. |
-| ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track and drops commentary, dubs, and embedded bitmap subtitles — video untouched. |
+| ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track (or best non-commentary audio on foreign films with a validated `.eng.srt`) and drops commentary, dubs, and embedded bitmap subtitles — video untouched. |
 | 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
 | 🛡 **Safety invariants** | Advisory locks, atomic staging, transaction journals, and crash recovery — engineered so a power cut can never corrupt your library. |
@@ -128,11 +128,11 @@ search. `pipeline.py` exists so you cannot get this wrong.
 └───────────┬───────────┘
             ▼
 ┌───────────────────────┐   exact OSHash match (moviehash_match=only),
-│ 2 · subtitles         │   conservative title/year fallback, UTF-8 .en.srt
+│ 2 · subtitles         │   conservative title/year fallback, UTF-8 .eng.srt
 └───────────┬───────────┘
             ▼
-┌───────────────────────┐   lossless mkvmerge remux: 1 best English audio,
-│ 3 · clean             │   drop commentary/DVS/dubs/embedded subs (post-SRT)
+┌───────────────────────┐   lossless mkvmerge remux: 1 best English audio
+│ 3 · clean             │   (or best non-commentary audio + .eng.srt on foreign films)
 └───────────┬───────────┘
             ▼
 ┌───────────────────────┐   ffprobe sweep: QUEUE 8-bit SDR, KEEP native HDR,
@@ -160,7 +160,7 @@ printed) when its prerequisite is missing.
 | :--- | :--- | :--- | :--- |
 | **[`movie_standardizer.py`](movie_standardizer.py)** | qBittorrent hook: parses scene/release names into canonical `Title (Year)`, hardlinks into the library (zero duplicate space), skips TV, discs, multipart splits, non-MKV. Existing movies are only replaced after an ffprobe-verified same-cut *technical upgrade* — never on size alone. | *Nothing* (ffprobe optional, for upgrade checks) | `movie_standardizer.log` · `movie_standardizer_report.txt` |
 | **[`subtitle_fetcher.py`](subtitle_fetcher.py)** | Fetches one validated human-authored English UTF-8 SRT per movie. Exact OpenSubtitles **moviehash** first (`moviehash_match=only` — byte-identical release match), then a strict title/year fallback that holds low-confidence candidates for review. Append-only quota ledger prevents wasted API requests. | `OPENSUBTITLES_API_KEY` | `subtitle_fetcher.log` (also the quota ledger) · `subtitle_fetcher_report.txt` |
-| **[`mkv_track_cleaner.py`](mkv_track_cleaner.py)** | Lossless `mkvmerge` remux: keeps the single highest-quality English audio track, purges commentary / descriptive-audio / foreign dubs, strips embedded subtitles once a validated `.en.srt` exists. Transaction-journaled, fingerprint-verified, atomic. | `mkvmerge` *(MKVToolNix)* | `mkv_track_cleaner.log` · `mkv_track_cleaner_report.txt` · probe cache |
+| **[`mkv_track_cleaner.py`](mkv_track_cleaner.py)** | Lossless `mkvmerge` remux: keeps the single highest-quality English audio track (or the best non-commentary audio on foreign films that already have a validated `.eng.srt`), purges commentary / descriptive-audio / extra dubs, strips embedded subtitles once that sidecar exists. Transaction-journaled, fingerprint-verified, atomic. | `mkvmerge` *(MKVToolNix)* | `mkv_track_cleaner.log` · `mkv_track_cleaner_report.txt` · probe cache |
 | **[`10bit.py`](10bit.py)** | ffprobe inspection that classifies every movie: **QUEUE** (8-bit SDR → re-encode to 10-bit HEVC/AV1), **SKIP** (already high bit-depth), **KEEP** (native HDR — protected from tone-mapping), **REVIEW** (ambiguous — never auto-queued). Probe cache makes re-sweeps near-instant. | `ffprobe` *(FFmpeg)* | `10bit.log` · `10bit_report.txt` · probe cache |
 | **[`library_auditor.py`](library_auditor.py)** | 100% read-only health check: canonical folder/MKV structure, sidecar syntax validation (catches empty, truncated, and HTML-error-page SRTs), remux-aware (no false alarms mid-cleanup). `--fail-on-defects` / `--fail-on-findings` gate scheduled tasks. | *Nothing* (stdlib only) | `library_auditor.log` · `library_auditor_report.txt` |
 
@@ -233,7 +233,7 @@ python organize.py 10bit --fail-if-queue    # exit 3 if 8-bit SDR awaits encodin
 <summary><b>🔍 Deep dive · <code>library_auditor.py</code> — read-only health check &amp; gates</b></summary>
 
 - **Structure** — every top-level folder must hold exactly one canonical MKV whose stem matches the folder name; extra containers, stem mismatches, and missing movies are defects.
-- **Sidecar integrity** — `.en.srt` files are content-validated: empty files, truncated downloads, and provider error pages (HTML 429s) are flagged as `INVALID_SIDECAR` with a fix hint. A missing sidecar is only a *finding* — a freshly standardized movie legitimately has none yet.
+- **Sidecar integrity** — `.eng.srt` files are content-validated: empty files, truncated downloads, and provider error pages (HTML 429s) are flagged as `INVALID_SIDECAR` with a fix hint. A missing sidecar is only a *finding* — a freshly standardized movie legitimately has none yet.
 - **Remux awareness** — in-flight cleaner staging files (`temp_clean_*`) are ignored, so an audit mid-maintenance never raises false alarms.
 - **Scheduler gates** — `--fail-on-defects` exits 1 on layout defects; `--fail-on-findings` also fails on missing subtitles. Default stays 0 so report-only automation keeps working.
 
@@ -272,7 +272,7 @@ Why do media servers transcode in the first place?
 1. **The subtitle transcode trap** — bitmap subtitles (PGS, VobSub) and complex
    ASS styles can't be rendered by browsers, sticks, and smart TVs, so Jellyfin
    burns them into the video in real time: 80–100% CPU/GPU. *The fix:* a plain
-   external UTF-8 `.en.srt` is rendered by the client natively — **0% server cost**.
+   external UTF-8 `.eng.srt` is rendered by the client natively — **0% server cost**.
 2. **Audio track bloat** — commentary, descriptive audio, and redundant 7.1
    dubs freeze weak client decoders. *The fix:* one best English track, losslessly kept.
 3. **8-bit banding vs. 10-bit color** — 8-bit SDR posterizes shadows and skies.
@@ -295,7 +295,7 @@ python organize.py <command> [options]     # Windows: py organize.py <command>
 | `run` | `pipeline` | Runs the maintenance pipeline in the correct, moviehash-safe order |
 | `standardize` | `std` | Rename & hardlink completed torrents into `Title (Year)/Title (Year).mkv` |
 | `subtitles` | `subs` | Fetch validated English UTF-8 SRT sidecars from OpenSubtitles |
-| `clean` | `remux` | Lossless remux: keep one best English audio, strip commentary/DVS/bloat |
+| `clean` | `remux` | Lossless remux: keep one best English audio (or best non-commentary audio on foreign films with `.eng.srt`), strip embeds/bloat |
 | `10bit` | `probe` | ffprobe 8-bit vs 10-bit & native-HDR compliance sweep |
 | `audit` | — | Read-only health check of layout, naming, and subtitle sidecars |
 | `test` | `tests` | Run all self-tests (add `--unit` for the 208-test unit suite) |

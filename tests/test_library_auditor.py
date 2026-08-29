@@ -28,7 +28,7 @@ class FolderClassificationTests(unittest.TestCase):
 
     def test_canonical_mkv(self) -> None:
         folder = self._movie("Film (2000)")
-        (folder / "Film (2000).en.srt").write_text(VALID_SRT, encoding="utf-8")
+        (folder / "Film (2000).eng.srt").write_text(VALID_SRT, encoding="utf-8")
         result = la.classify_folder(folder)
         self.assertEqual(result.state, "CANONICAL_MKV")
 
@@ -55,8 +55,18 @@ class FolderClassificationTests(unittest.TestCase):
 
     def test_noncanonical_sidecar(self) -> None:
         folder = self._movie("Sidecar (2004)")
-        (folder / "Sidecar (2004).eng.srt").write_text(VALID_SRT, encoding="utf-8")
+        # A flagged/forced English SRT is not the plain canonical .eng.srt.
+        (folder / "Sidecar (2004).eng.forced.srt").write_text(VALID_SRT, encoding="utf-8")
         self.assertEqual(la.classify_folder(folder).state, "NONCANONICAL_SIDECAR")
+
+    def test_legacy_en_srt_is_promoted(self) -> None:
+        """A validated pre-cutover ``.en.srt`` is renamed to ``.eng.srt``."""
+        folder = self._movie("Legacy En (2008)")
+        (folder / "Legacy En (2008).en.srt").write_text(VALID_SRT, encoding="utf-8")
+        result = la.classify_folder(folder)
+        self.assertEqual(result.state, "CANONICAL_MKV")
+        self.assertTrue((folder / "Legacy En (2008).eng.srt").is_file())
+        self.assertFalse((folder / "Legacy En (2008).en.srt").exists())
 
     def test_missing_sidecar(self) -> None:
         """A canonical MKV with no English SRT is its own actionable state."""
@@ -68,7 +78,7 @@ class FolderClassificationTests(unittest.TestCase):
     def test_missing_sidecar_is_not_canonical(self) -> None:
         without = la.classify_folder(self._movie("Bare (2006)"))
         with_srt = self._movie("Covered (2007)")
-        (with_srt / "Covered (2007).en.srt").write_text(VALID_SRT, encoding="utf-8")
+        (with_srt / "Covered (2007).eng.srt").write_text(VALID_SRT, encoding="utf-8")
         self.assertNotEqual(without.state, "CANONICAL_MKV")
         self.assertEqual(la.classify_folder(with_srt).state, "CANONICAL_MKV")
 
@@ -91,7 +101,7 @@ class InvalidSidecarTests(unittest.TestCase):
         folder = self.root / name
         folder.mkdir()
         (folder / f"{name}.mkv").write_bytes(b"x")
-        (folder / f"{name}.en.srt").write_text(body, encoding="utf-8")
+        (folder / f"{name}.eng.srt").write_text(body, encoding="utf-8")
         return folder
 
     def _state(self, name: str, body: str) -> str:
@@ -140,7 +150,7 @@ class UnusableSidecarReportTests(unittest.TestCase):
         folder.mkdir()
         (folder / f"{name}.mkv").write_bytes(b"x")
         if srt_body is not None:
-            (folder / f"{name}.en.srt").write_text(srt_body, encoding="utf-8")
+            (folder / f"{name}.eng.srt").write_text(srt_body, encoding="utf-8")
         return folder
 
     def test_report_lists_missing_and_invalid_together(self) -> None:
@@ -177,7 +187,7 @@ class InFlightRemuxTests(unittest.TestCase):
 
     def test_staging_file_is_not_counted_as_a_second_feature(self) -> None:
         folder = self._movie("Film (2000)")
-        (folder / "Film (2000).en.srt").write_text(VALID_SRT, encoding="utf-8")
+        (folder / "Film (2000).eng.srt").write_text(VALID_SRT, encoding="utf-8")
         (folder / "temp_clean_deadbeef__Film (2000).mkv").write_bytes(b"y")
         self.assertEqual(la.classify_folder(folder).state, "CANONICAL_MKV")
 
@@ -194,7 +204,7 @@ class InFlightRemuxTests(unittest.TestCase):
 
     def test_transaction_journal_is_ignored(self) -> None:
         folder = self._movie("Three (2003)")
-        (folder / "Three (2003).en.srt").write_text(VALID_SRT, encoding="utf-8")
+        (folder / "Three (2003).eng.srt").write_text(VALID_SRT, encoding="utf-8")
         (folder / ".track_cleaner.deadbeef.json").write_text("{}", encoding="utf-8")
         self.assertEqual(la.classify_folder(folder).state, "CANONICAL_MKV")
 
@@ -204,7 +214,7 @@ class InFlightRemuxTests(unittest.TestCase):
         folder = self.root / "Temp Clean (2004)"
         folder.mkdir()
         (folder / "Temp Clean (2004).mkv").write_bytes(b"x")
-        (folder / "Temp Clean (2004).en.srt").write_text(VALID_SRT, encoding="utf-8")
+        (folder / "Temp Clean (2004).eng.srt").write_text(VALID_SRT, encoding="utf-8")
         self.assertEqual(la.classify_folder(folder).state, "CANONICAL_MKV")
 
 

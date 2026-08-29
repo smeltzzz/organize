@@ -17,16 +17,20 @@ import common
 from common import (
     EXTERNAL_SRT_ENCODINGS,
     EXTERNAL_SRT_MAX_BYTES,
+    EXTERNAL_SRT_SUFFIX,
+    LEGACY_EXTERNAL_SRT_SUFFIX,
     CoordinationLock,
     LockTimeoutError,
     MediaProbeCache,
     STANDARDIZER_LOCK_NAME,
     atomic_write_text,
     decode_srt_bytes,
+    exact_external_english_srt_path,
     normalize_srt_newlines,
     path_is_within,
     path_norm,
     paths_equal,
+    promote_legacy_external_english_srt,
     srt_looks_valid,
     validate_srt_sidecar,
 )
@@ -389,6 +393,58 @@ class SingleSourceContractTests(unittest.TestCase):
         # cp1252 bytes must decode identically everywhere.
         raw = b"it\x92s fine"
         self.assertEqual(decode_srt_bytes(raw), sf.decode_subtitle_bytes(raw))
+
+
+
+
+class PromoteLegacySidecarTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="common_promote_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def test_exact_path_uses_eng_suffix(self) -> None:
+        mkv = self.root / "Film (2000).mkv"
+        self.assertEqual(
+            exact_external_english_srt_path(mkv).name,
+            f"Film (2000){EXTERNAL_SRT_SUFFIX}",
+        )
+        self.assertTrue(EXTERNAL_SRT_SUFFIX.endswith(".srt"))
+        self.assertEqual(EXTERNAL_SRT_SUFFIX, ".eng.srt")
+        self.assertEqual(LEGACY_EXTERNAL_SRT_SUFFIX, ".en.srt")
+
+    def test_promote_renames_validated_legacy(self) -> None:
+        mkv = self.root / "Film (2000).mkv"
+        mkv.write_bytes(b"x")
+        legacy = self.root / f"Film (2000){LEGACY_EXTERNAL_SRT_SUFFIX}"
+        legacy.write_text("1\n00:00:00,000 --> 00:00:01,000\nHi\n", encoding="utf-8")
+        path, reason = promote_legacy_external_english_srt(mkv)
+        self.assertEqual(reason, "")
+        self.assertIsNotNone(path)
+        self.assertTrue(path.is_file())
+        self.assertEqual(path.name, f"Film (2000){EXTERNAL_SRT_SUFFIX}")
+        self.assertFalse(legacy.exists())
+
+    def test_promote_is_noop_when_canonical_exists(self) -> None:
+        mkv = self.root / "Film (2001).mkv"
+        mkv.write_bytes(b"x")
+        canonical = self.root / f"Film (2001){EXTERNAL_SRT_SUFFIX}"
+        canonical.write_text("1\n00:00:00,000 --> 00:00:01,000\nHi\n", encoding="utf-8")
+        path, reason = promote_legacy_external_english_srt(mkv)
+        self.assertEqual(reason, "")
+        self.assertEqual(path, canonical)
+
+    def test_promote_refuses_when_both_names_exist(self) -> None:
+        mkv = self.root / "Film (2002).mkv"
+        mkv.write_bytes(b"x")
+        body = "1\n00:00:00,000 --> 00:00:01,000\nHi\n"
+        (self.root / f"Film (2002){EXTERNAL_SRT_SUFFIX}").write_text(body, encoding="utf-8")
+        (self.root / f"Film (2002){LEGACY_EXTERNAL_SRT_SUFFIX}").write_text(body, encoding="utf-8")
+        path, reason = promote_legacy_external_english_srt(mkv)
+        # Canonical already present -> success path returns it without touching legacy.
+        self.assertEqual(path.name, f"Film (2002){EXTERNAL_SRT_SUFFIX}")
+        self.assertEqual(reason, "")
+        self.assertTrue((self.root / f"Film (2002){LEGACY_EXTERNAL_SRT_SUFFIX}").exists())
 
 
 if __name__ == "__main__":

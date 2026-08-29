@@ -41,10 +41,17 @@ STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
 # The cue pattern is the tolerant form: leading whitespace before the cue
 # number is accepted, because some muxers and editors indent it.  This is a
 # "does it look like a subtitle at all" test, not a full SRT parser.
+#
+# Canonical language tag is ISO 639-2/B ``eng`` (``.eng.srt``).  The older
+# ISO 639-1 ``.en.srt`` form is recognized only as a legacy rename source so a
+# library cut over from the previous convention is not stuck in review.
 EXTERNAL_SRT_MAX_BYTES = 4 * 1024 * 1024
 EXTERNAL_SRT_CUE_RE = re.compile(
     r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
 )
+EXTERNAL_SRT_LANG = "eng"
+EXTERNAL_SRT_SUFFIX = f".{EXTERNAL_SRT_LANG}.srt"  # ".eng.srt"
+LEGACY_EXTERNAL_SRT_SUFFIX = ".en.srt"
 
 # The single agreed decode order. Every tool that turns subtitle bytes into
 # text uses this tuple and nothing else, so a tool cannot quietly accept an
@@ -66,10 +73,16 @@ __all__ = [
     "EXTERNAL_SRT_MAX_BYTES",
     "EXTERNAL_SRT_CUE_RE",
     "EXTERNAL_SRT_ENCODINGS",
+    "EXTERNAL_SRT_LANG",
+    "EXTERNAL_SRT_SUFFIX",
+    "LEGACY_EXTERNAL_SRT_SUFFIX",
     "decode_srt_bytes",
     "normalize_srt_newlines",
     "srt_looks_valid",
     "validate_srt_sidecar",
+    "exact_external_english_srt_path",
+    "legacy_external_english_srt_path",
+    "promote_legacy_external_english_srt",
 ]
 
 
@@ -132,6 +145,50 @@ def validate_srt_sidecar(path: Path) -> tuple[bool, str]:
     if not srt_looks_valid(normalize_srt_newlines(text)):
         return False, "subtitle contains no valid SRT cue"
     return True, ""
+
+
+def exact_external_english_srt_path(media_path: Path) -> Path:
+    """Return the canonical ``<stem>.eng.srt`` path beside a movie file."""
+    return media_path.with_name(f"{media_path.stem}{EXTERNAL_SRT_SUFFIX}")
+
+
+def legacy_external_english_srt_path(media_path: Path) -> Path:
+    """Return the pre-cutover ``<stem>.en.srt`` path beside a movie file."""
+    return media_path.with_name(f"{media_path.stem}{LEGACY_EXTERNAL_SRT_SUFFIX}")
+
+
+def promote_legacy_external_english_srt(media_path: Path) -> tuple[Path | None, str]:
+    """Rename a validated legacy ``.en.srt`` to the canonical ``.eng.srt``.
+
+    Returns ``(canonical_path, "")`` when the canonical sidecar already exists
+    or was just created by renaming the legacy file.  Returns ``(None, reason)``
+    when there is nothing to promote or the rename is unsafe (e.g. both names
+    exist, legacy is invalid, or the destination is occupied by a non-file).
+
+    Never overwrites an existing ``.eng.srt``.  Never follows symlinks.
+    """
+    canonical = exact_external_english_srt_path(media_path)
+    legacy = legacy_external_english_srt_path(media_path)
+    try:
+        if canonical.exists() and not canonical.is_symlink() and canonical.is_file():
+            return canonical, ""
+        if canonical.exists() or canonical.is_symlink():
+            return None, f"canonical sidecar path is occupied: {canonical.name}"
+    except OSError as exc:
+        return None, f"could not inspect canonical sidecar: {exc}"
+    try:
+        if not legacy.exists() or legacy.is_symlink() or not legacy.is_file():
+            return None, "legacy .en.srt is absent"
+    except OSError as exc:
+        return None, f"could not inspect legacy sidecar: {exc}"
+    ok, reason = validate_srt_sidecar(legacy)
+    if not ok:
+        return None, f"legacy .en.srt is unusable ({reason})"
+    try:
+        os.replace(str(legacy), str(canonical))
+    except OSError as exc:
+        return None, f"could not rename legacy .en.srt to .eng.srt: {exc}"
+    return canonical, ""
 
 
 class LockTimeoutError(TimeoutError):

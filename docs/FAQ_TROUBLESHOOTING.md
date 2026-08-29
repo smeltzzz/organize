@@ -36,9 +36,9 @@ When `movie_standardizer.py` ingests a movie from qBittorrent, it creates a hard
 4. **Daily quota reached**: In free development mode, OpenSubtitles limits downloads to 100 requests per UTC day. Unprocessed movies are deferred to the next UTC day.
 
 ### Q: How do I fix an `INVALID_SIDECAR` finding from `library_auditor.py`?
-**A:** An `INVALID_SIDECAR` finding means a `.en.srt` file exists next to the movie, but it is empty, corrupt, truncated, or contains provider error text (such as an HTML 429 page).
+**A:** An `INVALID_SIDECAR` finding means a `.eng.srt` file exists next to the movie, but it is empty, corrupt, truncated, or contains provider error text (such as an HTML 429 page).
 Because no tool will overwrite an existing sidecar, this dead end blocks downstream steps.
-- **Fix:** Simply delete the corrupted `.en.srt` file and re-run:
+- **Fix:** Simply delete the corrupted `.eng.srt` file and re-run:
   ```bash
   python organize.py subtitles
   ```

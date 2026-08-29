@@ -33,7 +33,7 @@ v2.1 safety/correctness pass
 - ``--dry-run`` never creates the target directory.
 - Roman-numeral casing no longer mangles "Mix"/"Li"-style words ("MIX").
 - Subtitle suffix stripping is generated from the language/flag tables;
-  output stays `Title.en.forced.srt` order (Plex & Jellyfin compatible).
+  output stays `Title.eng.forced.srt` order (Plex & Jellyfin compatible).
 - Added ``--version``; dead code removed; stricter lint-clean.
 
 v2.7 hardlink-only canonical output
@@ -102,7 +102,9 @@ from stat import S_ISREG
 
 from common import (
     EXTERNAL_SRT_CUE_RE,
+    EXTERNAL_SRT_LANG,
     EXTERNAL_SRT_MAX_BYTES,
+    EXTERNAL_SRT_SUFFIX,
     CoordinationLock,
     LockTimeoutError,
     atomic_write_text,
@@ -1204,7 +1206,11 @@ def parse_movie_name(name: str) -> ParsedName:
 
 @lru_cache(maxsize=4096)
 def subtitle_suffix(filename: str) -> str:
-    """Return ``.en.sdh.srt``-style suffix (ISO 639-1 + flags + original ext)."""
+    """Return ``.eng.sdh.srt``-style suffix (ISO 639-2/B + flags + original ext).
+
+    English language tokens (``en`` / ``eng`` / ``english``) always collapse to
+    the canonical library tag ``eng`` so every tool emits ``.eng.srt``.
+    """
     base, ext = os.path.splitext(filename)
     tokens = [t for t in re.split(r"[\.\-\s_]+", base.lower()) if t]
     langs: list[str] = []
@@ -1226,7 +1232,8 @@ def subtitle_suffix(filename: str) -> str:
             continue
         iso = _LANG_NAME_TO_ISO1.get(token)
         if iso:
-            langs.append(iso)
+            # Canonical English tag is ISO 639-2/B ``eng`` (``.eng.srt``).
+            langs.append(EXTERNAL_SRT_LANG if iso == "en" else iso)
     # de-dupe, preserve order
     def unique(seq: list[str]) -> list[str]:
         seen: set[str] = set()
@@ -1246,11 +1253,16 @@ def subtitle_suffix(filename: str) -> str:
 def is_english_subtitle(path: Path) -> bool:
     """Return true only when the sidecar carries an English language suffix."""
     suffix_fields = {field.casefold() for field in subtitle_suffix(path.name).split(".") if field}
-    return "en" in suffix_fields
+    return EXTERNAL_SRT_LANG in suffix_fields or "en" in suffix_fields
 
 
 def is_valid_plain_english_srt(path: Path) -> tuple[bool, str]:
-    """Admit only one direct-play-safe normal English SRT into the library."""
+    """Admit only one direct-play-safe normal English SRT into the library.
+
+    Accepts either the canonical ``.eng.srt`` name or the legacy ``.en.srt``
+    form so a release that still ships the old suffix can be hardlinked and
+    then renamed to the canonical name by the fetcher/cleaner promote step.
+    """
     if path.suffix.lower() != ".srt":
         return False, "not an SRT"
     try:
@@ -1262,7 +1274,9 @@ def is_valid_plain_english_srt(path: Path) -> tuple[bool, str]:
     if st.st_size <= 0 or st.st_size > EXTERNAL_SRT_MAX_BYTES:
         return False, "subtitle size is unsafe"
     suffix_fields = [field.casefold() for field in subtitle_suffix(path.name).split(".") if field]
-    if suffix_fields != ["en", "srt"]:
+    # Canonical is eng.srt; legacy en.srt is still a normal English SRT that
+    # the promote step will rename after placement.
+    if suffix_fields not in (["eng", "srt"], ["en", "srt"]):
         return False, "subtitle is not a normal English SRT"
     try:
         raw = path.read_bytes()
@@ -2099,7 +2113,7 @@ def handle_single_file(path: Path) -> None:
                     sidecars.append(sibling)
         except OSError as exc:
             LOG.warning("Cannot list sidecars in %s: %s", parent, exc)
-        place_one_safe_external_srt(sidecars, dest.with_name(parsed.file_stem(parsed.part) + ".en.srt"))
+        place_one_safe_external_srt(sidecars, dest.with_name(parsed.file_stem(parsed.part) + EXTERNAL_SRT_SUFFIX))
 
 
 def _group_videos(videos: Sequence[ScannedFile], root: Path) -> dict[tuple, list[tuple[ScannedFile, ParsedName]]]:
@@ -2296,7 +2310,7 @@ def _place_subs(
     part: str | None,
 ) -> None:
     matched = match_subtitles_for_video(video, parsed, subtitles, multi=multi)
-    place_one_safe_external_srt([sub.path for sub in matched], video_dest.with_name(parsed.file_stem(part) + ".en.srt"))
+    place_one_safe_external_srt([sub.path for sub in matched], video_dest.with_name(parsed.file_stem(part) + EXTERNAL_SRT_SUFFIX))
 
 
 def handle_item(item_path: Path) -> None:
@@ -2925,7 +2939,7 @@ def run_canonical_self_tests() -> int:
         _assert_eq(
             sorted(path.name for path in output_dir.iterdir()) if output_dir.exists() else [],
             [
-                "Example Film (2020).en.srt",
+                f"Example Film (2020){EXTERNAL_SRT_SUFFIX}",
                 "Example Film (2020).mkv",
             ],
             "exact canonical output",

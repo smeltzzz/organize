@@ -24,7 +24,7 @@ E:\torrents\
 ├── final_organized\            ← THE JELLYFIN LIBRARY (point Jellyfin/Plex here)
 │   └── Dune (2021)\
 │       ├── Dune (2021).mkv
-│       └── Dune (2021).en.srt
+│       └── Dune (2021).eng.srt
 ├── movie_standardizer\         ← movie_standardizer.log / _report.txt
 ├── subtitle_fetcher\           ← subtitle_fetcher.log (also the UTC quota ledger) / _report.txt
 ├── mkv_track_cleaner\          ← mkv_track_cleaner.log / _report.txt
@@ -190,7 +190,7 @@ sidecar yet. Use `--fail-on-findings` if missing sidecars should fail too.
   metadata, not remove tracks. If disk churn matters more than cleanup, skip
   the step: `py pipeline.py --steps fetcher,10bit,auditor`.
 - **A subtitle sidecar can be present and worthless.** An empty or truncated
-  `.en.srt` is reported by `library_auditor.py` as `INVALID_SIDECAR` with the
+  `.eng.srt` is reported by `library_auditor.py` as `INVALID_SIDECAR` with the
   reason. Nothing in the pipeline repairs it on its own — delete the bad file
   and re-run `subtitle_fetcher.py`.
 - **`subtitle_fetcher.py --dry-run` still needs the API key.** It exits 2 with

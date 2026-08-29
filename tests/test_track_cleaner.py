@@ -142,6 +142,125 @@ class HardlinkDeferralTests(unittest.TestCase):
         self.assertNotIn("allow_hardlinked", tc.process_mkv.__code__.co_varnames)
 
 
+class ForeignFilmWithExternalSrtTests(unittest.TestCase):
+    """A foreign film with a validated ``.eng.srt`` is cleaned, not skipped.
+
+    Without English audio the cleaner used to bail entirely, which left PGS
+    embeds beside a perfectly good external SRT (e.g. Parasite). With a
+    validated sidecar the original-language audio is kept and every embedded
+    subtitle is stripped.
+    """
+
+    FOREIGN_INFO = {
+        "container": {"recognized": True, "supported": True,
+                      "properties": {"duration": 6_000_000_000_000}},
+        "tracks": [
+            {"id": 0, "type": "video", "codec": "HEVC/H.265/MPEG-H", "properties": {
+                "codec_id": "V_MPEGH/ISO/HEVC", "pixel_dimensions": "1920x1080",
+                "display_dimensions": "1920x1080", "flag_default": True}},
+            {"id": 1, "type": "audio", "codec": "AAC", "properties": {
+                "codec_id": "A_AAC", "language": "kor",
+                "audio_channels": 2, "audio_sampling_frequency": 48000,
+                "flag_default": True}},
+            {"id": 2, "type": "audio", "codec": "AC-3", "properties": {
+                "codec_id": "A_AC3", "language": "kor", "track_name": "Commentary",
+                "flag_commentary": True, "audio_channels": 2,
+                "audio_sampling_frequency": 48000}},
+            {"id": 3, "type": "subtitles", "codec": "HDMV PGS", "properties": {
+                "codec_id": "S_HDMV/PGS", "language": "eng", "flag_default": False}},
+        ],
+        "attachments": [], "chapters": [],
+    }
+
+    UNTAGGED_INFO = {
+        "container": {"recognized": True, "supported": True,
+                      "properties": {"duration": 6_000_000_000_000}},
+        "tracks": [
+            {"id": 0, "type": "video", "codec": "HEVC/H.265/MPEG-H", "properties": {
+                "codec_id": "V_MPEGH/ISO/HEVC", "pixel_dimensions": "1920x1080",
+                "display_dimensions": "1920x1080", "flag_default": True}},
+            {"id": 1, "type": "audio", "codec": "AAC", "properties": {
+                "codec_id": "A_AAC", "language": "und",
+                "audio_channels": 2, "audio_sampling_frequency": 48000,
+                "flag_default": True}},
+            {"id": 2, "type": "subtitles", "codec": "SubRip/SRT", "properties": {
+                "codec_id": "S_TEXT/UTF8", "language": "eng", "track_name": "ENG"}},
+            {"id": 3, "type": "subtitles", "codec": "SubRip/SRT", "properties": {
+                "codec_id": "S_TEXT/UTF8", "language": "eng", "track_name": "ENG SDH"}},
+        ],
+        "attachments": [], "chapters": [],
+    }
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="cleaner_foreign_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.folder = self.root / "Film (2019)"
+        self.folder.mkdir()
+        self.movie = self.folder / "Film (2019).mkv"
+        self.movie.write_bytes(b"x" * 4096)
+        self.calls: list[list[str]] = []
+        self.info = self.FOREIGN_INFO
+
+        def fake_mkvmerge(cmd, on_progress=None):
+            self.calls.append([str(part) for part in cmd])
+            if "-J" in cmd:
+                return 0, json.dumps(self.info), ""
+            return 1, "", "stub refuses to remux"
+
+        self._real = tc._run_mkvmerge
+        self._real_root = tc._target_root
+        tc._run_mkvmerge = fake_mkvmerge
+        tc._target_root = self.root
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        tc._run_mkvmerge = self._real
+        tc._target_root = self._real_root
+
+    def _write_srt(self) -> None:
+        from common import EXTERNAL_SRT_SUFFIX
+        (self.folder / f"Film (2019){EXTERNAL_SRT_SUFFIX}").write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8",
+        )
+
+    def _run(self) -> dict:
+        stats = _empty_stats()
+        with contextlib.redirect_stdout(io.StringIO()):
+            tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=True, log_file_path=None)
+        return stats
+
+    def test_foreign_without_srt_is_still_skipped(self) -> None:
+        stats = self._run()
+        self.assertEqual(len(stats["skipped_no_english"]), 1)
+        self.assertEqual(stats["cleaned"], [])
+        self.assertIn("foreign film", stats["skipped_no_english"][0]["reason"])
+
+    def test_foreign_with_validated_srt_is_cleaned(self) -> None:
+        self._write_srt()
+        stats = self._run()
+        self.assertEqual(stats["skipped_no_english"], [])
+        self.assertEqual(len(stats["cleaned"]), 1)
+        cleaned = stats["cleaned"][0]
+        self.assertEqual(cleaned["kept_subs_count"], 0)
+        self.assertEqual(cleaned["removed_subs_count"], 1)
+        self.assertEqual(cleaned["removed_audio_count"], 1)  # commentary dropped
+        self.assertIsNotNone(cleaned.get("external_srt"))
+        self.assertIn("[kor]", cleaned["kept_audio"])
+
+    def test_untagged_audio_with_srt_is_cleaned(self) -> None:
+        """IT (2017)-style: und audio + external SRT + embedded SRTs."""
+        self.info = self.UNTAGGED_INFO
+        self._write_srt()
+        stats = self._run()
+        self.assertEqual(stats["skipped_no_english"], [])
+        self.assertEqual(len(stats["cleaned"]), 1)
+        cleaned = stats["cleaned"][0]
+        self.assertEqual(cleaned["kept_subs_count"], 0)
+        self.assertEqual(cleaned["removed_subs_count"], 2)
+        self.assertEqual(cleaned["removed_audio_count"], 0)
+
+
 class RemuxWithoutSrtReportTests(unittest.TestCase):
     """Remuxing with no external SRT invalidates the moviehash; say so in the report."""
 
