@@ -7,12 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Every report now shares one layout.** A new renderer in `common.py` (`Report`, `report_banner`, `print_text`) draws all six reports — `subtitle_fetcher.py`, `library_auditor.py`, `mkv_track_cleaner.py`, `movie_standardizer.py`, `10bit.py` and the `pipeline.py` summary — with the same boxed header, the same right-aligned scorecard, and the same titled sections. Each report leads with the counts, then a one-line "Start here:", then the groups ordered by how cheap the fix is, then the full inventory. Nothing overflows the page and no line carries trailing whitespace.
+- **`subtitle_fetcher.py`'s report answers the two questions you actually ask.** Movies are no longer dumped into one flat list tagged with a status word: every result now carries a machine-readable reason, so the report splits cleanly into **MOVIES THAT NEED A SUBTITLE** (grouped by the fix — unusable sidecar, misnamed sidecar, layout defect, held for review, no provider match, deferred by quota, error) and **MOVIES THAT ALREADY HAVE AN EXTERNAL `.eng.srt`** (every covered movie listed with its sidecar file name). Movies the UTC cap cut off before they were scanned are now *named* in the report instead of only counted.
+- **`library_auditor.py` leads with defects.** "Folders that need attention" now comes first, grouped by fix, with the full folder-by-folder inventory and the file-type table moved behind it.
+- **`10bit.py` leads with the queue.** The HandBrake queue and the two REVIEW groups come first; native-HDR and already-high-bit-depth movies are listed last, as confirmation that nothing should be touched.
+- **`mkv_track_cleaner.py` leads with what needs a decision** — errors, movies remuxed without a validated `.eng.srt` (moviehash now invalidated), hardlink-deferred movies and layout skips — before the per-movie remux detail.
+- **`movie_standardizer.py` leads with `ITEMS LEFT IN SOURCE`**, the only section where inaction silently leaves files in the torrent folder forever.
 - **Tool output no longer clutters the torrents root on Windows**: logs, reports, and probe-cache JSON now default to `E:\torrents\tools\ReportsAndLogs\<tool>\` (e.g. `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner.log`) instead of five folders at the root of `E:\torrents`. Existing hooks scheduled with direct tool paths pick this up automatically; anything using explicit `--log`/`--report`/`--cache` paths is unaffected.
 - **Foreign films with a validated `.eng.srt` are now cleaned** by `mkv_track_cleaner.py`: the best non-commentary audio of any language is kept, commentary/DVS is dropped, and every embedded subtitle is stripped so the external SRT is the sole subtitle option. Foreign films *without* a validated sidecar remain untouched.
 - **Canonical external subtitle suffix is now `.eng.srt`** (ISO 639-2/B) instead of `.en.srt`.
   `subtitle_fetcher.py` writes `.eng.srt`, `mkv_track_cleaner.py` requires it before stripping embeds,
   `library_auditor.py` and `movie_standardizer.py` treat it as the sole canonical sidecar name.
   A validated legacy `.en.srt` is automatically renamed to `.eng.srt` on the next fetcher, cleaner, or auditor run.
+
+### Fixed
+- **Reports no longer depend on the console's encoding.** Every tool now pins its own stdout/stderr to UTF-8 with `errors="replace"` on *every* platform (`common.enable_utf8_stdio`; previously this ran on Windows only), the `log()` helpers print through the encoding-safe path, and every caller that captures a child process — `organize.py` and the test suite — decodes it as UTF-8 instead of with the locale encoding. Before this, a boxed report was a `UnicodeDecodeError` waiting to happen on Windows (cp1252) and a `UnicodeEncodeError` on a runner with no locale set. The report *file* is written UTF-8 either way, so a limited console degrades to `?` instead of losing data or aborting a run.
+- **Report entries wrap instead of being cut off.** `Report.entry()` used to ellipsize an
+  entry that overflowed the 96-column page, which silently destroyed exactly what the line
+  was there to name: on macOS the standardizer's source paths run ~90 columns, so
+  `.../final/Small.1995.mkv` printed as `.../final/Small...`. Entry text now wraps at path
+  separators (`common.wrap_path_text`), so the movie folder or file name always lands whole
+  on its own line; the boxed header's metadata rows break the same way instead of splitting a
+  directory name mid-word. A detail that shares an entry's line now really does start at its
+  column instead of drifting four columns right. Tables still clip — columns have to line up.
+
+### Added
+- **28 new report tests** (244 total): `tests/reporttext.py` parses the scorecard and sections back out of a rendered report, `tests/test_reports.py` builds one report per tool and asserts the shared contract, and `tests/test_common.py` covers the renderer itself (width invariants, wrapping, clipping, partial-run tallies), and `tests/test_reports.py` runs the fetcher under `PYTHONIOENCODING=ascii` to prove a hostile console cannot abort a run or corrupt the report file.
 
 ## [3.1.0] - 2026-08-29
 

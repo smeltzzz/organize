@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 import mkv_track_cleaner as tc
+from reporttext import scorecard
 from common import MediaProbeCache
 
 
@@ -136,7 +137,7 @@ class HardlinkDeferralTests(unittest.TestCase):
 
         help_text = subprocess.run(
             [__import__("sys").executable, str(pathlib.Path(tc.__file__)), "--help"],
-            capture_output=True, text=True, check=False,
+            capture_output=True, check=False, encoding="utf-8", errors="replace",
         ).stdout
         self.assertNotIn("--allow-hardlinked", help_text)
         self.assertNotIn("allow_hardlinked", tc.process_mkv.__code__.co_varnames)
@@ -284,12 +285,12 @@ class RemuxWithoutSrtReportTests(unittest.TestCase):
         self.assertIn("REMUXED WITH NO EXTERNAL SRT", text)
         self.assertIn("moviehash", text)
         self.assertIn("Film (2000).mkv", text)
-        self.assertIn("Remuxed Without SRT       : 1", text)
+        self.assertEqual(scorecard(text)["Remuxed without SRT"], 1)
 
     def test_section_is_absent_when_every_movie_had_an_srt(self) -> None:
         text = self._render(_empty_stats())
         self.assertNotIn("REMUXED WITH NO EXTERNAL SRT", text)
-        self.assertIn("Remuxed Without SRT       : 0", text)
+        self.assertEqual(scorecard(text)["Remuxed without SRT"], 0)
 
 
 class MetadataCacheWiringTests(unittest.TestCase):

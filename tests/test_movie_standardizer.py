@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 import movie_standardizer as ms
+from reporttext import scorecard, section
 
 
 class ParseMovieNameTests(unittest.TestCase):
@@ -199,10 +200,10 @@ class DeclinedSourceTests(_RunStateMixin):
         ms.decline_source(self.root / "final" / "Small.1995.mkv", "smaller than the 300 MB minimum")
         ms.decline_source(self.root / "final" / "Parts.2018", "multipart fragments")
         report = self._capture_report()
-        self.assertIn("ITEMS LEFT IN SOURCE", report)
-        self.assertIn("Small.1995.mkv", report)
-        self.assertIn("multipart fragments", report)
-        self.assertIn("Skipped              : 2", report)
+        left = section(report, "ITEMS LEFT IN SOURCE")
+        self.assertIn("Small.1995.mkv", left)
+        self.assertIn("multipart fragments", left)
+        self.assertEqual(scorecard(report)["Left in source"], 2)
 
     def test_section_is_absent_when_nothing_was_declined(self) -> None:
         ms.record_outcome("completed", "HARDLINK", src=self.root / "a", dest=self.root / "b")

@@ -194,7 +194,10 @@ def get_binary_version(binary_path: str, flag: str = "-version") -> str:
         proc = subprocess.run(
             [binary_path, flag],
             capture_output=True,
-            text=True,
+            # Children pin their own stdio to UTF-8, so decode it explicitly
+            # rather than with the locale encoding (cp1252 on Windows).
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
             creationflags=0x08000000 if os.name == "nt" else 0,
         )
@@ -475,7 +478,8 @@ def run_all_self_tests() -> int:
 
         cmd = [sys.executable, str(script_path)] + test_args
         sub_start = time.monotonic()
-        proc = subprocess.run(cmd, cwd=str(HERE), capture_output=True, text=True, check=False)
+        proc = subprocess.run(cmd, cwd=str(HERE), capture_output=True, check=False,
+                              encoding="utf-8", errors="replace")
         elapsed = time.monotonic() - sub_start
 
         if proc.returncode == 0:
@@ -566,18 +570,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _reconfigure_stdio_for_windows() -> None:
-    """Best-effort UTF-8 stdio so Unicode output never raises on Windows.
+    """Best-effort UTF-8 stdio so Unicode output never raises.
 
     Windows defaults non-interactive stdout/stderr to the ANSI code page
-    (cp1252) or the OEM code page (cp437), neither of which can encode the
-    box-drawing and symbol characters this CLI prints.  Reconfiguring to UTF-8
-    with ``errors="replace"`` matches the sibling tools and guarantees the
-    output path cannot crash on an unencodable character.
+    (cp1252) or the OEM code page (cp437), and a macOS/Linux runner with no
+    locale set can land on ASCII - none of which can encode the box-drawing
+    and symbol characters this CLI and the tool reports print.  Reconfiguring
+    to UTF-8 with ``errors="replace"`` on every platform matches the sibling
+    tools and guarantees the output path cannot crash on an unencodable
+    character.
+
+    Kept inline (``common.enable_utf8_stdio`` does the same thing) so this
+    entrypoint stays importable with nothing but the standard library.
     """
-    if os.name == "nt":
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
         try:
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+            reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
 

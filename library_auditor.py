@@ -33,8 +33,11 @@ from typing import Sequence
 from common import (
     EXTERNAL_SRT_SUFFIX,
     LEGACY_EXTERNAL_SRT_SUFFIX,
+    Report,
     atomic_write_text,
+    enable_utf8_stdio,
     path_is_within,
+    print_text,
     promote_legacy_external_english_srt,
     try_file_lock,
     validate_srt_sidecar,
@@ -128,7 +131,7 @@ def log(message: str, level: str = "INFO", log_file: Path | None = None) -> None
     line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{level}] {message}"
     target = log_file if log_file is not None else _ACTIVE_LOG_FILE
     with PRINT_LOCK:
-        print(line, flush=True)
+        print_text(line)
         if target is None:
             return
         try:
@@ -327,70 +330,195 @@ def names_for(item: FolderAudit) -> str:
     return "; ".join(file.name for file in item.movie_files) if item.movie_files else "—"
 
 
+@dataclass(frozen=True)
+class StateGuide:
+    """How one audit state reads in the report: a label, a hint and a fix."""
+
+    state: str
+    label: str
+    hint: str
+    title: str
+    fix: str
+
+
+# Reading order is the order of the report: the two sidecar states share one
+# actionable group (that is the group subtitle_fetcher.py exists to clear), and
+# the remaining layout defects follow, cheapest fix first.
+STATE_GUIDES: tuple[StateGuide, ...] = (
+    StateGuide(
+        "MISSING_SIDECAR", "Missing Eng SRT", "run subtitle_fetcher.py",
+        "MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)",
+        f"Run subtitle_fetcher.py before mkv_track_cleaner.py: fetching first keeps the "
+        "pristine release moviehash, which is what makes an exact subtitle match possible.",
+    ),
+    StateGuide(
+        "INVALID_SIDECAR", "Invalid Eng SRT", "delete the broken sidecar",
+        "MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)",
+        f"An INVALID entry means a sidecar exists but is unusable - delete that file first, "
+        "because no tool will replace a sidecar it believes is already present.",
+    ),
+    StateGuide(
+        "NONCANONICAL_SIDECAR", "Noncanonical SRT", f"rename it to {EXTERNAL_SRT_SUFFIX}",
+        "SIDECAR NAME IS NOT CANONICAL",
+        f"Rename the subtitle to \"<movie>{EXTERNAL_SRT_SUFFIX}\". Jellyfin and Plex only "
+        "direct play that exact name beside the MKV.",
+    ),
+    StateGuide(
+        "MKV_STEM_MISMATCH", "MKV stem mismatch", "rename the MKV to match its folder",
+        "MKV NAME DOES NOT MATCH ITS FOLDER",
+        "The movie file must be named exactly like the folder that holds it: "
+        "\"Title (Year)/Title (Year).mkv\".",
+    ),
+    StateGuide(
+        "SINGLE_OTHER_CONTAINER", "Single other container", "remux to MKV or accept it",
+        "MOVIE IS NOT AN MKV",
+        "MKV is the only container this toolkit cleans and the only one guaranteed to "
+        "carry an external SRT plus every track type Jellyfin direct plays.",
+    ),
+    StateGuide(
+        "MULTIPLE_DIRECT_MOVIE_FILES", "Multiple movie files", "keep one feature per folder",
+        "MORE THAN ONE MOVIE FILE IN A FOLDER",
+        "One folder holds one feature. Move extras into a \"extras\" subfolder or into "
+        "their own \"Title (Year)\" folder.",
+    ),
+    StateGuide(
+        "NO_DIRECT_MOVIE_FILE", "No movie file", "the folder holds no feature",
+        "FOLDER HAS NO MOVIE FILE",
+        "Nothing in this folder is a movie container. Delete the leftover or move the "
+        "movie back in.",
+    ),
+    StateGuide(
+        "INACCESSIBLE", "Inaccessible", "check permissions and the path",
+        "FOLDER COULD NOT BE READ",
+        "The folder could not be listed at all. Check permissions, ownership and that "
+        "the path still exists.",
+    ),
+)
+CANONICAL_LABEL = "Canonical MKV"
+CANONICAL_HINT = f"one MKV + a validated {EXTERNAL_SRT_SUFFIX}"
+
+
 def build_report(audit: Audit, cfg: Config) -> str:
+    """Render the audit: what is wrong first, then the full inventory."""
     counts = Counter(item.state for item in audit.folders)
     type_counts = Counter(file.extension.upper() for item in audit.folders for file in item.movie_files)
-    lines: list[str] = []
-    add = lines.append
-    add("=" * 116)
-    add("JELLYFIN MOVIE FOLDER FILE-TYPE AUDIT")
-    add(f"Generated       : {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    add(f"Library         : {audit.source_dir}")
-    add(f"Report file     : {cfg.report_file}")
-    add(f"Folders checked : {len(audit.folders)}")
-    add(f"Canonical MKV   : {counts['CANONICAL_MKV']}")
-    add(f"Missing Eng SRT : {counts['MISSING_SIDECAR']}")
-    add(f"Invalid Eng SRT : {counts['INVALID_SIDECAR']}")
-    add(f"MKV stem mismatch: {counts['MKV_STEM_MISMATCH']}")
-    add(f"Noncanonical SRT: {counts['NONCANONICAL_SIDECAR']}")
-    add(f"Single other    : {counts['SINGLE_OTHER_CONTAINER']}")
-    add(f"Multiple files  : {counts['MULTIPLE_DIRECT_MOVIE_FILES']}")
-    add(f"No movie file   : {counts['NO_DIRECT_MOVIE_FILE']}")
-    add(f"Inaccessible    : {counts['INACCESSIBLE']}")
-    add(f"Elapsed         : {audit.elapsed_sec:.2f}s")
-    add("=" * 116)
-    add("Scope: direct feature containers plus direct SRT sidecar names. Artwork, NFO files, and nested extras are ignored.")
-    add("Container labels are file extensions only; they do not verify codecs or Jellyfin client direct-play support.")
-    add("")
-    add("SUMMARY BY DIRECT MOVIE FILE TYPE")
-    add("-" * 116)
-    if type_counts:
-        add(f"{'Type':<14} {'Files':>8}")
-        add("-" * 116)
-        for extension, count in sorted(type_counts.items(), key=lambda item: (-item[1], item[0])):
-            add(f"{extension:<14} {count:>8}")
-    else:
-        add("No direct movie-container files found.")
-    add("")
-    add("FOLDER-BY-FOLDER RESULTS")
-    add("-" * 116)
-    add(f"{'Folder':<36} {'Status':<30} {'Type(s)':<18} Movie file(s) / detail")
-    add("-" * 116)
+    total = len(audit.folders)
+    findings = total - counts["CANONICAL_MKV"]
+    by_state: dict[str, list[FolderAudit]] = {}
     for item in audit.folders:
-        detail = item.detail if item.detail else names_for(item)
-        add(f"{item.folder.name:<36.36} {item.state.replace('_', ' '):<30.30} {types_for(item):<18.18} {detail}")
-    if not audit.folders:
-        add("No top-level movie folders found.")
+        by_state.setdefault(item.state, []).append(item)
 
-    missing = [
-        (item.folder.name, item.detail)
-        for item in audit.folders
-        if item.state in ("MISSING_SIDECAR", "INVALID_SIDECAR")
-    ]
-    if missing:
-        add("")
-        add("MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)")
-        add("-" * 116)
-        add(
-            f"These folders have a canonical MKV but no working English {EXTERNAL_SRT_SUFFIX}. Run"
-            " subtitle_fetcher.py before mkv_track_cleaner.py: fetching first keeps the"
-            " pristine release moviehash, which is what makes an exact subtitle match possible."
-            " An INVALID entry means a sidecar exists but is unusable - delete that file first,"
-            " because no tool will replace a sidecar it believes is already present."
+    report = Report(
+        "JELLYFIN MOVIE LIBRARY AUDIT",
+        "Read-only health check \u00b7 canonical folder layout and external English "
+        "subtitle integrity",
+    )
+    report.metas([
+        ("Generated", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")),
+        ("Library", audit.source_dir),
+        ("Folders checked", total),
+        ("Elapsed", f"{audit.elapsed_sec:.2f}s"),
+        ("Report", cfg.report_file),
+    ])
+
+    rows: list[tuple[object, str, str]] = [(counts["CANONICAL_MKV"], CANONICAL_LABEL, CANONICAL_HINT)]
+    for guide in STATE_GUIDES:
+        rows.append((counts[guide.state], guide.label, guide.hint))
+    rows.append((total, "Folders checked", "every top-level folder in the library"))
+    report.blank()
+    report.scorecard(rows)
+    if findings:
+        report.paragraph(
+            f"Start here: {findings} of {total} folder(s) are not canonical \u00b7 every one is "
+            "listed below with the fix that clears it."
         )
-        for name, detail in missing:
-            add(f"  [ ] {name}  ({detail})")
-    return "\n".join(lines) + "\n"
+    else:
+        report.paragraph(
+            f"Nothing to do: all {total} folder(s) hold exactly one MKV named like their "
+            f"folder, each with a validated {EXTERNAL_SRT_SUFFIX} beside it."
+        )
+
+    report.section(
+        "FOLDERS THAT NEED ATTENTION",
+        count=findings,
+        total=total,
+        intro="Grouped by the fix that clears them, cheapest first. A folder appears in exactly one group.",
+    )
+    if not findings:
+        report.paragraph("None. The library is fully canonical.")
+    else:
+        # The two sidecar states share one group: both mean "no usable .eng.srt".
+        sidecar_states = [guide for guide in STATE_GUIDES if guide.state in ("MISSING_SIDECAR", "INVALID_SIDECAR")]
+        sidecar_items = [item for state in ("MISSING_SIDECAR", "INVALID_SIDECAR") for item in by_state.get(state, [])]
+        if sidecar_items:
+            report.subsection(sidecar_states[0].title, count=len(sidecar_items))
+            for guide in sidecar_states:
+                if counts[guide.state]:
+                    report.paragraph(f"{guide.label}: {guide.fix}")
+            report.blank()
+            report.entries(
+                [{"text": item.folder.name,
+                  "detail": f"{_state_label(item.state)}  \u00b7  {item.detail or names_for(item)}"}
+                 for item in sorted(sidecar_items, key=lambda entry: entry.folder.name.casefold())],
+            )
+        for guide in STATE_GUIDES:
+            if guide.state in ("MISSING_SIDECAR", "INVALID_SIDECAR"):
+                continue
+            items = by_state.get(guide.state) or []
+            if not items:
+                continue
+            report.subsection(guide.title, count=len(items))
+            report.paragraph(guide.fix)
+            report.blank()
+            report.entries(
+                [{"text": item.folder.name, "detail": item.detail or names_for(item)}
+                 for item in sorted(items, key=lambda entry: entry.folder.name.casefold())],
+            )
+
+    report.section(
+        "EVERY FOLDER CHECKED",
+        count=total,
+        intro="The complete inventory, healthy folders included.",
+    )
+    if not audit.folders:
+        report.paragraph("No top-level movie folders found.")
+    else:
+        report.table(
+            ["Folder", "Status", "Type(s)", "Movie file(s) / detail"],
+            [[item.folder.name,
+              item.state.replace("_", " "),
+              types_for(item),
+              item.detail or names_for(item)]
+             for item in audit.folders],
+            aligns="<<<<" ,
+        )
+
+    report.section("DIRECT MOVIE FILE TYPES", intro="Container labels are file extensions only.")
+    if type_counts:
+        report.table(
+            ["Type", "Files"],
+            [[extension, count]
+             for extension, count in sorted(type_counts.items(), key=lambda pair: (-pair[1], pair[0]))],
+            aligns="<>",
+        )
+    else:
+        report.paragraph("No direct movie-container files found.")
+
+    report.footer([
+        "Scope: direct feature containers plus direct SRT sidecar names. Artwork, NFO files, "
+        "and nested extras are ignored.",
+        "Container labels are file extensions only; they do not verify codecs or Jellyfin "
+        "client direct-play support.",
+    ])
+    return report.render()
+
+
+def _state_label(state: str) -> str:
+    """The short scorecard label for a state (``MISSING`` for a missing sidecar)."""
+    for guide in STATE_GUIDES:
+        if guide.state == state:
+            return guide.label.split(" ")[0].upper()
+    return state.replace("_", " ")
 
 
 # =============================================================================
@@ -451,7 +579,7 @@ def run(cfg: Config) -> int:
             counts = Counter(item.state for item in audit.folders)
             log(f"Audit complete: canonical_mkv={counts['CANONICAL_MKV']}; exceptions={len(audit.folders) - counts['CANONICAL_MKV']}; elapsed={audit.elapsed_sec:.2f}s")
             log(f"Report published: {cfg.report_file}")
-            print(report, end="")
+            print_text(report)
         return exit_code_for(counts, cfg)
     except LockUnavailable as exc:
         log(f"Audit lock unavailable: {exc}", level="ERROR")
@@ -556,8 +684,12 @@ def run_self_tests() -> int:
         )
         report = build_report(audit, cfg)
         check(f"Movie One (2020){EXTERNAL_SRT_SUFFIX}" not in report and "making-of.mp4" not in report, "non-direct media leaked into report")
-        check("MKV stem mismatch: 1" in report and "Noncanonical SRT: 1" in report, "canonical exception counts")
-        check("Invalid Eng SRT : 1" in report and "MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT" in report,
+        # The scorecard is the contract: a right-aligned count, three spaces,
+        # then the label. Asserting on it keeps the report honest about what a
+        # reader sees at a glance.
+        check("   1   MKV stem mismatch" in report and "   1   Noncanonical SRT" in report,
+              "canonical exception counts")
+        check("   1   Invalid Eng SRT" in report and "MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT" in report,
               "unusable sidecar reported as actionable")
         atomic_write_text(cfg.report_file, report)
         check(cfg.report_file.read_text(encoding="utf-8") == report, "saved report differs")
@@ -579,12 +711,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.self_test:
         return run_self_tests()
     try:
-        if os.name == "nt":
-            try:
-                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-                sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-            except Exception:
-                pass
+        enable_utf8_stdio()
         return run(cfg_from_args(args))
     except KeyboardInterrupt:
         log("Interrupted")

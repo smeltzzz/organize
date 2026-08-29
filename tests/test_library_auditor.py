@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 import library_auditor as la
+from reporttext import scorecard, section
 
 
 # A minimal but genuinely well-formed SRT. Anything shorter is not a subtitle.
@@ -161,14 +162,17 @@ class UnusableSidecarReportTests(unittest.TestCase):
         cfg = la.Config(source_dir=self.root)
         report = la.build_report(la.audit_library(cfg), cfg)
 
-        self.assertIn("Missing Eng SRT : 1", report)
-        self.assertIn("Invalid Eng SRT : 1", report)
-        self.assertIn("MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT", report)
+        self.assertEqual(scorecard(report)["Missing Eng SRT"], 1)
+        self.assertEqual(scorecard(report)["Invalid Eng SRT"], 1)
+        self.assertEqual(scorecard(report)["Canonical MKV"], 1)
 
-        actionable = report.split("ACTIONABLE")[-1]
+        actionable = section(report, "MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)")
         self.assertIn("Bare (2008)", actionable)
         self.assertIn("Broken (2009)", actionable)
         self.assertNotIn("Covered (2010)", actionable)
+
+        # A covered movie is still inventoried, just not called actionable.
+        self.assertIn("Covered (2010)", section(report, "EVERY FOLDER CHECKED"))
 
 
 class InFlightRemuxTests(unittest.TestCase):

@@ -10,7 +10,7 @@ cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](requirements.txt)
-[![Tests](https://img.shields.io/badge/tests-208%20passing%20(offline)-2EA44F.svg?style=flat-square)](run_tests.sh)
+[![Tests](https://img.shields.io/badge/tests-244%20passing%20(offline)-2EA44F.svg?style=flat-square)](run_tests.sh)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![Platforms](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20macos%20%7C%20docker-6E40C9.svg?style=flat-square)](docs/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
@@ -18,6 +18,7 @@ cleanup.**
 [Quickstart](#-quickstart-in-90-seconds) •
 [The Pipeline](#-the-pipeline) •
 [The Five Tools](#-the-five-tools) •
+[Reading the Reports](#-reading-the-reports) •
 [Why It's Different](#-why-its-different) •
 [Safety Invariants](#-core-safety-invariants) •
 [Documentation](#-documentation)
@@ -245,6 +246,60 @@ python organize.py audit --fail-on-defects  # gate a scheduled task
 
 ---
 
+## 📄 Reading the reports
+
+Every tool writes exactly one replaceable plain-text report (and one append-only
+log) outside your library, and every one of them is drawn by the same shared
+renderer in `common.py`, so they all read the same way:
+
+```
+┌ 1  boxed header        what ran, where, with which settings
+├ 2  scorecard           right-aligned counts, one line per outcome
+├ 3  "Start here:"       the single cheapest thing to do next
+├ 4  action sections     grouped by the fix, cheapest first, every item named
+└ 5  inventory           the complete list, so nothing is hidden by a summary
+```
+
+`subtitle_fetcher.py` is the clearest example. Its report answers the only two
+questions that matter — *what still needs a subtitle*, and *what already has
+one*:
+
+```
+  ──────────────────────────────────────────────────────────────────────────────
+    18   Already have .eng.srt   validated sidecar beside the movie
+     1   Downloaded this run     written as <movie>.eng.srt
+     3   NEED A SUBTITLE         action required · every one is listed below
+    22   Movies in the library   every folder holding an eligible MKV
+  ──────────────────────────────────────────────────────────────────────────────
+  Start here: 1 movie(s) in "SIDECAR EXISTS BUT IS UNUSABLE" · delete the file, then re-run.
+
+  ══ MOVIES THAT NEED A SUBTITLE ══════════════════════════════════════ 3 of 22 ══
+
+  ── SIDECAR EXISTS BUT IS UNUSABLE ────────────────────────────────────────── 1 ──
+  Delete the named file, then re-run this tool. Nothing replaces a sidecar it
+  believes is already present, so a corrupt file blocks a good download forever.
+
+       1  Broken (2009)
+            'Broken (2009).eng.srt' exists but is unusable (empty, truncated, or not an SRT)
+
+  ── DEFERRED TO THE NEXT UTC DAY ──────────────────────────────────────────── 2 ──
+       1  Zodiac (2007)
+            never scanned: the UTC request cap was reached before this movie
+
+  ══ MOVIES THAT ALREADY HAVE AN EXTERNAL .eng.srt ══════════════════════════ 18 of 22 ══
+
+       1  Alita Battle Angel (2019)                 Alita Battle Angel (2019).eng.srt
+       2  Dune (2021)                               Dune (2021).eng.srt
+```
+
+The other reports follow the same shape: `library_auditor.py` opens with *folders
+that need attention*, `10bit.py` with the *HandBrake queue*, `mkv_track_cleaner.py`
+with *what needs a decision* (errors, movies remuxed without a validated `.eng.srt`,
+hardlink deferrals), and `movie_standardizer.py` with `ITEMS LEFT IN SOURCE` — the
+one section where doing nothing quietly leaves files in your torrent folder forever.
+
+---
+
 ## 💎 Why it's different
 
 Most media automation stacks pull in containers, databases, and web UIs to
@@ -258,7 +313,7 @@ of these guarantees are structurally impossible in a copy-based workflow:
 | **100% Direct Play, no transcode traps** | External UTF-8 SRT sidecars only; embedded PGS/VobSub bitmap subs are stripped after the sidecar is verified. |
 | **No accidental HDR destruction** | The bit-depth inspector fail-closes: native HDR is *kept*, ambiguous metadata goes to a human review queue. |
 | **Crash-safe by construction** | Atomic `os.replace` staging everywhere, transaction-journaled remuxes with orphan recovery, fail-closed advisory locks. |
-| **Auditable** | Every run leaves a plain-text report and an append-only log outside the library. The auditor reads them so you don't have to. |
+| **Auditable** | Every run leaves a plain-text report and an append-only log outside the library, and every report uses the same layout: counts first, then what needs a decision, then the full inventory. |
 | **Runs anywhere Python 3.11 runs** | Stdlib only — Windows, Linux, macOS, Docker, Unraid, TrueNAS. No venv ceremony, no dependency drift, no CVE surface. |
 
 Organize complements rather than replaces acquisition tooling: Radarr/qBittorrent
@@ -298,7 +353,7 @@ python organize.py <command> [options]     # Windows: py organize.py <command>
 | `clean` | `remux` | Lossless remux: keep one best English audio (or best non-commentary audio on foreign films with `.eng.srt`), strip embeds/bloat |
 | `10bit` | `probe` | ffprobe 8-bit vs 10-bit & native-HDR compliance sweep |
 | `audit` | — | Read-only health check of layout, naming, and subtitle sidecars |
-| `test` | `tests` | Run all self-tests (add `--unit` for the 208-test unit suite) |
+| `test` | `tests` | Run all self-tests (add `--unit` for the 244-test unit suite) |
 
 Launchers wrap it for every platform — `organize.sh` (bash), `organize.ps1`
 (PowerShell), `organize.bat` (cmd) — and each underlying script still runs
@@ -356,7 +411,7 @@ The suite runs **100% offline** — no media files, no external binaries, no API
 key, no network:
 
 ```bash
-bash run_tests.sh                      # self-tests + 208 unit tests
+bash run_tests.sh                      # self-tests + 244 unit tests
 python3 -m unittest discover -s tests -p 'test_*.py'
 python3 organize.py test --unit        # same thing through the unified CLI
 ```
