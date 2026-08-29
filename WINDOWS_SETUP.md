@@ -222,11 +222,13 @@ Anything else prints `blocked: <exact reason>`. Missing prerequisites are
 
 ```powershell
 py -m unittest discover -s tests -p "test_*.py"
-py movie_standardizer.py --self-test
+py organize.py test
 ```
 
-190 unit tests plus one `--self-test` per script, all offline — no media, no
-binaries, no API key. (`run_tests.sh` is the bash equivalent.) All seven files
-(`10bit.py`, `common.py`, `library_auditor.py`, `mkv_track_cleaner.py`,
+205 unit tests plus one `--self-test` per script, all offline — no media, no
+binaries, no API key. (`run_tests.sh` is the bash equivalent.) All toolkit files
+(`organize.py`, `10bit.py`, `common.py`, `library_auditor.py`, `mkv_track_cleaner.py`,
 `movie_standardizer.py`, `pipeline.py`, and `subtitle_fetcher.py`) must be kept
-in the same folder because the six main scripts all `from common import ...`.
+in the same folder because the scripts all import from `common`.
+
+See `docs/WINDOWS_GUIDE.md` for extended Task Scheduler and automation details.

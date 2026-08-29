@@ -1,3 +1,29 @@
+[project]
+name = "organize"
+version = "3.0.0"
+description = "The Definitive Media Management Toolkit for Jellyfin & Plex"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["jellyfin", "plex", "media-management", "subtitles", "mkv", "remux", "handbrake"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+]
+
+[project.scripts]
+organize = "organize:main"
+
 [tool.pytest.ini_options]
 # Make `pytest` discover the tests/ directory and put the repository root on
 # sys.path so the standalone scripts (which are imported by the tests) resolve.

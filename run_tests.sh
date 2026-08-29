@@ -11,7 +11,7 @@ echo "==========================================================================
 echo "BUILT-IN SELF-TESTS"
 echo "================================================================================"
 status=0
-for script in 10bit.py library_auditor.py movie_standardizer.py subtitle_fetcher.py mkv_track_cleaner.py pipeline.py; do
+for script in organize.py 10bit.py library_auditor.py movie_standardizer.py subtitle_fetcher.py mkv_track_cleaner.py pipeline.py; do
     echo
     echo "--- $script --self-test ---"
     if python3 "$script" --self-test; then
