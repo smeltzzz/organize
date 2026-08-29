@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Foreign films with a validated `.eng.srt` are now cleaned** by `mkv_track_cleaner.py`: the best non-commentary audio of any language is kept, commentary/DVS is dropped, and every embedded subtitle is stripped so the external SRT is the sole subtitle option. Foreign films *without* a validated sidecar remain untouched.
+- **Canonical external subtitle suffix is now `.eng.srt`** (ISO 639-2/B) instead of `.en.srt`.
+  `subtitle_fetcher.py` writes `.eng.srt`, `mkv_track_cleaner.py` requires it before stripping embeds,
+  `library_auditor.py` and `movie_standardizer.py` treat it as the sole canonical sidecar name.
+  A validated legacy `.en.srt` is automatically renamed to `.eng.srt` on the next fetcher, cleaner, or auditor run.
+
 ## [3.1.0] - 2026-08-29
 
 ### Added
@@ -51,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.6.0]
 
 ### Added
-- Canonical movie-and-English-subtitle contract (`Title (Year)/Title (Year).mkv` + `.en.srt`).
+- Canonical movie-and-English-subtitle contract (`Title (Year)/Title (Year).mkv` + `.eng.srt`).
 - OpenSubtitles moviehash prioritization in `subtitle_fetcher.py`.
 - Shared external subtitle validation contract in `common.py`.
 

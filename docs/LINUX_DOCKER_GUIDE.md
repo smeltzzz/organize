@@ -47,7 +47,7 @@ Recommended directory layout:
 ├── movies/                     # Jellyfin library root (Title (Year)/Title (Year).mkv)
 │   └── Dune (2021)/
 │       ├── Dune (2021).mkv
-│       └── Dune (2021).en.srt
+│       └── Dune (2021).eng.srt
 └── organize_logs/              # Logs, reports, and probe caches
 ```
 

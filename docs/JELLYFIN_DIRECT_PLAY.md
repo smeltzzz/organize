@@ -34,13 +34,13 @@ The single most common cause of unexpected video transcoding in Jellyfin is **su
 - When a client cannot render PGS or complex stylized ASS subtitles, Jellyfin **forces a video transcode** to burn the subtitle images into the video frames on the fly.
 - Even if your server has an Intel QuickSync or Nvidia NVENC GPU, tone-mapping HDR while burning in subtitles easily overwhelms hardware encoders and introduces stutter.
 
-### The Solution: External UTF-8 `.en.srt`
+### The Solution: External UTF-8 `.eng.srt`
 - Plain text SubRip (`.srt`) encoded in UTF-8 is universally supported by **100% of modern Jellyfin clients**.
-- Jellyfin serves external `.en.srt` files directly to the client as lightweight text packets over HTTP/WebSocket. The client renders the font natively using its own OS display layer.
+- Jellyfin serves external `.eng.srt` files directly to the client as lightweight text packets over HTTP/WebSocket. The client renders the font natively using its own OS display layer.
 - **Zero server transcoding required.**
 
 > [!NOTE]
-> That is why `subtitle_fetcher.py` exclusively downloads UTF-8 `.en.srt` files, and `mkv_track_cleaner.py` strips embedded PGS/VobSub tracks once a verified `.en.srt` sidecar is present.
+> That is why `subtitle_fetcher.py` exclusively downloads UTF-8 `.eng.srt` files, and `mkv_track_cleaner.py` strips embedded PGS/VobSub tracks once a verified `.eng.srt` sidecar is present.
 
 ---
 
@@ -56,10 +56,14 @@ If a client attempts to play a multi-channel track it cannot decode, Jellyfin mu
 
 ### The Solution: Track Cleaner Remux
 `mkv_track_cleaner.py` analyzes the track header layout with `mkvmerge`:
-1. Selects the single highest quality primary English audio track (Dolby Atmos / TrueHD / DTS-HD MA / 5.1).
-2. Explicitly purges commentary, director, and DVS tracks.
-3. Purges unneeded foreign dub tracks.
-4. Preserves chapters and metadata without re-encoding the video.
+1. Selects the single highest quality primary English audio track (Dolby Atmos / TrueHD / DTS-HD MA / 5.1) when one exists.
+2. On foreign films with no English audio but a validated external `.eng.srt`, keeps the single best non-commentary audio of any language instead (so the original-language track stays playable with the sidecar).
+3. Explicitly purges commentary, director, and DVS tracks.
+4. Purges unneeded foreign dub tracks (and extra non-best audio on the foreign+SRT path).
+5. Strips every embedded subtitle once a validated `.eng.srt` is present.
+6. Preserves chapters and metadata without re-encoding the video.
+
+Foreign films **without** a validated external English SRT are left completely untouched.
 
 ---
 
@@ -82,7 +86,7 @@ Standard 8-bit video provides 256 discrete levels per color channel ($2^8 = 256$
 
 By running `organize`:
 1. Every movie is canonically named for instant metadata match.
-2. Every movie gains a verified, external `.en.srt` for 100% Direct Play subtitles.
+2. Every movie gains a verified, external `.eng.srt` for 100% Direct Play subtitles.
 3. Every container is stripped of commentary and unnecessary tracks.
 4. Your server runs cool, whisper-quiet, and at near 0% CPU.
 

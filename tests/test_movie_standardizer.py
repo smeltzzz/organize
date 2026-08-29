@@ -59,7 +59,7 @@ class SubtitleLanguageTests(unittest.TestCase):
         self.assertFalse(ms.is_english_subtitle(ms.Path("Film.Spanish.srt")))
 
     def test_suffix_order(self) -> None:
-        self.assertEqual(ms.subtitle_suffix("Film.English.srt"), ".en.srt")
+        self.assertEqual(ms.subtitle_suffix("Film.English.srt"), ".eng.srt")
 
 
 class DuplicateUpgradeTests(unittest.TestCase):

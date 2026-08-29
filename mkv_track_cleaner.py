@@ -3,12 +3,18 @@
 Lossless Canonical Jellyfin MKV Track Cleaner
 ==============================================
 Remux-only (no video/audio re-encode). Keeps the single best English audio
-track and, whenever present and validated, a sole external English SRT subtitle.
+track when one exists; for foreign films with no English audio, a validated
+external English SRT unlocks the same cleanup using the best non-commentary
+audio of any language. Whenever a validated external English SRT is present it
+becomes the sole subtitle option (all embedded subs stripped).
 
 Safety:
   * Idempotent — already-clean files are not rewritten
-  * Foreign films with no English audio are left untouched
-  * SDH, text-description, and Forced *subtitles* are kept (never treated as DVS)
+  * Foreign films without a validated external English SRT are left untouched
+  * Foreign films *with* a validated ``.eng.srt`` are cleaned: best audio kept,
+    commentary/DVS dropped, every embedded subtitle removed
+  * SDH, text-description, and Forced *subtitles* are kept only when no
+    validated external SRT exists (never treated as DVS)
   * DVS / commentary *audio* is dropped
   * Post-remux fingerprint verification (tracks, chapters, attachments, duration,
     frames, size) — a bad remux is never swapped over the original
@@ -68,13 +74,16 @@ from typing import Any, Callable, Dict, IO, List, Optional, Set, Tuple
 from common import (
     EXTERNAL_SRT_CUE_RE,
     EXTERNAL_SRT_MAX_BYTES,
+    EXTERNAL_SRT_SUFFIX,
     CoordinationLock,
     MediaProbeCache,
     decode_srt_bytes,
+    exact_external_english_srt_path,
     normalize_srt_newlines,
+    promote_legacy_external_english_srt,
 )
 
-VERSION = "2.5.2"
+VERSION = "2.6.0"
 
 # ==================== DEFAULT CONFIGURATION ====================
 TARGET_DIR = r"E:\torrents\final_organized"
@@ -958,13 +967,20 @@ def _source_snapshot_matches(path: Path, snapshot: Dict[str, Any]) -> bool:
 def validate_exact_external_english_srt(mkv_path: Path) -> Dict[str, Any]:
     """Validate the sole sidecar allowed to replace embedded subtitle choices.
 
-    Only ``<exact MKV stem>.en.srt`` beside the movie qualifies. The helper is
+    Only ``<exact MKV stem>.eng.srt`` beside the movie qualifies. A validated
+    legacy ``.en.srt`` is renamed to that canonical name first. The helper is
     intentionally conservative: any uncertain encoding, unsafe file type,
     oversized payload, or malformed SRT leaves embedded subtitle selection
     unchanged.
     """
-    sidecar = mkv_path.with_name(f"{mkv_path.stem}.en.srt")
+    promoted, promote_reason = promote_legacy_external_english_srt(mkv_path)
+    sidecar = exact_external_english_srt_path(mkv_path)
     result: Dict[str, Any] = {"mkv_path": str(mkv_path), "path": str(sidecar), "valid": False, "reason": ""}
+    if promoted is None and promote_reason and "absent" not in promote_reason:
+        # Dual-name / occupied-destination cases must not silently drop embeds.
+        if "unusable" not in promote_reason:
+            result["reason"] = f"legacy external SRT could not be promoted: {promote_reason}"
+            return result
     try:
         file_stat = sidecar.stat(follow_symlinks=False)
     except OSError as exc:
@@ -2032,19 +2048,54 @@ def process_mkv(
     audio_tracks = [t for t in tracks if t.get("type") == "audio"]
     subtitle_tracks = [t for t in tracks if t.get("type") == "subtitles"]
 
-    valid_audio = [
+    # Prefer tagged/named English audio. A foreign original-language track is
+    # only considered when a validated external English SRT is present — that
+    # sidecar is what makes the movie playable for an English library, so the
+    # same cleanup (one best audio, no embeds) is safe and useful.
+    english_audio = [
         t for t in audio_tracks
         if is_matching_language(t, audio_langs) and not is_commentary_track(t, remove_commentary)
     ]
-    if not valid_audio:
+    if not english_audio:
         # An untagged stream is safe only when its explicit title identifies it
         # as English. Never guess that a bare ``und`` audio stream is English.
-        valid_audio = [
+        english_audio = [
             t for t in audio_tracks
             if is_english_named_untagged(t) and not is_commentary_track(t, remove_commentary)
         ]
 
-    if not valid_audio:
+    external_srt: Optional[Dict[str, Any]] = None
+    candidate = validate_exact_external_english_srt(mkv_path)
+    if candidate.get("valid"):
+        external_srt = candidate
+    elif candidate.get("reason") != "external SRT is absent":
+        log(
+            f"{tag}External SRT ignored for '{display_name}': {candidate.get('reason')}; "
+            "retaining the established embedded subtitle selection",
+            level="WARNING", to_console=_console is None, log_file_path=log_file_path,
+        )
+
+    foreign_with_srt = False
+    if english_audio:
+        valid_audio = english_audio
+    elif external_srt is not None:
+        # Foreign / untagged-audio film with a verified external English SRT:
+        # keep the single best non-commentary audio of any language and strip
+        # every embedded subtitle so the sidecar is the sole subtitle option.
+        valid_audio = [
+            t for t in audio_tracks
+            if not is_commentary_track(t, remove_commentary)
+        ]
+        foreign_with_srt = True
+        if not valid_audio:
+            reason = "no non-commentary audio track to retain beside external English SRT"
+            if _console is not None:
+                _console.end_file_inline(f"skipped ({reason})", kind="warn")
+            log(f"{tag}Skipping '{display_name}' ({reason})",
+                level="WARNING", to_console=_console is None, log_file_path=log_file_path)
+            stats["skipped_no_english"].append({"name": movie_name, "reason": reason})
+            return
+    else:
         any_english = any(is_matching_language(t, audio_langs) for t in audio_tracks)
         reason = ("all English audio tracks are commentary/descriptive"
                   if any_english else "foreign film / no tagged or explicitly named English audio")
@@ -2063,20 +2114,11 @@ def process_mkv(
         if (is_matching_language(t, sub_langs) or is_english_named_untagged(t))
         and not is_commentary_track(t, remove_commentary)
     ]
-    external_srt: Optional[Dict[str, Any]] = None
-    candidate = validate_exact_external_english_srt(mkv_path)
-    if candidate.get("valid"):
-        external_srt = candidate
+    if external_srt is not None:
         # A verified exact-stem external SRT is always the authoritative
         # Jellyfin subtitle choice. Remove every embedded subtitle option,
         # including normal, SDH, forced, and non-English tracks.
         keep_subtitles = []
-    elif candidate.get("reason") != "external SRT is absent":
-        log(
-            f"{tag}External SRT ignored for '{display_name}': {candidate.get('reason')}; "
-            "retaining the established embedded subtitle selection",
-            level="WARNING", to_console=_console is None, log_file_path=log_file_path,
-        )
     keep_sub_ids = [int(t["id"]) for t in keep_subtitles]
     existing_audio_ids = [int(t["id"]) for t in audio_tracks]
     existing_sub_ids = [int(t["id"]) for t in subtitle_tracks]
@@ -2120,6 +2162,12 @@ def process_mkv(
         _console.mark_details()
     log(f"{tag}Processing: {display_name} ({format_size(size_before)})",
         to_console=_console is None, log_file_path=log_file_path)
+    if foreign_with_srt:
+        _log_detail(
+            "  -> Foreign / non-English audio film with validated external English SRT: "
+            "retaining best non-commentary audio and stripping all embedded subtitles",
+            log_file_path,
+        )
     _log_detail(f"  -> Retaining Audio: {best_audio_desc}", log_file_path)
     if removed_audio_descs:
         if len(removed_audio_descs) <= 8:
@@ -2342,7 +2390,7 @@ def generate_and_save_report(
     lines.append("Hardlinked Movies : Always deferred until qBittorrent removes the seeded source")
     if meta.get("external_srt_auto_preference"):
         lines.append(
-            "External English SRT: Validated exact .en.srt automatically becomes the sole subtitle option"
+            f"External English SRT: Validated exact {EXTERNAL_SRT_SUFFIX} automatically becomes the sole subtitle option"
         )
     if "standardizer_lock_acquired" in meta:
         lines.append(
@@ -2501,9 +2549,11 @@ def _print_startup_banner(
         f"  Audio languages     : {', '.join(sorted(audio_langs))}",
         f"  Subtitle languages  : {', '.join(sorted(sub_langs))}",
         f"  Commentary / DVS    : {'remove (fixed policy)' if remove_commentary else 'keep'}",
-        "  Accessibility subs  : retained only when no valid external .en.srt exists",
-        "  External .en.srt   : validated exact sidecar automatically becomes sole subtitle option",
-        "  Sidecar subtitles   : never modified by this cleaner",
+        f"  Accessibility subs  : retained only when no valid external {EXTERNAL_SRT_SUFFIX} exists",
+        f"  External {EXTERNAL_SRT_SUFFIX}  : validated exact sidecar automatically becomes sole subtitle option",
+        "  Foreign films       : cleaned when a validated external English SRT is present "
+        "(best non-commentary audio kept)",
+        "  Sidecar subtitles   : never modified by this cleaner (legacy .en.srt is renamed to .eng.srt)",
         "  Pipeline order      : movie_standardizer.py -> subtitle_fetcher.py -> this cleaner",
         "  (remuxing first invalidates the OpenSubtitles moviehash; a warning is logged per file)",
         "  Hardlinked movies   : always deferred (never remuxed while seeding)",
@@ -2524,7 +2574,11 @@ def _print_startup_banner(
 def main(argv: Optional[List[str]] = None) -> int:
     global _console, _target_root, _interrupt_requested
     parser = argparse.ArgumentParser(
-        description="Lossless post-standardizer cleanup: keep one best English audio and automatically prefer validated external English SRTs."
+        description=(
+            "Lossless post-standardizer cleanup: keep one best English audio "
+            "(or best non-commentary audio on foreign films with a validated "
+            f"external {EXTERNAL_SRT_SUFFIX}) and strip embedded subs when that sidecar exists."
+        )
     )
     parser.add_argument("--version", action="version", version=f"track_cleaner.py {VERSION}")
     parser.add_argument("--dir", default=TARGET_DIR, help=f"Target library folder (Default: {TARGET_DIR})")
@@ -2852,13 +2906,32 @@ def run_self_tests() -> int:
         hardlink_target.unlink()
         check(hardlink_count(hardlink_source) == 1, "hardlink count clears after source removal")
 
-        movie_srt = movie / "Film (2000).en.srt"
+        movie_srt = movie / f"Film (2000){EXTERNAL_SRT_SUFFIX}"
         movie_srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8")
         external_record = validate_exact_external_english_srt(movie / "Film (2000).mkv")
         check(external_record.get("valid"), f"valid exact external SRT: {external_record}")
         check(external_srt_snapshot_matches(external_record), "external SRT snapshot initial match")
-        (movie / "Film (2000).eng.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nWrong suffix\n", encoding="utf-8")
-        check(external_record.get("path", "").endswith("Film (2000).en.srt"), "only exact .en.srt qualifies")
+        (movie / "Film (2000).en.forced.srt").write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nWrong suffix\n", encoding="utf-8",
+        )
+        check(
+            external_record.get("path", "").endswith(f"Film (2000){EXTERNAL_SRT_SUFFIX}"),
+            f"only exact {EXTERNAL_SRT_SUFFIX} qualifies",
+        )
+        # Legacy .en.srt is promoted to the canonical .eng.srt on validate.
+        legacy_movie = tmp / "Legacy (2001)"
+        legacy_movie.mkdir()
+        (legacy_movie / "Legacy (2001).mkv").write_bytes(b"x")
+        (legacy_movie / "Legacy (2001).en.srt").write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8",
+        )
+        legacy_record = validate_exact_external_english_srt(legacy_movie / "Legacy (2001).mkv")
+        check(legacy_record.get("valid"), f"legacy .en.srt promotes: {legacy_record}")
+        check(
+            str(legacy_record.get("path", "")).endswith(f"Legacy (2001){EXTERNAL_SRT_SUFFIX}"),
+            "promoted path is .eng.srt",
+        )
+        check(not (legacy_movie / "Legacy (2001).en.srt").exists(), "legacy .en.srt removed after promote")
         movie_srt.write_text("<html>not a subtitle</html>", encoding="utf-8")
         check(not external_srt_snapshot_matches(external_record), "changed/malformed external SRT rejects activation")
         check(not validate_exact_external_english_srt(movie / "Film (2000).mkv").get("valid"),

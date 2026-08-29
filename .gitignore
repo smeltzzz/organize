@@ -21,6 +21,14 @@ Thumbs.db
 *.partial.*
 *.tmp
 *.log
+*_report.txt
+*_probe_cache.json
+*probe_cache*.json
+
+# Accidental desktop / OS dumps
+Screenshot*.png
+Screen Shot*.png
+*.stackdump
 
 # Running the tools on a non-Windows host with default config writes literal
 # filenames such as `E:\torrents\10bit\10bit_report.txt` into the CWD.

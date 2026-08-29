@@ -66,9 +66,12 @@ from typing import Any, Sequence
 from common import (
     EXTERNAL_SRT_ENCODINGS,
     EXTERNAL_SRT_MAX_BYTES,
+    EXTERNAL_SRT_SUFFIX,
     CoordinationLock,
+    exact_external_english_srt_path,
     normalize_srt_newlines,
     path_norm,
+    promote_legacy_external_english_srt,
     srt_looks_valid,
 )
 
@@ -165,8 +168,8 @@ class Config:
 
     @property
     def sidecar_suffix(self) -> str:
-        """The sole output sidecar: a normal English UTF-8 SRT."""
-        return ".en.srt"
+        """The sole output sidecar: a normal English UTF-8 SRT (``.eng.srt``)."""
+        return EXTERNAL_SRT_SUFFIX
 
 
 @dataclass
@@ -788,7 +791,10 @@ def canonical_movie_layout_issue(video: Path, library: Path) -> str | None:
 
 def dest_for(video: Path, cfg: Config) -> Path:
     # Plex/Jellyfin: file next to the video, same stem + language suffix.
-    return video.with_name(video.stem + cfg.sidecar_suffix)
+    # cfg.sidecar_suffix is always EXTERNAL_SRT_SUFFIX (".eng.srt"); keep the
+    # Config hook so a future override stays one call site away.
+    _ = cfg.sidecar_suffix
+    return exact_external_english_srt_path(video)
 
 
 
@@ -885,21 +891,21 @@ def run_self_tests() -> int:
         with vid.open("wb") as fh:
             fh.truncate(400 * 1024 * 1024)
         (extra / "Making-Of.mkv").write_bytes(b"x")
-        sidecar = movie / "Knowing (2009).en.srt"
+        sidecar = movie / f"Knowing (2009){EXTERNAL_SRT_SUFFIX}"
         sidecar.write_text(sample, encoding="utf-8")
-        (movie / "Another Movie (2009).en.srt").write_text(sample, encoding="utf-8")
-        (movie / "Knowing (2009).en.ass").write_text("[Script Info]", encoding="utf-8")
+        (movie / f"Another Movie (2009){EXTERNAL_SRT_SUFFIX}").write_text(sample, encoding="utf-8")
+        (movie / "Knowing (2009).eng.ass").write_text("[Script Info]", encoding="utf-8")
         with (movie / "Knowing (2009).mp4").open("wb") as fh:
             fh.truncate(400 * 1024 * 1024)
         found = discover_videos(tmp, 300 * 1024 * 1024)
         check(found == [vid], f"discover {found}")
         check(has_english_sidecar(movie, "Knowing (2009)") == sidecar, "exact existing English SRT")
-        check(not is_english_srt_sidecar(movie / "Another Movie (2009).en.srt", "Knowing (2009)"),
+        check(not is_english_srt_sidecar(movie / f"Another Movie (2009){EXTERNAL_SRT_SUFFIX}", "Knowing (2009)"),
               "neighboring movie subtitle must not block download")
-        check(not is_english_srt_sidecar(movie / "Knowing (2009).en.ass", "Knowing (2009)"),
+        check(not is_english_srt_sidecar(movie / "Knowing (2009).eng.ass", "Knowing (2009)"),
               "non-SRT sidecar must not count as direct-play policy output")
 
-        guarded = movie / "Guarded.en.srt"
+        guarded = movie / f"Guarded{EXTERNAL_SRT_SUFFIX}"
         atomic_write_text(guarded, sample, replace=False)
         try:
             atomic_write_text(guarded, "1\\n00:00:00,000 --> 00:00:01,000\\nreplacement\\n", replace=False)
@@ -907,7 +913,19 @@ def run_self_tests() -> int:
         except FileExistsError:
             pass
         check(guarded.read_text(encoding="utf-8") == sample, "create-only sidecar retains existing content")
-        check(not list(movie.glob(".Guarded.en.srt.partial.*")), "create-only sidecar leaves no temp")
+        check(not list(movie.glob(f".Guarded{EXTERNAL_SRT_SUFFIX}.partial.*")), "create-only sidecar leaves no temp")
+
+        # Legacy .en.srt is promoted to the canonical .eng.srt on inspect.
+        legacy_movie = tmp / "Legacy Film (2010)"
+        legacy_movie.mkdir()
+        legacy_vid = legacy_movie / "Legacy Film (2010).mkv"
+        with legacy_vid.open("wb") as fh:
+            fh.truncate(400 * 1024 * 1024)
+        (legacy_movie / "Legacy Film (2010).en.srt").write_text(sample, encoding="utf-8")
+        status, path, detail = inspect_existing_sidecars(legacy_vid)
+        check(status == "covered", f"legacy .en.srt promotes to covered: {status} {detail}")
+        check(path is not None and path.name.endswith(EXTERNAL_SRT_SUFFIX), f"promoted path {path}")
+        check(not (legacy_movie / "Legacy Film (2010).en.srt").exists(), "legacy .en.srt removed after promote")
 
         snapshot = video_snapshot(vid)
         with vid.open("ab") as fh:
@@ -1115,12 +1133,25 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
     """Classify existing English sidecars without trusting filename alone.
 
     The cleaner's automatic external-subtitle policy requires the exact
-    ``Movie.en.srt`` name. Noncanonical or invalid English sidecars are kept for
-    manual review rather than triggering a duplicate download request.
+    ``Movie.eng.srt`` name. A validated legacy ``Movie.en.srt`` is renamed in
+    place to that canonical name. Any other noncanonical or invalid English
+    sidecar is kept for manual review rather than triggering a duplicate
+    download request.
     """
     exact = dest_for(video, Config())
-    # dest_for uses only the video name and the fixed .en.srt suffix, so no
+    # dest_for uses only the video name and the fixed .eng.srt suffix, so no
     # configured library path leaks into the decision.
+    promoted, promote_reason = promote_legacy_external_english_srt(video)
+    if promoted is not None and promote_reason == "" and promoted == exact:
+        # A successful rename (or an already-canonical sidecar) is re-validated
+        # below through the normal candidate walk.
+        pass
+    elif promote_reason and "absent" not in promote_reason and "unusable" not in promote_reason:
+        # Ambiguous dual-name or occupied-destination cases need a human.
+        return (
+            "review", exact if exact.exists() else None,
+            f"legacy .en.srt could not be promoted to .eng.srt ({promote_reason})",
+        )
     candidates: list[Path] = []
     try:
         candidates = [
@@ -1141,11 +1172,11 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str]:
         except (OSError, EOFError, ValueError):
             valid = False
         if path == exact and valid:
-            return "covered", path, "validated exact .en.srt"
+            return "covered", path, f"validated exact {EXTERNAL_SRT_SUFFIX}"
         if valid:
             return (
                 "review", path,
-                f"'{path.name}' is a valid English SRT but not the exact .en.srt sidecar; "
+                f"'{path.name}' is a valid English SRT but not the exact {EXTERNAL_SRT_SUFFIX} sidecar; "
                 "rename or remove it to let this movie be fetched",
             )
     broken = candidates[0]
