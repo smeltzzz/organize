@@ -301,8 +301,6 @@ class ContinueOnErrorTests(unittest.TestCase):
 
     def test_continue_on_error_flag_is_accepted_no_op(self) -> None:
         """--continue-on-error is still accepted and is now a no-op (default is True)."""
-        # This tests that the argument parser accepts --continue-on-error
-        import argparse
         parser = pl.build_parser()
         # Parse with --continue-on-error
         args = parser.parse_args(["--continue-on-error"])
@@ -310,7 +308,6 @@ class ContinueOnErrorTests(unittest.TestCase):
 
     def test_stop_on_error_flag_sets_false(self) -> None:
         """--stop-on-error sets continue_on_error to False."""
-        import argparse
         parser = pl.build_parser()
         # Parse with --stop-on-error
         args = parser.parse_args(["--stop-on-error"])
@@ -318,7 +315,6 @@ class ContinueOnErrorTests(unittest.TestCase):
 
     def test_stop_on_error_overrides_default(self) -> None:
         """--stop-on-error overrides the default True."""
-        import argparse
         parser = pl.build_parser()
         # Parse with both flags (--continue-on-error is default, --stop-on-error overrides)
         args = parser.parse_args(["--stop-on-error"])

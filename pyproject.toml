@@ -38,3 +38,10 @@ organize = "organize:main"
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
