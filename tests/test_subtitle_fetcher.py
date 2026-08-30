@@ -243,3 +243,12 @@ class ReportOrganizationTests(unittest.TestCase):
         ]
         for line in self.report(results, self.summary(results)).splitlines():
             self.assertLessEqual(len(line), sf.Report("").width, line)
+
+
+class SubdlIntegrationTests(unittest.TestCase):
+    def test_subdl_client_empty_key(self) -> None:
+        client = sf.SubdlClient("")
+        identity = sf.MovieIdentity(title="Inception", year=2010, normalized_title="inception")
+        cands, urls = client.search_identity(identity)
+        self.assertEqual(cands, [])
+        self.assertEqual(urls, {})
