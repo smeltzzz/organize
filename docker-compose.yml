@@ -24,7 +24,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=UTC
-      # Subtitle providers (OpenSubtitles is hash-match primary; SubDL is fallback)
+      # Subtitle providers (OpenSubtitles is hash-match primary; SubDL is a score-gated release fallback)
       # https://www.opensubtitles.com/en/consumers
       - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}
       # https://subdl.com/panel/api

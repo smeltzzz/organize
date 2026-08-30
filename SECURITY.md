@@ -17,8 +17,10 @@ enforced in code and covered by the offline test suite:
 - **Provider hardening.** The subtitle fetcher only dereferences absolute
   HTTPS download links from OpenSubtitles; SubDL raw URLs are restricted to
   `https://dl.subdl.com/subtitle/...` and opaque v2 IDs use a locally-built
-  API path. Both providers are byte-capped, archive/gzip-aware, cue-validated,
-  snapshot-checked, and atomically published only after validation.
+  `format=file` API path. Both providers are byte-capped, archive/gzip-aware,
+  cue-validated, snapshot-checked, and atomically published only after
+  validation. A SubDL archive with more than one usable `.srt` is rejected for
+  manual review rather than guessed.
 - **Credentials stay out of the command line.** OpenSubtitles and SubDL keys,
   plus optional OpenSubtitles user credentials, are read only from environment
   variables.

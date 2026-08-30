@@ -63,7 +63,7 @@ Restart your terminal so the new PATH entries take effect.
 | MKVToolNix | `mkv_track_cleaner.py` | Also auto-found at `C:\Program Files\MKVToolNix\mkvmerge.exe` |
 | FFmpeg | `10bit.py`, upgrade checks | Or drop `ffprobe.exe` at `C:\ffmpeg\bin\ffprobe.exe` |
 | OpenSubtitles API key | `subtitle_fetcher.py` | Recommended exact-match source: <https://www.opensubtitles.com/en/consumers> |
-| SubDL API key | `subtitle_fetcher.py` | Optional strict title/year fallback: <https://subdl.com/panel/api> |
+| SubDL API key | `subtitle_fetcher.py` | Optional score-gated release-aware fallback: <https://subdl.com/panel/api> |
 
 No `pip install` — the runtime is stdlib-only (`requirements.txt` is empty on
 purpose).
@@ -73,7 +73,7 @@ purpose).
 Set one or both keys as **user** environment variables so qBittorrent and
 PowerShell both see them, then **restart qBittorrent and any open terminal** —
 a process only reads the environment it was started with. OpenSubtitles is the
-recommended exact-release source; SubDL adds a strict title/year fallback:
+recommended exact-release source; SubDL adds a score-gated release-aware fallback:
 
 ```powershell
 [Environment]::SetEnvironmentVariable("OPENSUBTITLES_API_KEY", "your-opensubtitles-key", "User")
@@ -202,10 +202,12 @@ sidecar yet. Use `--fail-on-findings` if missing sidecars should fail too.
 - **`subtitle_fetcher.py --dry-run` still needs a provider key.** It exits 2 if
   neither `OPENSUBTITLES_API_KEY` nor `SUBDL_API_KEY` is set. Every other
   tool's `--dry-run` works with nothing installed.
-- **The fetcher is quota-limited per provider per UTC day:** OpenSubtitles
+- **The fetcher keeps local UTC quota reservations per provider:** OpenSubtitles
   defaults to 100 download requests in `development-anonymous` mode (20 with
-  `--auth-mode user`); SubDL defaults to the free-tier 50 and can be changed
-  with `--subdl-daily-cap` for a different plan. The append-only log at
+  `--auth-mode user`). Per [SubDL's current developer documentation](https://subdl.com/developers),
+  its free tier has 2,000 searches and 50 downloads per day; this fetcher
+  defaults to those guards and can be raised for another plan with
+  `--subdl-search-daily-cap` and `--subdl-daily-cap`. The append-only log at
   `E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher.log` *is*
   the durable ledger — don't delete it or you lose your quota accounting.
 

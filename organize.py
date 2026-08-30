@@ -154,7 +154,7 @@ def print_dashboard() -> None:
 
     print(bold("  WORKFLOW PIPELINE:"))
     print(f"    {cyan('1. standardize')} {SYM_ARROW} qBittorrent completion hook: hardlinks & names into Title (Year)")
-    print(f"    {cyan('2. subtitles')}   {SYM_ARROW} OpenSubtitles OSHash first + SubDL fallback: English UTF-8 SRT (pre-remux)")
+    print(f"    {cyan('2. subtitles')}   {SYM_ARROW} OpenSubtitles OSHash first + score-gated SubDL fallback: English UTF-8 SRT (pre-remux)")
     print(f"    {cyan('3. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps 1 audio, drops commentary & bloat")
     print(f"    {cyan('4. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect native HDR")
     print(f"    {cyan('5. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
@@ -317,7 +317,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             name="SubDL API Key",
             status="ok",
             message=f"Configured ({mask_key(subdl_key)})",
-            detail="Enables the strict title/year fallback and can run as the sole provider",
+            detail="Enables score-gated release-aware fallback and can run as the sole provider",
         ))
     if not opensubtitles_key and not subdl_key:
         checks.append(DiagnosticCheck(
@@ -327,7 +327,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             detail="Subtitle fetching will be skipped until at least one provider is configured",
             remedy=(
                 "OpenSubtitles (recommended exact-match source): https://www.opensubtitles.com/en/consumers\n"
-                "SubDL (strict title/year fallback): https://subdl.com/panel/api\n"
+                "SubDL (score-gated release-aware fallback): https://subdl.com/panel/api\n"
                 "Windows (PowerShell): [Environment]::SetEnvironmentVariable('OPENSUBTITLES_API_KEY', 'your-key', 'User')\n"
                 "or: [Environment]::SetEnvironmentVariable('SUBDL_API_KEY', 'your-key', 'User')\n"
                 "Linux/macOS (bash): export OPENSUBTITLES_API_KEY='your-key'  # or export SUBDL_API_KEY='your-key'"

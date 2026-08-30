@@ -9,8 +9,8 @@ there is no separate queue script or launcher to run.
 
 When configured, it always attempts the exact OpenSubtitles moviehash first.
 After a hash miss, it automatically allows only a high-confidence exact
-title/year candidate. An optional SubDL lookup is the final fallback; because
-SubDL has no equivalent release hash, it is never allowed ahead of an available
+title/year candidate. An optional score-gated SubDL release-aware lookup is the final
+fallback; because SubDL has no equivalent release hash, it is never allowed ahead of an available
 OpenSubtitles hash match. A wrong cut is held for review rather than downloaded.
 
 The position in the pipeline is deliberate, not cosmetic. The moviehash is the
@@ -66,7 +66,7 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from common import (
     EXTERNAL_SRT_ENCODINGS,
@@ -109,9 +109,11 @@ OPENSUBTITLES_PASSWORD = ""
 SUBDL_API_KEY = ""
 SUBDL_API_BASE = "https://api.subdl.com/api/v2"
 SUBDL_DOWNLOAD_HOST = "dl.subdl.com"
-# SubDL publishes separate search and download limits. Keep a conservative
-# local guard for the free API-key download allowance; users on a paid plan
-# can explicitly raise it with --subdl-daily-cap.
+# SubDL's current v2 developer docs publish separate free-tier allowances:
+# 2,000 searches and 50 downloads per day. Keep conservative local guards for
+# both; users on a paid plan can explicitly raise either cap with the matching
+# --subdl-*-daily-cap flag.
+SUBDL_DEFAULT_SEARCH_DAILY_CAP = 2_000
 SUBDL_DEFAULT_DAILY_CAP = 50
 SUBDL_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
@@ -164,6 +166,10 @@ EDITION_MARKERS = frozenset({
 MIN_IDENTITY_RATING = 6.0
 MIN_IDENTITY_VOTES = 3
 MIN_IDENTITY_DOWNLOADS = 50
+# SubDL documents this as a confident release-level filename match. It applies
+# only to its /files/search endpoint; title-only fallback retains its separate
+# strict identity and provider-quality policy.
+MIN_SUBDL_RELEASE_MATCH_SCORE = 0.80
 
 
 # Official OSHash test: first+last 64KiB of a synthetic pattern is tested in --self-test.
@@ -215,6 +221,9 @@ class Candidate:
     feature_title: str = ""
     feature_year: int = 0
     feature_imdb_id: int = 0
+    # /api/v2/files/search provides this release-name similarity in [0, 1].
+    # ``None`` means the provider did not offer a filename-match score.
+    subdl_match_score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -229,6 +238,10 @@ class SubdlDownload:
 
     n_id: str = ""
     url: str = ""
+
+
+class SubdlSearchQuotaExhausted(RuntimeError):
+    """Raised before a SubDL search that would exceed the durable local cap."""
 
 
 @dataclass(frozen=True)
@@ -580,6 +593,18 @@ def _subdl_identifier(value: Any) -> str:
     return identifier
 
 
+def _subdl_match_score(value: Any) -> float | None:
+    """Parse SubDL's documented [0, 1] release-match score fail-closed."""
+    text = _subdl_text(value)
+    if not text:
+        return None
+    try:
+        score = float(text)
+    except ValueError:
+        return None
+    return score if 0.0 <= score <= 1.0 else None
+
+
 def normalize_subdl_download_url(value: Any) -> str:
     """Validate a SubDL raw-file URL before ``urllib`` can dereference it.
 
@@ -617,22 +642,10 @@ def normalize_subdl_download_url(value: Any) -> str:
     return normalized
 
 
-def _subdl_exact_feature(payload: dict[str, Any], identity: MovieIdentity) -> tuple[str, int, int] | None:
-    """Validate that the response's subtitle list belongs to this exact movie.
-
-    SubDL returns subtitle entries for the first result. A search query is not
-    proof of identity, so never stamp the requested title/year onto candidates
-    until the provider's own result confirms it.
-    """
-    results = payload.get("results")
-    feature: dict[str, Any] | None = None
-    if isinstance(results, list) and results and isinstance(results[0], dict):
-        feature = results[0]
-    elif isinstance(payload.get("match"), dict):
-        feature = payload["match"]
-    if feature is None:
-        return None
-
+def _subdl_exact_feature_record(
+    feature: dict[str, Any], identity: MovieIdentity,
+) -> tuple[str, int, int] | None:
+    """Validate one provider-supplied movie identity record."""
     titles = [
         _subdl_text(feature.get(field_name))
         for field_name in ("name", "title", "original_name")
@@ -648,6 +661,32 @@ def _subdl_exact_feature(payload: dict[str, Any], identity: MovieIdentity) -> tu
     imdb_text = _subdl_text(feature.get("imdb_id"))
     imdb_match = re.search(r"(\d+)$", imdb_text)
     return matched_title, year, int(imdb_match.group(1)) if imdb_match else 0
+
+
+def _subdl_exact_feature(
+    payload: dict[str, Any], identity: MovieIdentity, *, require_match: bool = False,
+) -> tuple[str, int, int] | None:
+    """Confirm the provider says these subtitles belong to this exact movie.
+
+    ``/files/search`` returns a ``match`` record that is specifically bound to
+    the filename supplied by this client, so it is mandatory for that route.
+    The title-search endpoint documents its subtitle array as belonging to the
+    first entry in ``results``, which remains its authoritative identity.
+    """
+    match = payload.get("match")
+    if require_match:
+        # The documented filename endpoint attaches ``subtitles`` to this
+        # parsed-release record. Do not substitute a generic search result if
+        # it is absent or disagrees; that would turn release matching into a
+        # weaker title search without the caller's knowledge.
+        return _subdl_exact_feature_record(match, identity) if isinstance(match, dict) else None
+
+    results = payload.get("results")
+    if isinstance(results, list) and results and isinstance(results[0], dict):
+        return _subdl_exact_feature_record(results[0], identity)
+    if isinstance(match, dict):
+        return _subdl_exact_feature_record(match, identity)
+    return None
 
 
 def _subdl_value(child: dict[str, Any], parent: dict[str, Any], *names: str) -> Any:
@@ -721,15 +760,42 @@ def _identity_candidate_basics(cands: Sequence[Candidate], identity: MovieIdenti
     ]
 
 
-def pick_subdl_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity) -> tuple[Candidate | None, str]:
-    """Choose a conservative SubDL title/year fallback.
+def pick_subdl_identity_candidate(
+    cands: Sequence[Candidate],
+    identity: MovieIdentity,
+    *,
+    require_release_match_score: bool = False,
+) -> tuple[Candidate | None, str]:
+    """Choose a conservative SubDL fallback candidate.
 
-    OpenSubtitles exposes a trusted flag plus community vote/rating metadata, so
-    its generic picker can demand those signals. SubDL's documented v2 response
-    does not guarantee that those fields are present. When they are present,
-    use the same strict policy. When they are absent, accept only one exact,
-    normal English SRT; multiple otherwise-equal releases remain manual review.
+    The generic title/year route has no documented release-similarity signal, so
+    it retains the existing strict provider-quality policy (or one uniquely
+    normal English SRT when the v2 response omits quality metadata). In contrast,
+    ``/files/search`` explicitly ranks exact-release candidates by
+    ``match_score``. There, choose only the single highest valid score at or
+    above SubDL's documented confident threshold; provider vote metadata must
+    not accidentally outrank the release match, and a tied top score is review
+    rather than a guess.
     """
+    if require_release_match_score:
+        scored: list[tuple[Candidate, float]] = []
+        for candidate in _identity_candidate_basics(cands, identity):
+            score = _subdl_match_score(candidate.subdl_match_score)
+            if score is not None and score >= MIN_SUBDL_RELEASE_MATCH_SCORE:
+                scored.append((candidate, score))
+        if not scored:
+            return (
+                None,
+                "SubDL did not return a confident release match "
+                f"(requires match_score >= {MIN_SUBDL_RELEASE_MATCH_SCORE:.2f})",
+            )
+        highest = max(score for _candidate, score in scored)
+        top = [(candidate, score) for candidate, score in scored if score == highest]
+        if len(top) != 1:
+            return None, "multiple equally scored confident SubDL release matches require review"
+        candidate, score = top[0]
+        return candidate, f"title/year exact; SubDL highest release match {score:.2f}"
+
     pick, reason = pick_identity_candidate(cands, identity)
     if pick is not None:
         return pick, reason
@@ -775,7 +841,7 @@ def subdl_download_redirect_url(data: bytes) -> str | None:
 
 
 def decode_subdl_srt_payload(data: bytes, max_bytes: int) -> str:
-    """Decode a raw SRT or one SRT member from a bounded SubDL archive."""
+    """Decode a raw SRT or exactly one SRT member from a bounded archive."""
     if len(data) > max_bytes:
         raise RuntimeError(f"subtitle exceeds {max_bytes} byte safety limit")
     if zipfile.is_zipfile(io.BytesIO(data)):
@@ -790,14 +856,19 @@ def decode_subdl_srt_payload(data: bytes, max_bytes: int) -> str:
                 ]
                 if not candidates:
                     raise RuntimeError("no usable .srt file found in SubDL zip archive")
-                # A raw unpacked URL normally avoids this branch. For a legacy
-                # archive choose deterministically, but stream only the selected
-                # member so a compressed archive cannot expand past the cap.
-                selected = sorted(candidates, key=lambda info: (-info.file_size, info.filename.casefold()))[0]
+                # An unpacked file URL is selected before an archive reaches this
+                # branch. Without that per-file reference, choosing one of several
+                # SRTs would be a guess, so keep it for manual review instead.
+                if len(candidates) != 1:
+                    raise RuntimeError("SubDL zip archive contains multiple usable .srt files")
+                selected = candidates[0]
                 with archive.open(selected, "r") as member:
                     raw_srt = member.read(max_bytes + 1)
         except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
-            if isinstance(exc, RuntimeError) and str(exc).startswith("no usable .srt"):
+            if isinstance(exc, RuntimeError) and (
+                str(exc).startswith("no usable .srt")
+                or str(exc).startswith("SubDL zip archive contains multiple")
+            ):
                 raise
             raise RuntimeError("SubDL zip archive could not be read safely") from exc
         if len(raw_srt) > max_bytes:
@@ -820,8 +891,16 @@ def decode_subdl_srt_payload(data: bytes, max_bytes: int) -> str:
 class SubdlClient:
     """Small stdlib-only client for SubDL's authenticated v2 API."""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        before_search_request: Callable[[], None] | None = None,
+    ) -> None:
         self.api_key = api_key.strip()
+        # Queue mode supplies a durable reservation callback. Keep it optional
+        # so this small client remains usable on its own and in focused tests.
+        self._before_search_request = before_search_request
         self._last_call = 0.0
 
     def _headers(self, accept: str) -> dict[str, str]:
@@ -858,6 +937,12 @@ class SubdlClient:
         url = SUBDL_API_BASE + path + "?" + urllib.parse.urlencode(params)
         last_error: RuntimeError | None = None
         for attempt in range(4):
+            # A retry is another HTTP search request and can count against the
+            # provider quota, so reserve it before each outbound attempt. Do
+            # this before throttling too: an exhausted cap must not sleep only
+            # to reject a request that will never be sent.
+            if self._before_search_request is not None:
+                self._before_search_request()
             self._throttle()
             request = urllib.request.Request(url, headers=self._headers("application/json"))
             try:
@@ -931,25 +1016,21 @@ class SubdlClient:
                 feature_title=feature_title,
                 feature_year=feature_year,
                 feature_imdb_id=feature_imdb_id,
+                subdl_match_score=_subdl_match_score(_subdl_value(child, parent, "match_score")),
             ),
             candidate_id,
             download,
         )
 
-    def search_identity(self, identity: MovieIdentity) -> tuple[list[Candidate], dict[str, SubdlDownload]]:
-        """Find strictly title/year-confirmed English movie subtitles on SubDL."""
-        if not self.api_key:
-            return [], {}
-        payload = self._request_json(
-            "/subtitles/search",
-            {
-                "film_name": identity.title,
-                "type": "movie",
-                "languages": "en",
-                "unpack": "1",
-            },
-        )
-        feature = _subdl_exact_feature(payload, identity)
+    def _parse_search_payload(
+        self,
+        payload: dict[str, Any],
+        identity: MovieIdentity,
+        *,
+        require_match: bool = False,
+    ) -> tuple[list[Candidate], dict[str, SubdlDownload]]:
+        """Turn one vetted SubDL search response into downloadable candidates."""
+        feature = _subdl_exact_feature(payload, identity, require_match=require_match)
         if feature is None:
             return [], {}
         feature_title, feature_year, feature_imdb_id = feature
@@ -962,7 +1043,12 @@ class SubdlClient:
         for parent in subtitles:
             if not isinstance(parent, dict):
                 continue
+            # ``unpack_files`` is the documented subtitle-search shape. Accept
+            # the two equivalent spellings defensively because v2 is evolving,
+            # but never infer a file reference from a non-object value.
             unpacked = parent.get("unpack_files")
+            if not isinstance(unpacked, list):
+                unpacked = parent.get("unpacked_files") or parent.get("files")
             entries: list[dict[str, Any]]
             if isinstance(unpacked, list) and unpacked:
                 entries = [entry for entry in unpacked if isinstance(entry, dict)]
@@ -979,6 +1065,52 @@ class SubdlClient:
                     candidates.append(candidate)
                     downloads[candidate_id] = download
         return candidates, downloads
+
+    def search_filename(
+        self,
+        filename: str,
+        identity: MovieIdentity,
+    ) -> tuple[list[Candidate], dict[str, SubdlDownload]]:
+        """Use SubDL's release-aware v2 media-manager search endpoint.
+
+        The API documents ``/files/search`` as the route for library scanners:
+        it returns the movie identity plus a per-subtitle ``match_score`` that
+        measures release-name similarity. Only the basename is sent, never a
+        local directory path.
+        """
+        if not self.api_key:
+            return [], {}
+        # ``Path.name`` on Linux does not split a Windows backslash path, so
+        # normalize both separators before taking the basename.
+        name = str(filename).replace("\\", "/").rsplit("/", 1)[-1].strip()
+        if not name or "\x00" in name or len(name) > 512:
+            return [], {}
+        payload = self._request_json(
+            "/files/search",
+            {
+                "filename": name,
+                "type": "movie",
+                "languages": "en",
+                "hi": "0",
+                "subs_per_page": "30",
+            },
+        )
+        return self._parse_search_payload(payload, identity, require_match=True)
+
+    def search_identity(self, identity: MovieIdentity) -> tuple[list[Candidate], dict[str, SubdlDownload]]:
+        """Use documented title search only when filename matching found nothing."""
+        if not self.api_key:
+            return [], {}
+        payload = self._request_json(
+            "/subtitles/search",
+            {
+                "film_name": identity.title,
+                "type": "movie",
+                "languages": "en",
+                "unpack": "1",
+            },
+        )
+        return self._parse_search_payload(payload, identity)
 
     def _download_bytes(self, url: str, max_bytes: int) -> bytes:
         self._throttle()
@@ -1007,9 +1139,13 @@ class SubdlClient:
             subtitle_id = _subdl_identifier(download.n_id)
             if not subtitle_id:
                 raise RuntimeError("SubDL candidate has an invalid subtitle identifier")
+            # The documented ``format=file`` mode returns a non-ZIP payload
+            # only when SubDL can identify one obvious file. That is safer than
+            # silently choosing from an archive; unexpected ZIP responses still
+            # pass through the one-SRT-only validator below.
             url = (
                 f"{SUBDL_API_BASE}/subtitles/{urllib.parse.quote(subtitle_id, safe='')}/download?"
-                "format=zip"
+                "format=file"
             )
         else:
             raise RuntimeError("SubDL candidate has no safe download reference")
@@ -1428,9 +1564,14 @@ def run_self_tests() -> int:
         moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
         hearing_impaired=False, machine_translated=False, ai_translated=False,
         foreign_parts_only=False, language="en", feature_title="Knowing", feature_year=2009,
+        subdl_match_score=0.92,
     )
     subdl_pick, _subdl_reason = pick_subdl_identity_candidate([subdl_candidate], subdl_identity)
     check(subdl_pick == subdl_candidate, "SubDL unique title/year fallback")
+    subdl_release_pick, _subdl_release_reason = pick_subdl_identity_candidate(
+        [subdl_candidate], subdl_identity, require_release_match_score=True,
+    )
+    check(subdl_release_pick == subdl_candidate, "SubDL confident release match")
     check(
         normalize_subdl_download_url("/subtitle/fixture/file") == "https://dl.subdl.com/subtitle/fixture/file",
         "SubDL relative download URL is constrained",
@@ -1543,7 +1684,8 @@ class QueueConfig:
     username: str = ""
     password: str = ""
     # ``daily_cap`` remains the OpenSubtitles cap for backwards-compatible
-    # command-line/config names. SubDL has a separate provider quota.
+    # command-line/config names. SubDL publishes independently metered search
+    # and download quotas, both tracked in the same durable ledger.
     daily_cap: int = DEVELOPMENT_ANONYMOUS_DAILY_CAP
     subdl_daily_cap: int = SUBDL_DEFAULT_DAILY_CAP
     min_movie_size_mb: float = MIN_MOVIE_SIZE_MB
@@ -1553,6 +1695,8 @@ class QueueConfig:
     dry_run: bool = False
     limit: int = 0
     auth_mode: str = DEFAULT_AUTH_MODE
+    # Appended to preserve positional compatibility with pre-search-cap callers.
+    subdl_search_daily_cap: int = SUBDL_DEFAULT_SEARCH_DAILY_CAP
 
     @property
     def min_bytes(self) -> int:
@@ -1677,6 +1821,7 @@ def day_ledger(state: dict[str, Any], day: str) -> dict[str, int]:
                                        ledger.get("successful_downloads", 0))
     defaults: dict[str, Any] = {
         "opensubtitles_download_requests_reserved": legacy_open_reserved,
+        "subdl_search_requests_reserved": 0,
         "subdl_download_requests_reserved": 0,
         "opensubtitles_successful_downloads": legacy_open_successful,
         "subdl_successful_downloads": 0,
@@ -1738,6 +1883,22 @@ def provider_has_quota(cfg: QueueConfig, ledger: dict[str, int], provider: str) 
     return provider_reserved(ledger, provider) < provider_daily_cap(cfg, provider)
 
 
+def subdl_search_reserved(ledger: dict[str, int]) -> int:
+    """Return durable SubDL search requests reserved for the current UTC day."""
+    return max(0, int(ledger.get("subdl_search_requests_reserved", 0) or 0))
+
+
+def subdl_search_has_quota(cfg: QueueConfig, ledger: dict[str, int]) -> bool:
+    return subdl_search_reserved(ledger) < cfg.subdl_search_daily_cap
+
+
+def reserve_subdl_search(ledger: dict[str, int]) -> int:
+    """Reserve one SubDL API search before it can leave this process."""
+    reserved = subdl_search_reserved(ledger) + 1
+    ledger["subdl_search_requests_reserved"] = reserved
+    return reserved
+
+
 def reserve_provider_download(ledger: dict[str, int], provider: str) -> int:
     field_name = provider_reservation_field(provider)
     ledger[field_name] = provider_reserved(ledger, provider) + 1
@@ -1761,11 +1922,17 @@ def provider_label(provider: str) -> str:
 
 
 def provider_quota_text(cfg: QueueConfig, ledger: dict[str, int]) -> str:
-    """Format only enabled providers' independent UTC download reservations."""
-    parts = [
-        f"{provider_label(provider)} {provider_reserved(ledger, provider)}/{provider_daily_cap(cfg, provider)}"
-        for provider in configured_providers(cfg)
-    ]
+    """Format enabled providers' durable local quota reservations."""
+    parts: list[str] = []
+    for provider in configured_providers(cfg):
+        downloads = f"downloads {provider_reserved(ledger, provider)}/{provider_daily_cap(cfg, provider)}"
+        if provider == PROVIDER_SUBDL:
+            parts.append(
+                f"SubDL {downloads}; searches "
+                f"{subdl_search_reserved(ledger)}/{cfg.subdl_search_daily_cap}"
+            )
+        else:
+            parts.append(f"{provider_label(provider)} {downloads}")
     return " · ".join(parts) or "no provider configured"
 
 
@@ -1775,8 +1942,11 @@ def provider_configuration_text(cfg: QueueConfig) -> str:
     if cfg.api_key.strip():
         parts.append(f"OpenSubtitles {cfg.auth_mode}; cap {cfg.daily_cap}")
     if cfg.subdl_api_key.strip():
-        subdl_role = "fallback" if cfg.api_key.strip() else "title/year"
-        parts.append(f"SubDL {subdl_role}; cap {cfg.subdl_daily_cap}")
+        subdl_role = "fallback" if cfg.api_key.strip() else "release-aware/title-year"
+        parts.append(
+            f"SubDL {subdl_role}; downloads {cfg.subdl_daily_cap}; "
+            f"searches {cfg.subdl_search_daily_cap}"
+        )
     return " · ".join(parts) or "no provider configured"
 
 
@@ -1787,11 +1957,11 @@ def provider_policy_text(cfg: QueueConfig) -> str:
             return "OpenSubtitles exact moviehash matching only"
         return "title/year fallback disabled"
     if cfg.api_key.strip() and cfg.subdl_api_key.strip():
-        return "OpenSubtitles exact moviehash first · SubDL strict title/year fallback"
+        return "OpenSubtitles exact moviehash first · SubDL release-aware fallback (score ≥ 0.80)"
     if cfg.api_key.strip():
         return "OpenSubtitles exact moviehash first · conservative title/year fallback"
     if cfg.subdl_api_key.strip():
-        return "SubDL strict title/year matching · no exact moviehash provider"
+        return "SubDL release-aware matching (score ≥ 0.80) · no exact moviehash provider"
     return "no provider configured"
 
 
@@ -1888,17 +2058,34 @@ def relative_text(path: Path, root: Path) -> str:
 def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     """Process one daily batch with independent provider quotas.
 
-    OpenSubtitles remains the only exact-release (OSHash) source. SubDL is
-    deliberately title/year-only and runs only after OpenSubtitles has no safe
-    candidate or is unavailable for the day.
+    OpenSubtitles remains the only exact-release (OSHash) source. SubDL runs
+    only after OpenSubtitles has no safe candidate or is unavailable for the
+    day; its documented filename match is score-gated, then its strict
+    title/year route is used only when filename matching found no usable candidate.
     """
     state = load_state(cfg.log_file, cfg.library)
     today = utc_day()
     ledger = day_ledger(state, today)
     fetcher_cfg = cfg.fetcher_config()
+
+    def reserve_subdl_search_request() -> None:
+        """Persist a search reservation before every SubDL API attempt."""
+        if not subdl_search_has_quota(cfg, ledger):
+            raise SubdlSearchQuotaExhausted(
+                "SubDL daily search cap exhausted "
+                f"({subdl_search_reserved(ledger)}/{cfg.subdl_search_daily_cap} requests reserved)"
+            )
+        reserve_subdl_search(ledger)
+        # A network timeout can still count remotely, so never wait until the
+        # response to make this local reservation durable.
+        persist_state(state, cfg.log_file)
+
     results: list[JobResult] = []
     open_client = OpenSubtitlesClient(fetcher_cfg) if cfg.api_key.strip() else None
-    subdl_client = SubdlClient(cfg.subdl_api_key) if cfg.subdl_api_key.strip() else None
+    subdl_client = (
+        SubdlClient(cfg.subdl_api_key, before_search_request=reserve_subdl_search_request)
+        if cfg.subdl_api_key.strip() else None
+    )
     active_providers = configured_providers(cfg)
     deferred_remaining = 0
     deferred_videos: list[Path] = []
@@ -1908,7 +2095,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         videos = videos[:cfg.limit]
     total = len(videos)
     log(
-        f"Found {total} eligible movies. UTC download reservations: {provider_quota_text(cfg, ledger)}.",
+        f"Found {total} eligible movies. UTC local reservations: {provider_quota_text(cfg, ledger)}.",
         log_file=cfg.log_file,
     )
 
@@ -1983,19 +2170,20 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             open_client is not None
             and provider_has_quota(cfg, ledger, PROVIDER_OPENSUBTITLES)
         )
-        # SubDL offers only identity matching, so --no-identity-fallback also
-        # intentionally disables it.
+        # SubDL has no byte-exact release hash, so --no-identity-fallback also
+        # intentionally disables its release-aware/title-year lookup.
         subdl_available = (
             subdl_client is not None
             and cfg.identity_fallback
             and provider_has_quota(cfg, ledger, PROVIDER_SUBDL)
+            and subdl_search_has_quota(cfg, ledger)
         )
         if not open_available and not subdl_available:
             deferred_remaining = total - index + 1
             deferred_videos = list(videos[index - 1:])
             log(
-                "QUOTA REACHED: no configured provider with an enabled matching mode has a "
-                f"download reservation left ({provider_quota_text(cfg, ledger)}). "
+                "QUOTA REACHED: no configured provider with an enabled matching mode has "
+                f"remaining local capacity ({provider_quota_text(cfg, ledger)}). "
                 f"{deferred_remaining} movie(s) remain for the next UTC day.",
                 level="WARNING", log_file=cfg.log_file,
             )
@@ -2008,6 +2196,11 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         selection_reason = "no usable English moviehash-matched human SRT"
         providers_checked: list[str] = []
         subdl_downloads: dict[str, SubdlDownload] = {}
+        # Distinguish an exhausted SubDL cap before a lookup from a filename
+        # lookup that actually returned a low-score or ambiguous candidate.
+        # The former should be retried on the next quota day; the latter is a
+        # deliberate manual-review decision.
+        subdl_lookup_attempted = False
 
         open_lookup_error = ""
         if open_available and open_client is not None:
@@ -2130,12 +2323,48 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                     "OpenSubtitles missed; " if open_available else
                     "OpenSubtitles quota exhausted; " if open_client is not None else ""
                 )
-                emit(index, "FALLBACK", video,
-                     f"{prefix}checking SubDL title/year: {identity.title} ({identity.year})")
+                emit(
+                    index,
+                    "FALLBACK",
+                    video,
+                    f"{prefix}checking SubDL release-aware filename match: {video.name}",
+                )
                 try:
-                    subdl_candidates, subdl_downloads = subdl_client.search_identity(identity)
-                    pick, selection_reason = pick_subdl_identity_candidate(subdl_candidates, identity)
-                except RuntimeError as exc:
+                    subdl_lookup_attempted = True
+                    subdl_candidates, subdl_downloads = subdl_client.search_filename(video.name, identity)
+                    pick, selection_reason = pick_subdl_identity_candidate(
+                        subdl_candidates, identity, require_release_match_score=True,
+                    )
+                    if pick is not None:
+                        selected_provider = PROVIDER_SUBDL
+                        selection_method = "subdl-release"
+                    elif not subdl_candidates:
+                        # The local canonical filename deliberately omits scene
+                        # tags. If SubDL cannot resolve it at all, use its
+                        # documented title route once, still requiring exact
+                        # provider title/year metadata and one unambiguous SRT.
+                        emit(
+                            index,
+                            "FALLBACK",
+                            video,
+                            f"SubDL filename lookup found no usable candidate; checking strict title/year: "
+                            f"{identity.title} ({identity.year})",
+                        )
+                        subdl_candidates, subdl_downloads = subdl_client.search_identity(identity)
+                        pick, selection_reason = pick_subdl_identity_candidate(subdl_candidates, identity)
+                        if pick is not None:
+                            selected_provider = PROVIDER_SUBDL
+                            selection_method = "subdl-identity"
+                except SubdlSearchQuotaExhausted as exc:
+                    # The callback fires before an outbound request. This movie
+                    # was not fully evaluated, so defer it rather than turning a
+                    # temporary provider limit into a manual-review decision.
+                    detail = str(exc)
+                    result = JobResult(video, "skip", detail, reason=REASON_QUOTA)
+                    results.append(result)
+                    emit(index, "SKIP", video, detail)
+                    continue
+                except (RuntimeError, ValueError) as exc:
                     detail = f"SubDL lookup failed: {exc}"
                     set_movie_status(
                         record, "error", detail, moviehash=digest,
@@ -2148,13 +2377,25 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                     results.append(result)
                     emit(index, "ERROR", video, detail)
                     continue
-                if pick is not None:
-                    selected_provider = PROVIDER_SUBDL
-                    selection_method = "subdl-identity"
-                else:
+                if pick is None:
                     identity_reasons.append(f"SubDL: {selection_reason}")
             elif pick is None and subdl_client is not None:
-                identity_reasons.append("SubDL: daily download cap exhausted")
+                if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
+                    identity_reasons.append("SubDL: daily download cap exhausted")
+                elif not subdl_search_has_quota(cfg, ledger):
+                    identity_reasons.append("SubDL: daily search cap exhausted")
+                else:
+                    identity_reasons.append("SubDL: identity fallback disabled")
+
+            if pick is None and subdl_client is not None and not subdl_lookup_attempted and not subdl_available:
+                if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
+                    detail = "SubDL daily download cap exhausted before lookup; deferred to the next UTC day"
+                else:
+                    detail = "SubDL daily search cap exhausted before lookup; deferred to the next UTC day"
+                result = JobResult(video, "skip", detail, reason=REASON_QUOTA)
+                results.append(result)
+                emit(index, "SKIP", video, detail)
+                continue
 
             if pick is None:
                 reason = "; ".join(identity_reasons) or selection_reason
@@ -2238,6 +2479,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         provider for provider in active_providers
         if provider_has_quota(cfg, ledger, provider)
         and (provider != PROVIDER_SUBDL or cfg.identity_fallback)
+        and (provider != PROVIDER_SUBDL or subdl_search_has_quota(cfg, ledger))
     ]
     summary = {
         "utc_day": today,
@@ -2249,6 +2491,8 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         "opensubtitles_daily_cap": cfg.daily_cap,
         "opensubtitles_download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
         "opensubtitles_successful_downloads": ledger["opensubtitles_successful_downloads"],
+        "subdl_search_daily_cap": cfg.subdl_search_daily_cap,
+        "subdl_search_requests_reserved": subdl_search_reserved(ledger),
         "subdl_daily_cap": cfg.subdl_daily_cap,
         "subdl_download_requests_reserved": provider_reserved(ledger, PROVIDER_SUBDL),
         "subdl_successful_downloads": ledger["subdl_successful_downloads"],
@@ -2393,9 +2637,15 @@ def report_provider_quota_text(cfg: QueueConfig, summary: dict[str, Any]) -> str
         cap = int(summary.get("opensubtitles_daily_cap", summary.get("daily_cap", cfg.daily_cap)) or 0)
         parts.append(f"OpenSubtitles {reserved}/{cap} reserved · {max(0, cap - reserved)} left")
     if cfg.subdl_api_key.strip():
-        reserved = int(summary.get("subdl_download_requests_reserved", 0) or 0)
-        cap = int(summary.get("subdl_daily_cap", cfg.subdl_daily_cap) or 0)
-        parts.append(f"SubDL {reserved}/{cap} reserved · {max(0, cap - reserved)} left")
+        downloads_reserved = int(summary.get("subdl_download_requests_reserved", 0) or 0)
+        downloads_cap = int(summary.get("subdl_daily_cap", cfg.subdl_daily_cap) or 0)
+        searches_reserved = int(summary.get("subdl_search_requests_reserved", 0) or 0)
+        searches_cap = int(summary.get("subdl_search_daily_cap", cfg.subdl_search_daily_cap) or 0)
+        parts.append(
+            f"SubDL downloads {downloads_reserved}/{downloads_cap} reserved · "
+            f"{max(0, downloads_cap - downloads_reserved)} left; searches "
+            f"{searches_reserved}/{searches_cap} reserved · {max(0, searches_cap - searches_reserved)} left"
+        )
     return "  ·  ".join(parts) or "No provider configured"
 
 
@@ -2558,7 +2808,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Fetch one validated external English SRT per Jellyfin MKV. "
             "OpenSubtitles exact moviehash is preferred; SubDL is an optional "
-            "strict title/year fallback when no hash-safe result is available."
+            "score-gated release-aware fallback when no hash-safe result is available."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -2579,14 +2829,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--subdl-daily-cap", type=int, default=0, metavar="N",
                         help=("Maximum SubDL download requests per UTC day (0 uses the conservative "
                               f"free allowance of {SUBDL_DEFAULT_DAILY_CAP})"))
+    parser.add_argument("--subdl-search-daily-cap", type=int, default=0, metavar="N",
+                        help=("Maximum SubDL search requests per UTC day (0 uses the conservative "
+                              f"free allowance of {SUBDL_DEFAULT_SEARCH_DAILY_CAP})"))
     parser.add_argument("--min-size", type=float, default=MIN_MOVIE_SIZE_MB, metavar="MB")
     parser.add_argument("--lock-timeout", type=float, default=60.0, metavar="SEC")
     parser.add_argument("--limit", type=int, default=0, metavar="N",
                         help="Process at most N movies (0 means all eligible movies)")
     parser.add_argument("--dry-run", action="store_true",
-                        help="Preview candidates; no provider download request or SRT write")
+                        help="Preview candidates; searches still run, but no download request or SRT write")
     parser.add_argument("--no-identity-fallback", dest="identity_fallback", action="store_false",
-                        help="Disable the conservative exact-title/year fallback after hash misses")
+                        help="Disable all conservative non-hash fallback matching after hash misses")
     parser.set_defaults(identity_fallback=True)
     parser.add_argument("--retry-review", action="store_true",
                         help="Reconsider movies previously held for manual identity review")
@@ -2621,6 +2874,14 @@ def resolve_subdl_daily_cap(requested_cap: int) -> int:
     return cap
 
 
+def resolve_subdl_search_daily_cap(requested_cap: int) -> int:
+    """Choose SubDL's free search allowance or a user plan-specific override."""
+    cap = SUBDL_DEFAULT_SEARCH_DAILY_CAP if requested_cap == 0 else int(requested_cap)
+    if cap < 1:
+        raise ValueError("--subdl-search-daily-cap must be zero (automatic) or at least 1")
+    return cap
+
+
 def compact_config_from_args(args: argparse.Namespace) -> QueueConfig:
     return QueueConfig(
         library=args.source.resolve(),
@@ -2632,6 +2893,7 @@ def compact_config_from_args(args: argparse.Namespace) -> QueueConfig:
         password=(os.environ.get("OPENSUBTITLES_PASSWORD") or OPENSUBTITLES_PASSWORD).strip(),
         daily_cap=resolve_daily_cap(str(args.auth_mode), int(args.daily_cap)),
         subdl_daily_cap=resolve_subdl_daily_cap(int(args.subdl_daily_cap)),
+        subdl_search_daily_cap=resolve_subdl_search_daily_cap(int(args.subdl_search_daily_cap)),
         min_movie_size_mb=float(args.min_size),
         lock_timeout_seconds=max(0.0, float(args.lock_timeout)),
         retry_no_match=bool(args.retry_review),
@@ -2650,6 +2912,8 @@ def validate_compact_config(cfg: QueueConfig) -> list[str]:
         errors.append("--daily-cap must be at least 1")
     if cfg.subdl_daily_cap < 1:
         errors.append("--subdl-daily-cap must be at least 1")
+    if cfg.subdl_search_daily_cap < 1:
+        errors.append("--subdl-search-daily-cap must be at least 1")
     if cfg.auth_mode not in {AUTH_MODE_DEVELOPMENT_ANONYMOUS, AUTH_MODE_USER}:
         errors.append("--auth-mode is unsupported")
     if not configured_providers(cfg):
@@ -2657,7 +2921,7 @@ def validate_compact_config(cfg: QueueConfig) -> list[str]:
     if cfg.api_key and cfg.auth_mode == AUTH_MODE_USER and (not cfg.username or not cfg.password):
         errors.append("--auth-mode user requires an OpenSubtitles username and password")
     if cfg.subdl_api_key.strip() and not cfg.api_key.strip() and not cfg.identity_fallback:
-        errors.append("SubDL-only mode requires title/year fallback; omit --no-identity-fallback")
+        errors.append("SubDL-only mode requires fallback matching; omit --no-identity-fallback")
     if cfg.min_movie_size_mb < 0 or cfg.lock_timeout_seconds < 0 or cfg.limit < 0:
         errors.append("--min-size, --lock-timeout, and --limit must be non-negative")
     if cfg.report_file == cfg.library or cfg.report_file.is_relative_to(cfg.library):

@@ -97,28 +97,39 @@ python subtitle_fetcher.py [OPTIONS]
 | `--auth-mode MODE` | `development-anonymous` | — | `development-anonymous` (API key only) or `user` |
 | `--daily-cap N` | `100` (anon) / `20` (user) | — | Maximum **OpenSubtitles** download requests per UTC day |
 | `--subdl-daily-cap N` | `50` | — | Maximum **SubDL** download requests per UTC day; set a higher plan-specific value explicitly |
+| `--subdl-search-daily-cap N` | `2,000` | — | Maximum **SubDL** search requests per UTC day; set a higher plan-specific value explicitly |
 | `--min-size MB` | `300` | — | Minimum file size in MB |
 | `--lock-timeout S`| `60.0` | — | Coordination lock timeout |
 | `--limit N` | `0` (all) | — | Maximum movies to process in this run |
-| `--dry-run` | `False` | — | Query API for candidates without downloading |
-| `--no-identity-fallback` | `False` | — | Disable conservative title/year fallback after hash miss |
+| `--dry-run` | `False` | — | Query providers for candidates without downloading; SubDL searches still consume the local search guard |
+| `--no-identity-fallback` | `False` | — | Disable all conservative non-hash fallback matching after a hash miss |
 | `--retry-review` | `False` | — | Reconsider items previously held for manual review |
 
 ### Providers and Environment Variables
 
 At least one provider key is required. When both are set, OpenSubtitles is
-always queried first for an exact moviehash match; SubDL runs only after no safe
-OpenSubtitles hash/title-year candidate is available. SubDL can be used by
-itself, but it is necessarily limited to the same conservative title/year
-matching policy.
+always queried first for an exact moviehash match, then gets its conservative
+title/year check. Only after no safe OpenSubtitles candidate is available does
+SubDL run. It first calls the documented [`/api/v2/files/search`](https://subdl.com/developers)
+route with the local basename only and auto-selects only a normal English SRT
+whose provider `match` confirms the canonical movie and whose `match_score` is
+at least `0.80`. If that filename route returns no usable candidate, it makes
+one strict title/year query. A low score, malformed/missing score, ambiguity, or
+edition-labelled release is held for manual review; it does not weaken into a
+title-only automatic pick. SubDL can be used by itself, but it has no
+byte-identical moviehash capability.
 
 - `OPENSUBTITLES_API_KEY`: OpenSubtitles Consumer API Key (recommended for exact release matching).
 - `OPENSUBTITLES_USERNAME`: Username only when `OPENSUBTITLES_API_KEY` is set and using `--auth-mode user`.
 - `OPENSUBTITLES_PASSWORD`: Password only when `OPENSUBTITLES_API_KEY` is set and using `--auth-mode user`.
 - `SUBDL_API_KEY`: SubDL API key. Read only from the environment; get one at <https://subdl.com/panel/api>.
 
-The log ledger records reservations separately for both providers. `--daily-cap`
-continues to control OpenSubtitles; `--subdl-daily-cap` controls SubDL.
+The append-only log ledger records reservations separately for both providers.
+`--daily-cap` controls OpenSubtitles downloads; `--subdl-daily-cap` controls
+SubDL downloads and `--subdl-search-daily-cap` controls SubDL searches. The
+current SubDL free tier documents 2,000 searches and 50 downloads per day;
+SubDL Pro documents 30,000 and 2,000, respectively. Searches occur in dry-run
+mode too, and every retry is reserved before the request is sent.
 
 ---
 

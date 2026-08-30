@@ -33,13 +33,17 @@ When `movie_standardizer.py` ingests a movie from qBittorrent, it creates a hard
 1. **File size under 300 MB**: Movies under 300 MB are skipped by default (`--min-size 300`). Pass `--min-size 100` if you collect smaller rips.
 2. **Not an MKV container**: Only canonical `.mkv` files are processed.
 3. **Previous no-match or review state**: The fetcher records previous search outcomes in its log ledger so it doesn't waste daily quota re-searching movies with no match. Pass `--retry-review` to force a re-check.
-4. **Daily quota reached**: The fetcher keeps OpenSubtitles and SubDL reservations separately. In free OpenSubtitles development mode, the default is 100 downloads per UTC day; SubDL defaults to the free-tier 50 downloads per UTC day. A remaining provider can still be used after the other reaches its cap. Movies are deferred only once every configured usable provider is capped.
+4. **Daily quota reached**: The fetcher keeps OpenSubtitles and SubDL reservations separately. In free OpenSubtitles development mode, the default is 100 downloads per UTC day. [SubDL documents](https://subdl.com/developers) 2,000 searches and 50 downloads per day on its free tier; the fetcher keeps independent local UTC guards for both (`--subdl-search-daily-cap` and `--subdl-daily-cap`). A remaining provider can still be used after the other reaches its cap. Movies are deferred only once every configured usable provider is capped.
 
 ### Q: Should I configure both subtitle providers?
 **A:** Yes, when possible. `OPENSUBTITLES_API_KEY` is preferred because its
 moviehash can identify the byte-identical release and is the safest automatic
 sync match. `SUBDL_API_KEY` adds coverage after OpenSubtitles has no safe
-candidate. SubDL can run by itself, but only through strict title/year matching.
+candidate. SubDL first uses its documented release-aware filename match; automatic
+picks require the provider's `match` metadata to confirm the movie and a
+`match_score` of at least `0.80`. Only a filename lookup with no usable
+candidate may fall back to strict title/year matching; low-score or ambiguous results are held for
+review. SubDL can run by itself but has no byte-identical moviehash match.
 Keys are read only from environment variables:
 ```bash
 export OPENSUBTITLES_API_KEY="your-opensubtitles-key"

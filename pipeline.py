@@ -10,8 +10,8 @@ load-bearing:
     subtitle_fetcher.py   MUST run before mkv_track_cleaner.py
 
 ``subtitle_fetcher.py`` searches OpenSubtitles by moviehash, which is the file
-size plus the sum of the first and last 64 KiB. It can then use SubDL as a
-strict title/year fallback. A remux rewrites those bytes, so any movie cleaned
+size plus the sum of the first and last 64 KiB. It can then use SubDL's
+score-gated release-aware fallback. A remux rewrites those bytes, so any movie cleaned
 first can never reproduce its release hash and is silently demoted to the much
 weaker title/year search. Running the four scripts
 by hand makes that easy to get wrong on a busy day; this script cannot get it

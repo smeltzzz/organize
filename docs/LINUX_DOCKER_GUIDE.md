@@ -66,7 +66,8 @@ Create `/etc/organize.env` or export in your shell profile (`~/.bashrc`):
 ```bash
 # Recommended exact-release source (https://www.opensubtitles.com/en/consumers)
 export OPENSUBTITLES_API_KEY="your-opensubtitles-consumer-api-key"
-# Optional strict title/year fallback (https://subdl.com/panel/api)
+# Optional release-aware fallback (https://subdl.com/panel/api)
+# Automatic SubDL picks require its documented filename match_score >= 0.80.
 export SUBDL_API_KEY="your-subdl-api-key"
 export MOVIE_STD_SOURCE="/data/media/torrents/final"
 export MOVIE_STD_TARGET="/data/media/movies"

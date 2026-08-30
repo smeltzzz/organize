@@ -113,7 +113,7 @@ $$\text{OSHash} = \text{FileSize} + \sum_{i=0}^{8191} \text{uint64le}(\text{chun
 
 Where $\text{chunk}_{\text{first}}$ and $\text{chunk}_{\text{last}}$ are the first and last 64 KiB ($65,536$ bytes) of the file, read as 64-bit unsigned integers in little-endian byte order, with addition modulo $2^{64}$.
 
-Because this hash relies on the exact first and last 64 KiB of the release, `subtitle_fetcher.py` must run before any remuxing touches the Matroska headers. The optional SubDL provider is deliberately a title/year-only fallback: it adds coverage after OpenSubtitles has no safe result, but never displaces an available OSHash match.
+Because this hash relies on the exact first and last 64 KiB of the release, `subtitle_fetcher.py` must run before any remuxing touches the Matroska headers. The optional SubDL provider runs only after OpenSubtitles has no safe result, so it never displaces an available OSHash match. It uses SubDL's documented release-aware filename route, requires the provider `match` record to confirm the canonical movie, and auto-selects only `match_score >= 0.80`; a strict title/year query is allowed only if filename matching yields no usable candidate.
 
 ---
 
