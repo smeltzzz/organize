@@ -6,9 +6,11 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, cast
+
+from reporttext import scorecard, section
 
 import movie_standardizer as ms
-from reporttext import scorecard, section
 
 
 class ParseMovieNameTests(unittest.TestCase):
@@ -84,7 +86,7 @@ class DuplicateUpgradeTests(unittest.TestCase):
 
     @staticmethod
     def _info(**changes) -> ms.MediaTechnicalInfo:
-        values = {
+        values: dict[str, Any] = {
             "duration": 7200.0,
             "width": 1920,
             "height": 1080,
@@ -99,11 +101,11 @@ class DuplicateUpgradeTests(unittest.TestCase):
         return ms.MediaTechnicalInfo(**values)
 
     def _use_probe_results(self, source, existing) -> None:
-        ms.find_ffprobe = lambda _explicit="ffprobe": "ffprobe"
-        ms.probe_media = lambda path, _binary: ((source if path == self.source else existing), "")
+        ms.find_ffprobe = cast(Any, lambda _explicit="ffprobe": "ffprobe")
+        ms.probe_media = cast(Any, lambda path, _binary: ((source if path == self.source else existing), ""))
 
     def test_ffprobe_is_required_instead_of_size_fallback(self) -> None:
-        ms.find_ffprobe = lambda _explicit="ffprobe": None
+        ms.find_ffprobe = cast(Any, lambda _explicit="ffprobe": None)
         replace, reason = ms.should_replace(self.source, self.destination)
         self.assertFalse(replace)
         self.assertIn("size alone never replaces", reason)
@@ -514,6 +516,7 @@ class AtomicReportTests(_RunStateMixin):
 
     def test_report_survives_a_failed_write(self) -> None:
         report = ms.CFG.report_file
+        assert report is not None
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text("PREVIOUS REPORT", encoding="utf-8")
 
@@ -532,6 +535,7 @@ class AtomicReportTests(_RunStateMixin):
 
     def test_failed_report_write_leaves_no_partial_behind(self) -> None:
         report = ms.CFG.report_file
+        assert report is not None
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text("PREVIOUS REPORT", encoding="utf-8")
 
@@ -546,6 +550,7 @@ class AtomicReportTests(_RunStateMixin):
 
     def test_successful_report_replaces_the_previous_one(self) -> None:
         report = ms.CFG.report_file
+        assert report is not None
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text("PREVIOUS REPORT", encoding="utf-8")
         ms.decline_source(self.root / "final" / "Film.1995.mkv", "not an MKV")

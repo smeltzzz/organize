@@ -54,7 +54,6 @@ import re
 import shutil
 import struct
 import sys
-import uuid
 import tempfile
 import time
 import traceback
@@ -62,11 +61,13 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import zipfile
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from common import (
     EXTERNAL_SRT_ENCODINGS,
@@ -1677,7 +1678,7 @@ def run_self_tests() -> int:
 @dataclass
 class QueueConfig:
     library: Path
-    log_file: Path
+    log_file: Path | None
     report_file: Path
     api_key: str = ""
     subdl_api_key: str = ""
@@ -1720,11 +1721,11 @@ class QueueConfig:
 
 
 def utc_day() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
 def utc_timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -1760,7 +1761,7 @@ def _ledger_payload(state: dict[str, Any]) -> dict[str, Any]:
     return {"library": state["library"], "days": state["days"], "movies": movies}
 
 
-def load_state(log_path: Path, library: Path) -> dict[str, Any]:
+def load_state(log_path: Path | None, library: Path) -> dict[str, Any]:
     """Recover durable quota/retry state from append-only ledger events in the log.
 
     Ordinary log lines are ignored. A malformed or partial final event is ignored
@@ -1768,7 +1769,7 @@ def load_state(log_path: Path, library: Path) -> dict[str, Any]:
     decremented, which keeps the quota guard conservative after interruption.
     """
     state = new_state(library)
-    if not log_path.exists():
+    if log_path is None or not log_path.exists():
         return state
     try:
         with log_path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -1791,8 +1792,10 @@ def load_state(log_path: Path, library: Path) -> dict[str, Any]:
     return state
 
 
-def persist_state(state: dict[str, Any], log_path: Path) -> None:
+def persist_state(state: dict[str, Any], log_path: Path | None) -> None:
     """Append a compact, fsync-backed ledger checkpoint to the one allowed log."""
+    if log_path is None:
+        return
     payload = json.dumps(_ledger_payload(state), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [INFO] {LEDGER_EVENT} {payload}\n"
     try:

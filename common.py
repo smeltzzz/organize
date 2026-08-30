@@ -222,7 +222,7 @@ def try_file_lock(handle: Any, *, strict_non_contention: bool = False) -> bool:
 
         handle.seek(0)
         try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
             return True
         except OSError as exc:
             if not strict_non_contention:
@@ -319,7 +319,7 @@ class CoordinationLock:
 
                 handle.seek(0)
                 try:
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
                 except OSError:
                     pass
             else:
@@ -330,7 +330,7 @@ class CoordinationLock:
             handle.close()
             self._fh = None
 
-    def __enter__(self) -> "CoordinationLock":
+    def __enter__(self) -> CoordinationLock:
         self.acquire()
         return self
 
@@ -339,7 +339,7 @@ class CoordinationLock:
 
 
 def atomic_write_text(path: Path, text: str) -> None:
-    """Publish ``text`` to ``path`` atomically.
+    r"""Publish ``text`` to ``path`` atomically.
 
     Writes through a unique sibling file then ``os.replace``\ s it into place, so
     a crash never leaves a truncated report and a read in progress always sees
@@ -495,7 +495,7 @@ def path_is_within(candidate: Path, parent: Path) -> bool:
         return False
 
 
-def path_norm(path: Path) -> str:
+def path_norm(path: Path | str) -> str:
     """Normalize a path the same way every tool compares them.
 
     ``normcase`` lower-cases on Windows and is a no-op on POSIX; ``normpath``
@@ -506,19 +506,21 @@ def path_norm(path: Path) -> str:
     return os.path.normcase(os.path.normpath(str(path)))
 
 
-def paths_equal(a: Path, b: Path) -> bool:
+def paths_equal(a: Path | str, b: Path | str) -> bool:
     """True when two paths refer to the same file.
 
     If both paths already exist, ``samefile`` resolves hard links and symlinks
     (the most accurate answer); otherwise it falls back to the normalized-text
     comparison used for paths that may not have been created yet.
     """
+    pa = Path(a) if isinstance(a, str) else a
+    pb = Path(b) if isinstance(b, str) else b
     try:
-        if a.exists() and b.exists():
-            return a.samefile(b)
+        if pa.exists() and pb.exists():
+            return pa.samefile(pb)
     except OSError:
         pass
-    return path_norm(a) == path_norm(b)
+    return path_norm(pa) == path_norm(pb)
 
 
 # ---------------------------------------------------------------------------
@@ -749,12 +751,12 @@ class Report:
         return self._width - 4
 
     # -- header --------------------------------------------------------
-    def meta(self, label: str, value: object) -> "Report":
+    def meta(self, label: str, value: object) -> Report:
         """Add one ``label  value`` row to the boxed header."""
         self._meta.append((str(label), "" if value is None else str(value)))
         return self
 
-    def metas(self, pairs: "Iterable[tuple[str, object]]") -> "Report":
+    def metas(self, pairs: Iterable[tuple[str, object]]) -> Report:
         for label, value in pairs:
             self.meta(label, value)
         return self
@@ -794,21 +796,21 @@ class Report:
         return "\n".join(lines)
 
     # -- body ----------------------------------------------------------
-    def blank(self, count: int = 1) -> "Report":
+    def blank(self, count: int = 1) -> Report:
         self._body.extend([""] * max(0, count))
         return self
 
-    def rule(self, char: str = _RULE_LIGHT, *, indent: int = REPORT_INDENT) -> "Report":
+    def rule(self, char: str = _RULE_LIGHT, *, indent: int = REPORT_INDENT) -> Report:
         self._body.append(" " * indent + char * max(0, self._width - indent))
         return self
 
-    def paragraph(self, text: str, *, indent: int = REPORT_INDENT) -> "Report":
+    def paragraph(self, text: str, *, indent: int = REPORT_INDENT) -> Report:
         """A wrapped block of prose; leading spaces on continuation lines."""
         for chunk in wrap_text(text, self._width - indent):
             self._body.append(" " * indent + chunk)
         return self
 
-    def title_line(self, text: str, *, right: str = "", indent: int = REPORT_INDENT) -> "Report":
+    def title_line(self, text: str, *, right: str = "", indent: int = REPORT_INDENT) -> Report:
         """``text`` left-aligned with ``right`` pushed to the right margin."""
         span = self._width - indent
         if not right:
@@ -821,7 +823,7 @@ class Report:
             self._body.append(" " * indent + text + " " * gap + right)
         return self
 
-    def scorecard(self, rows: "Iterable[tuple]", *, indent: int = REPORT_INDENT) -> "Report":
+    def scorecard(self, rows: Iterable[tuple], *, indent: int = REPORT_INDENT) -> Report:
         """Render ``(count, label, hint)`` rows between two light rules.
 
         The count is right-aligned so a reader can scan the numbers as a
@@ -853,7 +855,7 @@ class Report:
         total: int | None = None,
         intro: str = "",
         indent: int = REPORT_INDENT,
-    ) -> "Report":
+    ) -> Report:
         """Open a major section: a heavy banner plus an optional explanation."""
         if self._body and self._body[-1].strip():
             self.blank()
@@ -885,7 +887,7 @@ class Report:
         *,
         count: int | None = None,
         indent: int = REPORT_INDENT,
-    ) -> "Report":
+    ) -> Report:
         """Open a labelled group inside a section (one light rule, not a box)."""
         if self._body and self._body[-1].strip():
             self.blank()
@@ -907,10 +909,10 @@ class Report:
         detail: str = "",
         ordinal: int | None = None,
         marker: str = "",
-        fields: "Iterable[tuple[str, str]]" = (),
+        fields: Iterable[tuple[str, str]] = (),
         detail_column: int = 0,
         indent: int = 4,
-    ) -> "Report":
+    ) -> Report:
         """One item in a section.
 
         ``ordinal`` numbers the entry; ``marker`` is a short tag used instead
@@ -970,12 +972,12 @@ class Report:
 
     def table(
         self,
-        headers: "Iterable[str]",
-        rows: "Iterable[Iterable]",
+        headers: Iterable[str],
+        rows: Iterable[Iterable],
         *,
         aligns: str = "",
         indent: int = 4,
-    ) -> "Report":
+    ) -> Report:
         """An aligned column table with a header row and a rule under it.
 
         ``aligns`` is one character per column, ``<`` or ``>``.  Columns are
@@ -1001,7 +1003,7 @@ class Report:
                 break
             widths[max(shrinkable, key=lambda i: widths[i])] -= 1
 
-        def render(cells: "list[str]") -> str:
+        def render(cells: list[str]) -> str:
             parts = []
             for i, cell in enumerate(cells[:columns]):
                 text = clip_text(cell, widths[i])
@@ -1014,7 +1016,7 @@ class Report:
             self._body.append(render(list(row) + [""] * (columns - len(row))))
         return self
 
-    def entries(self, items: Iterable, **defaults: object) -> "Report":
+    def entries(self, items: Iterable, **defaults: object) -> Report:
         """Render an iterable of entry specs, numbered in order.
 
         Each item is either a ``(text, detail)`` tuple or a mapping of
@@ -1032,7 +1034,7 @@ class Report:
             self.entry(str(merged.pop("text", "")), **merged)
         return self
 
-    def footer(self, lines: "Iterable[str]" = (), *, indent: int = REPORT_INDENT) -> "Report":
+    def footer(self, lines: Iterable[str] = (), *, indent: int = REPORT_INDENT) -> Report:
         """Close the report with a light rule and trailing notes."""
         self.blank()
         self.rule(indent=indent)
@@ -1053,7 +1055,7 @@ class Report:
 def report_banner(
     title: str,
     subtitle: str = "",
-    meta: "Iterable[tuple[str, object]]" = (),
+    meta: Iterable[tuple[str, object]] = (),
     *,
     width: int = REPORT_WIDTH,
 ) -> str:

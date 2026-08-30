@@ -93,12 +93,13 @@ import tempfile
 import traceback
 import unicodedata
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from stat import S_ISREG
+from typing import Any
 
 from common import (
     EXTERNAL_SRT_CUE_RE,
@@ -1814,14 +1815,14 @@ def find_ffprobe(explicit: str = "ffprobe") -> str | None:
     return None
 
 
-def _probe_int(value: object) -> int:
+def _probe_int(value: Any) -> int:
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
         return 0
 
 
-def _probe_float(value: object) -> float:
+def _probe_float(value: Any) -> float:
     try:
         return max(0.0, float(value))
     except (TypeError, ValueError):
@@ -2350,15 +2351,16 @@ def handle_directory(path: Path) -> None:
         # parsed.part. Re-reading the names here keeps the title-integral
         # "Part 2" protection exactly as it was for single files.
         if len(items) > 1:
-            stack_numbers = []
+            raw_stack_numbers = []
             for video, _ in items:
                 stack_match = _PART_RE.search(video.path.stem)
-                stack_numbers.append(int(stack_match.group(1)) if stack_match else None)
-            if all(n is not None for n in stack_numbers) and len(set(stack_numbers)) == len(stack_numbers):
+                raw_stack_numbers.append(int(stack_match.group(1)) if stack_match else None)
+            valid_stack_numbers = [n for n in raw_stack_numbers if n is not None]
+            if len(valid_stack_numbers) == len(raw_stack_numbers) and len(set(valid_stack_numbers)) == len(valid_stack_numbers):
                 LOG.info(
                     "Skipping part-numbered split release (parts %s); "
                     "canonical output requires one complete MKV: %s",
-                    ", ".join(str(n) for n in sorted(stack_numbers)),
+                    ", ".join(str(n) for n in sorted(valid_stack_numbers)),
                     path,
                 )
                 decline_source(
@@ -2700,7 +2702,7 @@ def resolve_input_path(positional: Sequence[str]) -> Path | None:
 
 
 def apply_env(cfg: Config) -> None:
-    mapping = {
+    mapping: dict[str, tuple[str, Callable[[str], Any]]] = {
         "MOVIE_STD_TARGET": ("target_dir", Path),
         "MOVIE_STD_SOURCE": ("source_dir", Path),
         "MOVIE_STD_LOG": ("log_file", Path),

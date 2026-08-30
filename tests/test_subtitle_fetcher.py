@@ -5,14 +5,15 @@ from __future__ import annotations
 import io
 import json
 import tempfile
-import urllib.error
 import unittest
+import urllib.error
 import zipfile
 from pathlib import Path
 from unittest import mock
 
-import subtitle_fetcher as sf
 from reporttext import scorecard, section
+
+import subtitle_fetcher as sf
 
 
 class MovieHashTests(unittest.TestCase):
@@ -262,8 +263,8 @@ class SubdlIntegrationTests(unittest.TestCase):
         def __enter__(self):
             return self
 
-        def __exit__(self, *_args: object) -> bool:
-            return False
+        def __exit__(self, *_args: object) -> None:
+            pass
 
         def read(self, size: int = -1) -> bytes:
             if size < 0:
@@ -524,7 +525,7 @@ class SubdlIntegrationTests(unittest.TestCase):
         download = downloads[str(candidates[0].file_id)]
         self.assertEqual(download.n_id, "subtitle-123")
         self.assertEqual(download.url, "")
-        with self.assertRaisesRegex(ValueError, "outside dl\.subdl\.com"):
+        with self.assertRaisesRegex(ValueError, r"outside dl\.subdl\.com"):
             sf.normalize_subdl_download_url("https://attacker.invalid/subtitle/steal")
 
     def test_release_search_uses_the_unique_highest_confident_score(self) -> None:

@@ -24,11 +24,12 @@ import tempfile
 import time
 import traceback
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Sequence
+from typing import Any
 
 from common import (
     EXTERNAL_SRT_SUFFIX,
@@ -160,7 +161,9 @@ class ExclusiveRunLock:
     """Fail-closed advisory lock compatible with Windows and POSIX."""
 
     def __init__(self, path: Path, timeout_seconds: float) -> None:
-        self.path, self.timeout_seconds, self.handle = path, timeout_seconds, None
+        self.path = path
+        self.timeout_seconds = timeout_seconds
+        self.handle: Any | None = None
 
     def _try_lock(self) -> bool:
         assert self.handle is not None
@@ -171,7 +174,7 @@ class ExclusiveRunLock:
             self.handle.flush()
         return try_file_lock(self.handle, strict_non_contention=False)
 
-    def __enter__(self) -> "ExclusiveRunLock":
+    def __enter__(self) -> ExclusiveRunLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.handle = self.path.open("a+", encoding="utf-8")
         deadline = time.monotonic() + self.timeout_seconds
@@ -181,9 +184,10 @@ class ExclusiveRunLock:
                 self.handle = None
                 raise LockUnavailable(f"another audit owns {self.path}")
             time.sleep(0.2)
+        assert self.handle is not None
         self.handle.seek(0)
         self.handle.truncate()
-        self.handle.write(f"pid={os.getpid()} started={datetime.now(timezone.utc).isoformat()}\n")
+        self.handle.write(f"pid={os.getpid()} started={datetime.now(UTC).isoformat()}\n")
         self.handle.flush()
         return self
 
@@ -194,7 +198,7 @@ class ExclusiveRunLock:
             if os.name == "nt":
                 import msvcrt
                 self.handle.seek(0)
-                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
             else:
                 import fcntl
                 fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
@@ -632,7 +636,8 @@ def run_self_tests() -> int:
     root = Path(tempfile.mkdtemp(prefix="jellyfin_auditor_"))
     try:
         library, output = root / "library", root / "reports"
-        library.mkdir(); output.mkdir()
+        library.mkdir()
+        output.mkdir()
         valid_srt = "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n"
         (library / "Movie One (2020)").mkdir()
         (library / "Movie One (2020)" / "Movie One (2020).mkv").write_bytes(b"mkv")

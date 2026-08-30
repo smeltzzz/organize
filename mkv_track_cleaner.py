@@ -52,8 +52,8 @@ stop) whenever it remuxes a movie that has no validated external English SRT.
 
 from __future__ import annotations
 
-import atexit
 import argparse
+import atexit
 import hashlib
 import json
 import os
@@ -67,9 +67,10 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, IO, List, Optional, Set, Tuple
+from typing import IO, Any
 
 from common import (
     EXTERNAL_SRT_CUE_RE,
@@ -176,7 +177,7 @@ def normalize_language(code: str) -> str:
     return _LANG_NORMALIZE.get((code or "").strip().lower(), (code or "").strip().lower())
 
 
-def resolve_mkvmerge_path(custom_path: Optional[str] = None) -> str:
+def resolve_mkvmerge_path(custom_path: str | None = None) -> str:
     if custom_path:
         found = shutil.which(custom_path)
         if found:
@@ -251,7 +252,7 @@ def _this_hostname() -> str:
         return "unknown"
 
 
-def _eta_seconds(elapsed: float, done_bytes: int, total_bytes: int, done_files: int, total_files: int) -> Optional[float]:
+def _eta_seconds(elapsed: float, done_bytes: int, total_bytes: int, done_files: int, total_files: int) -> float | None:
     if elapsed <= 0:
         return None
     if total_bytes > 0 and done_bytes > 0:
@@ -263,7 +264,7 @@ def _eta_seconds(elapsed: float, done_bytes: int, total_bytes: int, done_files: 
     return None
 
 
-def check_free_space(target_dir: Path, source_size: int) -> Tuple[bool, int, int, Optional[str]]:
+def check_free_space(target_dir: Path, source_size: int) -> tuple[bool, int, int, str | None]:
     required = int(max(0, source_size) * (1.0 + _DISK_SLACK_RATIO)) + _DISK_SLACK_BYTES
     try:
         free = int(shutil.disk_usage(str(target_dir)).free)
@@ -274,7 +275,7 @@ def check_free_space(target_dir: Path, source_size: int) -> Tuple[bool, int, int
     return True, free, required, None
 
 
-def _unix_ns_to_filetime(unix_ns: int) -> Tuple[int, int]:
+def _unix_ns_to_filetime(unix_ns: int) -> tuple[int, int]:
     windows_epoch_offset_ns = 11_644_473_600 * 1_000_000_000
     ft = (int(unix_ns) + windows_epoch_offset_ns) // 100
     if ft < 0:
@@ -296,7 +297,10 @@ def _restore_windows_ctime(path: Path, orig_stat: os.stat_result) -> None:
             _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
 
         creation = FILETIME(low, high)
-        kernel32 = ctypes.windll.kernel32
+        windll = getattr(ctypes, "windll", None)
+        if not windll:
+            return
+        kernel32 = windll.kernel32
         handle = kernel32.CreateFileW(str(path), 0x0100, 0x00000007, None, 3, 0x02000000, None)
         if not handle or handle == ctypes.c_void_p(-1).value:
             return
@@ -327,20 +331,23 @@ def apply_low_priority() -> str:
             import ctypes
             from ctypes import wintypes
 
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-            kernel32.GetCurrentProcess.argtypes = []
-            kernel32.SetPriorityClass.restype = wintypes.BOOL
-            kernel32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-            kernel32.GetCurrentThread.restype = wintypes.HANDLE
-            kernel32.GetCurrentThread.argtypes = []
-            kernel32.SetThreadPriority.restype = wintypes.BOOL
-            kernel32.SetThreadPriority.argtypes = [wintypes.HANDLE, ctypes.c_int]
-            if kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), 0x00004000):
-                return "below-normal (Windows)"
-            if kernel32.SetThreadPriority(kernel32.GetCurrentThread(), -1):
-                return "thread below-normal (Windows)"
-            return f"unchanged (Windows error {ctypes.get_last_error()})"
+            windll_cls = getattr(ctypes, "WinDLL", None)
+            if windll_cls:
+                kernel32 = windll_cls("kernel32", use_last_error=True)
+                kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+                kernel32.GetCurrentProcess.argtypes = []
+                kernel32.SetPriorityClass.restype = wintypes.BOOL
+                kernel32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+                kernel32.GetCurrentThread.restype = wintypes.HANDLE
+                kernel32.GetCurrentThread.argtypes = []
+                kernel32.SetThreadPriority.restype = wintypes.BOOL
+                kernel32.SetThreadPriority.argtypes = [wintypes.HANDLE, ctypes.c_int]
+                if kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), 0x00004000):
+                    return "below-normal (Windows)"
+                if kernel32.SetThreadPriority(kernel32.GetCurrentThread(), -1):
+                    return "thread below-normal (Windows)"
+                get_err = getattr(ctypes, "get_last_error", lambda: 0)
+                return f"unchanged (Windows error {get_err()})"
         except Exception as e:
             return f"unchanged ({e})"
     try:
@@ -396,18 +403,21 @@ def _enable_windows_vt() -> bool:
         return True
     try:
         import ctypes
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.GetStdHandle(-11)
-        if not handle or handle == -1:
-            return False
-        mode = ctypes.c_uint32()
-        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-            return False
-        if mode.value & 0x0004:
-            return True
-        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+        windll = getattr(ctypes, "windll", None)
+        if windll:
+            kernel32 = windll.kernel32
+            handle = kernel32.GetStdHandle(-11)
+            if not handle or handle == -1:
+                return False
+            mode = ctypes.c_uint32()
+            if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+                return False
+            if mode.value & 0x0004:
+                return True
+            return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
     except Exception:
         return False
+    return False
 
 
 _GUI_PROGRESS_RE = re.compile(
@@ -422,7 +432,7 @@ def _clamp_percent(value: int) -> int:
     return 0 if value < 0 else 100 if value > 100 else value
 
 
-def _parse_mkvmerge_progress(line: str) -> Optional[int]:
+def _parse_mkvmerge_progress(line: str) -> int | None:
     if not line:
         return None
     m = _GUI_PROGRESS_RE.search(line)
@@ -445,7 +455,7 @@ def _parse_mkvmerge_progress(line: str) -> Optional[int]:
 def _summarize_mkvmerge_failure(output: str, rc: int) -> str:
     if not (output or "").strip():
         return f"mkvmerge remux failed with code {rc}"
-    lines: List[str] = []
+    lines: list[str] = []
     for raw in output.splitlines():
         s = raw.strip()
         if not s:
@@ -472,7 +482,7 @@ class LiveConsole:
     YELLOW = "\033[33m"
     CYAN = "\033[36m"
 
-    def __init__(self, use_color: Optional[bool] = None):
+    def __init__(self, use_color: bool | None = None):
         self.is_tty = False
         try:
             self.is_tty = bool(sys.stdout and sys.stdout.isatty())
@@ -502,7 +512,7 @@ class LiveConsole:
             self._bar_fill, self._bar_empty = "█", "░"
         except Exception:
             self._bar_fill, self._bar_empty = "#", "-"
-        self.target_root: Optional[Path] = None
+        self.target_root: Path | None = None
         self._detail_indent = "           "
         self._file_ts = ""
         self._file_tag = ""
@@ -525,7 +535,7 @@ class LiveConsole:
         except Exception:
             return 100
 
-    def _compose_file_line(self, suffix_plain: str = "", suffix_styled: str = "") -> Tuple[str, str]:
+    def _compose_file_line(self, suffix_plain: str = "", suffix_styled: str = "") -> tuple[str, str]:
         prefix = f"[{self._file_ts}] {self._file_tag}"
         reserved = len(prefix) + len(self._file_size_note) + len(suffix_plain)
         budget = max(8, self._cols() - 1 - reserved)
@@ -677,13 +687,13 @@ class LiveConsole:
                 self._last_progress_draw = now
 
 
-_console: Optional[LiveConsole] = None
-_target_root: Optional[Path] = None
+_console: LiveConsole | None = None
+_target_root: Path | None = None
 _interrupt_requested: bool = False
-_log_fp: Optional[IO[str]] = None
-_log_fp_path: Optional[str] = None
-_active_temp_file: Optional[Path] = None
-_active_proc: Optional[subprocess.Popen] = None
+_log_fp: IO[str] | None = None
+_log_fp_path: str | None = None
+_active_temp_file: Path | None = None
+_active_proc: subprocess.Popen | None = None
 
 
 def _progress_tag(file_index: int, file_total: int) -> str:
@@ -702,7 +712,7 @@ def _rel_display_name(mkv_path: Path) -> str:
     return mkv_path.name
 
 
-def _open_log_fp(log_file_path: str) -> Optional[IO[str]]:
+def _open_log_fp(log_file_path: str) -> IO[str] | None:
     global _log_fp, _log_fp_path
     if _log_fp is not None and _log_fp_path == log_file_path:
         return _log_fp
@@ -733,7 +743,7 @@ def close_log_fp() -> None:
             pass
 
 
-def log(msg: str, level: str = "INFO", to_console: bool = True, log_file_path: Optional[str] = LOG_FILE):
+def log(msg: str, level: str = "INFO", to_console: bool = True, log_file_path: str | None = LOG_FILE):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     formatted = f"[{timestamp}] [{level}] {msg}"
     if to_console:
@@ -751,7 +761,7 @@ def log(msg: str, level: str = "INFO", to_console: bool = True, log_file_path: O
             pass
 
 
-def _log_detail(msg: str, log_file_path: Optional[str], kind: str = "info", level: str = "INFO") -> None:
+def _log_detail(msg: str, log_file_path: str | None, kind: str = "info", level: str = "INFO") -> None:
     if _console is not None:
         _console.detail(msg, kind=kind)
         log(msg, level=level, to_console=False, log_file_path=log_file_path)
@@ -802,7 +812,7 @@ def is_commentary_name(name: str, *, track_type: str = "audio") -> bool:
     return False
 
 
-def is_commentary_track(track: Dict[str, Any], remove_commentary: bool = True) -> bool:
+def is_commentary_track(track: dict[str, Any], remove_commentary: bool = True) -> bool:
     """Drop commentary / DVS audio. Never drop hearing-impaired (SDH) subtitles."""
     if not remove_commentary:
         return False
@@ -819,7 +829,7 @@ def is_commentary_track(track: Dict[str, Any], remove_commentary: bool = True) -
     return is_commentary_name(str(props.get("track_name") or ""), track_type=ttype)
 
 
-def is_forced_subtitle(track: Dict[str, Any]) -> bool:
+def is_forced_subtitle(track: dict[str, Any]) -> bool:
     props = track.get("properties") or {}
     if props.get("flag_forced") or props.get("forced_track"):
         return True
@@ -827,7 +837,7 @@ def is_forced_subtitle(track: Dict[str, Any]) -> bool:
     return bool(re.search(r"\b(forced|foreign only|signs?/?songs?)\b", name.lower()))
 
 
-def get_audio_quality_score(track: Dict[str, Any]) -> Tuple[int, int, int, int, int, int]:
+def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, int, int]:
     """(codec tier, atmos, channels, bitrate, sample-rate, original-flag)."""
     props = track.get("properties") or {}
     codec_id = str(props.get("codec_id") or "").upper()
@@ -874,7 +884,7 @@ def get_audio_quality_score(track: Dict[str, Any]) -> Tuple[int, int, int, int, 
     return (tier, atmos_flag, channels, bitrate, sampling_freq, original)
 
 
-def is_matching_language(track: Optional[Dict[str, Any]], target_languages: Set[str]) -> bool:
+def is_matching_language(track: dict[str, Any] | None, target_languages: set[str]) -> bool:
     if not track:
         return False
     props = track.get("properties") or {}
@@ -902,7 +912,7 @@ def name_implies_english(name: str) -> bool:
     return bool(re.search(r"\b(english|eng)\b", name.lower()))
 
 
-def is_english_named_untagged(track: Optional[Dict[str, Any]]) -> bool:
+def is_english_named_untagged(track: dict[str, Any] | None) -> bool:
     if not track:
         return False
     props = track.get("properties") or {}
@@ -940,10 +950,10 @@ def _fsync_directory(directory: Path) -> None:
             pass
 
 
-def _source_snapshot(path: Path, stat_result: Optional[os.stat_result] = None) -> Dict[str, Any]:
+def _source_snapshot(path: Path, stat_result: os.stat_result | None = None) -> dict[str, Any]:
     """Return a cheap identity snapshot used to reject concurrent source changes."""
     st = stat_result if stat_result is not None else path.stat()
-    fields = {
+    fields: dict[str, Any] = {
         "size": int(st.st_size),
         "mtime_ns": int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))),
         "device": int(getattr(st, "st_dev", 0)),
@@ -954,7 +964,7 @@ def _source_snapshot(path: Path, stat_result: Optional[os.stat_result] = None) -
     return fields
 
 
-def _source_snapshot_matches(path: Path, snapshot: Dict[str, Any]) -> bool:
+def _source_snapshot_matches(path: Path, snapshot: dict[str, Any]) -> bool:
     try:
         observed = _source_snapshot(path)
     except OSError:
@@ -968,7 +978,7 @@ def _source_snapshot_matches(path: Path, snapshot: Dict[str, Any]) -> bool:
     return bool(expected.get("identity") == observed.get("identity"))
 
 
-def validate_exact_external_english_srt(mkv_path: Path) -> Dict[str, Any]:
+def validate_exact_external_english_srt(mkv_path: Path) -> dict[str, Any]:
     """Validate the sole sidecar allowed to replace embedded subtitle choices.
 
     Only ``<exact MKV stem>.eng.srt`` beside the movie qualifies. A validated
@@ -979,7 +989,7 @@ def validate_exact_external_english_srt(mkv_path: Path) -> Dict[str, Any]:
     """
     promoted, promote_reason = promote_legacy_external_english_srt(mkv_path)
     sidecar = exact_external_english_srt_path(mkv_path)
-    result: Dict[str, Any] = {"mkv_path": str(mkv_path), "path": str(sidecar), "valid": False, "reason": ""}
+    result: dict[str, Any] = {"mkv_path": str(mkv_path), "path": str(sidecar), "valid": False, "reason": ""}
     if promoted is None and promote_reason and "absent" not in promote_reason:
         # Dual-name / occupied-destination cases must not silently drop embeds.
         if "unusable" not in promote_reason:
@@ -1026,7 +1036,7 @@ def validate_exact_external_english_srt(mkv_path: Path) -> Dict[str, Any]:
     return result
 
 
-def external_srt_snapshot_matches(record: Dict[str, Any]) -> bool:
+def external_srt_snapshot_matches(record: dict[str, Any]) -> bool:
     """Revalidate the external SRT and require the pre-remux identity to match."""
     if not record or not record.get("valid") or not record.get("snapshot"):
         return False
@@ -1044,7 +1054,7 @@ def external_srt_snapshot_matches(record: Dict[str, Any]) -> bool:
     )
 
 
-def _transaction_token_from_temp_name(name: str) -> Optional[str]:
+def _transaction_token_from_temp_name(name: str) -> str | None:
     if not name.startswith(TEMP_PREFIX):
         return None
     remainder = name[len(TEMP_PREFIX):]
@@ -1058,14 +1068,14 @@ def _transaction_journal_path(parent: Path, token: str) -> Path:
     return parent / f"{TRANSACTION_MARKER}{token}{TRANSACTION_JOURNAL_SUFFIX}"
 
 
-def new_transaction_paths(original: Path) -> Tuple[Path, Path, str]:
+def new_transaction_paths(original: Path) -> tuple[Path, Path, str]:
     """Create unique sibling paths so staging and atomic replacement share a filesystem."""
     token = uuid.uuid4().hex
     temp = original.with_name(f"{TEMP_PREFIX}{token}__{original.name}")
     return temp, _transaction_journal_path(original.parent, token), token
 
 
-def read_transaction(journal_path: Path) -> Optional[Dict[str, Any]]:
+def read_transaction(journal_path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(journal_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
@@ -1075,7 +1085,7 @@ def read_transaction(journal_path: Path) -> Optional[Dict[str, Any]]:
     return data
 
 
-def write_transaction(journal_path: Path, payload: Dict[str, Any]) -> None:
+def write_transaction(journal_path: Path, payload: dict[str, Any]) -> None:
     """Durably replace a compact JSON transaction journal on the media volume."""
     tmp = journal_path.with_name(f".{journal_path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -1094,7 +1104,7 @@ def write_transaction(journal_path: Path, payload: Dict[str, Any]) -> None:
         raise
 
 
-def create_transaction(original: Path, temp: Path, token: str, orig_stat: os.stat_result) -> Dict[str, Any]:
+def create_transaction(original: Path, temp: Path, token: str, orig_stat: os.stat_result) -> dict[str, Any]:
     return {
         "schema": TRANSACTION_SCHEMA_VERSION,
         "token": token,
@@ -1107,7 +1117,7 @@ def create_transaction(original: Path, temp: Path, token: str, orig_stat: os.sta
     }
 
 
-def cleanup_transaction_artifacts(temp_path: Path, journal_path: Optional[Path] = None) -> None:
+def cleanup_transaction_artifacts(temp_path: Path, journal_path: Path | None = None) -> None:
     safe_delete(temp_path)
     if journal_path is not None:
         safe_delete(journal_path)
@@ -1138,7 +1148,7 @@ def safe_delete(file_path: Path, max_retries: int = 6, delay: float = 0.5):
             time.sleep(delay)
 
 
-def describe_track(track: Dict[str, Any]) -> str:
+def describe_track(track: dict[str, Any]) -> str:
     props = track.get("properties") or {}
     tid = track.get("id")
     codec = track.get("codec") or "Unknown"
@@ -1184,7 +1194,7 @@ def request_interrupt() -> None:
             pass
 
 
-def _run_mkvmerge(cmd: List[str], on_progress: Optional[Callable[[int], None]] = None) -> Tuple[int, str, str]:
+def _run_mkvmerge(cmd: list[str], on_progress: Callable[[int], None] | None = None) -> tuple[int, str, str]:
     global _active_proc
     live = on_progress is not None
     run_cmd = list(cmd)
@@ -1194,7 +1204,7 @@ def _run_mkvmerge(cmd: List[str], on_progress: Optional[Callable[[int], None]] =
         run_cmd.insert(1, "--gui-mode")
 
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-    popen_kwargs: Dict[str, Any] = dict(
+    popen_kwargs: dict[str, Any] = dict(
         args=run_cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT if live else subprocess.PIPE,
@@ -1215,7 +1225,7 @@ def _run_mkvmerge(cmd: List[str], on_progress: Optional[Callable[[int], None]] =
                 raise KeyboardInterrupt
             return proc.returncode, stdout, stderr
 
-        output_parts: List[str] = []
+        output_parts: list[str] = []
         stdout_handle = proc.stdout
         if stdout_handle is None:
             proc.wait()
@@ -1226,7 +1236,7 @@ def _run_mkvmerge(cmd: List[str], on_progress: Optional[Callable[[int], None]] =
                 return
             output_parts.append(part + "\n")
             pct = _parse_mkvmerge_progress(part)
-            if pct is not None:
+            if pct is not None and on_progress is not None:
                 try:
                     on_progress(pct)
                 except Exception:
@@ -1297,7 +1307,7 @@ def _bool_flag(value: Any) -> bool:
     return bool(value)
 
 
-def _normal_int(value: Any) -> Optional[int]:
+def _normal_int(value: Any) -> int | None:
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -1305,9 +1315,9 @@ def _normal_int(value: Any) -> Optional[int]:
 
 
 def track_fingerprint(
-    track: Dict[str, Any], *, default_override: Optional[bool] = None,
-    forced_override: Optional[bool] = None,
-) -> Dict[str, Any]:
+    track: dict[str, Any], *, default_override: bool | None = None,
+    forced_override: bool | None = None,
+) -> dict[str, Any]:
     """Return stable track metadata sufficient to detect wrong retained streams.
 
     IDs and statistics tags are intentionally excluded because mkvmerge may
@@ -1330,7 +1340,7 @@ def track_fingerprint(
     # tag as its canonical language equivalent, but preserve an explicit tag
     # when present so genuine language/tag changes remain verification failures.
     language_ietf = raw_language_ietf or normalize_language(language)
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "type": str(track.get("type") or ""),
         "codec": str(track.get("codec") or ""),
         "codec_id": str(props.get("codec_id") or ""),
@@ -1353,7 +1363,7 @@ def track_fingerprint(
     return result
 
 
-def _diagnostic_track_record(track: Dict[str, Any]) -> Dict[str, Any]:
+def _diagnostic_track_record(track: dict[str, Any]) -> dict[str, Any]:
     """Return compact raw and normalized metadata for a failed-track diagnosis."""
     props = track.get("properties") or {}
     raw_properties = {
@@ -1369,8 +1379,8 @@ def _diagnostic_track_record(track: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_verification_diagnostic(
-    source_info: Dict[str, Any], output_info: Optional[Dict[str, Any]], plan: Dict[str, Any], reason: str,
-) -> Dict[str, Any]:
+    source_info: dict[str, Any], output_info: dict[str, Any] | None, plan: dict[str, Any], reason: str,
+) -> dict[str, Any]:
     """Produce actionable evidence for a fail-closed remux mismatch.
 
     The payload intentionally records only comparison-relevant metadata. It is
@@ -1407,15 +1417,15 @@ def build_verification_diagnostic(
     }
 
 
-def _fingerprint_key(fingerprint: Dict[str, Any]) -> str:
+def _fingerprint_key(fingerprint: dict[str, Any]) -> str:
     return json.dumps(fingerprint, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def _fingerprint_list(tracks: List[Dict[str, Any]], **kwargs: Any) -> List[Dict[str, Any]]:
+def _fingerprint_list(tracks: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
     return sorted((track_fingerprint(track, **kwargs) for track in tracks), key=_fingerprint_key)
 
 
-def retained_audio_fingerprint_matches(actual: Dict[str, Any], expected: Dict[str, Any]) -> bool:
+def retained_audio_fingerprint_matches(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
     """Compare the selected audio contract without masking a real stream change.
 
     MKVToolNix 100 preserves the AAC payload but can report an AAC stream whose
@@ -1443,11 +1453,11 @@ def retained_audio_fingerprint_matches(actual: Dict[str, Any], expected: Dict[st
     return actual == normalized_expected
 
 
-def _chapter_entry_count(info: Dict[str, Any]) -> int:
+def _chapter_entry_count(info: dict[str, Any]) -> int:
     return sum(int(c.get("num_entries", 0) or 0) for c in (info.get("chapters") or []))
 
 
-def _video_frame_counts(tracks: List[Dict[str, Any]]) -> List[Optional[int]]:
+def _video_frame_counts(tracks: list[dict[str, Any]]) -> list[int | None]:
     return sorted(
         (_normal_int((track.get("properties") or {}).get("tag_number_of_frames"))
          for track in tracks if track.get("type") == "video"),
@@ -1456,12 +1466,12 @@ def _video_frame_counts(tracks: List[Dict[str, Any]]) -> List[Optional[int]]:
 
 
 def build_verification_plan(
-    input_info: Dict[str, Any], best_audio: Dict[str, Any], keep_subtitles: List[Dict[str, Any]],
+    input_info: dict[str, Any], best_audio: dict[str, Any], keep_subtitles: list[dict[str, Any]],
     source_size: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a JSON-serializable contract for normal and orphan remux verification."""
     tracks = input_info.get("tracks") or []
-    preserved: Dict[str, List[Dict[str, Any]]] = {}
+    preserved: dict[str, list[dict[str, Any]]] = {}
     for track_type in ("video", "buttons", "menu", "complex"):
         preserved[track_type] = _fingerprint_list(
             [track for track in tracks if track.get("type") == track_type]
@@ -1486,7 +1496,7 @@ def build_verification_plan(
     }
 
 
-def _verify_remux_info(temp_path: Path, out_info: Dict[str, Any], plan: Dict[str, Any]) -> Tuple[bool, str]:
+def _verify_remux_info(temp_path: Path, out_info: dict[str, Any], plan: dict[str, Any]) -> tuple[bool, str]:
     container = out_info.get("container") or {}
     if not (container.get("recognized") and container.get("supported")):
         return False, "remuxed file is not a recognized/supported media container"
@@ -1566,8 +1576,8 @@ def _verify_remux_info(temp_path: Path, out_info: Dict[str, Any], plan: Dict[str
 
 
 def verify_remux_output(
-    temp_path: Path, mkvmerge_bin: str, plan: Dict[str, Any],
-) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    temp_path: Path, mkvmerge_bin: str, plan: dict[str, Any],
+) -> tuple[bool, str, dict[str, Any] | None]:
     try:
         rc, out, err = _run_mkvmerge([mkvmerge_bin, "-J", str(temp_path)])
     except (KeyboardInterrupt, SystemExit):
@@ -1594,12 +1604,14 @@ def _pid_alive(pid: int) -> bool:
     if os.name == "nt":
         try:
             import ctypes
-            kernel32 = ctypes.windll.kernel32
-            handle = kernel32.OpenProcess(0x1000, False, pid)
-            if not handle:
-                return False
-            kernel32.CloseHandle(handle)
-            return True
+            windll = getattr(ctypes, "windll", None)
+            if windll:
+                kernel32 = windll.kernel32
+                handle = kernel32.OpenProcess(0x1000, False, pid)
+                if not handle:
+                    return False
+                kernel32.CloseHandle(handle)
+                return True
         except Exception:
             return True
     try:
@@ -1611,7 +1623,7 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def acquire_lock(lock_path: Path, log_file_path: Optional[str] = LOG_FILE) -> bool:
+def acquire_lock(lock_path: Path, log_file_path: str | None = LOG_FILE) -> bool:
     try:
         for _ in range(2):
             try:
@@ -1669,7 +1681,7 @@ def release_lock(lock_path: Path):
         pass
 
 
-def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: Optional[str] = LOG_FILE) -> int:
+def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: str | None = LOG_FILE) -> int:
     """Resolve only journal-proven, fully verified interrupted transactions.
 
     A recognized MKV is not evidence that it passed this program's selection and
@@ -1727,6 +1739,7 @@ def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: Op
                     level="WARNING", log_file_path=log_file_path)
                 preserved += 1
                 continue
+            assert journal is not None
 
             original = Path(root) / source_name
             if original.exists():
@@ -1827,7 +1840,7 @@ def _in_extra_dir(path: Path, root: Path) -> bool:
     return any(part.strip().lower() in EXTRA_DIR_NAMES for part in rel.parts)
 
 
-def canonical_movie_layout_issue(mkv_path: Path, target_root: Path) -> Optional[str]:
+def canonical_movie_layout_issue(mkv_path: Path, target_root: Path) -> str | None:
     """Return a reason when a movie does not follow the canonical folder contract."""
     parent = mkv_path.parent
     if parent == target_root:
@@ -1851,17 +1864,17 @@ def canonical_movie_layout_issue(mkv_path: Path, target_root: Path) -> Optional[
 
 def discover_mkv_files(
     target_path: Path,
-    log_file_path: Optional[str],
-    onerror: Optional[Callable[[OSError], None]] = None,
+    log_file_path: str | None,
+    onerror: Callable[[OSError], None] | None = None,
     *,
     skip_extras: bool = True,
     min_size: int = 0,
-) -> Tuple[List[Path], List[int], int]:
+) -> tuple[list[Path], list[int], int]:
     log(f"Scanning '{target_path}' for MKV files...", log_file_path=log_file_path)
-    found: List[Tuple[Path, int]] = []
+    found: list[tuple[Path, int]] = []
     total_bytes = 0
     last_draw = 0.0
-    walk_kwargs: Dict[str, Any] = {}
+    walk_kwargs: dict[str, Any] = {}
     if onerror is not None:
         walk_kwargs["onerror"] = onerror
     for root, dirnames, names in os.walk(target_path, **walk_kwargs):
@@ -1903,8 +1916,8 @@ def discover_mkv_files(
 
 
 def _log_live_totals(
-    stats: Dict[str, Any], index: int, total: int, run_started: float,
-    log_file_path: Optional[str], done_bytes: int = 0, total_bytes: int = 0,
+    stats: dict[str, Any], index: int, total: int, run_started: float,
+    log_file_path: str | None, done_bytes: int = 0, total_bytes: int = 0,
 ) -> None:
     elapsed = time.monotonic() - run_started
     remain_est = _eta_seconds(elapsed, done_bytes, total_bytes, index, total)
@@ -1925,16 +1938,16 @@ def _log_live_totals(
 
 def process_mkv(
     mkv_path: Path,
-    stats: Dict[str, Any],
+    stats: dict[str, Any],
     mkvmerge_bin: str,
     dry_run: bool = False,
-    remove_commentary: Optional[bool] = None,
-    audio_langs: Optional[Set[str]] = None,
-    sub_langs: Optional[Set[str]] = None,
-    log_file_path: Optional[str] = LOG_FILE,
+    remove_commentary: bool | None = None,
+    audio_langs: set[str] | None = None,
+    sub_langs: set[str] | None = None,
+    log_file_path: str | None = LOG_FILE,
     file_index: int = 0,
     file_total: int = 0,
-    probe_cache: Optional[MediaProbeCache] = None,
+    probe_cache: MediaProbeCache | None = None,
 ):
     global _active_temp_file
     if _interrupt_requested:
@@ -1950,10 +1963,10 @@ def process_mkv(
     movie_name = mkv_path.name
     display_name = _rel_display_name(mkv_path)
     tag = _progress_tag(file_index, file_total)
-    temp_output: Optional[Path] = None
-    journal_path: Optional[Path] = None
+    temp_output: Path | None = None
+    journal_path: Path | None = None
 
-    orig_stat: Optional[os.stat_result] = None
+    orig_stat: os.stat_result | None = None
     try:
         orig_stat = mkv_path.stat()
         size_before = orig_stat.st_size
@@ -2004,7 +2017,7 @@ def process_mkv(
         # decision. Everything below still runs on live state, so a sidecar
         # appearing beside the movie or a hardlink count dropping when seeding
         # stops is still acted on immediately.
-        media_info: Optional[Dict[str, Any]] = None
+        media_info: dict[str, Any] | None = None
         if probe_cache is not None:
             media_info = probe_cache.get(mkv_path, orig_stat.st_size, orig_stat.st_mtime_ns)
         if media_info is None:
@@ -2068,7 +2081,7 @@ def process_mkv(
             if is_english_named_untagged(t) and not is_commentary_track(t, remove_commentary)
         ]
 
-    external_srt: Optional[Dict[str, Any]] = None
+    external_srt: dict[str, Any] | None = None
     candidate = validate_exact_external_english_srt(mkv_path)
     if candidate.get("valid"):
         external_srt = candidate
@@ -2360,8 +2373,8 @@ def process_mkv(
 
 
 def generate_and_save_report(
-    stats: Dict[str, Any], dry_run: bool, report_file: str,
-    log_file_path: Optional[str] = LOG_FILE, meta: Optional[Dict[str, Any]] = None,
+    stats: dict[str, Any], dry_run: bool, report_file: str,
+    log_file_path: str | None = LOG_FILE, meta: dict[str, Any] | None = None,
 ) -> str:
     """Render and publish the run report.
 
@@ -2376,13 +2389,13 @@ def generate_and_save_report(
     dur_str = str(duration).split(".")[0]
     meta = meta or {}
 
-    cleaned: List[Dict[str, Any]] = list(stats.get("cleaned") or [])
-    already_clean: List[Any] = list(stats.get("already_clean") or [])
-    remux_without_srt: List[Any] = list(stats.get("remux_without_srt") or [])
-    deferred: List[Any] = list(stats.get("deferred_hardlinked") or [])
-    skipped_english: List[Any] = list(stats.get("skipped_no_english") or [])
-    skipped_layout: List[Any] = list(stats.get("skipped_layout") or [])
-    errors: List[Dict[str, Any]] = list(stats.get("errors") or [])
+    cleaned: list[dict[str, Any]] = list(stats.get("cleaned") or [])
+    already_clean: list[Any] = list(stats.get("already_clean") or [])
+    remux_without_srt: list[Any] = list(stats.get("remux_without_srt") or [])
+    deferred: list[Any] = list(stats.get("deferred_hardlinked") or [])
+    skipped_english: list[Any] = list(stats.get("skipped_no_english") or [])
+    skipped_layout: list[Any] = list(stats.get("skipped_layout") or [])
+    errors: list[dict[str, Any]] = list(stats.get("errors") or [])
     attention = len(remux_without_srt) + len(deferred) + len(skipped_layout) + len(errors)
     total = int(stats.get("total_scanned") or 0)
 
@@ -2391,7 +2404,7 @@ def generate_and_save_report(
         "Lossless mkvmerge remux \u00b7 commentary, dubs and embedded bitmaps removed; "
         "video bytes never touched",
     )
-    header: List[Tuple[str, Any]] = [
+    header: list[tuple[str, Any]] = [
         ("Mode", "DRY-RUN (simulation, no files modified)" if dry_run else "LIVE RUN (changes applied)"),
     ]
     if meta.get("interrupted"):
@@ -2423,7 +2436,7 @@ def generate_and_save_report(
     ]
     report.metas(header)
 
-    rows: List[Tuple[Any, str, str]] = [
+    rows: list[tuple[Any, str, str]] = [
         (len(cleaned), "Cleaned / remuxed", "simulated" if dry_run else "tracks pruned, video untouched"),
         (len(already_clean), "Already clean", "no writes needed"),
         (len(errors), "Errors", "unreadable or failed"),
@@ -2532,7 +2545,7 @@ def generate_and_save_report(
         report.paragraph("None.")
     else:
         for position, item in enumerate(cleaned, start=1):
-            fields: List[Tuple[str, str]] = [
+            fields: list[tuple[str, str]] = [
                 ("Kept audio", str(item.get("kept_audio", ""))),
                 ("Removed audio",
                  ", ".join(item.get("removed_audio_desc") or [])
@@ -2618,8 +2631,8 @@ def generate_and_save_report(
 
 def _print_startup_banner(
     target_path: Path, mkvmerge_bin: str, mkvmerge_version: str, dry_run: bool,
-    audio_langs: Set[str], sub_langs: Set[str], remove_commentary: bool,
-    log_file_path: Optional[str], priority: str = "normal",
+    audio_langs: set[str], sub_langs: set[str], remove_commentary: bool,
+    log_file_path: str | None, priority: str = "normal",
 ) -> None:
     width = 79
     mode = "DRY-RUN (simulation - no files modified)" if dry_run else "LIVE RUN (modifications will be applied)"
@@ -2654,7 +2667,7 @@ def _print_startup_banner(
         log(line, to_console=False, log_file_path=log_file_path)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     global _console, _target_root, _interrupt_requested
     enable_utf8_stdio()
     parser = argparse.ArgumentParser(
@@ -2696,8 +2709,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         parser.error("--standardizer-lock-timeout must be zero or greater")
 
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
@@ -2745,12 +2760,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.dry_run:
         log("Running in DRY-RUN mode (Simulation only).", log_file_path=args.log)
 
-    stats: Dict[str, Any] = {
+    stats: dict[str, Any] = {
         "start_time": datetime.now(), "total_scanned": 0, "cleaned": [],
         "already_clean": [], "skipped_no_english": [], "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
         "remux_without_srt": [], "diagnostics": [], "total_space_saved_bytes": 0,
     }
-    report_meta: Dict[str, Any] = {
+    report_meta: dict[str, Any] = {
         "target_dir": str(target_path), "report_file": args.report, "mkvmerge": mkvmerge_bin,
         "mkvmerge_version": mkvmerge_version, "audio_langs": audio_langs_set,
         "sub_langs": sub_langs_set, "remove_commentary": remove_commentary,
@@ -2816,7 +2831,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             min_size=int(args.min_size * 1024 * 1024) if args.min_size else 0,
         )
         if args.only:
-            requested: Set[str] = set()
+            requested: set[str] = set()
             for raw_path in args.only:
                 candidate_path = Path(raw_path).expanduser().resolve()
                 if candidate_path.suffix.lower() != ".mkv" or candidate_path.is_symlink() or not candidate_path.is_file():
@@ -2827,7 +2842,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     raise ValueError(f"--only MKV must be inside --dir: {raw_path}") from exc
                 requested.add(os.path.normcase(os.path.normpath(str(candidate_path))))
             selected = [
-                (path, size) for path, size in zip(mkv_files, file_sizes)
+                (path, size) for path, size in zip(mkv_files, file_sizes, strict=True)
                 if os.path.normcase(os.path.normpath(str(path))) in requested
             ]
             if len(selected) != len(requested):
@@ -2993,7 +3008,7 @@ def run_self_tests() -> int:
         movie_srt = movie / f"Film (2000){EXTERNAL_SRT_SUFFIX}"
         movie_srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8")
         external_record = validate_exact_external_english_srt(movie / "Film (2000).mkv")
-        check(external_record.get("valid"), f"valid exact external SRT: {external_record}")
+        check(bool(external_record.get("valid")), f"valid exact external SRT: {external_record}")
         check(external_srt_snapshot_matches(external_record), "external SRT snapshot initial match")
         (movie / "Film (2000).en.forced.srt").write_text(
             "1\n00:00:00,000 --> 00:00:01,000\nWrong suffix\n", encoding="utf-8",
@@ -3010,7 +3025,7 @@ def run_self_tests() -> int:
             "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8",
         )
         legacy_record = validate_exact_external_english_srt(legacy_movie / "Legacy (2001).mkv")
-        check(legacy_record.get("valid"), f"legacy .en.srt promotes: {legacy_record}")
+        check(bool(legacy_record.get("valid")), f"legacy .en.srt promotes: {legacy_record}")
         check(
             str(legacy_record.get("path", "")).endswith(f"Legacy (2001){EXTERNAL_SRT_SUFFIX}"),
             "promoted path is .eng.srt",

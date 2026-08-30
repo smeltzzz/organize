@@ -7,9 +7,9 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
-import library_auditor as la
 from reporttext import scorecard, section
 
+import library_auditor as la
 
 # A minimal but genuinely well-formed SRT. Anything shorter is not a subtitle.
 VALID_SRT = "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n"
