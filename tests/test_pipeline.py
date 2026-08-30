@@ -13,6 +13,7 @@ import os
 import subprocess
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import pipeline as pl
 
@@ -131,6 +132,15 @@ class PrerequisiteTests(unittest.TestCase):
         for key in pl.STEP_ORDER:
             with self.subTest(step=key):
                 self.assertTrue((pl.HERE / pl.STEPS[key].script).is_file())
+
+    def test_subdl_key_satisfies_fetcher_prerequisite(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"OPENSUBTITLES_API_KEY": "", "SUBDL_API_KEY": "subdl-test-key"},
+            clear=False,
+        ):
+            self.assertTrue(pl._api_key_present())
+            self.assertIsNone(pl.prerequisite_issue(pl.STEPS["fetcher"]))
 
 
 class DryRunDoesNotExecuteTests(unittest.TestCase):

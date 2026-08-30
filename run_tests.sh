@@ -4,7 +4,7 @@
 #   bash run_tests.sh
 #
 # All checks are offline and need no media, no mkvmerge, no ffprobe and no
-# OpenSubtitles credentials.
+# OpenSubtitles or SubDL credentials.
 set -u
 
 echo "================================================================================"

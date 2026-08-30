@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import io
+import json
 import tempfile
+import urllib.error
 import unittest
+import zipfile
 from pathlib import Path
+from unittest import mock
 
 import subtitle_fetcher as sf
 from reporttext import scorecard, section
@@ -106,8 +111,9 @@ class PerMovieFailureIsolationTests(unittest.TestCase):
 
         source = inspect.getsource(sf.queue_run)
         self.assertIn("except (RuntimeError, ValueError) as exc:", source)
-        # Two sites were affected: the hash/search step and the download step.
-        self.assertEqual(source.count("except (RuntimeError, ValueError) as exc:"), 2)
+        # The hash/search and download paths must both isolate malformed input;
+        # provider-specific fallback branches may add further guarded sites.
+        self.assertGreaterEqual(source.count("except (RuntimeError, ValueError) as exc:"), 2)
 
 
 if __name__ == "__main__":
@@ -184,7 +190,7 @@ class ReportOrganizationTests(unittest.TestCase):
         needs = section(text, "MOVIES THAT NEED A SUBTITLE")
 
         for title in ("SIDECAR EXISTS BUT IS UNUSABLE", "LIBRARY LAYOUT MUST BE FIXED FIRST",
-                      "NO MATCHING SUBTITLE ON OPENSUBTITLES"):
+                      "NO MATCHING SUBTITLE ON CONFIGURED PROVIDERS"):
             self.assertIn(title, needs)
         for movie in ("Broken (2009)", "Heat (1995)", "Loose"):
             self.assertIn(movie, needs)
@@ -199,7 +205,7 @@ class ReportOrganizationTests(unittest.TestCase):
         text = self.report(results, self.summary(results))
         self.assertIn("Start here:", text)
         self.assertLess(text.index("SIDECAR EXISTS BUT IS UNUSABLE"),
-                        text.index("NO MATCHING SUBTITLE ON OPENSUBTITLES"))
+                        text.index("NO MATCHING SUBTITLE ON CONFIGURED PROVIDERS"))
 
     def test_movies_cut_off_by_the_quota_are_named_not_just_counted(self) -> None:
         results: list[sf.JobResult] = []
@@ -246,9 +252,628 @@ class ReportOrganizationTests(unittest.TestCase):
 
 
 class SubdlIntegrationTests(unittest.TestCase):
+    sample_srt = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+
+    class Response:
+        def __init__(self, payload: bytes, headers: dict[str, str] | None = None) -> None:
+            self.payload = payload
+            self.headers = headers or {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def read(self, size: int = -1) -> bytes:
+            if size < 0:
+                return self.payload
+            return self.payload[:size]
+
+    @staticmethod
+    def identity() -> sf.MovieIdentity:
+        return sf.MovieIdentity(title="Dune: Part Two", year=2024, normalized_title="dune part two")
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "status": True,
+            "results": [{
+                "sd_id": "sd693134", "type": "movie", "name": "Dune: Part Two",
+                "year": 2024, "imdb_id": "tt15239678",
+            }],
+            "subtitles": [{
+                "n_id": "subtitle-123",
+                "lang": "english",
+                "release_name": "Dune.Part.Two.2024.2160p.BluRay.x265-GROUP",
+                "url": "/subtitle/subtitle-123.zip",
+                "unpack_files": [{
+                    "file_n_id": "file-456",
+                    "language": "EN",
+                    "format": "srt",
+                    "release_name": "Dune.Part.Two.2024.2160p.BluRay.x265-GROUP",
+                    "url": "/subtitle/subtitle-123/file-456",
+                }],
+            }],
+        }
+
+    def file_search_payload(self, *, match_score: object = 0.92) -> dict[str, object]:
+        """Shape documented for SubDL v2's release-aware /files/search route."""
+        return {
+            "status": True,
+            "results": [{
+                "sd_id": "sd693134", "type": "movie", "name": "Dune: Part Two",
+                "year": 2024, "imdb_id": "tt15239678",
+            }],
+            "match": {
+                "engine": "local", "confidence": "high", "type": "movie",
+                "title": "Dune: Part Two", "year": 2024, "sd_id": "sd693134",
+            },
+            "subtitles": [{
+                "n_id": "subtitle-123", "lang": "english",
+                "release_name": "Dune.Part.Two.2024.2160p.BluRay.x265-GROUP",
+                "match_score": match_score,
+                "url": "/subtitle/subtitle-123/file-456",
+            }],
+        }
+
+    def test_subdl_search_cap_uses_the_documented_free_default(self) -> None:
+        self.assertEqual(sf.resolve_subdl_search_daily_cap(0), 2_000)
+        self.assertEqual(sf.resolve_subdl_search_daily_cap(30_000), 30_000)
+        with self.assertRaisesRegex(ValueError, "subdl-search-daily-cap"):
+            sf.resolve_subdl_search_daily_cap(-1)
+
     def test_subdl_client_empty_key(self) -> None:
         client = sf.SubdlClient("")
-        identity = sf.MovieIdentity(title="Inception", year=2010, normalized_title="inception")
-        cands, urls = client.search_identity(identity)
+        cands, downloads = client.search_identity(self.identity())
         self.assertEqual(cands, [])
-        self.assertEqual(urls, {})
+        self.assertEqual(downloads, {})
+
+    def test_v2_search_uses_bearer_auth_and_builds_safe_unpacked_candidate(self) -> None:
+        body = json.dumps(self.payload()).encode("utf-8")
+        with mock.patch("subtitle_fetcher.urllib.request.urlopen", return_value=self.Response(body)) as open_url:
+            candidates, downloads = sf.SubdlClient("secret-key").search_identity(self.identity())
+
+        self.assertEqual(len(candidates), 1)
+        candidate = candidates[0]
+        self.assertEqual(candidate.file_id, "subdl:subtitle-123:file-456")
+        self.assertEqual(candidate.feature_title, "Dune: Part Two")
+        self.assertEqual(candidate.feature_year, 2024)
+        self.assertFalse(candidate.trusted, "the provider did not assert a trusted flag")
+        self.assertEqual(
+            downloads[str(candidate.file_id)],
+            sf.SubdlDownload(n_id="subtitle-123", url="https://dl.subdl.com/subtitle/subtitle-123/file-456"),
+        )
+
+        request = open_url.call_args.args[0]
+        self.assertIn("/api/v2/subtitles/search?", request.full_url)
+        self.assertIn("film_name=Dune%3A+Part+Two", request.full_url)
+        self.assertNotIn("secret-key", request.full_url)
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
+
+    def test_file_search_uses_v2_release_score_for_media_manager_matching(self) -> None:
+        body = json.dumps(self.file_search_payload()).encode("utf-8")
+        with mock.patch("subtitle_fetcher.urllib.request.urlopen", return_value=self.Response(body)) as open_url:
+            candidates, downloads = sf.SubdlClient("secret-key").search_filename(
+                r"C:\private-library\Dune: Part Two (2024).mkv", self.identity(),
+            )
+
+        self.assertEqual(len(candidates), 1)
+        candidate = candidates[0]
+        self.assertEqual(candidate.subdl_match_score, 0.92)
+        self.assertEqual(
+            downloads[str(candidate.file_id)],
+            sf.SubdlDownload(n_id="subtitle-123", url="https://dl.subdl.com/subtitle/subtitle-123/file-456"),
+        )
+        pick, reason = sf.pick_subdl_identity_candidate(
+            candidates, self.identity(), require_release_match_score=True,
+        )
+        self.assertEqual(pick, candidate)
+        self.assertIn("release match 0.92", reason)
+
+        request = open_url.call_args.args[0]
+        self.assertIn("/api/v2/files/search?", request.full_url)
+        self.assertIn("filename=Dune%3A+Part+Two+%282024%29.mkv", request.full_url)
+        self.assertNotIn("private-library", request.full_url)
+        self.assertNotIn("C%3A", request.full_url)
+        self.assertIn("languages=en", request.full_url)
+        self.assertIn("type=movie", request.full_url)
+        self.assertIn("hi=0", request.full_url)
+        self.assertIn("subs_per_page=30", request.full_url)
+        self.assertNotIn("secret-key", request.full_url)
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
+
+    def test_file_search_accepts_its_documented_raw_file_url_without_an_n_id(self) -> None:
+        payload = self.file_search_payload()
+        subtitles = payload["subtitles"]
+        assert isinstance(subtitles, list)
+        subtitles[0].pop("n_id")  # type: ignore[index]
+        with mock.patch(
+            "subtitle_fetcher.urllib.request.urlopen",
+            return_value=self.Response(json.dumps(payload).encode("utf-8")),
+        ):
+            candidates, downloads = sf.SubdlClient("secret-key").search_filename(
+                "Dune: Part Two (2024).mkv", self.identity(),
+            )
+        self.assertEqual(len(candidates), 1)
+        self.assertTrue(str(candidates[0].file_id).startswith("subdl:url:"))
+        self.assertEqual(downloads[str(candidates[0].file_id)].n_id, "")
+        self.assertEqual(
+            downloads[str(candidates[0].file_id)].url,
+            "https://dl.subdl.com/subtitle/subtitle-123/file-456",
+        )
+
+    def test_search_reservation_callback_runs_before_the_outbound_request(self) -> None:
+        reserve = mock.Mock()
+        body = json.dumps(self.file_search_payload()).encode("utf-8")
+
+        def open_after_reservation(*_args: object, **_kwargs: object) -> SubdlIntegrationTests.Response:
+            self.assertEqual(reserve.call_count, 1)
+            return self.Response(body)
+
+        with mock.patch("subtitle_fetcher.urllib.request.urlopen", side_effect=open_after_reservation):
+            sf.SubdlClient("secret-key", before_search_request=reserve).search_filename(
+                "Dune: Part Two (2024).mkv", self.identity(),
+            )
+        reserve.assert_called_once_with()
+
+    def test_search_reservation_callback_counts_a_retry_as_another_request(self) -> None:
+        reserve = mock.Mock()
+        body = json.dumps(self.file_search_payload()).encode("utf-8")
+        with (
+            mock.patch(
+                "subtitle_fetcher.urllib.request.urlopen",
+                side_effect=[urllib.error.URLError("temporary network failure"), self.Response(body)],
+            ),
+            mock.patch("subtitle_fetcher.time.sleep"),
+        ):
+            sf.SubdlClient("secret-key", before_search_request=reserve).search_filename(
+                "Dune: Part Two (2024).mkv", self.identity(),
+            )
+        self.assertEqual(reserve.call_count, 2)
+
+    def test_low_file_search_score_is_not_auto_selected(self) -> None:
+        body = json.dumps(self.file_search_payload(match_score=0.79)).encode("utf-8")
+        with mock.patch("subtitle_fetcher.urllib.request.urlopen", return_value=self.Response(body)):
+            candidates, _downloads = sf.SubdlClient("secret-key").search_filename(
+                "Dune: Part Two (2024).mkv", self.identity(),
+            )
+        pick, reason = sf.pick_subdl_identity_candidate(
+            candidates, self.identity(), require_release_match_score=True,
+        )
+        self.assertIsNone(pick)
+        self.assertIn("match_score >= 0.80", reason)
+
+    def test_file_search_confidence_threshold_is_inclusive(self) -> None:
+        body = json.dumps(self.file_search_payload(match_score=0.80)).encode("utf-8")
+        with mock.patch("subtitle_fetcher.urllib.request.urlopen", return_value=self.Response(body)):
+            candidates, _downloads = sf.SubdlClient("secret-key").search_filename(
+                "Dune: Part Two (2024).mkv", self.identity(),
+            )
+        pick, _reason = sf.pick_subdl_identity_candidate(
+            candidates, self.identity(), require_release_match_score=True,
+        )
+        self.assertIsNotNone(pick)
+
+    def test_invalid_or_out_of_range_file_search_scores_are_not_auto_selected(self) -> None:
+        for raw_score in ("not-a-score", "nan", -0.01, 1.01):
+            with self.subTest(raw_score=raw_score):
+                body = json.dumps(self.file_search_payload(match_score=raw_score)).encode("utf-8")
+                with mock.patch("subtitle_fetcher.urllib.request.urlopen", return_value=self.Response(body)):
+                    candidates, _downloads = sf.SubdlClient("secret-key").search_filename(
+                        "Dune: Part Two (2024).mkv", self.identity(),
+                    )
+                self.assertEqual(len(candidates), 1)
+                self.assertIsNone(candidates[0].subdl_match_score)
+                pick, _reason = sf.pick_subdl_identity_candidate(
+                    candidates, self.identity(), require_release_match_score=True,
+                )
+                self.assertIsNone(pick)
+
+    def test_file_search_requires_its_match_record_to_confirm_identity(self) -> None:
+        payload = self.file_search_payload()
+        match = payload["match"]
+        assert isinstance(match, dict)
+        match["year"] = 1984
+        with mock.patch(
+            "subtitle_fetcher.urllib.request.urlopen",
+            return_value=self.Response(json.dumps(payload).encode("utf-8")),
+        ):
+            candidates, downloads = sf.SubdlClient("key").search_filename(
+                "Dune: Part Two (2024).mkv", self.identity(),
+            )
+        self.assertEqual(candidates, [])
+        self.assertEqual(downloads, {})
+
+    def test_file_search_does_not_substitute_a_generic_result_for_missing_match(self) -> None:
+        payload = self.file_search_payload()
+        payload.pop("match")
+        with mock.patch(
+            "subtitle_fetcher.urllib.request.urlopen",
+            return_value=self.Response(json.dumps(payload).encode("utf-8")),
+        ):
+            candidates, downloads = sf.SubdlClient("key").search_filename(
+                "Dune: Part Two (2024).mkv", self.identity(),
+            )
+        self.assertEqual(candidates, [])
+        self.assertEqual(downloads, {})
+
+    def test_provider_result_must_confirm_exact_title_and_year(self) -> None:
+        payload = self.payload()
+        results = payload["results"]
+        assert isinstance(results, list)
+        results[0]["year"] = 1984  # type: ignore[index]
+        with mock.patch(
+            "subtitle_fetcher.urllib.request.urlopen",
+            return_value=self.Response(json.dumps(payload).encode("utf-8")),
+        ):
+            candidates, downloads = sf.SubdlClient("key").search_identity(self.identity())
+        self.assertEqual(candidates, [])
+        self.assertEqual(downloads, {})
+
+    def test_untrusted_download_host_is_not_used_when_n_id_is_available(self) -> None:
+        payload = self.payload()
+        subtitles = payload["subtitles"]
+        assert isinstance(subtitles, list)
+        subtitles[0]["unpack_files"][0]["url"] = "https://attacker.invalid/subtitle/steal"  # type: ignore[index]
+        with mock.patch(
+            "subtitle_fetcher.urllib.request.urlopen",
+            return_value=self.Response(json.dumps(payload).encode("utf-8")),
+        ):
+            candidates, downloads = sf.SubdlClient("key").search_identity(self.identity())
+        self.assertEqual(len(candidates), 1)
+        download = downloads[str(candidates[0].file_id)]
+        self.assertEqual(download.n_id, "subtitle-123")
+        self.assertEqual(download.url, "")
+        with self.assertRaisesRegex(ValueError, "outside dl\.subdl\.com"):
+            sf.normalize_subdl_download_url("https://attacker.invalid/subtitle/steal")
+
+    def test_release_search_uses_the_unique_highest_confident_score(self) -> None:
+        lower_scored_but_popular = sf.Candidate(
+            file_id="subdl:lower", release="Dune.Part.Two.2024.1080p.WEB",
+            moviehash_match=False, downloads=10_000, votes=100, rating=10.0, trusted=True,
+            hearing_impaired=False, machine_translated=False, ai_translated=False,
+            foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
+            subdl_match_score=0.81,
+        )
+        highest_score = sf.Candidate(
+            **{**lower_scored_but_popular.__dict__, "file_id": "subdl:highest", "downloads": 0,
+               "votes": 0, "rating": 0.0, "trusted": False, "subdl_match_score": 0.92},
+        )
+        pick, reason = sf.pick_subdl_identity_candidate(
+            [lower_scored_but_popular, highest_score], self.identity(), require_release_match_score=True,
+        )
+        self.assertEqual(pick, highest_score)
+        self.assertIn("highest release match 0.92", reason)
+
+    def test_tied_confident_release_scores_are_held_for_review(self) -> None:
+        base = sf.Candidate(
+            file_id="subdl:one", release="Dune.Part.Two.2024.1080p.WEB",
+            moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
+            hearing_impaired=False, machine_translated=False, ai_translated=False,
+            foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
+            subdl_match_score=0.92,
+        )
+        other = sf.Candidate(**{**base.__dict__, "file_id": "subdl:two"})
+        pick, reason = sf.pick_subdl_identity_candidate(
+            [base, other], self.identity(), require_release_match_score=True,
+        )
+        self.assertIsNone(pick)
+        self.assertIn("equally scored", reason)
+
+    def test_unique_subdl_candidate_without_vote_metadata_is_usable(self) -> None:
+        candidate = sf.Candidate(
+            file_id="subdl:one", release="Dune.Part.Two.2024.1080p.WEB",
+            moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
+            hearing_impaired=False, machine_translated=False, ai_translated=False,
+            foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
+        )
+        pick, reason = sf.pick_subdl_identity_candidate([candidate], self.identity())
+        self.assertEqual(pick, candidate)
+        self.assertIn("one normal English SubDL", reason)
+
+    def test_multiple_subdl_candidates_without_quality_metadata_are_held(self) -> None:
+        base = sf.Candidate(
+            file_id="subdl:one", release="Dune.Part.Two.2024.1080p.WEB",
+            moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
+            hearing_impaired=False, machine_translated=False, ai_translated=False,
+            foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
+        )
+        other = sf.Candidate(**{**base.__dict__, "file_id": "subdl:two", "release": "Dune.Part.Two.2024.720p.WEB"})
+        pick, reason = sf.pick_subdl_identity_candidate([base, other], self.identity())
+        self.assertIsNone(pick)
+        self.assertIn("unambiguous", reason)
+
+    def test_zip_payload_is_streamed_and_validated_as_srt(self) -> None:
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("Dune.Part.Two.eng.srt", self.sample_srt)
+        self.assertEqual(sf.decode_subdl_srt_payload(archive.getvalue(), sf.MAX_SUBTITLE_BYTES), self.sample_srt)
+
+    def test_archive_with_multiple_srt_members_is_held_for_review(self) -> None:
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("Dune.Part.Two.theatrical.srt", self.sample_srt)
+            zf.writestr("Dune.Part.Two.extended.srt", self.sample_srt)
+        with self.assertRaisesRegex(RuntimeError, "multiple usable .srt"):
+            sf.decode_subdl_srt_payload(archive.getvalue(), sf.MAX_SUBTITLE_BYTES)
+
+    def test_n_id_download_uses_v2_endpoint_and_snapshot_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            video = root / "Dune Part Two (2024).mkv"
+            video.write_bytes(b"movie bytes")
+            destination = root / "Dune Part Two (2024).eng.srt"
+            snapshot = sf.video_snapshot(video)
+            with mock.patch(
+                "subtitle_fetcher.urllib.request.urlopen",
+                return_value=self.Response(self.sample_srt.encode("utf-8")),
+            ) as open_url:
+                sf.SubdlClient("secret-key").download_srt(
+                    sf.SubdlDownload(n_id="subtitle-123"), destination,
+                    video=video, expected_video=snapshot,
+                )
+            request = open_url.call_args.args[0]
+            self.assertIn("/api/v2/subtitles/subtitle-123/download?format=file", request.full_url)
+            self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
+            self.assertEqual(destination.read_text(encoding="utf-8"), self.sample_srt)
+
+    def test_json_download_response_follows_only_a_vetted_subdl_url(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            destination = root / "Dune.eng.srt"
+            redirect = json.dumps({"download_url": "/subtitle/subtitle-123/file-456"}).encode("utf-8")
+            with (
+                mock.patch(
+                    "subtitle_fetcher.urllib.request.urlopen",
+                    side_effect=[self.Response(redirect), self.Response(self.sample_srt.encode("utf-8"))],
+                ) as open_url,
+                mock.patch("subtitle_fetcher.time.sleep"),
+            ):
+                sf.SubdlClient("secret-key").download_srt(sf.SubdlDownload(n_id="subtitle-123"), destination)
+            self.assertEqual(open_url.call_count, 2)
+            second_request = open_url.call_args.args[0]
+            self.assertEqual(second_request.full_url, "https://dl.subdl.com/subtitle/subtitle-123/file-456")
+            self.assertEqual(destination.read_text(encoding="utf-8"), self.sample_srt)
+        with self.assertRaisesRegex(RuntimeError, "unsafe download URL"):
+            sf.subdl_download_redirect_url(
+                json.dumps({"download_url": "https://attacker.invalid/subtitle/steal"}).encode("utf-8")
+            )
+
+    def test_low_scored_filename_match_does_not_weaken_to_title_search(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = root / "library"
+            movie = library / "Dune Part Two (2024)"
+            movie.mkdir(parents=True)
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"small-but-valid-for-subdl")
+            cfg = sf.QueueConfig(
+                library=library, log_file=root / "subtitle_fetcher.log", report_file=root / "report.txt",
+                subdl_api_key="subdl-test-key", min_movie_size_mb=0, subdl_daily_cap=3,
+            )
+            low_score = sf.Candidate(
+                file_id="subdl:low", release="Dune.Part.Two.2024.1080p.WEB",
+                moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
+                hearing_impaired=False, machine_translated=False, ai_translated=False,
+                foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
+                subdl_match_score=0.79,
+            )
+            with (
+                mock.patch.object(
+                    sf.SubdlClient, "search_filename", return_value=([low_score], {}),
+                ),
+                mock.patch.object(
+                    sf.SubdlClient, "search_identity",
+                    side_effect=AssertionError("low-score release matches must remain review-only"),
+                ) as title_search,
+            ):
+                results, _summary = sf.queue_run(cfg)
+
+            title_search.assert_not_called()
+            self.assertEqual([result.status for result in results], ["review"])
+            self.assertIn("match_score >= 0.80", results[0].detail)
+
+    def test_subdl_search_cap_stops_title_fallback_before_a_second_request(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = root / "library"
+            movie = library / "Dune Part Two (2024)"
+            movie.mkdir(parents=True)
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"small-but-valid-for-subdl")
+            cfg = sf.QueueConfig(
+                library=library, log_file=root / "subtitle_fetcher.log", report_file=root / "report.txt",
+                subdl_api_key="subdl-test-key", min_movie_size_mb=0,
+                subdl_daily_cap=3, subdl_search_daily_cap=1,
+            )
+            no_filename_match = json.dumps({"status": True, "match": None, "subtitles": []}).encode("utf-8")
+            with mock.patch(
+                "subtitle_fetcher.urllib.request.urlopen", return_value=self.Response(no_filename_match),
+            ) as open_url:
+                results, summary = sf.queue_run(cfg)
+
+            self.assertEqual([result.reason for result in results], [sf.REASON_QUOTA])
+            self.assertIn("daily search cap exhausted", results[0].detail)
+            self.assertEqual(open_url.call_count, 1, "generic title fallback must not exceed the search cap")
+            self.assertEqual(summary["subdl_search_requests_reserved"], 1)
+            self.assertEqual(summary["subdl_download_requests_reserved"], 0)
+
+    def test_exhausted_subdl_search_cap_defers_after_an_open_subtitles_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = root / "library"
+            movie = library / "Dune Part Two (2024)"
+            movie.mkdir(parents=True)
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"x" * sf.MIN_HASH_SIZE)
+            log_file = root / "subtitle_fetcher.log"
+            state = sf.new_state(library)
+            sf.day_ledger(state, sf.utc_day())["subdl_search_requests_reserved"] = 1
+            sf.persist_state(state, log_file)
+            cfg = sf.QueueConfig(
+                library=library, log_file=log_file, report_file=root / "report.txt",
+                api_key="open-key", subdl_api_key="subdl-key", daily_cap=3,
+                subdl_daily_cap=3, subdl_search_daily_cap=1, min_movie_size_mb=0,
+            )
+            with (
+                mock.patch.object(sf.OpenSubtitlesClient, "search", return_value=[]),
+                mock.patch.object(sf.OpenSubtitlesClient, "search_identity", return_value=[]),
+                mock.patch.object(
+                    sf.SubdlClient, "search_filename",
+                    side_effect=AssertionError("exhausted SubDL search quota must not issue a lookup"),
+                ) as filename_search,
+            ):
+                results, summary = sf.queue_run(cfg)
+
+            filename_search.assert_not_called()
+            self.assertEqual([result.reason for result in results], [sf.REASON_QUOTA])
+            self.assertIn("daily search cap exhausted before lookup", results[0].detail)
+            self.assertEqual(summary["subdl_search_requests_reserved"], 1)
+
+    def test_subdl_only_queue_downloads_without_open_subtitles(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = root / "library"
+            movie = library / "Dune Part Two (2024)"
+            movie.mkdir(parents=True)
+            video = movie / "Dune Part Two (2024).mkv"
+            video.write_bytes(b"small-but-valid-for-subdl")
+            log_file = root / "subtitle_fetcher.log"
+            cfg = sf.QueueConfig(
+                library=library, log_file=log_file, report_file=root / "report.txt",
+                subdl_api_key="subdl-test-key", min_movie_size_mb=0, subdl_daily_cap=3,
+            )
+            candidate = sf.Candidate(
+                file_id="subdl:subtitle-123:file-456", release="Dune.Part.Two.2024.1080p.WEB",
+                moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
+                hearing_impaired=False, machine_translated=False, ai_translated=False,
+                foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
+                subdl_match_score=0.92,
+            )
+            download = sf.SubdlDownload(n_id="subtitle-123", url="https://dl.subdl.com/subtitle/subtitle-123/file-456")
+
+            def write_sidecar(actual: sf.SubdlDownload, destination: Path, **_kwargs: object) -> None:
+                self.assertEqual(actual, download)
+                sf.atomic_write_text(destination, self.sample_srt, replace=False)
+
+            with (
+                mock.patch.object(
+                    sf.SubdlClient, "search_filename", return_value=([], {}),
+                ) as file_search,
+                mock.patch.object(
+                    sf.SubdlClient, "search_identity",
+                    return_value=([candidate], {str(candidate.file_id): download}),
+                ) as title_search,
+                mock.patch.object(sf.SubdlClient, "download_srt", side_effect=write_sidecar),
+            ):
+                results, summary = sf.queue_run(cfg)
+
+            file_search.assert_called_once()
+            title_search.assert_called_once()
+            self.assertEqual([result.status for result in results], ["download"])
+            self.assertTrue((movie / "Dune Part Two (2024).eng.srt").is_file())
+            self.assertEqual(summary["opensubtitles_download_requests_reserved"], 0)
+            self.assertEqual(summary["subdl_download_requests_reserved"], 1)
+            self.assertEqual(summary["subdl_successful_downloads"], 1)
+
+    def test_open_subtitles_cap_does_not_consume_subdl_capacity(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = root / "library"
+            movie = library / "Dune Part Two (2024)"
+            movie.mkdir(parents=True)
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"subdl-only-content")
+            log_file = root / "subtitle_fetcher.log"
+            state = sf.new_state(library)
+            ledger = sf.day_ledger(state, sf.utc_day())
+            ledger["opensubtitles_download_requests_reserved"] = 1
+            ledger["download_requests_reserved"] = 1
+            sf.persist_state(state, log_file)
+            cfg = sf.QueueConfig(
+                library=library, log_file=log_file, report_file=root / "report.txt",
+                api_key="open-key", subdl_api_key="subdl-key", daily_cap=1,
+                subdl_daily_cap=3, min_movie_size_mb=0,
+            )
+            candidate = sf.Candidate(
+                file_id="subdl:subtitle-123:file-456", release="Dune.Part.Two.2024.1080p.WEB",
+                moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
+                hearing_impaired=False, machine_translated=False, ai_translated=False,
+                foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
+                subdl_match_score=0.92,
+            )
+            download = sf.SubdlDownload(n_id="subtitle-123")
+
+            def write_sidecar(_actual: sf.SubdlDownload, destination: Path, **_kwargs: object) -> None:
+                sf.atomic_write_text(destination, self.sample_srt, replace=False)
+
+            with (
+                mock.patch.object(
+                    sf.OpenSubtitlesClient, "search",
+                    side_effect=AssertionError("OpenSubtitles is capped"),
+                ),
+                mock.patch.object(
+                    sf.SubdlClient, "search_filename",
+                    return_value=([candidate], {str(candidate.file_id): download}),
+                ),
+                mock.patch.object(sf.SubdlClient, "download_srt", side_effect=write_sidecar),
+            ):
+                results, summary = sf.queue_run(cfg)
+
+            self.assertEqual([result.status for result in results], ["download"])
+            self.assertEqual(summary["opensubtitles_download_requests_reserved"], 1)
+            self.assertEqual(summary["subdl_download_requests_reserved"], 1)
+
+    def test_subdl_falls_back_when_open_subtitles_lookup_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = root / "library"
+            movie = library / "Dune Part Two (2024)"
+            movie.mkdir(parents=True)
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"x" * sf.MIN_HASH_SIZE)
+            cfg = sf.QueueConfig(
+                library=library, log_file=root / "subtitle_fetcher.log", report_file=root / "report.txt",
+                api_key="open-key", subdl_api_key="subdl-key", min_movie_size_mb=0,
+            )
+            candidate = sf.Candidate(
+                file_id="subdl:subtitle-123", release="Dune.Part.Two.2024.1080p.WEB",
+                moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
+                hearing_impaired=False, machine_translated=False, ai_translated=False,
+                foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
+                subdl_match_score=0.92,
+            )
+            download = sf.SubdlDownload(n_id="subtitle-123")
+
+            def write_sidecar(_actual: sf.SubdlDownload, destination: Path, **_kwargs: object) -> None:
+                sf.atomic_write_text(destination, self.sample_srt, replace=False)
+
+            with (
+                mock.patch.object(
+                    sf.OpenSubtitlesClient, "search", side_effect=RuntimeError("temporary outage"),
+                ),
+                mock.patch.object(
+                    sf.OpenSubtitlesClient, "search_identity",
+                    side_effect=AssertionError("do not spend a second request after a provider failure"),
+                ),
+                mock.patch.object(
+                    sf.SubdlClient, "search_filename",
+                    return_value=([candidate], {str(candidate.file_id): download}),
+                ),
+                mock.patch.object(sf.SubdlClient, "download_srt", side_effect=write_sidecar),
+            ):
+                results, summary = sf.queue_run(cfg)
+
+            self.assertEqual([result.status for result in results], ["download"])
+            self.assertEqual(summary["opensubtitles_download_requests_reserved"], 0)
+            self.assertEqual(summary["subdl_download_requests_reserved"], 1)
+
+    def test_subdl_only_configuration_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = root / "library"
+            library.mkdir()
+            cfg = sf.QueueConfig(
+                library=library, log_file=root / "subtitle.log", report_file=root / "subtitle_report.txt",
+                subdl_api_key="key",
+            )
+            self.assertEqual(sf.validate_compact_config(cfg), [])
+            errors = sf.validate_compact_config(sf.QueueConfig(
+                library=library, log_file=root / "none.log", report_file=root / "none.txt",
+            ))
+            self.assertIn("configure OPENSUBTITLES_API_KEY and/or SUBDL_API_KEY", errors)

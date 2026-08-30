@@ -24,8 +24,11 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=UTC
-      # OpenSubtitles Consumer API Key (https://www.opensubtitles.com/en/consumers)
+      # Subtitle providers (OpenSubtitles is hash-match primary; SubDL is a score-gated release fallback)
+      # https://www.opensubtitles.com/en/consumers
       - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}
+      # https://subdl.com/panel/api
+      - SUBDL_API_KEY=${SUBDL_API_KEY:-}
       # Library roots INSIDE the container. Both live under the single /media
       # mount below, so hardlink-only ingestion works.
       - MOVIE_STD_SOURCE=/media/torrents/final

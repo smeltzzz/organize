@@ -64,7 +64,11 @@ python3 organize.py doctor --source /data/media/torrents/final --target /data/me
 Create `/etc/organize.env` or export in your shell profile (`~/.bashrc`):
 
 ```bash
+# Recommended exact-release source (https://www.opensubtitles.com/en/consumers)
 export OPENSUBTITLES_API_KEY="your-opensubtitles-consumer-api-key"
+# Optional release-aware fallback (https://subdl.com/panel/api)
+# Automatic SubDL picks require its documented filename match_score >= 0.80.
+export SUBDL_API_KEY="your-subdl-api-key"
 export MOVIE_STD_SOURCE="/data/media/torrents/final"
 export MOVIE_STD_TARGET="/data/media/movies"
 export MOVIE_STD_LOG="/data/media/organize_logs/movie_standardizer.log"

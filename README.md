@@ -10,7 +10,7 @@ cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](requirements.txt)
-[![Tests](https://img.shields.io/badge/tests-245%20passing%20(offline)-2EA44F.svg?style=flat-square)](run_tests.sh)
+[![Tests](https://img.shields.io/badge/tests-274%20passing%20(offline)-2EA44F.svg?style=flat-square)](run_tests.sh)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![Platforms](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20macos%20%7C%20docker-6E40C9.svg?style=flat-square)](docs/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
@@ -36,7 +36,7 @@ CLI that ingest completed torrent downloads and maintain a canonical
 ```
 Title (Year)/
 ├── Title (Year).mkv        ← one losslessly-cleaned MKV per movie
-└── Title (Year).eng.srt     ← one validated, exact-match English subtitle
+└── Title (Year).eng.srt     ← one validated English subtitle (hash-matched when available)
 ```
 
 Unlike bloated container stacks with hundred-megabyte images, SQLite lockups,
@@ -46,7 +46,7 @@ and fragile web UIs, Organize is **100% standard-library Python 3.11+**:
 | :--- | :--- |
 | 🫧 **Zero pip installs** | The whole toolkit *is* the checkout. No venv, no Docker required. |
 | 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
-| 💬 **Exact-match subtitles** | OpenSubtitles moviehash matching while container bytes are still pristine, plus a conservative title/year fallback. |
+| 💬 **Exact-match subtitles** | OpenSubtitles moviehash matching while container bytes are still pristine, then SubDL's release-aware filename match (only score ≥ 0.80) with a strict title/year fallback when no filename candidate exists. |
 | ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track (or best non-commentary audio on foreign films with a validated `.eng.srt`) and drops commentary, dubs, and embedded bitmap subtitles — video untouched. |
 | 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
@@ -71,9 +71,9 @@ python3 organize.py doctor            # Windows: py organize.py doctor
 <img src="docs/assets/terminal-doctor.png" width="86%" alt="organize doctor — an all-green diagnostics scorecard">
 
 `doctor` verifies Python, `mkvmerge` (MKVToolNix), `ffprobe` (FFmpeg), your
-OpenSubtitles API key, and — crucially — that your download folder and library
-sit on the **same filesystem volume** so hardlinks work. Missing pieces are
-reported with the exact fix, never a crash.
+OpenSubtitles and/or SubDL provider key, and — crucially — that your download
+folder and library sit on the **same filesystem volume** so hardlinks work.
+Missing pieces are reported with the exact fix, never a crash.
 
 ### 2 · Wire up qBittorrent ingest
 
@@ -107,9 +107,12 @@ Then point Jellyfin at your organized folder as a **Movies** library. Done —
 every movie is canonically named, subtitle-complete, and direct-play safe.
 
 > [!TIP]
-> Set `OPENSUBTITLES_API_KEY` to enable subtitle fetching. Grab a free
-> consumer key at [opensubtitles.com/en/consumers](https://www.opensubtitles.com/en/consumers).
-> Full reference: [docs/CONFIGURATION_REFERENCE.md](docs/CONFIGURATION_REFERENCE.md).
+> Set `OPENSUBTITLES_API_KEY` for the preferred exact-release moviehash source,
+> and optionally set `SUBDL_API_KEY` for [SubDL's documented release-aware
+> filename matching](https://subdl.com/developers). Automatic SubDL picks require
+> `match_score ≥ 0.80`; it can also run alone, but has no byte-identical moviehash
+> match. Full reference:
+> [docs/CONFIGURATION_REFERENCE.md](docs/CONFIGURATION_REFERENCE.md).
 
 ---
 
@@ -129,7 +132,7 @@ search. `pipeline.py` exists so you cannot get this wrong.
 └───────────┬───────────┘
             ▼
 ┌───────────────────────┐   exact OSHash match (moviehash_match=only),
-│ 2 · subtitles         │   conservative title/year fallback, UTF-8 .eng.srt
+│ 2 · subtitles         │   OpenSubtitles hash first, score-gated SubDL release fallback, UTF-8 .eng.srt
 └───────────┬───────────┘
             ▼
 ┌───────────────────────┐   lossless mkvmerge remux: 1 best English audio
@@ -160,7 +163,7 @@ printed) when its prerequisite is missing.
 | Tool | What it does | Needs | Artifacts (always outside the library) |
 | :--- | :--- | :--- | :--- |
 | **[`movie_standardizer.py`](movie_standardizer.py)** | qBittorrent hook: parses scene/release names into canonical `Title (Year)`, hardlinks into the library (zero duplicate space), skips TV, discs, multipart splits, non-MKV. Existing movies are only replaced after an ffprobe-verified same-cut *technical upgrade* — never on size alone. | *Nothing* (ffprobe optional, for upgrade checks) | `movie_standardizer.log` · `movie_standardizer_report.txt` |
-| **[`subtitle_fetcher.py`](subtitle_fetcher.py)** | Fetches one validated human-authored English UTF-8 SRT per movie. Exact OpenSubtitles **moviehash** first (`moviehash_match=only` — byte-identical release match), then a strict title/year fallback that holds low-confidence candidates for review. Append-only quota ledger prevents wasted API requests. | `OPENSUBTITLES_API_KEY` | `subtitle_fetcher.log` (also the quota ledger) · `subtitle_fetcher_report.txt` |
+| **[`subtitle_fetcher.py`](subtitle_fetcher.py)** | Fetches one validated human-authored English UTF-8 SRT per movie. Exact OpenSubtitles **moviehash** first (`moviehash_match=only` — byte-identical release match), then optional SubDL `/files/search` release matching (`match_score ≥ 0.80`). If that route finds no usable candidate, one strict title/year SubDL query is allowed. SubDL can run alone; ambiguous/low-score candidates remain review-only. Durable per-provider quota reservations prevent waste. | `OPENSUBTITLES_API_KEY` *(recommended)* and/or `SUBDL_API_KEY` | `subtitle_fetcher.log` (also the quota ledger) · `subtitle_fetcher_report.txt` |
 | **[`mkv_track_cleaner.py`](mkv_track_cleaner.py)** | Lossless `mkvmerge` remux: keeps the single highest-quality English audio track (or the best non-commentary audio on foreign films that already have a validated `.eng.srt`), purges commentary / descriptive-audio / extra dubs, strips embedded subtitles once that sidecar exists. Transaction-journaled, fingerprint-verified, atomic. | `mkvmerge` *(MKVToolNix)* | `mkv_track_cleaner.log` · `mkv_track_cleaner_report.txt` · probe cache |
 | **[`10bit.py`](10bit.py)** | ffprobe inspection that classifies every movie: **QUEUE** (8-bit SDR → re-encode to 10-bit HEVC/AV1), **SKIP** (already high bit-depth), **KEEP** (native HDR — protected from tone-mapping), **REVIEW** (ambiguous — never auto-queued). Probe cache makes re-sweeps near-instant. | `ffprobe` *(FFmpeg)* | `10bit.log` · `10bit_report.txt` · probe cache |
 | **[`library_auditor.py`](library_auditor.py)** | 100% read-only health check: canonical folder/MKV structure, sidecar syntax validation (catches empty, truncated, and HTML-error-page SRTs), remux-aware (no false alarms mid-cleanup). `--fail-on-defects` / `--fail-on-findings` gate scheduled tasks. | *Nothing* (stdlib only) | `library_auditor.log` · `library_auditor_report.txt` |
@@ -188,9 +191,9 @@ python movie_standardizer.py "D:\torrents\final\Some.Movie.2023.1080p"   # one f
 
 - **Why it runs before the remux** — the OpenSubtitles moviehash is the file size plus the sum of the first and last 64 KiB. Submitting it with `moviehash_match=only` returns subtitles uploaded against that *exact release*, guaranteeing sync. A remux rewrites those bytes permanently, demoting the movie to the far weaker title/year search.
 - **Strict candidate policy** — only normal (non-SDH, non-forced, non-machine-translated) human English SRTs; trusted flags and ratings outrank raw download counts for a deterministic pick.
-- **Conservative fallback** — after a hash miss, an exact title/year match with high community confidence is allowed; edition-labelled releases (*extended*, *director's cut*, …) are held for manual review instead of guessed.
-- **Durable quota ledger** — the append-only log doubles as an ACID UTC-day ledger: reservations are persisted *before* each download request, so an interrupted run never double-spends quota.
-- **Sidecar safety** — downloads are size-capped, HTTPS-only, gzip-aware, cue-validated, and activated via an atomic create-only link so a concurrent sidecar is never overwritten.
+- **Conservative provider fallback** — after a hash miss, OpenSubtitles gets a strict title/year check. Optional SubDL then sends only the release basename to its documented `/api/v2/files/search` route, requires its `match` metadata to confirm the canonical movie, and auto-selects only normal English candidates with `match_score ≥ 0.80`. It makes one strict title/year query only when filename matching returns no usable candidate; low-score, ambiguous, and edition-labelled releases (*extended*, *director's cut*, …) are held for review. SubDL is never used ahead of a live OpenSubtitles hash match.
+- **Durable per-provider quota ledger** — the append-only log keeps independent local UTC reservations for OpenSubtitles downloads and SubDL's documented free-tier allowances: 2,000 searches and 50 downloads per day. Each SubDL search attempt (including a retry) and each download is reserved *before* it is sent, so an interrupted run never silently exceeds its configured guard.
+- **Sidecar safety** — downloads are size-capped, HTTPS-host-validated, archive/gzip-aware, cue-validated, snapshot-checked, and activated via an atomic create-only link so a concurrent sidecar is never overwritten.
 
 ```bash
 python organize.py subtitles --dry-run      # preview candidates
@@ -349,11 +352,11 @@ python organize.py <command> [options]     # Windows: py organize.py <command>
 | `doctor` | `check` | Verifies Python, `mkvmerge`, `ffprobe`, API key, paths, and hardlink compatibility — with per-check fixes |
 | `run` | `pipeline` | Runs the maintenance pipeline in the correct, moviehash-safe order |
 | `standardize` | `std` | Rename & hardlink completed torrents into `Title (Year)/Title (Year).mkv` |
-| `subtitles` | `subs` | Fetch validated English UTF-8 SRT sidecars from OpenSubtitles |
+| `subtitles` | `subs` | Fetch validated English UTF-8 SRT sidecars: OpenSubtitles hash-first, SubDL fallback |
 | `clean` | `remux` | Lossless remux: keep one best English audio (or best non-commentary audio on foreign films with `.eng.srt`), strip embeds/bloat |
 | `10bit` | `probe` | ffprobe 8-bit vs 10-bit & native-HDR compliance sweep |
 | `audit` | — | Read-only health check of layout, naming, and subtitle sidecars |
-| `test` | `tests` | Run all self-tests (add `--unit` for the 245-test unit suite) |
+| `test` | `tests` | Run all self-tests (add `--unit` for the 274-test unit suite) |
 
 Launchers wrap it for every platform — `organize.sh` (bash), `organize.ps1`
 (PowerShell), `organize.bat` (cmd) — and each underlying script still runs
@@ -411,7 +414,7 @@ The suite runs **100% offline** — no media files, no external binaries, no API
 key, no network:
 
 ```bash
-bash run_tests.sh                      # self-tests + 245 unit tests
+bash run_tests.sh                      # self-tests + 274 unit tests
 python3 -m unittest discover -s tests -p 'test_*.py'
 python3 organize.py test --unit        # same thing through the unified CLI
 ```

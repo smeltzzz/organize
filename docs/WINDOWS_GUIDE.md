@@ -62,19 +62,22 @@ Restart your terminal so the new PATH entries take effect.
 | Python 3.11+ | everything | Tick **Add python.exe to PATH** in the installer |
 | MKVToolNix | `mkv_track_cleaner.py` | Also auto-found at `C:\Program Files\MKVToolNix\mkvmerge.exe` |
 | FFmpeg | `10bit.py`, upgrade checks | Or drop `ffprobe.exe` at `C:\ffmpeg\bin\ffprobe.exe` |
-| OpenSubtitles API key | `subtitle_fetcher.py` | Free: <https://www.opensubtitles.com/en/consumers> |
+| OpenSubtitles API key | `subtitle_fetcher.py` | Recommended exact-match source: <https://www.opensubtitles.com/en/consumers> |
+| SubDL API key | `subtitle_fetcher.py` | Optional score-gated release-aware fallback: <https://subdl.com/panel/api> |
 
 No `pip install` — the runtime is stdlib-only (`requirements.txt` is empty on
 purpose).
 
-## 3. Set the OpenSubtitles API key
+## 3. Set your subtitle-provider API key(s)
 
-Set it once as a **user** environment variable so qBittorrent and PowerShell
-both see it, then **restart qBittorrent and any open terminal** — a process
-only reads the environment it was started with:
+Set one or both keys as **user** environment variables so qBittorrent and
+PowerShell both see them, then **restart qBittorrent and any open terminal** —
+a process only reads the environment it was started with. OpenSubtitles is the
+recommended exact-release source; SubDL adds a score-gated release-aware fallback:
 
 ```powershell
-[Environment]::SetEnvironmentVariable("OPENSUBTITLES_API_KEY", "your-key-here", "User")
+[Environment]::SetEnvironmentVariable("OPENSUBTITLES_API_KEY", "your-opensubtitles-key", "User")
+[Environment]::SetEnvironmentVariable("SUBDL_API_KEY", "your-subdl-key", "User")
 ```
 
 ## 4. Run the system doctor
@@ -196,12 +199,16 @@ sidecar yet. Use `--fail-on-findings` if missing sidecars should fail too.
   `.eng.srt` is reported by `library_auditor.py` as `INVALID_SIDECAR` with the
   reason. Nothing in the pipeline repairs it on its own — delete the bad file
   and re-run `subtitle_fetcher.py`.
-- **`subtitle_fetcher.py --dry-run` still needs the API key.** It exits 2 with
-  `Configuration error: an OpenSubtitles API key is required` if the variable
-  is missing. Every other tool's `--dry-run` works with nothing installed.
-- **The fetcher is quota-limited per UTC day:** 100 download requests in the
-  default `development-anonymous` mode, 20 with `--auth-mode user`. The
-  append-only log at `E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher.log` *is*
+- **`subtitle_fetcher.py --dry-run` still needs a provider key.** It exits 2 if
+  neither `OPENSUBTITLES_API_KEY` nor `SUBDL_API_KEY` is set. Every other
+  tool's `--dry-run` works with nothing installed.
+- **The fetcher keeps local UTC quota reservations per provider:** OpenSubtitles
+  defaults to 100 download requests in `development-anonymous` mode (20 with
+  `--auth-mode user`). Per [SubDL's current developer documentation](https://subdl.com/developers),
+  its free tier has 2,000 searches and 50 downloads per day; this fetcher
+  defaults to those guards and can be raised for another plan with
+  `--subdl-search-daily-cap` and `--subdl-daily-cap`. The append-only log at
+  `E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher.log` *is*
   the durable ledger — don't delete it or you lose your quota accounting.
 
 ## 9. Everyday commands

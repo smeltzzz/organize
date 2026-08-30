@@ -15,10 +15,15 @@ enforced in code and covered by the offline test suite:
 - **Fail-closed concurrency.** Every tool coordinates through advisory locks;
   a lock that cannot be acquired halts the tool instead of racing.
 - **Provider hardening.** The subtitle fetcher only dereferences absolute
-  HTTPS download links from OpenSubtitles, enforces a byte-size ceiling on
-  downloads, and validates SRT contents before anything is written.
-- **Credentials stay out of the command line.** The OpenSubtitles key and user
-  credentials are read only from environment variables.
+  HTTPS download links from OpenSubtitles; SubDL raw URLs are restricted to
+  `https://dl.subdl.com/subtitle/...` and opaque v2 IDs use a locally-built
+  `format=file` API path. Both providers are byte-capped, archive/gzip-aware,
+  cue-validated, snapshot-checked, and atomically published only after
+  validation. A SubDL archive with more than one usable `.srt` is rejected for
+  manual review rather than guessed.
+- **Credentials stay out of the command line.** OpenSubtitles and SubDL keys,
+  plus optional OpenSubtitles user credentials, are read only from environment
+  variables.
 
 ## Reporting a vulnerability
 
