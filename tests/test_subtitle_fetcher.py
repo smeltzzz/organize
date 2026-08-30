@@ -600,9 +600,9 @@ class SubdlIntegrationTests(unittest.TestCase):
     def test_n_id_download_uses_v2_endpoint_and_snapshot_guard(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            video = root / "Dune: Part Two (2024).mkv"
+            video = root / "Dune Part Two (2024).mkv"
             video.write_bytes(b"movie bytes")
-            destination = root / "Dune: Part Two (2024).eng.srt"
+            destination = root / "Dune Part Two (2024).eng.srt"
             snapshot = sf.video_snapshot(video)
             with mock.patch(
                 "subtitle_fetcher.urllib.request.urlopen",
@@ -643,9 +643,9 @@ class SubdlIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             library = root / "library"
-            movie = library / "Dune: Part Two (2024)"
+            movie = library / "Dune Part Two (2024)"
             movie.mkdir(parents=True)
-            (movie / "Dune: Part Two (2024).mkv").write_bytes(b"small-but-valid-for-subdl")
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"small-but-valid-for-subdl")
             cfg = sf.QueueConfig(
                 library=library, log_file=root / "subtitle_fetcher.log", report_file=root / "report.txt",
                 subdl_api_key="subdl-test-key", min_movie_size_mb=0, subdl_daily_cap=3,
@@ -676,9 +676,9 @@ class SubdlIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             library = root / "library"
-            movie = library / "Dune: Part Two (2024)"
+            movie = library / "Dune Part Two (2024)"
             movie.mkdir(parents=True)
-            (movie / "Dune: Part Two (2024).mkv").write_bytes(b"small-but-valid-for-subdl")
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"small-but-valid-for-subdl")
             cfg = sf.QueueConfig(
                 library=library, log_file=root / "subtitle_fetcher.log", report_file=root / "report.txt",
                 subdl_api_key="subdl-test-key", min_movie_size_mb=0,
@@ -700,9 +700,9 @@ class SubdlIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             library = root / "library"
-            movie = library / "Dune: Part Two (2024)"
+            movie = library / "Dune Part Two (2024)"
             movie.mkdir(parents=True)
-            (movie / "Dune: Part Two (2024).mkv").write_bytes(b"x" * sf.MIN_HASH_SIZE)
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"x" * sf.MIN_HASH_SIZE)
             log_file = root / "subtitle_fetcher.log"
             state = sf.new_state(library)
             sf.day_ledger(state, sf.utc_day())["subdl_search_requests_reserved"] = 1
@@ -731,9 +731,9 @@ class SubdlIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             library = root / "library"
-            movie = library / "Dune: Part Two (2024)"
+            movie = library / "Dune Part Two (2024)"
             movie.mkdir(parents=True)
-            video = movie / "Dune: Part Two (2024).mkv"
+            video = movie / "Dune Part Two (2024).mkv"
             video.write_bytes(b"small-but-valid-for-subdl")
             log_file = root / "subtitle_fetcher.log"
             cfg = sf.QueueConfig(
@@ -768,7 +768,7 @@ class SubdlIntegrationTests(unittest.TestCase):
             file_search.assert_called_once()
             title_search.assert_called_once()
             self.assertEqual([result.status for result in results], ["download"])
-            self.assertTrue((movie / "Dune: Part Two (2024).eng.srt").is_file())
+            self.assertTrue((movie / "Dune Part Two (2024).eng.srt").is_file())
             self.assertEqual(summary["opensubtitles_download_requests_reserved"], 0)
             self.assertEqual(summary["subdl_download_requests_reserved"], 1)
             self.assertEqual(summary["subdl_successful_downloads"], 1)
@@ -777,9 +777,9 @@ class SubdlIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             library = root / "library"
-            movie = library / "Dune: Part Two (2024)"
+            movie = library / "Dune Part Two (2024)"
             movie.mkdir(parents=True)
-            (movie / "Dune: Part Two (2024).mkv").write_bytes(b"subdl-only-content")
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"subdl-only-content")
             log_file = root / "subtitle_fetcher.log"
             state = sf.new_state(library)
             ledger = sf.day_ledger(state, sf.utc_day())
@@ -824,9 +824,9 @@ class SubdlIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             library = root / "library"
-            movie = library / "Dune: Part Two (2024)"
+            movie = library / "Dune Part Two (2024)"
             movie.mkdir(parents=True)
-            (movie / "Dune: Part Two (2024).mkv").write_bytes(b"x" * sf.MIN_HASH_SIZE)
+            (movie / "Dune Part Two (2024).mkv").write_bytes(b"x" * sf.MIN_HASH_SIZE)
             cfg = sf.QueueConfig(
                 library=library, log_file=root / "subtitle_fetcher.log", report_file=root / "report.txt",
                 api_key="open-key", subdl_api_key="subdl-key", min_movie_size_mb=0,
