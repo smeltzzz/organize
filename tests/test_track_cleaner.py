@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import contextlib
-import pathlib
 import datetime
 import io
 import json
+import pathlib
 import tempfile
 import unittest
 from pathlib import Path
 
-import mkv_track_cleaner as tc
 from reporttext import scorecard
+
+import mkv_track_cleaner as tc
 from common import MediaProbeCache
 
 

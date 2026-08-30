@@ -19,10 +19,10 @@ from common import (
     EXTERNAL_SRT_MAX_BYTES,
     EXTERNAL_SRT_SUFFIX,
     LEGACY_EXTERNAL_SRT_SUFFIX,
+    STANDARDIZER_LOCK_NAME,
     CoordinationLock,
     LockTimeoutError,
     MediaProbeCache,
-    STANDARDIZER_LOCK_NAME,
     atomic_write_text,
     decode_srt_bytes,
     exact_external_english_srt_path,
@@ -421,6 +421,7 @@ class PromoteLegacySidecarTests(unittest.TestCase):
         path, reason = promote_legacy_external_english_srt(mkv)
         self.assertEqual(reason, "")
         self.assertIsNotNone(path)
+        assert path is not None
         self.assertTrue(path.is_file())
         self.assertEqual(path.name, f"Film (2000){EXTERNAL_SRT_SUFFIX}")
         self.assertFalse(legacy.exists())
@@ -442,6 +443,8 @@ class PromoteLegacySidecarTests(unittest.TestCase):
         (self.root / f"Film (2002){LEGACY_EXTERNAL_SRT_SUFFIX}").write_text(body, encoding="utf-8")
         path, reason = promote_legacy_external_english_srt(mkv)
         # Canonical already present -> success path returns it without touching legacy.
+        self.assertIsNotNone(path)
+        assert path is not None
         self.assertEqual(path.name, f"Film (2002){EXTERNAL_SRT_SUFFIX}")
         self.assertEqual(reason, "")
         self.assertTrue((self.root / f"Film (2002){LEGACY_EXTERNAL_SRT_SUFFIX}").exists())

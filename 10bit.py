@@ -36,12 +36,13 @@ import sys
 import tempfile
 import time
 import traceback
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any, Sequence
+from typing import Any
 
 from common import (
     MediaProbeCache,
@@ -273,7 +274,7 @@ class ExclusiveRunLock:
                 self.handle.flush()
         return try_file_lock(self.handle, strict_non_contention=False)
 
-    def __enter__(self) -> "ExclusiveRunLock":
+    def __enter__(self) -> ExclusiveRunLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.handle = self.path.open("a+", encoding="utf-8")
         deadline = time.monotonic() + self.timeout_seconds
@@ -281,7 +282,7 @@ class ExclusiveRunLock:
             if self._try_lock():
                 self.handle.seek(0)
                 self.handle.truncate()
-                self.handle.write(f"pid={os.getpid()} started={datetime.now(timezone.utc).isoformat()}\n")
+                self.handle.write(f"pid={os.getpid()} started={datetime.now(UTC).isoformat()}\n")
                 self.handle.flush()
                 return self
             if time.monotonic() >= deadline:
@@ -297,7 +298,7 @@ class ExclusiveRunLock:
             if os.name == "nt":
                 import msvcrt
                 self.handle.seek(0)
-                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
             else:
                 import fcntl
                 fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
@@ -387,7 +388,8 @@ def _iter_side_data(stream: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _tag_blob(stream: dict[str, Any], fmt: dict[str, Any] | None) -> str:
     parts: list[str] = []
-    for src in (stream.get("tags"), (fmt or {}).get("tags")):
+    fmt_tags = fmt.get("tags") if fmt is not None else None
+    for src in (stream.get("tags"), fmt_tags):
         if not isinstance(src, dict):
             continue
         for key, val in src.items():
@@ -423,8 +425,10 @@ def classify_hdr(stream: dict[str, Any], fmt: dict[str, Any] | None = None) -> t
             flavors.append("HDR10+")
         evidence.append("stream/container tag: HDR10+ signature")
     hdr_fmt = ""
-    stream_tags = stream.get("tags") if isinstance(stream.get("tags"), dict) else {}
-    fmt_tags = (fmt or {}).get("tags") if isinstance((fmt or {}).get("tags"), dict) else {}
+    st_raw = stream.get("tags")
+    stream_tags = st_raw if isinstance(st_raw, dict) else {}
+    ft_raw = fmt.get("tags") if fmt is not None else None
+    fmt_tags = ft_raw if isinstance(ft_raw, dict) else {}
     for key in ("HDR_Format", "hdr_format", "HDR_Format_String", "HDR_Format_Compatibility"):
         hdr_fmt += " " + str(stream_tags.get(key) or fmt_tags.get(key) or "")
     hf = hdr_fmt.lower()

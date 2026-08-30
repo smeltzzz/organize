@@ -11,13 +11,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from common import MediaProbeCache
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "10bit.py"
 _name = "_tbit"
 _spec = importlib.util.spec_from_file_location(_name, _SCRIPT)
-tb = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
+tb: Any = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 sys.modules[_name] = tb
 _spec.loader.exec_module(tb)  # type: ignore[union-attr]
 

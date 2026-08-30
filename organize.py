@@ -32,9 +32,9 @@ import platform
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 HERE = Path(__file__).resolve().parent
 
@@ -61,8 +61,9 @@ except Exception:
 if os.name == "nt" and _SUPPORTS_COLOR:
     try:
         import ctypes
-        kernel32 = ctypes.windll.kernel32
-        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        windll = getattr(ctypes, "windll", None)
+        if windll:
+            windll.kernel32.SetConsoleMode(windll.kernel32.GetStdHandle(-11), 7)
     except Exception:
         pass
 
