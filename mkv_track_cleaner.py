@@ -2664,7 +2664,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"external {EXTERNAL_SRT_SUFFIX}) and strip embedded subs when that sidecar exists."
         )
     )
-    parser.add_argument("--version", action="version", version=f"track_cleaner.py {VERSION}")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--dir", default=TARGET_DIR, help=f"Target library folder (Default: {TARGET_DIR})")
     parser.add_argument("--dry-run", action="store_true", help="Simulate cleanup without modifying any files")
     parser.add_argument(

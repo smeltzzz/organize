@@ -2732,7 +2732,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", type=Path, help="Batch-scan directory (no paths given)")
     p.add_argument("--log", type=Path, help="Log file path")
     p.add_argument("--min-size", type=float, metavar="MB", help="Minimum movie size in MB")
-    p.add_argument("--report", type=Path, help="Human-readable text report file (default: E:\\torrents\\movie_standardizer\\movie_standardizer_report.txt)")
+    p.add_argument("--report", type=Path, help="Human-readable text report file (default: E:\\torrents\\tools\\ReportsAndLogs\\movie_standardizer\\movie_standardizer_report.txt)")
     p.add_argument("--lock-timeout", type=float, metavar="SECONDS", help="Maximum wait for another organizer run")
     p.add_argument(
         "--ffprobe", default=None, metavar="PATH",
