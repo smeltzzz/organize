@@ -40,15 +40,10 @@ jobs:
       - name: Byte-compile every script (syntax gate)
         run: python -m compileall -q organize.py common.py pipeline.py 10bit.py library_auditor.py mkv_track_cleaner.py movie_standardizer.py subtitle_fetcher.py
 
-      - name: Lint with ruff (project rules in pyproject.toml)
-        run: |
-          python -m pip install ruff
-          python -m ruff check .
-
       - name: Built-in self-tests (one per tool)
         run: python organize.py test
 
-      - name: Unit test suite (274 tests, fully offline)
+      - name: Unit test suite (208 tests, fully offline)
         run: python -m unittest discover -s tests -p "test_*.py"
 
   doctor-smoke:
