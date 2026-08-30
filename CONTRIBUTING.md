@@ -24,7 +24,7 @@ To maintain its bulletproof stability, all contributions must respect the projec
    Reports, journals, manifests, and remuxed MKVs are written to sibling temporary files and atomically swapped (`os.replace` / `os.link`). Mid-operation crashes or power outages never corrupt existing media.
 
 6. **100% Offline Testability**
-   The test suite (`run_tests.sh` and `unittest` / `pytest`) must run completely offline without internet connectivity, without an OpenSubtitles API key, and without requiring external binaries (`mkvmerge` or `ffprobe`).
+   The test suite (`run_tests.sh` and `unittest` / `pytest`) must run completely offline without internet connectivity, without OpenSubtitles or SubDL API keys, and without requiring external binaries (`mkvmerge` or `ffprobe`).
 
 ---
 

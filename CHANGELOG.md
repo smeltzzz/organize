@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column instead of drifting four columns right. Tables still clip — columns have to line up.
 
 ### Added
+- **SubDL is now a first-class subtitle provider.** Configure `SUBDL_API_KEY` to add a strict English title/year fallback after OpenSubtitles has no safe exact-hash or title/year candidate, or run SubDL by itself when OpenSubtitles is unavailable. The v2 client uses Bearer authentication, validates the provider's title/year result before accepting it, permits only English SRT/archive payloads, validates raw download hosts and opaque IDs, size-bounds archive extraction, rechecks the movie snapshot, and never logs provider URLs or credentials. Independent OpenSubtitles/SubDL UTC download reservations are durable in the existing append-only ledger, so exhausting one source does not disable the other.
+- **Expanded provider coverage tests** exercise SubDL v2 authentication and parsing, exact identity validation, safe URL handling, archive validation, SubDL-only operation, independent quotas, and pipeline prerequisite detection.
 - **28 new report tests** (244 total): `tests/reporttext.py` parses the scorecard and sections back out of a rendered report, `tests/test_reports.py` builds one report per tool and asserts the shared contract, and `tests/test_common.py` covers the renderer itself (width invariants, wrapping, clipping, partial-run tallies), and `tests/test_reports.py` runs the fetcher under `PYTHONIOENCODING=ascii` to prove a hostile console cannot abort a run or corrupt the report file.
 
 ## [3.1.0] - 2026-08-29

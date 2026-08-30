@@ -10,9 +10,10 @@ load-bearing:
     subtitle_fetcher.py   MUST run before mkv_track_cleaner.py
 
 ``subtitle_fetcher.py`` searches OpenSubtitles by moviehash, which is the file
-size plus the sum of the first and last 64 KiB. A remux rewrites those bytes, so
-any movie cleaned first can never reproduce its release hash again and is
-silently demoted to the much weaker title/year search. Running the four scripts
+size plus the sum of the first and last 64 KiB. It can then use SubDL as a
+strict title/year fallback. A remux rewrites those bytes, so any movie cleaned
+first can never reproduce its release hash and is silently demoted to the much
+weaker title/year search. Running the four scripts
 by hand makes that easy to get wrong on a busy day; this script cannot get it
 wrong.
 
@@ -134,11 +135,18 @@ class Run:
 # ---------------------------------------------------------------------------
 
 def _api_key_present() -> bool:
+    """Return whether at least one supported subtitle provider is configured."""
     try:
         import subtitle_fetcher as sf
     except Exception:
         return False
-    return bool(os.environ.get("OPENSUBTITLES_API_KEY") or sf.OPENSUBTITLES_API_KEY)
+    keys = (
+        os.environ.get("OPENSUBTITLES_API_KEY"),
+        sf.OPENSUBTITLES_API_KEY,
+        os.environ.get("SUBDL_API_KEY"),
+        sf.SUBDL_API_KEY,
+    )
+    return any(str(key or "").strip() for key in keys)
 
 
 def _mkvmerge_present() -> bool:
@@ -168,7 +176,7 @@ def _ffprobe_present() -> bool:
 PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
     "fetcher": (
         _api_key_present,
-        "no OpenSubtitles API key; set OPENSUBTITLES_API_KEY to enable fetching",
+        "no subtitle-provider key; set OPENSUBTITLES_API_KEY and/or SUBDL_API_KEY to enable fetching",
     ),
     "cleaner": (
         _mkvmerge_present,

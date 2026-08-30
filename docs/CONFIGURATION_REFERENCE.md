@@ -23,7 +23,7 @@ python organize.py [COMMAND] [OPTIONS]
 | `doctor` | `check` | Run environment, binary, API key, and hardlink compatibility diagnostics |
 | `run` | `pipeline` | Run the automated maintenance pipeline (`pipeline.py`) |
 | `standardize` | `std` | Organize downloads into `Title (Year)/Title (Year).mkv` (`movie_standardizer.py`) |
-| `subtitles` | `subs` | Fetch English human UTF-8 SRT sidecars from OpenSubtitles (`subtitle_fetcher.py`) |
+| `subtitles` | `subs` | Fetch English human UTF-8 SRT sidecars: OpenSubtitles hash-first, SubDL fallback (`subtitle_fetcher.py`) |
 | `clean` | `remux` | Clean tracks via lossless remux (`mkv_track_cleaner.py`) |
 | `10bit` | `probe` | Check 8-bit vs 10-bit & native HDR compliance (`10bit.py`) |
 | `audit` | — | Read-only layout and subtitle health audit (`library_auditor.py`) |
@@ -95,7 +95,8 @@ python subtitle_fetcher.py [OPTIONS]
 | `--log PATH` | `E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher.log` | — | Execution log & durable quota ledger |
 | `--report PATH` | `E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher_report.txt` | — | Replaceable summary report |
 | `--auth-mode MODE` | `development-anonymous` | — | `development-anonymous` (API key only) or `user` |
-| `--daily-cap N` | `100` (anon) / `20` (user) | — | Maximum download requests per UTC day |
+| `--daily-cap N` | `100` (anon) / `20` (user) | — | Maximum **OpenSubtitles** download requests per UTC day |
+| `--subdl-daily-cap N` | `50` | — | Maximum **SubDL** download requests per UTC day; set a higher plan-specific value explicitly |
 | `--min-size MB` | `300` | — | Minimum file size in MB |
 | `--lock-timeout S`| `60.0` | — | Coordination lock timeout |
 | `--limit N` | `0` (all) | — | Maximum movies to process in this run |
@@ -103,10 +104,21 @@ python subtitle_fetcher.py [OPTIONS]
 | `--no-identity-fallback` | `False` | — | Disable conservative title/year fallback after hash miss |
 | `--retry-review` | `False` | — | Reconsider items previously held for manual review |
 
-### Environment Variables
-- `OPENSUBTITLES_API_KEY`: OpenSubtitles Consumer API Key (Required).
-- `OPENSUBTITLES_USERNAME`: Username (only for `--auth-mode user`).
-- `OPENSUBTITLES_PASSWORD`: Password (only for `--auth-mode user`).
+### Providers and Environment Variables
+
+At least one provider key is required. When both are set, OpenSubtitles is
+always queried first for an exact moviehash match; SubDL runs only after no safe
+OpenSubtitles hash/title-year candidate is available. SubDL can be used by
+itself, but it is necessarily limited to the same conservative title/year
+matching policy.
+
+- `OPENSUBTITLES_API_KEY`: OpenSubtitles Consumer API Key (recommended for exact release matching).
+- `OPENSUBTITLES_USERNAME`: Username only when `OPENSUBTITLES_API_KEY` is set and using `--auth-mode user`.
+- `OPENSUBTITLES_PASSWORD`: Password only when `OPENSUBTITLES_API_KEY` is set and using `--auth-mode user`.
+- `SUBDL_API_KEY`: SubDL API key. Read only from the environment; get one at <https://subdl.com/panel/api>.
+
+The log ledger records reservations separately for both providers. `--daily-cap`
+continues to control OpenSubtitles; `--subdl-daily-cap` controls SubDL.
 
 ---
 

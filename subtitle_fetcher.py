@@ -7,9 +7,11 @@ canonical movie library and create at most one validated external English SRT
 sidecar per MKV. This single script owns its persistent UTC request ledger;
 there is no separate queue script or launcher to run.
 
-It always attempts the exact OpenSubtitles moviehash first. After a hash miss,
-it automatically allows only a high-confidence exact title/year candidate. A
-wrong cut is held for review rather than downloaded.
+When configured, it always attempts the exact OpenSubtitles moviehash first.
+After a hash miss, it automatically allows only a high-confidence exact
+title/year candidate. An optional SubDL lookup is the final fallback; because
+SubDL has no equivalent release hash, it is never allowed ahead of an available
+OpenSubtitles hash match. A wrong cut is held for review rather than downloaded.
 
 The position in the pipeline is deliberate, not cosmetic. The moviehash is the
 file size plus the sum of the first and last 64 KiB, and this tool submits it
@@ -27,15 +29,17 @@ The default policy intentionally downloads only UTF-8 SRT sidecars. SRT is the
 most broadly direct-play-safe external subtitle choice across Jellyfin clients;
 ASS/SSA, VobSub, PGS, and other formats are never requested or written here.
 
-Development-anonymous mode (the default):
+Configure one or both providers through environment variables:
     set OPENSUBTITLES_API_KEY=...
+    set SUBDL_API_KEY=...
 
 Credentials are read only from environment variables, never command-line
-arguments. Development-anonymous mode uses only the API key for consumers that
-OpenSubtitles currently permits to download anonymously. Authenticated user
-mode remains available as an explicit fallback.
+arguments. Development-anonymous mode uses only the OpenSubtitles API key for
+consumers that OpenSubtitles currently permits to download anonymously.
+Authenticated user mode remains available as an explicit fallback.
 
-Free key: https://www.opensubtitles.com/en/consumers
+OpenSubtitles key: https://www.opensubtitles.com/en/consumers
+SubDL key: https://subdl.com/panel/api
 """
 
 from __future__ import annotations
@@ -103,10 +107,16 @@ OPENSUBTITLES_API_KEY = ""
 OPENSUBTITLES_USERNAME = ""
 OPENSUBTITLES_PASSWORD = ""
 SUBDL_API_KEY = ""
-SUBDL_API_BASE = "https://api.subdl.com/api/v1"
+SUBDL_API_BASE = "https://api.subdl.com/api/v2"
+SUBDL_DOWNLOAD_HOST = "dl.subdl.com"
+# SubDL publishes separate search and download limits. Keep a conservative
+# local guard for the free API-key download allowance; users on a paid plan
+# can explicitly raise it with --subdl-daily-cap.
+SUBDL_DEFAULT_DAILY_CAP = 50
+SUBDL_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
-__version__ = "2.5.0"
-APP_USER_AGENT = "JellyfinMovieSubtitleFetcher v2.5"
+__version__ = "2.6.0"
+APP_USER_AGENT = "JellyfinMovieSubtitleFetcher v2.6"
 API_BASE = "https://api.opensubtitles.com/api/v1"
 
 # The preceding standardizer emits canonical MKV movies only. Limiting the
@@ -120,6 +130,9 @@ REQUEST_GAP_SEC = 1.1  # stay under the documented per-second limit
 # Bound to the one shared limit in common.py, not a second copy of the number.
 MAX_SUBTITLE_BYTES = EXTERNAL_SRT_MAX_BYTES
 LANGUAGES = "en"
+
+PROVIDER_OPENSUBTITLES = "opensubtitles"
+PROVIDER_SUBDL = "subdl"
 
 # =============================================================================
 # CONSTANTS
@@ -184,7 +197,10 @@ class Config:
 
 @dataclass
 class Candidate:
-    file_id: int
+    # OpenSubtitles uses a numeric ``file_id`` while SubDL exposes opaque
+    # ``n_id`` values. Keep the common selection model without throwing away
+    # the provider's stable identifier.
+    file_id: int | str
     release: str
     moviehash_match: bool
     downloads: int
@@ -199,6 +215,20 @@ class Candidate:
     feature_title: str = ""
     feature_year: int = 0
     feature_imdb_id: int = 0
+
+
+@dataclass(frozen=True)
+class SubdlDownload:
+    """A vetted SubDL download reference kept out of human-facing logs.
+
+    ``url`` is an optional raw-file URL returned for an unpacked SRT. ``n_id``
+    is the documented v2 API download identifier and is used when no raw URL
+    is available. Neither value is ever printed because a provider may attach
+    short-lived query credentials to a URL.
+    """
+
+    n_id: str = ""
+    url: str = ""
 
 
 @dataclass(frozen=True)
@@ -533,10 +563,274 @@ class OpenSubtitlesClient:
             raise ConcurrentSidecarError("English SRT appeared during download; preserved the existing sidecar") from exc
 
 
+def _subdl_text(value: Any) -> str:
+    """Return a bounded, stripped API scalar without treating containers as text."""
+    if value is None or isinstance(value, (dict, list, tuple, set)):
+        return ""
+    return str(value).strip()
+
+
+def _subdl_identifier(value: Any) -> str:
+    """Accept only a compact identifier that is safe in a v2 URL path segment."""
+    identifier = _subdl_text(value)
+    if not identifier or len(identifier) > 256:
+        return ""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", identifier):
+        return ""
+    return identifier
+
+
+def normalize_subdl_download_url(value: Any) -> str:
+    """Validate a SubDL raw-file URL before ``urllib`` can dereference it.
+
+    Search responses are remote input. SubDL documents relative ``/subtitle/``
+    URLs and ``dl.subdl.com`` raw URLs; accepting an arbitrary absolute URL
+    here would turn a subtitle lookup into an SSRF primitive. The v2 API
+    download endpoint is built locally instead and therefore needs no URL from
+    the response.
+    """
+    raw = _subdl_text(value)
+    if not raw:
+        raise ValueError("SubDL returned an empty download URL")
+    parsed = urllib.parse.urlsplit(raw)
+    if parsed.scheme or parsed.netloc:
+        hostname = (parsed.hostname or "").casefold()
+        if parsed.scheme.casefold() != "https" or hostname != SUBDL_DOWNLOAD_HOST:
+            raise ValueError("SubDL returned a download URL outside dl.subdl.com")
+        try:
+            unsafe_port = parsed.port not in (None, 443)
+        except ValueError as exc:
+            raise ValueError("SubDL returned an unsafe download URL") from exc
+        if parsed.username or parsed.password or unsafe_port:
+            raise ValueError("SubDL returned an unsafe download URL")
+        normalized = raw
+    else:
+        # Network-path URLs (//host/path) are absolute URLs in disguise.
+        if not raw.startswith("/") or raw.startswith("//"):
+            raise ValueError("SubDL returned an invalid relative download URL")
+        normalized = f"https://{SUBDL_DOWNLOAD_HOST}{raw}"
+
+    final = urllib.parse.urlsplit(normalized)
+    decoded_parts = urllib.parse.unquote(final.path).split("/")
+    if not final.path.startswith("/subtitle/") or any(part in {".", ".."} for part in decoded_parts):
+        raise ValueError("SubDL returned an invalid subtitle download path")
+    return normalized
+
+
+def _subdl_exact_feature(payload: dict[str, Any], identity: MovieIdentity) -> tuple[str, int, int] | None:
+    """Validate that the response's subtitle list belongs to this exact movie.
+
+    SubDL returns subtitle entries for the first result. A search query is not
+    proof of identity, so never stamp the requested title/year onto candidates
+    until the provider's own result confirms it.
+    """
+    results = payload.get("results")
+    feature: dict[str, Any] | None = None
+    if isinstance(results, list) and results and isinstance(results[0], dict):
+        feature = results[0]
+    elif isinstance(payload.get("match"), dict):
+        feature = payload["match"]
+    if feature is None:
+        return None
+
+    titles = [
+        _subdl_text(feature.get(field_name))
+        for field_name in ("name", "title", "original_name")
+    ]
+    matched_title = next(
+        (title for title in titles if normalize_title(title) == identity.normalized_title), ""
+    )
+    year = _nonnegative_int(feature.get("year"))
+    media_type = _subdl_text(feature.get("type")).casefold()
+    if media_type != "movie" or year != identity.year or not matched_title:
+        return None
+
+    imdb_text = _subdl_text(feature.get("imdb_id"))
+    imdb_match = re.search(r"(\d+)$", imdb_text)
+    return matched_title, year, int(imdb_match.group(1)) if imdb_match else 0
+
+
+def _subdl_value(child: dict[str, Any], parent: dict[str, Any], *names: str) -> Any:
+    """Read an unpacked-file field first, then its parent subtitle record."""
+    for name in names:
+        if name in child and child[name] is not None:
+            return child[name]
+    for name in names:
+        if name in parent and parent[name] is not None:
+            return parent[name]
+    return None
+
+
+def _subdl_is_srt_or_archive(child: dict[str, Any], parent: dict[str, Any]) -> bool:
+    """Reject an explicitly non-SRT SubDL result before it reaches download."""
+    media_format = _subdl_text(_subdl_value(child, parent, "format")).casefold().lstrip(".")
+    if media_format and media_format not in {"srt", "zip"}:
+        return False
+    name = _subdl_text(_subdl_value(child, parent, "name", "file_name"))
+    if not name:
+        return True
+    lower_name = name.casefold().split("?", 1)[0]
+    # A provider may call an archive simply "subtitle"; accept an unknown
+    # extension only when no explicit format says otherwise, then validate the
+    # bytes after download. Known non-SRT formats are never candidates.
+    known_non_srt = (".ass", ".ssa", ".sub", ".idx", ".vtt", ".ttml", ".dfxp")
+    return not lower_name.endswith(known_non_srt)
+
+
+def _subdl_candidate_reference(
+    child: dict[str, Any], parent: dict[str, Any],
+) -> tuple[str, SubdlDownload] | None:
+    """Build a stable, non-secret candidate key and safe download reference."""
+    n_id = _subdl_identifier(_subdl_value(child, parent, "n_id", "nId"))
+    file_n_id = _subdl_identifier(_subdl_value(child, parent, "file_n_id", "fileNId"))
+    raw_url = _subdl_value(child, parent, "url", "download_link")
+    url = ""
+    if raw_url:
+        try:
+            url = normalize_subdl_download_url(raw_url)
+        except ValueError:
+            # An authenticated v2 n_id gives us a safer locally constructed
+            # endpoint, so an unexpected response URL is not fatal in that
+            # case. Without an n_id there is nothing safe to download.
+            if not n_id:
+                return None
+    if not n_id and not url:
+        return None
+
+    if n_id:
+        candidate_id = f"subdl:{n_id}"
+        if file_n_id:
+            candidate_id += f":{file_n_id}"
+        elif url:
+            candidate_id += ":" + hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    else:
+        # A legacy v1-shaped response may expose only a raw URL. A deterministic
+        # digest is stable across processes, unlike Python's randomized hash().
+        candidate_id = "subdl:url:" + hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
+    return candidate_id, SubdlDownload(n_id=n_id, url=url)
+
+
+def _identity_candidate_basics(cands: Sequence[Candidate], identity: MovieIdentity) -> list[Candidate]:
+    """Return title/year-exact candidates before provider-specific quality rules."""
+    return [
+        candidate for candidate in cands
+        if _is_normal_english_human_candidate(candidate)
+        and candidate.feature_year == identity.year
+        and normalize_title(candidate.feature_title) == identity.normalized_title
+        and not release_has_edition_marker(candidate.release)
+    ]
+
+
+def pick_subdl_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity) -> tuple[Candidate | None, str]:
+    """Choose a conservative SubDL title/year fallback.
+
+    OpenSubtitles exposes a trusted flag plus community vote/rating metadata, so
+    its generic picker can demand those signals. SubDL's documented v2 response
+    does not guarantee that those fields are present. When they are present,
+    use the same strict policy. When they are absent, accept only one exact,
+    normal English SRT; multiple otherwise-equal releases remain manual review.
+    """
+    pick, reason = pick_identity_candidate(cands, identity)
+    if pick is not None:
+        return pick, reason
+
+    usable = _identity_candidate_basics(cands, identity)
+    if len(usable) != 1:
+        return None, "SubDL did not return one unambiguous title/year-exact normal English SRT"
+    candidate = usable[0]
+    if candidate.downloads or candidate.votes or candidate.rating:
+        return None, reason
+    return candidate, "title/year exact; one normal English SubDL SRT (no provider vote metadata)"
+
+
+def subdl_download_redirect_url(data: bytes) -> str | None:
+    """Return a vetted raw-file URL when the v2 download endpoint returns JSON.
+
+    Some SubDL deployments respond with the file directly while others return a
+    short-lived raw download URL. Supporting both shapes keeps the client on
+    the documented v2 endpoint without trusting a URL outside the provider.
+    """
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if error:
+        message = _subdl_text(error.get("message") if isinstance(error, dict) else error)
+        raise RuntimeError(f"SubDL download failed{': ' + message if message else ''}")
+    containers = (payload, payload.get("data"), payload.get("download"))
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in ("download_url", "url", "link"):
+            value = container.get(key)
+            if value:
+                try:
+                    return normalize_subdl_download_url(value)
+                except ValueError as exc:
+                    raise RuntimeError("SubDL returned an unsafe download URL") from exc
+    return None
+
+
+def decode_subdl_srt_payload(data: bytes, max_bytes: int) -> str:
+    """Decode a raw SRT or one SRT member from a bounded SubDL archive."""
+    if len(data) > max_bytes:
+        raise RuntimeError(f"subtitle exceeds {max_bytes} byte safety limit")
+    if zipfile.is_zipfile(io.BytesIO(data)):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                candidates = [
+                    info for info in archive.infolist()
+                    if not info.is_dir()
+                    and not (info.flag_bits & 0x1)  # encrypted archives cannot be safely inspected
+                    and info.filename.casefold().endswith(".srt")
+                    and info.file_size <= max_bytes
+                ]
+                if not candidates:
+                    raise RuntimeError("no usable .srt file found in SubDL zip archive")
+                # A raw unpacked URL normally avoids this branch. For a legacy
+                # archive choose deterministically, but stream only the selected
+                # member so a compressed archive cannot expand past the cap.
+                selected = sorted(candidates, key=lambda info: (-info.file_size, info.filename.casefold()))[0]
+                with archive.open(selected, "r") as member:
+                    raw_srt = member.read(max_bytes + 1)
+        except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
+            if isinstance(exc, RuntimeError) and str(exc).startswith("no usable .srt"):
+                raise
+            raise RuntimeError("SubDL zip archive could not be read safely") from exc
+        if len(raw_srt) > max_bytes:
+            raise RuntimeError(f"subtitle exceeds {max_bytes} byte safety limit")
+        data = raw_srt
+    if data.startswith(b"\x1f\x8b"):
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as archive:
+                data = archive.read(max_bytes + 1)
+        except (OSError, EOFError) as exc:
+            raise RuntimeError("SubDL gzip subtitle could not be read safely") from exc
+        if len(data) > max_bytes:
+            raise RuntimeError(f"subtitle exceeds {max_bytes} byte safety limit")
+    text = normalize_srt_newlines(decode_subtitle_bytes(data))
+    if not looks_like_srt(text):
+        raise RuntimeError("downloaded payload from SubDL is not a valid SRT subtitle")
+    return text
+
+
 class SubdlClient:
+    """Small stdlib-only client for SubDL's authenticated v2 API."""
+
     def __init__(self, api_key: str) -> None:
-        self.api_key = api_key
+        self.api_key = api_key.strip()
         self._last_call = 0.0
+
+    def _headers(self, accept: str) -> dict[str, str]:
+        headers = {"User-Agent": APP_USER_AGENT, "Accept": accept}
+        if self.api_key:
+            # v2 documents Bearer authentication. Keeping credentials out of
+            # query strings prevents a key from leaking into proxy/access logs.
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     def _throttle(self) -> None:
         wait = REQUEST_GAP_SEC - (time.monotonic() - self._last_call)
@@ -544,127 +838,213 @@ class SubdlClient:
             time.sleep(wait)
         self._last_call = time.monotonic()
 
-    def search_identity(self, identity: MovieIdentity) -> tuple[list[Candidate], dict[int, str]]:
+    @staticmethod
+    def _read_limited(response: Any, max_bytes: int, label: str) -> bytes:
+        declared = response.headers.get("Content-Length")
+        if declared:
+            try:
+                if int(declared) > max_bytes:
+                    raise RuntimeError(f"{label} exceeds {max_bytes} byte safety limit")
+            except ValueError as exc:
+                raise RuntimeError(f"invalid {label} content length") from exc
+        data = response.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise RuntimeError(f"{label} exceeds {max_bytes} byte safety limit")
+        return data
+
+    def _request_json(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+        if not self.api_key:
+            raise RuntimeError("SubDL API key is required")
+        url = SUBDL_API_BASE + path + "?" + urllib.parse.urlencode(params)
+        last_error: RuntimeError | None = None
+        for attempt in range(4):
+            self._throttle()
+            request = urllib.request.Request(url, headers=self._headers("application/json"))
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - fixed provider API endpoint
+                    raw = self._read_limited(response, SUBDL_MAX_RESPONSE_BYTES, "SubDL API response")
+                break
+            except urllib.error.HTTPError as exc:
+                body = exc.read(400).decode("utf-8", errors="replace").strip()
+                last_error = RuntimeError(f"SubDL API HTTP {exc.code}: {body}".rstrip())
+                if exc.code in {408, 425, 429, 500, 502, 503, 504} and attempt < 3:
+                    retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                    try:
+                        delay = min(30.0, float(retry_after)) if retry_after else 2.0 * (attempt + 1)
+                    except ValueError:
+                        delay = 2.0 * (attempt + 1)
+                    time.sleep(delay)
+                    continue
+                raise last_error from exc
+            except urllib.error.URLError as exc:
+                last_error = RuntimeError(f"SubDL API network error: {exc.reason}")
+                if attempt < 3:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise last_error from exc
+        else:
+            raise last_error or RuntimeError("SubDL API request failed")
+
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("SubDL API returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("SubDL API returned an unexpected JSON document")
+        error = payload.get("error")
+        if payload.get("status") is False or error:
+            message = _subdl_text(error.get("message") if isinstance(error, dict) else error)
+            message = message or _subdl_text(payload.get("message"))
+            raise RuntimeError(f"SubDL API rejected the search{': ' + message if message else ''}")
+        return payload
+
+    def _candidate(
+        self,
+        parent: dict[str, Any],
+        child: dict[str, Any],
+        feature_title: str,
+        feature_year: int,
+        feature_imdb_id: int,
+    ) -> tuple[Candidate, str, SubdlDownload] | None:
+        language = _subdl_text(_subdl_value(child, parent, "language", "lang")).casefold()
+        if language not in ENGLISH_LANGUAGE_TOKENS or not _subdl_is_srt_or_archive(child, parent):
+            return None
+        reference = _subdl_candidate_reference(child, parent)
+        if reference is None:
+            return None
+        candidate_id, download = reference
+        release = _subdl_text(_subdl_value(child, parent, "release_name", "release", "name", "file_name"))
+        return (
+            Candidate(
+                file_id=candidate_id,
+                release=release,
+                moviehash_match=False,
+                downloads=_nonnegative_int(_subdl_value(child, parent, "downloads", "download_count")),
+                votes=_nonnegative_int(_subdl_value(child, parent, "votes", "vote_count")),
+                rating=_nonnegative_float(_subdl_value(child, parent, "ratings", "rating")),
+                trusted=as_bool(_subdl_value(child, parent, "trusted", "from_trusted")),
+                hearing_impaired=as_bool(_subdl_value(child, parent, "hi", "hearing_impaired")),
+                machine_translated=as_bool(_subdl_value(child, parent, "machine_translated", "machine_translation")),
+                ai_translated=as_bool(_subdl_value(child, parent, "ai_translated", "ai_translation")),
+                foreign_parts_only=as_bool(_subdl_value(child, parent, "foreign_parts_only", "forced")),
+                language=language,
+                feature_title=feature_title,
+                feature_year=feature_year,
+                feature_imdb_id=feature_imdb_id,
+            ),
+            candidate_id,
+            download,
+        )
+
+    def search_identity(self, identity: MovieIdentity) -> tuple[list[Candidate], dict[str, SubdlDownload]]:
+        """Find strictly title/year-confirmed English movie subtitles on SubDL."""
         if not self.api_key:
             return [], {}
-        params = {
-            "api_key": self.api_key,
-            "film_name": identity.title,
-            "year": str(identity.year),
-            "type": "movie",
-            "languages": "en",
-            "unpack": "1",
-        }
-        url = SUBDL_API_BASE + "/subtitles?" + urllib.parse.urlencode(params)
-        self._throttle()
-        req = urllib.request.Request(url, headers={"User-Agent": APP_USER_AGENT, "Accept": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
-                raw = resp.read().decode("utf-8", errors="replace")
-        except Exception:
+        payload = self._request_json(
+            "/subtitles/search",
+            {
+                "film_name": identity.title,
+                "type": "movie",
+                "languages": "en",
+                "unpack": "1",
+            },
+        )
+        feature = _subdl_exact_feature(payload, identity)
+        if feature is None:
             return [], {}
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            return [], {}
-        if not isinstance(parsed, dict) or not parsed.get("status"):
-            return [], {}
+        feature_title, feature_year, feature_imdb_id = feature
 
-        cands: list[Candidate] = []
-        urls_map: dict[int, str] = {}
-        subtitles = parsed.get("subtitles") or []
-        for item in subtitles:
-            if not isinstance(item, dict):
+        candidates: list[Candidate] = []
+        downloads: dict[str, SubdlDownload] = {}
+        subtitles = payload.get("subtitles")
+        if not isinstance(subtitles, list):
+            return candidates, downloads
+        for parent in subtitles:
+            if not isinstance(parent, dict):
                 continue
-            unpack_files = item.get("unpack_files") or []
-            if unpack_files:
-                for uf in unpack_files:
-                    if not isinstance(uf, dict):
-                        continue
-                    lang = str(uf.get("language") or "").casefold()
-                    if lang and lang not in {"en", "eng", "english"}:
-                        continue
-                    file_url = uf.get("url")
-                    if file_url:
-                        full_url = "https://dl.subdl.com" + file_url if file_url.startswith("/") else file_url
-                        file_id = hash(full_url) & 0x7FFFFFFF
-                        urls_map[file_id] = full_url
-                        cands.append(
-                            Candidate(
-                                file_id=file_id,
-                                release=str(uf.get("release_name") or uf.get("name") or item.get("release_name") or ""),
-                                moviehash_match=False,
-                                downloads=_nonnegative_int(item.get("downloads") or item.get("download_count")),
-                                votes=_nonnegative_int(item.get("votes")),
-                                rating=_nonnegative_float(item.get("ratings") or item.get("rating") or 7.0),
-                                trusted=True,
-                                hearing_impaired=as_bool(uf.get("hi")),
-                                machine_translated=False,
-                                ai_translated=False,
-                                foreign_parts_only=False,
-                                language="en",
-                                feature_title=identity.title,
-                                feature_year=identity.year,
-                                feature_imdb_id=0,
-                            )
-                        )
+            unpacked = parent.get("unpack_files")
+            entries: list[dict[str, Any]]
+            if isinstance(unpacked, list) and unpacked:
+                entries = [entry for entry in unpacked if isinstance(entry, dict)]
             else:
-                lang = str(item.get("lang") or item.get("language") or "").casefold()
-                if lang and lang not in {"en", "eng", "english"}:
+                entries = [parent]
+            for child in entries:
+                built = self._candidate(parent, child, feature_title, feature_year, feature_imdb_id)
+                if built is None:
                     continue
-                file_url = item.get("url")
-                if file_url:
-                    full_url = "https://dl.subdl.com" + file_url if file_url.startswith("/") else file_url
-                    file_id = hash(full_url) & 0x7FFFFFFF
-                    urls_map[file_id] = full_url
-                    cands.append(
-                        Candidate(
-                            file_id=file_id,
-                            release=str(item.get("release_name") or item.get("name") or ""),
-                            moviehash_match=False,
-                            downloads=_nonnegative_int(item.get("download_count") or item.get("downloads")),
-                            votes=_nonnegative_int(item.get("votes")),
-                            rating=_nonnegative_float(item.get("ratings") or item.get("rating") or 7.0),
-                            trusted=True,
-                            hearing_impaired=as_bool(item.get("hi")),
-                            machine_translated=False,
-                            ai_translated=False,
-                            foreign_parts_only=False,
-                            language="en",
-                            feature_title=identity.title,
-                            feature_year=identity.year,
-                            feature_imdb_id=0,
-                        )
-                    )
-        return cands, urls_map
+                candidate, candidate_id, download = built
+                # A duplicate key is the same provider record; preserving the
+                # first result maintains provider ordering without ambiguity.
+                if candidate_id not in downloads:
+                    candidates.append(candidate)
+                    downloads[candidate_id] = download
+        return candidates, downloads
+
+    def _download_bytes(self, url: str, max_bytes: int) -> bytes:
+        self._throttle()
+        request = urllib.request.Request(url, headers=self._headers("application/octet-stream, */*;q=0.1"))
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310 - URL is provider-host validated or locally built
+                return self._read_limited(response, max_bytes, "subtitle")
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"SubDL subtitle download HTTP {exc.code}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"SubDL subtitle download network error: {exc.reason}") from exc
+
+    def download_srt(
+        self,
+        download: SubdlDownload,
+        dest: Path,
+        *,
+        video: Path | None = None,
+        expected_video: VideoSnapshot | None = None,
+        max_bytes: int = MAX_SUBTITLE_BYTES,
+    ) -> None:
+        """Download, validate, snapshot-check, and atomically publish one SRT."""
+        if download.url:
+            url = normalize_subdl_download_url(download.url)
+        elif download.n_id:
+            subtitle_id = _subdl_identifier(download.n_id)
+            if not subtitle_id:
+                raise RuntimeError("SubDL candidate has an invalid subtitle identifier")
+            url = (
+                f"{SUBDL_API_BASE}/subtitles/{urllib.parse.quote(subtitle_id, safe='')}/download?"
+                "format=zip"
+            )
+        else:
+            raise RuntimeError("SubDL candidate has no safe download reference")
+
+        data = self._download_bytes(url, max_bytes)
+        redirected_url = subdl_download_redirect_url(data)
+        if redirected_url is not None:
+            data = self._download_bytes(redirected_url, max_bytes)
+        text = decode_subdl_srt_payload(data, max_bytes)
+        if video is not None and expected_video is not None and not video_snapshot_matches(video, expected_video):
+            raise RuntimeError("movie changed during subtitle lookup; downloaded SRT was not activated")
+        try:
+            atomic_write_text(dest, text, replace=False)
+        except FileExistsError as exc:
+            raise ConcurrentSidecarError("English SRT appeared during download; preserved the existing sidecar") from exc
 
 
-def download_subdl_srt(url: str, dest: Path, max_bytes: int) -> None:
-    parsed = urllib.parse.urlsplit(url)
-    if not parsed.scheme or not parsed.netloc:
-        url = "https://dl.subdl.com" + url if url.startswith("/") else "https://dl.subdl.com/" + url
-    req = urllib.request.Request(url, headers={"User-Agent": APP_USER_AGENT, "Accept": "*/*"})
-    with urllib.request.urlopen(req, timeout=60) as resp:  # nosec B310
-        declared = resp.headers.get("Content-Length")
-        if declared and int(declared) > max_bytes:
-            raise RuntimeError(f"subtitle exceeds {max_bytes} byte safety limit")
-        data = resp.read(max_bytes + 1)
-    if len(data) > max_bytes:
-        raise RuntimeError(f"subtitle exceeds {max_bytes} byte safety limit")
-    if data.startswith(b"PK\x03\x04"):
-        with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            srt_names = [name for name in zf.namelist() if name.lower().endswith(".srt")]
-            if not srt_names:
-                raise RuntimeError("no .srt file found in Subdl zip archive")
-            best_srt = sorted(srt_names, key=lambda n: zf.getinfo(n).file_size, reverse=True)[0]
-            raw_srt = zf.read(best_srt)
-            text = decode_subtitle_bytes(raw_srt)
-    else:
-        text = decode_subtitle_bytes(data)
-    text = normalize_srt_newlines(text)
-    if not looks_like_srt(text):
-        raise RuntimeError("downloaded payload from Subdl is not a valid SRT subtitle")
-    atomic_write_text(dest, text, replace=False)
+def download_subdl_srt(
+    url: str,
+    dest: Path,
+    max_bytes: int,
+    *,
+    api_key: str = "",
+    video: Path | None = None,
+    expected_video: VideoSnapshot | None = None,
+) -> None:
+    """Backward-compatible raw-URL helper; new queue code uses ``SubdlClient``."""
+    client = SubdlClient(api_key)
+    client.download_srt(
+        SubdlDownload(url=normalize_subdl_download_url(url)),
+        dest,
+        video=video,
+        expected_video=expected_video,
+        max_bytes=max_bytes,
+    )
 
 
 def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
@@ -805,8 +1185,6 @@ def _is_normal_english_human_candidate(candidate: Candidate) -> bool:
         and not candidate.hearing_impaired
         and not candidate.foreign_parts_only
     )
-
-
 def pick_candidate(cands: Sequence[Candidate], cfg: Config) -> Candidate | None:
     """Return one strict best candidate for the requested English subtitle mode."""
     usable = [
@@ -820,7 +1198,7 @@ def pick_candidate(cands: Sequence[Candidate], cfg: Config) -> Candidate | None:
     usable.sort(
         key=lambda candidate: (
             -int(candidate.trusted), -candidate.rating, -candidate.votes, -candidate.downloads,
-            candidate.file_id, candidate.release.casefold(),
+            str(candidate.file_id), candidate.release.casefold(),
         ),
     )
     return usable[0]
@@ -851,7 +1229,7 @@ def pick_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity)
     usable.sort(
         key=lambda candidate: (
             -int(candidate.trusted), -candidate.rating, -candidate.votes, -candidate.downloads,
-            candidate.file_id, candidate.release.casefold(),
+            str(candidate.file_id), candidate.release.casefold(),
         ),
     )
     top = usable[0]
@@ -1044,6 +1422,25 @@ def run_self_tests() -> int:
     check(looks_like_srt(sample), "srt detect")
     check(not looks_like_srt("<html>nope</html>"), "html not srt")
 
+    subdl_identity = MovieIdentity("Knowing", 2009, "knowing")
+    subdl_candidate = Candidate(
+        file_id="subdl:fixture", release="Knowing.2009.1080p.BluRay",
+        moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
+        hearing_impaired=False, machine_translated=False, ai_translated=False,
+        foreign_parts_only=False, language="en", feature_title="Knowing", feature_year=2009,
+    )
+    subdl_pick, _subdl_reason = pick_subdl_identity_candidate([subdl_candidate], subdl_identity)
+    check(subdl_pick == subdl_candidate, "SubDL unique title/year fallback")
+    check(
+        normalize_subdl_download_url("/subtitle/fixture/file") == "https://dl.subdl.com/subtitle/fixture/file",
+        "SubDL relative download URL is constrained",
+    )
+    try:
+        normalize_subdl_download_url("https://example.invalid/subtitle/fixture")
+        errors.append("untrusted SubDL URL unexpectedly accepted")
+    except ValueError:
+        pass
+
     tmp = Path(tempfile.mkdtemp(prefix="subf_"))
     try:
         movie = tmp / "Knowing (2009)"
@@ -1132,7 +1529,7 @@ def run_self_tests() -> int:
         for e in errors:
             print("  -", e)
         return 1
-    print("SELF-TEST PASSED (hash + strict pick + SRT safety + discovery + transaction guards)")
+    print("SELF-TEST PASSED (hash + OpenSubtitles/SubDL picks + SRT safety + discovery + transaction guards)")
     return 0
 
 
@@ -1145,7 +1542,10 @@ class QueueConfig:
     subdl_api_key: str = ""
     username: str = ""
     password: str = ""
+    # ``daily_cap`` remains the OpenSubtitles cap for backwards-compatible
+    # command-line/config names. SubDL has a separate provider quota.
     daily_cap: int = DEVELOPMENT_ANONYMOUS_DAILY_CAP
+    subdl_daily_cap: int = SUBDL_DEFAULT_DAILY_CAP
     min_movie_size_mb: float = MIN_MOVIE_SIZE_MB
     lock_timeout_seconds: float = 60.0
     retry_no_match: bool = False
@@ -1263,15 +1663,136 @@ def persist_state(state: dict[str, Any], log_path: Path) -> None:
 
 
 def day_ledger(state: dict[str, Any], day: str) -> dict[str, int]:
+    """Return a backward-compatible per-provider quota ledger for one UTC day.
+
+    Older logs have only ``download_requests_reserved`` and
+    ``successful_downloads``. They are historical OpenSubtitles values, so map
+    them to the provider-specific fields on first read and continue writing the
+    legacy reservation field for a smooth upgrade.
+    """
     ledger = state["days"].setdefault(day, {})
-    for field_name in (
-        "download_requests_reserved", "successful_downloads", "no_match", "identity_review", "errors", "already_have",
-    ):
+    legacy_open_reserved = ledger.get("opensubtitles_download_requests_reserved",
+                                     ledger.get("download_requests_reserved", 0))
+    legacy_open_successful = ledger.get("opensubtitles_successful_downloads",
+                                       ledger.get("successful_downloads", 0))
+    defaults: dict[str, Any] = {
+        "opensubtitles_download_requests_reserved": legacy_open_reserved,
+        "subdl_download_requests_reserved": 0,
+        "opensubtitles_successful_downloads": legacy_open_successful,
+        "subdl_successful_downloads": 0,
+        "successful_downloads": ledger.get("successful_downloads", 0),
+        "no_match": 0,
+        "identity_review": 0,
+        "errors": 0,
+        "already_have": 0,
+    }
+    for field_name, default in defaults.items():
         try:
-            ledger[field_name] = max(0, int(ledger.get(field_name, 0) or 0))
+            ledger[field_name] = max(0, int(ledger.get(field_name, default) or 0))
         except (TypeError, ValueError):
             ledger[field_name] = 0
+    # Legacy consumers and existing reports use this field for the
+    # OpenSubtitles reservation count. Do not make SubDL downloads consume it.
+    ledger["download_requests_reserved"] = ledger["opensubtitles_download_requests_reserved"]
     return ledger
+
+
+def configured_providers(cfg: QueueConfig) -> tuple[str, ...]:
+    providers: list[str] = []
+    if cfg.api_key.strip():
+        providers.append(PROVIDER_OPENSUBTITLES)
+    if cfg.subdl_api_key.strip():
+        providers.append(PROVIDER_SUBDL)
+    return tuple(providers)
+
+
+def provider_daily_cap(cfg: QueueConfig, provider: str) -> int:
+    if provider == PROVIDER_OPENSUBTITLES:
+        return cfg.daily_cap
+    if provider == PROVIDER_SUBDL:
+        return cfg.subdl_daily_cap
+    raise ValueError(f"unknown subtitle provider: {provider}")
+
+
+def provider_reservation_field(provider: str) -> str:
+    if provider == PROVIDER_OPENSUBTITLES:
+        return "opensubtitles_download_requests_reserved"
+    if provider == PROVIDER_SUBDL:
+        return "subdl_download_requests_reserved"
+    raise ValueError(f"unknown subtitle provider: {provider}")
+
+
+def provider_success_field(provider: str) -> str:
+    if provider == PROVIDER_OPENSUBTITLES:
+        return "opensubtitles_successful_downloads"
+    if provider == PROVIDER_SUBDL:
+        return "subdl_successful_downloads"
+    raise ValueError(f"unknown subtitle provider: {provider}")
+
+
+def provider_reserved(ledger: dict[str, int], provider: str) -> int:
+    return int(ledger.get(provider_reservation_field(provider), 0) or 0)
+
+
+def provider_has_quota(cfg: QueueConfig, ledger: dict[str, int], provider: str) -> bool:
+    return provider_reserved(ledger, provider) < provider_daily_cap(cfg, provider)
+
+
+def reserve_provider_download(ledger: dict[str, int], provider: str) -> int:
+    field_name = provider_reservation_field(provider)
+    ledger[field_name] = provider_reserved(ledger, provider) + 1
+    if provider == PROVIDER_OPENSUBTITLES:
+        ledger["download_requests_reserved"] = ledger[field_name]
+    return ledger[field_name]
+
+
+def record_provider_success(ledger: dict[str, int], provider: str) -> None:
+    field_name = provider_success_field(provider)
+    ledger[field_name] = max(0, int(ledger.get(field_name, 0) or 0)) + 1
+    ledger["successful_downloads"] = max(0, int(ledger.get("successful_downloads", 0) or 0)) + 1
+
+
+def provider_label(provider: str) -> str:
+    if provider == PROVIDER_OPENSUBTITLES:
+        return "OpenSubtitles"
+    if provider == PROVIDER_SUBDL:
+        return "SubDL"
+    return provider
+
+
+def provider_quota_text(cfg: QueueConfig, ledger: dict[str, int]) -> str:
+    """Format only enabled providers' independent UTC download reservations."""
+    parts = [
+        f"{provider_label(provider)} {provider_reserved(ledger, provider)}/{provider_daily_cap(cfg, provider)}"
+        for provider in configured_providers(cfg)
+    ]
+    return " · ".join(parts) or "no provider configured"
+
+
+def provider_configuration_text(cfg: QueueConfig) -> str:
+    """Describe active providers without exposing any secret configuration."""
+    parts: list[str] = []
+    if cfg.api_key.strip():
+        parts.append(f"OpenSubtitles {cfg.auth_mode}; cap {cfg.daily_cap}")
+    if cfg.subdl_api_key.strip():
+        subdl_role = "fallback" if cfg.api_key.strip() else "title/year"
+        parts.append(f"SubDL {subdl_role}; cap {cfg.subdl_daily_cap}")
+    return " · ".join(parts) or "no provider configured"
+
+
+def provider_policy_text(cfg: QueueConfig) -> str:
+    """Explain the actual matching strength available in this run."""
+    if not cfg.identity_fallback:
+        if cfg.api_key.strip():
+            return "OpenSubtitles exact moviehash matching only"
+        return "title/year fallback disabled"
+    if cfg.api_key.strip() and cfg.subdl_api_key.strip():
+        return "OpenSubtitles exact moviehash first · SubDL strict title/year fallback"
+    if cfg.api_key.strip():
+        return "OpenSubtitles exact moviehash first · conservative title/year fallback"
+    if cfg.subdl_api_key.strip():
+        return "SubDL strict title/year matching · no exact moviehash provider"
+    return "no provider configured"
 
 
 def movie_key(video: Path, snapshot: VideoSnapshot) -> str:
@@ -1365,13 +1886,20 @@ def relative_text(path: Path, root: Path) -> str:
 
 
 def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
-    """Process one daily batch with immediate, human-readable progress output."""
+    """Process one daily batch with independent provider quotas.
+
+    OpenSubtitles remains the only exact-release (OSHash) source. SubDL is
+    deliberately title/year-only and runs only after OpenSubtitles has no safe
+    candidate or is unavailable for the day.
+    """
     state = load_state(cfg.log_file, cfg.library)
     today = utc_day()
     ledger = day_ledger(state, today)
     fetcher_cfg = cfg.fetcher_config()
     results: list[JobResult] = []
-    client: OpenSubtitlesClient | None = None
+    open_client = OpenSubtitlesClient(fetcher_cfg) if cfg.api_key.strip() else None
+    subdl_client = SubdlClient(cfg.subdl_api_key) if cfg.subdl_api_key.strip() else None
+    active_providers = configured_providers(cfg)
     deferred_remaining = 0
     deferred_videos: list[Path] = []
 
@@ -1380,8 +1908,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         videos = videos[:cfg.limit]
     total = len(videos)
     log(
-        f"Found {total} eligible movies. UTC quota: "
-        f"{ledger['download_requests_reserved']}/{cfg.daily_cap} requests already reserved.",
+        f"Found {total} eligible movies. UTC download reservations: {provider_quota_text(cfg, ledger)}.",
         log_file=cfg.log_file,
     )
 
@@ -1391,6 +1918,16 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             f"{relative_text(video, cfg.library)} — {detail}",
             log_file=cfg.log_file,
         )
+
+    def has_new_provider(record: dict[str, Any]) -> bool:
+        prior = record.get("providers_checked")
+        if not isinstance(prior, list):
+            # A pre-SubDL ledger cannot say which sources it queried. Preserve
+            # its intentional OpenSubtitles review hold unless the newly added
+            # provider is actually enabled, then revisit once for that source.
+            return PROVIDER_SUBDL in active_providers
+        previous = {str(provider) for provider in prior}
+        return any(provider not in previous for provider in active_providers)
 
     for index, video in enumerate(videos, start=1):
         layout_issue = canonical_movie_layout_issue(video, cfg.library)
@@ -1429,145 +1966,251 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             results.append(result)
             emit(index, "SKIP", video, result.detail)
             continue
-        if old_status == "manual_review" and not cfg.retry_no_match:
+        if old_status == "manual_review" and not cfg.retry_no_match and not has_new_provider(record):
             result = JobResult(video, "review", "previous identity fallback was intentionally held for review",
                                reason=REASON_REVIEW)
             results.append(result)
             emit(index, "REVIEW", video, result.detail)
             continue
         if old_status == "reserved" and str(record.get("updated_utc") or "").startswith(today):
-            result = JobResult(video, "skip", "download request was already reserved today; waiting for next UTC day",
+            result = JobResult(video, "skip", "a provider download was already reserved today; waiting for next UTC day",
                                reason=REASON_QUOTA)
             results.append(result)
             emit(index, "SKIP", video, result.detail)
             continue
 
-        if ledger["download_requests_reserved"] >= cfg.daily_cap:
+        open_available = (
+            open_client is not None
+            and provider_has_quota(cfg, ledger, PROVIDER_OPENSUBTITLES)
+        )
+        # SubDL offers only identity matching, so --no-identity-fallback also
+        # intentionally disables it.
+        subdl_available = (
+            subdl_client is not None
+            and cfg.identity_fallback
+            and provider_has_quota(cfg, ledger, PROVIDER_SUBDL)
+        )
+        if not open_available and not subdl_available:
             deferred_remaining = total - index + 1
             deferred_videos = list(videos[index - 1:])
             log(
-                f"QUOTA REACHED: {ledger['download_requests_reserved']}/{cfg.daily_cap} requests reserved. "
+                "QUOTA REACHED: no configured provider with an enabled matching mode has a "
+                f"download reservation left ({provider_quota_text(cfg, ledger)}). "
                 f"{deferred_remaining} movie(s) remain for the next UTC day.",
                 level="WARNING", log_file=cfg.log_file,
             )
             break
 
-        if client is None:
-            if not cfg.api_key:
-                raise RuntimeError("Missing API key. Set OPENSUBTITLES_API_KEY before running the daily queue.")
-            client = OpenSubtitlesClient(fetcher_cfg)
+        digest = ""
+        pick: Candidate | None = None
+        selected_provider = ""
+        selection_method = ""
+        selection_reason = "no usable English moviehash-matched human SRT"
+        providers_checked: list[str] = []
+        subdl_downloads: dict[str, SubdlDownload] = {}
 
-        emit(index, "SEARCH", video, "calculating moviehash and checking OpenSubtitles")
-        try:
-            digest = moviehash(video)
-            if not video_snapshot_matches(video, snapshot):
-                raise RuntimeError("movie changed while calculating moviehash")
-            candidates = client.search(movie_hash=digest, query=video.stem)
-            pick = pick_candidate(candidates, fetcher_cfg)
-        except (RuntimeError, ValueError) as exc:
-            # ValueError matters as much as RuntimeError here: moviehash()
-            # raises it for a file below MIN_HASH_SIZE, and the size gate ran at
-            # scan time, so a file truncated or partially removed in between
-            # reaches this point. Without it, one stub file aborted the whole
-            # run with a traceback and every remaining movie went unfetched.
-            set_movie_status(record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1)
-            ledger["errors"] += 1
-            persist_state(state, cfg.log_file)
-            result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
-            results.append(result)
-            emit(index, "ERROR", video, str(exc))
-            continue
-
-        selection_method = "hash"
-        selection_reason = "moviehash match"
-        if pick is None:
-            if not cfg.identity_fallback:
-                detail = "no usable English moviehash-matched human SRT"
-                set_movie_status(record, "no_match", detail, moviehash=digest or "",
-                                 attempts=int(record.get("attempts", 0) or 0) + 1)
-                ledger["no_match"] += 1
-                persist_state(state, cfg.log_file)
-                result = JobResult(video, "skip", detail, reason=REASON_NO_MATCH)
-                results.append(result)
-                emit(index, "NO MATCH", video, detail)
-                continue
-            identity = movie_identity_from_video(video)
-            if identity is None:
-                detail = "no strict hash match and filename is not canonical Title (Year)"
-                set_movie_status(record, "manual_review", detail, moviehash=digest or "",
-                                 attempts=int(record.get("attempts", 0) or 0) + 1)
-                ledger["identity_review"] += 1
-                persist_state(state, cfg.log_file)
-                result = JobResult(video, "review", detail, reason=REASON_REVIEW)
-                results.append(result)
-                emit(index, "REVIEW", video, detail)
-                continue
-            emit(index, "FALLBACK", video, f"exact hash missed; checking title/year: {identity.title} ({identity.year})")
+        open_lookup_error = ""
+        if open_available and open_client is not None:
+            providers_checked.append(PROVIDER_OPENSUBTITLES)
+            emit(index, "SEARCH", video, "calculating moviehash and checking OpenSubtitles")
             try:
-                identity_candidates = client.search_identity(identity)
-                pick, selection_reason = pick_identity_candidate(identity_candidates, identity)
-            except RuntimeError as exc:
-                set_movie_status(record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1)
+                digest = moviehash(video)
+                if not video_snapshot_matches(video, snapshot):
+                    raise RuntimeError("movie changed while calculating moviehash")
+            except (RuntimeError, ValueError) as exc:
+                # ValueError matters as much as RuntimeError here: moviehash()
+                # raises it for a file below MIN_HASH_SIZE, and the size gate ran
+                # at scan time, so a file truncated in between must not abort the
+                # rest of the daily queue. A local movie problem cannot safely
+                # fall through to title/year matching on another provider.
+                set_movie_status(
+                    record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1,
+                    providers_checked=providers_checked,
+                )
                 ledger["errors"] += 1
                 persist_state(state, cfg.log_file)
                 result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
                 results.append(result)
                 emit(index, "ERROR", video, str(exc))
                 continue
-            if pick is None:
-                subdl_client = SubdlClient(fetcher_cfg.subdl_api_key) if fetcher_cfg.subdl_api_key else None
-                if subdl_client and identity:
-                    emit(index, "FALLBACK", video, f"OpenSubtitles missed; checking Subdl secondary source: {identity.title} ({identity.year})")
-                    try:
-                        subdl_candidates, subdl_urls = subdl_client.search_identity(identity)
-                        pick, selection_reason = pick_identity_candidate(subdl_candidates, identity)
-                        if pick is not None:
-                            selection_method = "subdl"
-                    except Exception as exc:
-                        log(f"Subdl search error: {exc}", level="WARNING", log_file=cfg.log_file)
-                if pick is None:
-                    detail = f"identity fallback held for review: {selection_reason}"
-                    set_movie_status(record, "manual_review", detail, moviehash=digest or "",
-                                     attempts=int(record.get("attempts", 0) or 0) + 1)
-                    ledger["identity_review"] += 1
+            try:
+                candidates = open_client.search(movie_hash=digest, query=video.stem)
+                pick = pick_candidate(candidates, fetcher_cfg)
+            except (RuntimeError, ValueError) as exc:
+                if not subdl_available:
+                    set_movie_status(
+                        record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1,
+                        providers_checked=providers_checked,
+                    )
+                    ledger["errors"] += 1
                     persist_state(state, cfg.log_file)
-                    result = JobResult(video, "review", detail, reason=REASON_REVIEW)
+                    result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
                     results.append(result)
-                    emit(index, "REVIEW", video, detail)
+                    emit(index, "ERROR", video, str(exc))
                     continue
-            else:
-                selection_method = "identity"
+                open_lookup_error = f"OpenSubtitles moviehash lookup failed: {exc}"
+                emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
+            if pick is not None:
+                selected_provider = PROVIDER_OPENSUBTITLES
+                selection_method = "hash"
+                selection_reason = "moviehash match"
+
+        if pick is None:
+            if not cfg.identity_fallback:
+                detail = (
+                    "no usable English moviehash-matched human SRT"
+                    if open_available else
+                    "no exact-moviehash provider is available and title/year fallback is disabled"
+                )
+                set_movie_status(
+                    record, "no_match", detail, moviehash=digest,
+                    attempts=int(record.get("attempts", 0) or 0) + 1,
+                    providers_checked=providers_checked,
+                )
+                ledger["no_match"] += 1
+                persist_state(state, cfg.log_file)
+                result = JobResult(video, "skip", detail, reason=REASON_NO_MATCH)
+                results.append(result)
+                emit(index, "NO MATCH", video, detail)
+                continue
+
+            identity = movie_identity_from_video(video)
+            if identity is None:
+                detail = (
+                    "no strict hash match and filename is not canonical Title (Year)"
+                    if open_available else
+                    "SubDL title/year fallback requires a canonical Title (Year) filename"
+                )
+                set_movie_status(
+                    record, "manual_review", detail, moviehash=digest,
+                    attempts=int(record.get("attempts", 0) or 0) + 1,
+                    providers_checked=providers_checked,
+                )
+                ledger["identity_review"] += 1
+                persist_state(state, cfg.log_file)
+                result = JobResult(video, "review", detail, reason=REASON_REVIEW)
+                results.append(result)
+                emit(index, "REVIEW", video, detail)
+                continue
+
+            identity_reasons: list[str] = [open_lookup_error] if open_lookup_error else []
+            if open_available and open_client is not None and not open_lookup_error:
+                emit(index, "FALLBACK", video,
+                     f"exact hash missed; checking OpenSubtitles title/year: {identity.title} ({identity.year})")
+                try:
+                    identity_candidates = open_client.search_identity(identity)
+                    pick, selection_reason = pick_identity_candidate(identity_candidates, identity)
+                except (RuntimeError, ValueError) as exc:
+                    if not subdl_available:
+                        set_movie_status(
+                            record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1,
+                            providers_checked=providers_checked,
+                        )
+                        ledger["errors"] += 1
+                        persist_state(state, cfg.log_file)
+                        result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
+                        results.append(result)
+                        emit(index, "ERROR", video, str(exc))
+                        continue
+                    open_lookup_error = f"OpenSubtitles title/year lookup failed: {exc}"
+                    identity_reasons.append(open_lookup_error)
+                    emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
+                if pick is not None:
+                    selected_provider = PROVIDER_OPENSUBTITLES
+                    selection_method = "identity"
+                elif not open_lookup_error:
+                    identity_reasons.append(f"OpenSubtitles: {selection_reason}")
+            elif open_client is not None and not open_lookup_error:
+                identity_reasons.append("OpenSubtitles: daily download cap exhausted")
+
+            if pick is None and subdl_available and subdl_client is not None:
+                providers_checked.append(PROVIDER_SUBDL)
+                prefix = (
+                    "OpenSubtitles lookup failed; " if open_lookup_error else
+                    "OpenSubtitles missed; " if open_available else
+                    "OpenSubtitles quota exhausted; " if open_client is not None else ""
+                )
+                emit(index, "FALLBACK", video,
+                     f"{prefix}checking SubDL title/year: {identity.title} ({identity.year})")
+                try:
+                    subdl_candidates, subdl_downloads = subdl_client.search_identity(identity)
+                    pick, selection_reason = pick_subdl_identity_candidate(subdl_candidates, identity)
+                except RuntimeError as exc:
+                    detail = f"SubDL lookup failed: {exc}"
+                    set_movie_status(
+                        record, "error", detail, moviehash=digest,
+                        attempts=int(record.get("attempts", 0) or 0) + 1,
+                        providers_checked=providers_checked,
+                    )
+                    ledger["errors"] += 1
+                    persist_state(state, cfg.log_file)
+                    result = JobResult(video, "error", detail, reason=REASON_ERROR)
+                    results.append(result)
+                    emit(index, "ERROR", video, detail)
+                    continue
+                if pick is not None:
+                    selected_provider = PROVIDER_SUBDL
+                    selection_method = "subdl-identity"
+                else:
+                    identity_reasons.append(f"SubDL: {selection_reason}")
+            elif pick is None and subdl_client is not None:
+                identity_reasons.append("SubDL: daily download cap exhausted")
+
+            if pick is None:
+                reason = "; ".join(identity_reasons) or selection_reason
+                detail = f"identity fallback held for review: {reason}"
+                set_movie_status(
+                    record, "manual_review", detail, moviehash=digest,
+                    attempts=int(record.get("attempts", 0) or 0) + 1,
+                    providers_checked=providers_checked,
+                )
+                ledger["identity_review"] += 1
+                persist_state(state, cfg.log_file)
+                result = JobResult(video, "review", detail, reason=REASON_REVIEW)
+                results.append(result)
+                emit(index, "REVIEW", video, detail)
+                continue
 
         dest = dest_for(video, fetcher_cfg)
-        note = (f"method={selection_method}; id={pick.file_id}; trusted={'yes' if pick.trusted else 'no'}; "
-                f"rating={pick.rating:g}/{pick.votes}; {selection_reason}; {pick.release or 'unnamed release'}")
+        note = (
+            f"provider={provider_label(selected_provider)}; method={selection_method}; id={pick.file_id}; "
+            f"trusted={'yes' if pick.trusted else 'no'}; rating={pick.rating:g}/{pick.votes}; "
+            f"{selection_reason}; {pick.release or 'unnamed release'}"
+        )
         if cfg.dry_run:
             result = JobResult(video, "dry-run", note, dest, reason=REASON_DRY_RUN)
             results.append(result)
             emit(index, "WOULD GET", video, note)
             continue
 
-        # Persist before /download: an interrupted or failed download may still
-        # count against the provider, so the reservation is never released.
-        ledger["download_requests_reserved"] += 1
-        set_movie_status(record, "reserved", note, moviehash=digest, selection_method=selection_method,
-                         selected_file_id=pick.file_id, attempts=int(record.get("attempts", 0) or 0) + 1)
+        # Persist a provider-specific reservation before the download: an
+        # interrupted request may still count against that provider's quota.
+        reservation = reserve_provider_download(ledger, selected_provider)
+        set_movie_status(
+            record, "reserved", note, moviehash=digest, selection_method=selection_method,
+            selected_provider=selected_provider, selected_file_id=str(pick.file_id),
+            attempts=int(record.get("attempts", 0) or 0) + 1,
+            providers_checked=providers_checked,
+        )
         persist_state(state, cfg.log_file)
-        print(f"[{index:03d}/{total:03d}] DOWNLOAD {relative_text(video, cfg.library)} — request "
-              f"{ledger['download_requests_reserved']}/{cfg.daily_cap}", flush=True)
+        print(
+            f"[{index:03d}/{total:03d}] DOWNLOAD {relative_text(video, cfg.library)} — "
+            f"{provider_label(selected_provider)} request "
+            f"{reservation}/{provider_daily_cap(cfg, selected_provider)}",
+            flush=True,
+        )
         try:
-            if selection_method == "subdl":
-                subdl_url = subdl_urls.get(pick.file_id) if 'subdl_urls' in locals() else None
-                if not subdl_url:
-                    raise RuntimeError("Subdl candidate URL missing")
-                if not video_snapshot_matches(video, snapshot):
-                    raise RuntimeError("movie changed during subtitle lookup; downloaded SRT was not activated")
-                try:
-                    download_subdl_srt(subdl_url, dest, MAX_SUBTITLE_BYTES)
-                except FileExistsError as exc:
-                    raise ConcurrentSidecarError("English SRT appeared during download; preserved the existing sidecar") from exc
+            if selected_provider == PROVIDER_SUBDL:
+                if subdl_client is None:
+                    raise RuntimeError("SubDL client is unavailable")
+                download = subdl_downloads.get(str(pick.file_id))
+                if download is None:
+                    raise RuntimeError("SubDL candidate download reference is missing")
+                subdl_client.download_srt(download, dest, video=video, expected_video=snapshot)
             else:
-                client.download_srt(pick.file_id, dest, video=video, expected_video=snapshot)
+                if open_client is None or not isinstance(pick.file_id, int):
+                    raise RuntimeError("OpenSubtitles candidate has an invalid file identifier")
+                open_client.download_srt(pick.file_id, dest, video=video, expected_video=snapshot)
         except ConcurrentSidecarError as exc:
             set_movie_status(record, "have", str(exc), sidecar=str(dest))
             ledger["already_have"] += 1
@@ -1585,23 +2228,36 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             emit(index, "ERROR", video, str(exc))
         else:
             set_movie_status(record, "downloaded", note, sidecar=str(dest))
-            ledger["successful_downloads"] += 1
+            record_provider_success(ledger, selected_provider)
             result = JobResult(video, "download", note, dest, reason=REASON_DOWNLOADED)
             results.append(result)
             emit(index, "SAVED", video, dest.name)
         persist_state(state, cfg.log_file)
 
+    available_after_run = [
+        provider for provider in active_providers
+        if provider_has_quota(cfg, ledger, provider)
+        and (provider != PROVIDER_SUBDL or cfg.identity_fallback)
+    ]
     summary = {
         "utc_day": today,
+        # Legacy summary fields remain OpenSubtitles values for downstream
+        # consumers that predate the second provider.
         "daily_cap": cfg.daily_cap,
-        "download_requests_reserved": ledger["download_requests_reserved"],
+        "download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
         "successful_downloads": ledger["successful_downloads"],
-        "quota_reached": ledger["download_requests_reserved"] >= cfg.daily_cap,
+        "opensubtitles_daily_cap": cfg.daily_cap,
+        "opensubtitles_download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
+        "opensubtitles_successful_downloads": ledger["opensubtitles_successful_downloads"],
+        "subdl_daily_cap": cfg.subdl_daily_cap,
+        "subdl_download_requests_reserved": provider_reserved(ledger, PROVIDER_SUBDL),
+        "subdl_successful_downloads": ledger["subdl_successful_downloads"],
+        "quota_reached": not available_after_run,
         "deferred_remaining": deferred_remaining,
         "ledger_log": str(cfg.log_file),
         "movies_discovered": total,
         # Which movies, not just how many: the report has to be able to name
-        # what was never reached when the UTC cap cut the batch short.
+        # what was never reached when all usable provider caps cut the batch short.
         "deferred_videos": deferred_videos,
     }
     return results, summary
@@ -1652,22 +2308,22 @@ NEEDS_SUBTITLE_BUCKETS: tuple[NeedsBucket, ...] = (
         "inspect the title/year candidate yourself",
         "The exact moviehash missed and only a title/year match was found, so the "
         "download was deliberately not made. Inspect the candidate, then either place "
-        "the subtitle yourself or re-run with --retry-no-match to accept the match.",
+        "the subtitle yourself or re-run with --retry-review to reconsider the match.",
     ),
     NeedsBucket(
         REASON_NO_MATCH,
-        "NO MATCHING SUBTITLE ON OPENSUBTITLES",
+        "NO MATCHING SUBTITLE ON CONFIGURED PROVIDERS",
         "re-run on a later day, or add the SRT by hand",
-        "No English, human-authored SRT matched this file's moviehash. The provider "
-        "catalogue grows every day, so a later run often succeeds; otherwise add the "
-        "subtitle yourself.",
+        "No configured provider returned a safe English, human-authored SRT. Provider "
+        "catalogues grow over time, so a later run can succeed; otherwise add the subtitle "
+        "yourself.",
     ),
     NeedsBucket(
         REASON_QUOTA,
         "DEFERRED TO THE NEXT UTC DAY",
         "nothing to fix - re-run after the UTC day rolls over",
-        "The daily OpenSubtitles request cap was reached, so these movies were not "
-        "searched. Re-run after the UTC day rolls over; no request is wasted.",
+        "Every configured provider's usable daily download allowance was exhausted, so "
+        "these movies were not searched. Re-run after the UTC day rolls over; no request is wasted.",
     ),
     NeedsBucket(
         REASON_ERROR,
@@ -1726,6 +2382,34 @@ def group_results(
     return buckets, covered, downloaded, dry_run
 
 
+def report_provider_quota_text(cfg: QueueConfig, summary: dict[str, Any]) -> str:
+    """Format provider reservations for the report, including old summaries."""
+    parts: list[str] = []
+    # Unit callers and old log-derived summaries have only the legacy
+    # OpenSubtitles fields, so retain that display when no SubDL key is set.
+    if cfg.api_key.strip() or not cfg.subdl_api_key.strip():
+        reserved = int(summary.get("opensubtitles_download_requests_reserved",
+                                   summary.get("download_requests_reserved", 0)) or 0)
+        cap = int(summary.get("opensubtitles_daily_cap", summary.get("daily_cap", cfg.daily_cap)) or 0)
+        parts.append(f"OpenSubtitles {reserved}/{cap} reserved · {max(0, cap - reserved)} left")
+    if cfg.subdl_api_key.strip():
+        reserved = int(summary.get("subdl_download_requests_reserved", 0) or 0)
+        cap = int(summary.get("subdl_daily_cap", cfg.subdl_daily_cap) or 0)
+        parts.append(f"SubDL {reserved}/{cap} reserved · {max(0, cap - reserved)} left")
+    return "  ·  ".join(parts) or "No provider configured"
+
+
+def report_download_text(cfg: QueueConfig, summary: dict[str, Any]) -> str:
+    """Show a useful provider breakdown without breaking old report callers."""
+    total = int(summary.get("successful_downloads", 0) or 0)
+    parts: list[str] = []
+    if cfg.api_key.strip():
+        parts.append(f"OpenSubtitles {int(summary.get('opensubtitles_successful_downloads', 0) or 0)}")
+    if cfg.subdl_api_key.strip():
+        parts.append(f"SubDL {int(summary.get('subdl_successful_downloads', 0) or 0)}")
+    return f"{total} successful this run" + (f" ({' · '.join(parts)})" if parts else "")
+
+
 def build_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[str, Any]) -> str:
     """Render the whole run as one report a human can act on in ten seconds.
 
@@ -1736,24 +2420,18 @@ def build_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[s
     buckets, covered, downloaded, dry_run = group_results(results, summary)
     needs = sum(len(items) for items in buckets.values())
     total = int(summary.get("movies_discovered") or len(results))
-    reserved = int(summary.get("download_requests_reserved") or 0)
-    cap = int(summary.get("daily_cap") or 0)
-    remaining_quota = max(0, cap - reserved)
 
+    policy = provider_policy_text(cfg)
     report = Report(
         "JELLYFIN DAILY SUBTITLE QUEUE REPORT",
-        f"One validated external English {EXTERNAL_SRT_SUFFIX} beside every movie "
-        "\u00b7 exact OpenSubtitles moviehash match first",
+        f"One validated external English {EXTERNAL_SRT_SUFFIX} beside every movie \u00b7 {policy}",
     )
     report.metas([
         ("Generated", f"{utc_timestamp()} (UTC)"),
         ("Library", cfg.library),
-        ("Quota", f"{summary['utc_day']}  \u00b7  {reserved} of {cap} download requests reserved"
-                  f"  \u00b7  {remaining_quota} left today"),
-        ("Downloads", f"{summary.get('successful_downloads', 0)} successful this run"),
-        ("Policy", "English human-authored UTF-8 SRT only  \u00b7  exact moviehash first  \u00b7  "
-                   + ("conservative title/year fallback enabled" if cfg.identity_fallback
-                      else "no title/year fallback")),
+        ("Quota", f"{summary['utc_day']}  \u00b7  {report_provider_quota_text(cfg, summary)}"),
+        ("Downloads", report_download_text(cfg, summary)),
+        ("Policy", f"English human-authored UTF-8 SRT only  \u00b7  {policy}"),
         ("Ledger", cfg.log_file or "(none)"),
     ])
 
@@ -1857,7 +2535,7 @@ def build_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[s
         f"Durable quota and retry ledger  {cfg.log_file or '(none)'}",
         f"This report  {cfg.report_file}",
         "Re-running is always safe: covered movies are skipped without spending a request, and "
-        "the ledger keeps every run inside the provider's UTC cap.",
+        "the ledger keeps every run inside each configured provider's UTC cap.",
     ])
     return report.render()
 
@@ -1879,8 +2557,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Fetch one validated external English SRT per Jellyfin MKV. "
-            "Exact OpenSubtitles moviehash is always tried first; a conservative "
-            "title/year fallback is enabled by default after a hash miss."
+            "OpenSubtitles exact moviehash is preferred; SubDL is an optional "
+            "strict title/year fallback when no hash-safe result is available."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -1897,7 +2575,10 @@ def build_parser() -> argparse.ArgumentParser:
               "API key where the provider permits it; user is the authenticated fallback."),
     )
     parser.add_argument("--daily-cap", type=int, default=0, metavar="N",
-                        help="Maximum download requests per UTC day (0 automatically selects the documented free cap for --auth-mode)")
+                        help="Maximum OpenSubtitles download requests per UTC day (0 selects the free cap for --auth-mode)")
+    parser.add_argument("--subdl-daily-cap", type=int, default=0, metavar="N",
+                        help=("Maximum SubDL download requests per UTC day (0 uses the conservative "
+                              f"free allowance of {SUBDL_DEFAULT_DAILY_CAP})"))
     parser.add_argument("--min-size", type=float, default=MIN_MOVIE_SIZE_MB, metavar="MB")
     parser.add_argument("--lock-timeout", type=float, default=60.0, metavar="SEC")
     parser.add_argument("--limit", type=int, default=0, metavar="N",
@@ -1909,8 +2590,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.set_defaults(identity_fallback=True)
     parser.add_argument("--retry-review", action="store_true",
                         help="Reconsider movies previously held for manual identity review")
-    parser.add_argument("--subdl-api-key", default="",
-                        help="Optional Subdl API key for secondary high-coverage fallback provider")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -1934,16 +2613,25 @@ def resolve_daily_cap(auth_mode: str, requested_cap: int) -> int:
     return cap
 
 
+def resolve_subdl_daily_cap(requested_cap: int) -> int:
+    """Choose SubDL's conservative free download allowance or a user override."""
+    cap = SUBDL_DEFAULT_DAILY_CAP if requested_cap == 0 else int(requested_cap)
+    if cap < 1:
+        raise ValueError("--subdl-daily-cap must be zero (automatic) or at least 1")
+    return cap
+
+
 def compact_config_from_args(args: argparse.Namespace) -> QueueConfig:
     return QueueConfig(
         library=args.source.resolve(),
         log_file=args.log.resolve() if args.log else None,
         report_file=args.report.resolve(),
-        api_key=os.environ.get("OPENSUBTITLES_API_KEY") or OPENSUBTITLES_API_KEY,
-        subdl_api_key=os.environ.get("SUBDL_API_KEY") or getattr(args, "subdl_api_key", "") or SUBDL_API_KEY,
-        username=os.environ.get("OPENSUBTITLES_USERNAME") or OPENSUBTITLES_USERNAME,
-        password=os.environ.get("OPENSUBTITLES_PASSWORD") or OPENSUBTITLES_PASSWORD,
+        api_key=(os.environ.get("OPENSUBTITLES_API_KEY") or OPENSUBTITLES_API_KEY).strip(),
+        subdl_api_key=(os.environ.get("SUBDL_API_KEY") or SUBDL_API_KEY).strip(),
+        username=(os.environ.get("OPENSUBTITLES_USERNAME") or OPENSUBTITLES_USERNAME).strip(),
+        password=(os.environ.get("OPENSUBTITLES_PASSWORD") or OPENSUBTITLES_PASSWORD).strip(),
         daily_cap=resolve_daily_cap(str(args.auth_mode), int(args.daily_cap)),
+        subdl_daily_cap=resolve_subdl_daily_cap(int(args.subdl_daily_cap)),
         min_movie_size_mb=float(args.min_size),
         lock_timeout_seconds=max(0.0, float(args.lock_timeout)),
         retry_no_match=bool(args.retry_review),
@@ -1960,12 +2648,16 @@ def validate_compact_config(cfg: QueueConfig) -> list[str]:
         errors.append("--source must be an existing non-symlink movie-library directory")
     if cfg.daily_cap < 1:
         errors.append("--daily-cap must be at least 1")
+    if cfg.subdl_daily_cap < 1:
+        errors.append("--subdl-daily-cap must be at least 1")
     if cfg.auth_mode not in {AUTH_MODE_DEVELOPMENT_ANONYMOUS, AUTH_MODE_USER}:
         errors.append("--auth-mode is unsupported")
-    if not cfg.api_key:
-        errors.append("an OpenSubtitles API key is required")
-    if cfg.auth_mode == AUTH_MODE_USER and (not cfg.username or not cfg.password):
+    if not configured_providers(cfg):
+        errors.append("configure OPENSUBTITLES_API_KEY and/or SUBDL_API_KEY")
+    if cfg.api_key and cfg.auth_mode == AUTH_MODE_USER and (not cfg.username or not cfg.password):
         errors.append("--auth-mode user requires an OpenSubtitles username and password")
+    if cfg.subdl_api_key.strip() and not cfg.api_key.strip() and not cfg.identity_fallback:
+        errors.append("SubDL-only mode requires title/year fallback; omit --no-identity-fallback")
     if cfg.min_movie_size_mb < 0 or cfg.lock_timeout_seconds < 0 or cfg.limit < 0:
         errors.append("--min-size, --lock-timeout, and --limit must be non-negative")
     if cfg.report_file == cfg.library or cfg.report_file.is_relative_to(cfg.library):
@@ -1994,9 +2686,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             [
                 ("Mode", mode),
                 ("Library", cfg.library),
-                ("Policy", "English human-authored UTF-8 SRT; exact moviehash first; "
-                           f"title/year fallback {'on' if cfg.identity_fallback else 'off'}"),
-                ("Provider", f"OpenSubtitles {cfg.auth_mode}; UTC request cap {cfg.daily_cap}"),
+                ("Policy", "English human-authored UTF-8 SRT; " + provider_policy_text(cfg)),
+                ("Providers", provider_configuration_text(cfg) + " (UTC download caps)"),
                 ("Ledger", cfg.log_file),
                 ("Report", cfg.report_file),
             ],

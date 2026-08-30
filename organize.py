@@ -9,7 +9,7 @@ Commands:
     doctor       Diagnose environment, external binaries, paths, and hardlink capability
     run          Run the automated maintenance pipeline (subtitles -> remux -> 10-bit -> audit)
     standardize  Rename and hardlink completed downloads into Title (Year)/Title (Year).mkv
-    subtitles    Fetch validated English human UTF-8 SRT sidecars from OpenSubtitles
+    subtitles    Fetch validated English human UTF-8 SRT sidecars (OpenSubtitles + SubDL)
     clean        Lossless remux: keep single best English audio, strip commentary/DVS
     10bit        ffprobe inspection: queue 8-bit SDR for HandBrake; protect HDR & 10-bit
     audit        Read-only health check of library layout, MKV naming, and subtitle sidecars
@@ -42,7 +42,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 
 # ANSI styling helpers (with safe fallbacks)
 _SUPPORTS_COLOR = (
@@ -154,7 +154,7 @@ def print_dashboard() -> None:
 
     print(bold("  WORKFLOW PIPELINE:"))
     print(f"    {cyan('1. standardize')} {SYM_ARROW} qBittorrent completion hook: hardlinks & names into Title (Year)")
-    print(f"    {cyan('2. subtitles')}   {SYM_ARROW} OpenSubtitles OSHash fetcher: exact English UTF-8 SRT (pre-remux)")
+    print(f"    {cyan('2. subtitles')}   {SYM_ARROW} OpenSubtitles OSHash first + SubDL fallback: English UTF-8 SRT (pre-remux)")
     print(f"    {cyan('3. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps 1 audio, drops commentary & bloat")
     print(f"    {cyan('4. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect native HDR")
     print(f"    {cyan('5. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
@@ -293,30 +293,44 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             remedy=remedy_msg,
         ))
 
-    # 5. OpenSubtitles API Configuration
+    # 5. Subtitle provider API configuration
     try:
         import subtitle_fetcher as sf
-        api_key = os.environ.get("OPENSUBTITLES_API_KEY") or sf.OPENSUBTITLES_API_KEY
+        opensubtitles_key = (os.environ.get("OPENSUBTITLES_API_KEY") or sf.OPENSUBTITLES_API_KEY).strip()
+        subdl_key = (os.environ.get("SUBDL_API_KEY") or sf.SUBDL_API_KEY).strip()
     except Exception:
-        api_key = None
-    if api_key:
-        masked = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
+        opensubtitles_key = None
+        subdl_key = None
+
+    def mask_key(value: str) -> str:
+        return value[:4] + "..." + value[-4:] if len(value) > 8 else "***"
+
+    if opensubtitles_key:
         checks.append(DiagnosticCheck(
             name="OpenSubtitles API Key",
             status="ok",
-            message=f"Configured ({masked})",
-            detail="Allows automated English SRT downloads using release moviehash",
+            message=f"Configured ({mask_key(opensubtitles_key)})",
+            detail="Enables byte-identical OSHash subtitle matching before any fallback",
         ))
-    else:
+    if subdl_key:
         checks.append(DiagnosticCheck(
-            name="OpenSubtitles API Key",
+            name="SubDL API Key",
+            status="ok",
+            message=f"Configured ({mask_key(subdl_key)})",
+            detail="Enables the strict title/year fallback and can run as the sole provider",
+        ))
+    if not opensubtitles_key and not subdl_key:
+        checks.append(DiagnosticCheck(
+            name="Subtitle Provider API Key",
             status="warn",
-            message="OPENSUBTITLES_API_KEY environment variable is not set",
-            detail="Subtitle fetching step will be skipped until an API key is configured",
+            message="Neither OPENSUBTITLES_API_KEY nor SUBDL_API_KEY is set",
+            detail="Subtitle fetching will be skipped until at least one provider is configured",
             remedy=(
-                "Get a free consumer key at: https://www.opensubtitles.com/en/consumers\n"
+                "OpenSubtitles (recommended exact-match source): https://www.opensubtitles.com/en/consumers\n"
+                "SubDL (strict title/year fallback): https://subdl.com/panel/api\n"
                 "Windows (PowerShell): [Environment]::SetEnvironmentVariable('OPENSUBTITLES_API_KEY', 'your-key', 'User')\n"
-                "Linux/macOS (bash): export OPENSUBTITLES_API_KEY='your-key'"
+                "or: [Environment]::SetEnvironmentVariable('SUBDL_API_KEY', 'your-key', 'User')\n"
+                "Linux/macOS (bash): export OPENSUBTITLES_API_KEY='your-key'  # or export SUBDL_API_KEY='your-key'"
             ),
         ))
 
@@ -418,7 +432,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
         print(f"\n  {SYM_FAIL} {red('Action required:')} Fix the failed checks above before running automated tasks.")
         return 1
     elif total_warn > 0:
-        print(f"\n  {SYM_WARN} {yellow('Ready with optional steps:')} Core tasks will work; optional steps (remux, subs, 10bit) will skip until prerequisites are added.")
+        print(f"\n  {SYM_WARN} {yellow('Ready with optional steps:')} Core tasks will work; one or more optional pipeline steps will skip until prerequisites are added.")
         return 0
     else:
         print(f"\n  {SYM_OK} {green('All systems operational!')} This machine is fully provisioned for the complete Jellyfin media pipeline.")
@@ -550,7 +564,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("standardize", aliases=["std"], help="Rename & hardlink completed torrents into Title (Year)", add_help=False)
 
     # subtitles
-    subparsers.add_parser("subtitles", aliases=["subs"], help="Fetch English human UTF-8 SRT sidecars from OpenSubtitles", add_help=False)
+    subparsers.add_parser("subtitles", aliases=["subs"], help="Fetch English human UTF-8 SRT sidecars from OpenSubtitles + SubDL", add_help=False)
 
     # clean
     subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep 1 best audio, strip commentary/DVS", add_help=False)
