@@ -348,13 +348,13 @@ STATE_GUIDES: tuple[StateGuide, ...] = (
     StateGuide(
         "MISSING_SIDECAR", "Missing Eng SRT", "run subtitle_fetcher.py",
         "MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)",
-        f"Run subtitle_fetcher.py before mkv_track_cleaner.py: fetching first keeps the "
+        "Run subtitle_fetcher.py before mkv_track_cleaner.py: fetching first keeps the "
         "pristine release moviehash, which is what makes an exact subtitle match possible.",
     ),
     StateGuide(
         "INVALID_SIDECAR", "Invalid Eng SRT", "delete the broken sidecar",
         "MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)",
-        f"An INVALID entry means a sidecar exists but is unusable - delete that file first, "
+        "An INVALID entry means a sidecar exists but is unusable - delete that file first, "
         "because no tool will replace a sidecar it believes is already present.",
     ),
     StateGuide(

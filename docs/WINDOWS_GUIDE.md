@@ -253,7 +253,7 @@ py -m unittest discover -s tests -p "test_*.py"
 py organize.py test --unit
 ```
 
-208 unit tests plus one `--self-test` per script, all offline — no media, no
+274 unit tests plus one `--self-test` per script, all offline — no media, no
 binaries, no API key. (`run_tests.sh` is the bash equivalent.)
 
 ---

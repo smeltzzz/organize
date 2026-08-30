@@ -75,6 +75,7 @@ python movie_standardizer.py [PATH] [OPTIONS]
 | `--allow-tv` | `False` | — | Allow movies whose title triggers TV pattern matching |
 | `--category CAT` | None | — | Torrent category from qBittorrent (skips if TV) |
 | `--dry-run` | `False` | `MOVIE_STD_DRY_RUN` | Preview organization without hardlinking |
+| `--verbose`, `-v` | `False` | — | Print detailed per-item progress to the console |
 | `--deduplicate` | `False` | `MOVIE_STD_DEDUPLICATE` | Scan organized library for duplicate movie folders |
 | `--maintenance-mode` | `REPORT` | `MOVIE_STD_MAINTENANCE_MODE` | Maintenance action: `REPORT`, `QUARANTINE`, or `DELETE` |
 | `--quarantine-dir` | None | `MOVIE_STD_QUARANTINE` | Destination directory for quarantined items |
@@ -146,6 +147,8 @@ python mkv_track_cleaner.py [OPTIONS]
 | `--dir PATH` | `E:\torrents\final_organized` | Organized movie library root |
 | `--only PATH` | None | Restrict cleaning to a specific MKV file (repeatable) |
 | `--mkvmerge PATH` | `mkvmerge` | Path to `mkvmerge` binary |
+| `--standardizer-lock-timeout SECONDS` | `60.0` | Maximum wait for `movie_standardizer.py`'s coordination lock |
+| `--no-color` | `False` | Disable ANSI color in console output |
 | `--log PATH` | `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner.log` | Execution log file |
 | `--report PATH` | `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner_report.txt` | Replaceable summary report |
 | `--cache PATH` | `E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner_probe_cache.json` | Reusable JSON probe cache |
@@ -171,6 +174,7 @@ python 10bit.py [OPTIONS]
 | `--ffprobe PATH` | `ffprobe` | Path to `ffprobe` binary |
 | `--workers N` | `8` | Concurrent ffprobe inspection worker threads |
 | `--timeout S` | `45.0` | ffprobe execution timeout per movie |
+| `--lock-timeout SECONDS` | `60.0` | Maximum wait for another inspector run owning the lock |
 | `--min-size MB` | `0` | Minimum file size to process |
 | `--log PATH` | `E:\torrents\tools\ReportsAndLogs\10bit\10bit.log` | Execution log file |
 | `--report PATH` | `E:\torrents\tools\ReportsAndLogs\10bit\10bit_report.txt` | Replaceable action queue report |
@@ -179,6 +183,7 @@ python 10bit.py [OPTIONS]
 | `--fail-if-queue` | `False` | Exit non-zero (3) if 8-bit SDR movies are queued |
 | `--fail-if-review`| `False` | Exit non-zero (4) if movies require metadata review |
 | `--fail-if-error` | `False` | Exit non-zero (5) if any files failed probing |
+| `--verbose`, `-v` | `False` | Print detailed per-file scan progress to the console |
 | `--dry-run` | `False` | List discovered MKVs without probing |
 
 ---
@@ -202,15 +207,34 @@ python library_auditor.py [OPTIONS]
 
 ---
 
-## 8. Common Exit Codes
+## 8. Exit Codes
+
+The tools share a common baseline, but a few tools reserve additional codes
+for their own automation gates. Codes are therefore best read per-tool.
+
+### Baseline (shared across tools)
 
 | Code | Meaning |
 | :--- | :--- |
 | `0` | Success / All operations completed cleanly |
 | `1` | General error / Defects encountered under `--fail-on-*` flags |
 | `2` | Configuration error (missing directory, cross-device error, missing required flag) |
-| `3` | Coordination lock unavailable / Timed out waiting for other process |
+| `3` | Coordination lock unavailable / Timed out waiting for another process |
 | `130` | Interrupted by user (SIGINT / Ctrl+C) |
+
+### 10-bit inspector gates (`10bit.py`)
+
+`10bit.py` re-uses `3`, `4` and `5` for its own fail-fast gates, which take
+precedence over the baseline meaning of `3` on that tool:
+
+| Flag | Exit code when triggered |
+| :--- | :--- |
+| `--fail-if-queue` | `3` — confirmed 8-bit SDR movies are queued |
+| `--fail-if-review` | `4` — a movie needs a human metadata decision |
+| `--fail-if-error` | `5` — ffprobe could not inspect a movie |
+
+See [the README's pipeline section](../README.md#-the-pipeline) for how these map
+to scheduler-friendly non-zero exits.
 
 ---
 

@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A validated legacy `.en.srt` is automatically renamed to `.eng.srt` on the next fetcher, cleaner, or auditor run.
 
 ### Fixed
+- **`movie_standardizer.py --help` reported a stale default report path.** The `--report` help string claimed an old default of `E:\torrents\movie_standardizer\movie_standardizer_report.txt`, but the actual default (and the report that is written) is `E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt`. The help now matches the real constant, consistent with every other tool's `ReportsAndLogs` default.
+- **`mkv_track_cleaner.py --version` printed the old script name.** It hardcoded `track_cleaner.py {VERSION}`; every other tool derives its name from the invoked path (`%(prog)s`). It now prints `mkv_track_cleaner.py {VERSION}`.
+- **Placeholder-free `f`-strings and an unused `except` binding were removed** (`organize.py`, `library_auditor.py`) — caught by the project's `ruff` rules.
 - **Reports no longer depend on the console's encoding.** Every tool now pins its own stdout/stderr to UTF-8 with `errors="replace"` on *every* platform (`common.enable_utf8_stdio`; previously this ran on Windows only), the `log()` helpers print through the encoding-safe path, and every caller that captures a child process — `organize.py` and the test suite — decodes it as UTF-8 instead of with the locale encoding. Before this, a boxed report was a `UnicodeDecodeError` waiting to happen on Windows (cp1252) and a `UnicodeEncodeError` on a runner with no locale set. The report *file* is written UTF-8 either way, so a limited console degrades to `?` instead of losing data or aborting a run.
 - **Report entries wrap instead of being cut off.** `Report.entry()` used to ellipsize an
   entry that overflowed the 96-column page, which silently destroyed exactly what the line

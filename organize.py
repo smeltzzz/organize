@@ -251,7 +251,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             message=f"Found: {mkvmerge_ver or 'mkvmerge'}",
             detail=mkvmerge_bin,
         ))
-    except Exception as exc:
+    except Exception:
         remedy_msg = (
             "Windows: winget install MKVToolNix.MKVToolNix or https://mkvtoolnix.download/\n"
             "Debian/Ubuntu: sudo apt install -y mkvtoolnix\n"
@@ -674,7 +674,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Unknown command; show parser error
         parser = build_parser()
         parser.print_help()
-        print(f"\n{red(f'Unknown command:')} {command}", file=sys.stderr)
+        print(f"\n{red('Unknown command:')} {command}", file=sys.stderr)
         return 2
 
 
