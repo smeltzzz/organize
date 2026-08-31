@@ -19,7 +19,6 @@ from pathlib import Path
 
 from reporttext import scorecard, section
 
-import common
 import library_auditor as la
 import mkv_track_cleaner as tc
 import movie_standardizer as ms
@@ -132,7 +131,7 @@ class SharedLayoutTests(_SampleReports):
             with self.subTest(tool=name):
                 self.assertTrue(text.startswith("\u2554"), text.splitlines()[0])
                 for line in text.splitlines():
-                    self.assertLessEqual(len(line), common.REPORT_WIDTH, line)
+                    self.assertLessEqual(len(line), la.REPORT_WIDTH, line)
                 self.assertTrue(text.endswith("\n"))
 
     def test_every_report_opens_with_a_scorecard(self) -> None:
@@ -208,7 +207,7 @@ class StandardizerReportContentTests(_SampleReports):
 
         self.assertIn("Small.1995.mkv", section(text, "ITEMS LEFT IN SOURCE"))
         for line in text.splitlines():
-            self.assertLessEqual(len(line), common.REPORT_WIDTH, line)
+            self.assertLessEqual(len(line), la.REPORT_WIDTH, line)
 
 
 class HostileConsoleEncodingTests(unittest.TestCase):
@@ -252,6 +251,114 @@ class HostileConsoleEncodingTests(unittest.TestCase):
             text = report.read_bytes().decode("utf-8")
             self.assertIn(HEAVY * 2, text)
             self.assertIn("Covered Movie (2020).eng.srt", text)
+
+
+
+
+
+class ReportRendererTests(unittest.TestCase):
+    """The shared renderer is what makes five tools' reports read alike.
+
+    These pin the invariants every tool's report depends on: a boxed header,
+    a scorecard whose counts sit in one right-aligned column, banners that
+    delimit sections, and nothing that ever overflows the report width.
+    """
+
+    WIDTH = la.REPORT_WIDTH
+
+    def test_header_is_a_box_the_exact_report_width(self) -> None:
+        report = la.Report("TITLE", "subtitle")
+        for line in report.render_header().splitlines():
+            self.assertEqual(len(line), self.WIDTH)
+        self.assertTrue(report.render_header().startswith("\u2554"))
+        self.assertTrue(report.render_header().endswith("\u255d"))
+
+    def test_long_metadata_wraps_inside_the_box(self) -> None:
+        report = la.Report("T")
+        report.meta("Ledger", "E:\\reports\\logs\\" + "x" * 200)
+        for line in report.render_header().splitlines():
+            self.assertEqual(len(line), self.WIDTH)
+
+    def test_scorecard_counts_share_one_right_aligned_column(self) -> None:
+        report = la.Report("T")
+        report.scorecard([(3, "Needs a subtitle", "fix these"), (12, "Covered", "")])
+        lines = [line for line in report.render().splitlines() if "Covered" in line or "Needs" in line]
+        self.assertEqual(len(lines), 2)
+        columns = {line.index("   ") for line in lines}
+        self.assertEqual(len(columns), 1, lines)
+
+    def test_no_rendered_line_exceeds_the_report_width(self) -> None:
+        report = la.Report("T", "s")
+        report.meta("Library", "E:\\" + "very-long-segment\\" * 12)
+        report.scorecard([(1, "A very long scorecard label indeed", "a hint that is also long")])
+        report.section("A SECTION TITLE", count=1, total=2, intro="word " * 200)
+        report.subsection("A GROUP", count=1)
+        report.entry("x" * 300, detail="y " * 200, ordinal=1)
+        report.entry("short", detail="d", detail_column=40)
+        report.table(["One", "Two"], [["a" * 200, "b" * 200]])
+        report.footer(["z " * 200])
+        for line in report.render().splitlines():
+            self.assertLessEqual(len(line), self.WIDTH, line)
+
+    def test_a_long_entry_path_keeps_its_file_name_whole(self) -> None:
+        """An entry that overflows the width wraps; it is never ellipsised.
+
+        Clipping was the original behaviour and it cost the one thing the line
+        exists to name: on a macOS runner the standardizer's source paths run
+        to ~90 columns, so ``/var/folders/.../Small.1995.mkv`` rendered as
+        ``.../final/Small...`` and the test asserting the file name failed only
+        on macOS.  Wrapping at separators keeps the name intact everywhere.
+        """
+        deep = "/var/folders/q7/" + "a" * 28 + "/T/ms_runstate_ab12cd34/final/Small.1995.mkv"
+        report = la.Report("T")
+        report.entry(deep, detail="smaller than the 300 MB minimum", ordinal=1)
+        lines = report.render().splitlines()
+
+        self.assertTrue(
+            any(line.endswith("Small.1995.mkv") for line in lines),
+            "\n".join(lines),
+        )
+        self.assertLessEqual(max(len(line) for line in lines), self.WIDTH)
+        self.assertTrue(
+            any("smaller than the 300 MB minimum" in line for line in lines),
+            "\n".join(lines),
+        )
+
+    def test_path_wrapping_prefers_separators_over_splitting_names(self) -> None:
+        wrapped = la.wrap_path_text("/aaa/bbb/ccc/ddd/Small.1995.mkv", 18)
+        self.assertTrue(all(chunk in "/aaa/bbb/ccc/ddd/Small.1995.mkv" for chunk in wrapped))
+        self.assertEqual("".join(wrapped).replace(" ", ""), "/aaa/bbb/ccc/ddd/Small.1995.mkv")
+        self.assertIn("Small.1995.mkv", wrapped[-1])
+        # A single component wider than the width still has to break somewhere.
+        self.assertEqual(la.wrap_path_text("x" * 40, 16), ["x" * 16] * 2 + ["x" * 8])
+        # Short text is untouched.
+        self.assertEqual(la.wrap_path_text("Heat (1995).mkv", 40), ["Heat (1995).mkv"])
+
+    def test_a_partial_run_never_reports_more_items_than_the_total(self) -> None:
+        report = la.Report("T")
+        report.section("GROUP", count=5, total=3)
+        self.assertIn(" 5 ", report.render())
+        self.assertNotIn("5 of 3", report.render())
+
+    def test_entries_are_separated_by_a_blank_line(self) -> None:
+        report = la.Report("T")
+        report.entries([("first", "one"), ("second", "two")])
+        body = report.render().splitlines()
+        first = next(i for i, line in enumerate(body) if "first" in line)
+        second = next(i for i, line in enumerate(body) if "second" in line)
+        self.assertEqual(body[second - 1].strip(), "")
+        self.assertGreater(second - first, 2)
+
+    def test_table_columns_are_clipped_not_overflowed(self) -> None:
+        report = la.Report("T", width=la.REPORT_MIN_WIDTH)
+        report.table(["Folder", "Detail"], [["A" * 100, "B" * 100], ["short", "short"]])
+        for line in report.render().splitlines():
+            self.assertLessEqual(len(line), la.REPORT_MIN_WIDTH, line)
+
+    def test_report_always_ends_with_exactly_one_newline(self) -> None:
+        report = la.Report("T")
+        report.paragraph("hello")
+        self.assertTrue(report.render().endswith("hello\n"))
 
 
 if __name__ == "__main__":

@@ -13,14 +13,18 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from common import MediaProbeCache
-
 _SCRIPT = Path(__file__).resolve().parents[1] / "10bit.py"
 _name = "_tbit"
 _spec = importlib.util.spec_from_file_location(_name, _SCRIPT)
 tb: Any = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 sys.modules[_name] = tb
 _spec.loader.exec_module(tb)  # type: ignore[union-attr]
+
+MediaProbeCache = tb.MediaProbeCache
+atomic_write_text = tb.atomic_write_text
+path_norm = tb.path_norm
+format_bytes = tb.format_bytes
+format_duration = tb.format_duration
 
 
 class BitDepthTests(unittest.TestCase):
@@ -137,6 +141,152 @@ class ProbeCacheWiringTests(unittest.TestCase):
         tb.inspect_movie(self.movie, tb.Config())
         tb.inspect_movie(self.movie, tb.Config())
         self.assertEqual(len(self.calls), 2)
+
+
+class AtomicWriteTextTests(unittest.TestCase):
+    def test_writes_and_replaces(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "report.txt"
+            atomic_write_text(target, "hello")
+            self.assertEqual(target.read_text(encoding="utf-8"), "hello")
+            atomic_write_text(target, "world")
+            self.assertEqual(target.read_text(encoding="utf-8"), "world")
+
+    def test_creates_parents(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "a" / "b" / "report.txt"
+            atomic_write_text(target, "x")
+            self.assertTrue(target.is_file())
+            self.assertEqual(target.read_text(encoding="utf-8"), "x")
+
+    def test_leaves_no_temp_files(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "report.txt"
+            atomic_write_text(target, "data")
+            self.assertEqual([p.name for p in Path(td).iterdir()], ["report.txt"])
+
+
+class MediaProbeCacheTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="probe_cache_")
+        self.path = Path(self._td.name) / "cache.json"
+        self.addCleanup(self._td.cleanup)
+
+    def test_cold_cache_is_a_miss(self) -> None:
+        self.assertIsNone(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1))
+
+    def test_warm_cache_is_a_hit(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        self.assertEqual(cache.get("a.mkv", 10, 1), {"streams": []})
+        self.assertEqual((cache.hits, cache.misses), (1, 0))
+
+    def test_size_change_invalidates(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        self.assertIsNone(cache.get("a.mkv", 11, 1))
+
+    def test_mtime_change_invalidates(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        self.assertIsNone(cache.get("a.mkv", 10, 2))
+
+    def test_survives_a_reload(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": [{"id": 0}]})
+        cache.save()
+        self.assertEqual(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1),
+                         {"streams": [{"id": 0}]})
+
+    def test_save_is_a_noop_when_nothing_changed(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.save()
+        self.assertFalse(self.path.exists())
+
+    def test_a_different_tool_cache_is_not_reused(self) -> None:
+        cache = MediaProbeCache(self.path, tool="10bit")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        cache.save()
+        self.assertIsNone(MediaProbeCache(self.path, tool="mkv_track_cleaner").get("a.mkv", 10, 1))
+
+    def test_corrupt_cache_degrades_to_a_miss(self) -> None:
+        self.path.write_text("{not json", encoding="utf-8")
+        cache = MediaProbeCache(self.path, tool="t")
+        self.assertIsNone(cache.get("a.mkv", 10, 1))
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        self.assertEqual(cache.get("a.mkv", 10, 1), {"streams": []})
+
+    def test_truncated_json_degrades_to_a_miss(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        cache.save()
+        raw = self.path.read_text(encoding="utf-8")
+        self.path.write_text(raw[: len(raw) // 2], encoding="utf-8")
+        self.assertIsNone(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1))
+
+    def test_foreign_schema_is_ignored(self) -> None:
+        import json as _json
+
+        self.path.write_text(_json.dumps(
+            {"schema": MediaProbeCache.SCHEMA + 1, "tool": "t",
+             "entries": {"a.mkv": {"size": 10, "mtime_ns": 1, "payload": {}}}}
+        ), encoding="utf-8")
+        self.assertIsNone(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1))
+
+    def test_disabled_cache_never_reads_writes_or_persists(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t", enabled=False)
+        cache.put("a.mkv", 10, 1, {"streams": []})
+        cache.save()
+        self.assertIsNone(cache.get("a.mkv", 10, 1))
+        self.assertFalse(self.path.exists())
+
+    def test_evicts_oldest_past_the_cap(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t", max_entries=3)
+        for index in range(5):
+            cache.put(f"m{index}.mkv", 10, 1, {"i": index})
+        self.assertEqual(len(cache), 3)
+        self.assertIsNone(cache.get("m0.mkv", 10, 1))
+        self.assertEqual(cache.get("m4.mkv", 10, 1), {"i": 4})
+
+    def test_reinsert_refreshes_recency(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t", max_entries=2)
+        cache.put("a.mkv", 10, 1, {"i": "a"})
+        cache.put("b.mkv", 10, 1, {"i": "b"})
+        cache.put("a.mkv", 10, 1, {"i": "a2"})  # refresh a
+        cache.put("c.mkv", 10, 1, {"i": "c"})   # should evict b, not a
+        self.assertEqual(cache.get("a.mkv", 10, 1), {"i": "a2"})
+        self.assertIsNone(cache.get("b.mkv", 10, 1))
+        self.assertEqual(cache.get("c.mkv", 10, 1), {"i": "c"})
+
+    def test_keys_are_path_normalized(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("/lib/Film (2020)/Film (2020).mkv", 10, 1, {"ok": True})
+        self.assertEqual(cache.get("/lib/Film (2020)//Film (2020).mkv", 10, 1), {"ok": True})
+
+    def test_nondict_payload_is_ignored(self) -> None:
+        cache = MediaProbeCache(self.path, tool="t")
+        cache.put("a.mkv", 10, 1, {"ok": True})
+        cache.save()
+        import json as _json
+
+        doc = _json.loads(self.path.read_text(encoding="utf-8"))
+        doc["entries"][path_norm("a.mkv")]["payload"] = "not a dict"
+        self.path.write_text(_json.dumps(doc), encoding="utf-8")
+        self.assertIsNone(MediaProbeCache(self.path, tool="t").get("a.mkv", 10, 1))
+
+
+class ByteAndDurationFormatterTests(unittest.TestCase):
+    def test_byte_and_duration_formatters(self) -> None:
+        self.assertEqual(format_bytes(0), "0 B")
+        self.assertEqual(format_bytes(2048), "2.00 KiB")
+        self.assertEqual(format_bytes(5 * 1024 ** 3), "5.00 GiB")
+        self.assertEqual(format_duration(None), "-")
+        self.assertEqual(format_duration(65), "1:05")
+        self.assertEqual(format_duration(3725), "1:02:05")
+
+
+if __name__ == "__main__":
+    unittest.main()
 
 
 if __name__ == "__main__":

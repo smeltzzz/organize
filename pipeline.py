@@ -34,15 +34,490 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from common import Report, enable_utf8_stdio, print_text
+# ---------------------------------------------------------------------------
+# Shared helpers (vendored inline)
+#
+# This script is self-contained on purpose: every helper it needs is copied
+# below instead of imported from a shared module, so you can take this single
+# file anywhere and run it with nothing but the Python standard library.
+# The other scripts in this repo carry byte-identical copies of the same
+# helpers; if you change one, keep the others in sync.
+# ---------------------------------------------------------------------------
+
+REPORT_WIDTH = 96
+
+REPORT_MIN_WIDTH = 64
+
+REPORT_INDENT = 2
+
+_RULE_HEAVY = "═"
+
+_RULE_LIGHT = "─"
+
+def enable_utf8_stdio() -> None:
+    """Pin this process's console streams to UTF-8 with replacement errors.
+
+    The reports are full of box-drawing characters, and every tool now prints
+    one.  Two failures follow from leaving the stream encoding to the locale:
+    a console that cannot represent ``\u2550`` raises ``UnicodeEncodeError``
+    half-way through a run, and a parent that captures a child's output with
+    ``text=True`` decodes it with the *locale* encoding - cp1252 on Windows -
+    which turns those same bytes into a ``UnicodeDecodeError``.
+
+    So every tool pins its own output to UTF-8 at startup, and every caller
+    that captures a child decodes it as UTF-8.  ``errors="replace"`` means a
+    console that still cannot cope degrades to ``?`` instead of aborting work
+    that has already been done.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # a replaced stream, e.g. under redirect_stdout
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):  # closed or detached stream
+            pass
+
+def print_text(text: str) -> None:
+    """Print report text without ever raising on a legacy console encoding.
+
+    Reports contain box-drawing characters.  On a console or pipe whose
+    encoding cannot represent them, ``print`` raises ``UnicodeEncodeError``,
+    which used to surface as a crash *after* the work was already done.  The
+    fallback writes the same text with unrepresentable characters replaced.
+    """
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:
+        try:
+            encoding = sys.stdout.encoding or "utf-8"
+            sys.stdout.buffer.write((text + "\n").encode(encoding, errors="replace"))
+            sys.stdout.buffer.flush()
+        except Exception:  # pragma: no cover - a stream that cannot be written at all
+            print(text.encode("ascii", errors="replace").decode("ascii"), flush=True)
+
+def clip_text(text: str, width: int, *, ellipsis: str = "...") -> str:
+    """Shorten ``text`` to at most ``width`` columns, marking the cut."""
+    text = str(text)
+    if width <= 0:
+        return ""
+    if len(text) <= width:
+        return text
+    if width <= len(ellipsis):
+        return text[:width]
+    return text[: width - len(ellipsis)].rstrip() + ellipsis
+
+def wrap_text(text: str, width: int) -> list[str]:
+    """Wrap ``text`` to ``width`` columns, preserving explicit line breaks."""
+    width = max(1, int(width))
+    out: list[str] = []
+    for paragraph in str(text).split("\n"):
+        if not paragraph.strip():
+            out.append("")
+            continue
+        chunks = textwrap.wrap(
+            paragraph,
+            width=width,
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+        out.extend(chunks or [""])
+    return out
+
+_PATH_BREAK_RE = re.compile(r"(?<=[/\\])|(?<=\s)")
+
+def _pack_on_separators(text: str, width: int) -> list[str]:
+    """Greedily fill lines, breaking only after a separator or a space."""
+    lines: list[str] = []
+    current = ""
+    for token in (tok for tok in _PATH_BREAK_RE.split(text) if tok):
+        if len(token) > width:
+            if current.strip():
+                lines.append(current.rstrip())
+            current = ""
+            lines.extend(line.rstrip() for line in wrap_text(token, width))
+            continue
+        if current and len(current) + len(token) > width:
+            lines.append(current.rstrip())
+            current = token
+        else:
+            current += token
+    if current.strip():
+        lines.append(current.rstrip())
+    return lines
+
+def wrap_path_text(text: str, width: int) -> list[str]:
+    """Wrap ``text`` on path separators and spaces, keeping names whole.
+
+    Report lines are usually paths, and the tail of a path - the movie folder
+    or file name - is what a reader scans for.  Breaking after ``/`` and ``\\``
+    keeps that name on one line, where ``wrap_text`` would happily split it in
+    half.  Only a single component longer than ``width`` is hard-broken, and
+    nothing is ever ellipsised away.
+    """
+    width = max(1, int(width))
+    text = str(text)
+    if len(text) <= width:
+        return [text]
+    out: list[str] = []
+    for paragraph in text.split("\n"):
+        if not paragraph.strip():
+            out.append("")
+        elif len(paragraph) <= width:
+            out.append(paragraph.rstrip())
+        else:
+            out.extend(_pack_on_separators(paragraph, width))
+    return out or [""]
+
+class Report:
+    """Builder for one tool's plain-text report.
+
+    The layout is fixed so every tool reads the same way::
+
+        +--------------------------------------------------------------+
+        |  boxed header: title, subtitle, aligned metadata             |
+        +--------------------------------------------------------------+
+
+          scorecard: right-aligned counts, one line per outcome
+
+          ══ SECTION TITLE ═════════════════════════════════════  n of m ══
+          wrapped explanation of why this section matters
+
+             1  first entry
+                Reason    aligned, wrapped detail field
+                Next      the thing to do about it
+
+    Nothing here writes to disk; call :meth:`render` and hand the text to
+    ``atomic_write_text``.
+    """
+
+    def __init__(self, title: str, subtitle: str = "", *, width: int = REPORT_WIDTH) -> None:
+        self._title = title
+        self._subtitle = subtitle
+        self._width = max(REPORT_MIN_WIDTH, int(width))
+        self._meta: list[tuple[str, str]] = []
+        self._body: list[str] = []
+
+    # -- geometry ------------------------------------------------------
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def _inner(self) -> int:
+        """Columns available inside the header box (``║ `` + text + `` ║``)."""
+        return self._width - 4
+
+    # -- header --------------------------------------------------------
+    def meta(self, label: str, value: object) -> Report:
+        """Add one ``label  value`` row to the boxed header."""
+        self._meta.append((str(label), "" if value is None else str(value)))
+        return self
+
+    def metas(self, pairs: Iterable[tuple[str, object]]) -> Report:
+        for label, value in pairs:
+            self.meta(label, value)
+        return self
+
+    @staticmethod
+    def _is_rule(line: str) -> bool:
+        """True for a line that is only rule characters (used to space entries)."""
+        stripped = line.strip()
+        return bool(stripped) and set(stripped) <= {_RULE_HEAVY, _RULE_LIGHT}
+
+    def _box_row(self, text: str) -> str:
+        return "║ " + clip_text(text, self._inner, ellipsis="..").ljust(self._inner) + " ║"
+
+    def render_header(self) -> str:
+        """Render just the boxed header (used for the startup banner too)."""
+        lines = ["╔" + _RULE_HEAVY * (self._width - 2) + "╗"]
+        lines.append(self._box_row(self._title))
+        if self._subtitle:
+            for chunk in wrap_text(self._subtitle, self._inner):
+                lines.append(self._box_row(chunk))
+        if self._meta:
+            lines.append("╟" + _RULE_LIGHT * (self._width - 2) + "╢")
+            label_width = max(len(label) for label, _ in self._meta)
+            value_width = self._inner - label_width - 2
+            for label, value in self._meta:
+                if not value:
+                    lines.append(self._box_row(label))
+                    continue
+                # Long values here are usually paths; break them at a
+                # separator so a directory name is not split mid-word.
+                chunks = wrap_path_text(value, value_width) or [""]
+                pad = " " * (label_width + 2)
+                for position, chunk in enumerate(chunks):
+                    lead = f"{label.ljust(label_width)}  " if position == 0 else pad
+                    lines.append(self._box_row(lead + chunk))
+        lines.append("╚" + _RULE_HEAVY * (self._width - 2) + "╝")
+        return "\n".join(lines)
+
+    # -- body ----------------------------------------------------------
+    def blank(self, count: int = 1) -> Report:
+        self._body.extend([""] * max(0, count))
+        return self
+
+    def rule(self, char: str = _RULE_LIGHT, *, indent: int = REPORT_INDENT) -> Report:
+        self._body.append(" " * indent + char * max(0, self._width - indent))
+        return self
+
+    def paragraph(self, text: str, *, indent: int = REPORT_INDENT) -> Report:
+        """A wrapped block of prose; leading spaces on continuation lines."""
+        for chunk in wrap_text(text, self._width - indent):
+            self._body.append(" " * indent + chunk)
+        return self
+
+    def title_line(self, text: str, *, right: str = "", indent: int = REPORT_INDENT) -> Report:
+        """``text`` left-aligned with ``right`` pushed to the right margin."""
+        span = self._width - indent
+        if not right:
+            self._body.append(" " * indent + clip_text(text, span))
+            return self
+        gap = span - len(right) - len(text)
+        if gap < 2:
+            self._body.append(" " * indent + clip_text(f"{text}  {right}", span))
+        else:
+            self._body.append(" " * indent + text + " " * gap + right)
+        return self
+
+    def scorecard(self, rows: Iterable[tuple], *, indent: int = REPORT_INDENT) -> Report:
+        """Render ``(count, label, hint)`` rows between two light rules.
+
+        The count is right-aligned so a reader can scan the numbers as a
+        column, and the hint column is clipped rather than wrapped: a scorecard
+        is meant to fit on one screen.
+        """
+        materialized = [(str(count), str(label), str(hint or "")) for count, label, hint in rows]
+        if not materialized:
+            return self
+        count_width = max(4, max(len(count) for count, _, _ in materialized))
+        label_width = max(len(label) for _, label, _ in materialized)
+        span = self._width - indent
+        self.rule(indent=indent)
+        for count, label, hint in materialized:
+            line = f"{count:>{count_width}}   {label:<{label_width}}"
+            if hint:
+                room = span - len(line) - 3
+                if room > 8:
+                    line += "   " + clip_text(hint, room)
+            self._body.append(" " * indent + clip_text(line, span))
+        self.rule(indent=indent)
+        return self
+
+    def section(
+        self,
+        title: str,
+        *,
+        count: int | None = None,
+        total: int | None = None,
+        intro: str = "",
+        indent: int = REPORT_INDENT,
+    ) -> Report:
+        """Open a major section: a heavy banner plus an optional explanation."""
+        if self._body and self._body[-1].strip():
+            self.blank()
+        tally = ""
+        if count is not None:
+            # A partial or interrupted run can report more items in a group than
+            # the scan counted; "5 of 3" would be nonsense, so the total is only
+            # shown when it is actually the larger number.
+            show_total = total is not None and int(total) >= int(count)
+            tally = f"{count} of {total}" if show_total else str(count)
+        span = self._width - indent
+        head = f"{_RULE_HEAVY}{_RULE_HEAVY} {title} "
+        tail = f" {tally} {_RULE_HEAVY}{_RULE_HEAVY}" if tally else ""
+        fill = span - len(head) - len(tail)
+        if fill < 3:
+            self._body.append(" " * indent + clip_text(head.strip() + ("  " + tally if tally else ""), span,
+                                                      ellipsis=""))
+        else:
+            self._body.append(" " * indent + head + _RULE_HEAVY * fill + tail)
+        if intro:
+            self.blank()
+            self.paragraph(intro, indent=indent)
+        self.blank()
+        return self
+
+    def subsection(
+        self,
+        title: str,
+        *,
+        count: int | None = None,
+        indent: int = REPORT_INDENT,
+    ) -> Report:
+        """Open a labelled group inside a section (one light rule, not a box)."""
+        if self._body and self._body[-1].strip():
+            self.blank()
+        span = self._width - indent
+        tally = f" {count}" if count is not None else ""
+        head = f"{_RULE_LIGHT}{_RULE_LIGHT} {title} "
+        tail = f"{tally} {_RULE_LIGHT}{_RULE_LIGHT}"
+        fill = span - len(head) - len(tail)
+        if fill < 3:
+            self._body.append(" " * indent + clip_text(head.strip() + tally, span, ellipsis=""))
+        else:
+            self._body.append(" " * indent + head + _RULE_LIGHT * fill + tail)
+        return self
+
+    def entry(
+        self,
+        text: str,
+        *,
+        detail: str = "",
+        ordinal: int | None = None,
+        marker: str = "",
+        fields: Iterable[tuple[str, str]] = (),
+        detail_column: int = 0,
+        indent: int = 4,
+    ) -> Report:
+        """One item in a section.
+
+        ``ordinal`` numbers the entry; ``marker`` is a short tag used instead
+        when numbering would be noise.  ``detail_column`` puts a short detail
+        on the same line at a fixed column (used for name/sidecar tables) and
+        falls back to a wrapped line underneath when it would not fit.
+        ``fields`` are ``label  value`` pairs aligned under the entry text.
+        """
+        if ordinal is not None:
+            prefix = f"{ordinal:>4}  "
+        elif marker:
+            prefix = f"{marker:<4}  "
+        else:
+            prefix = "      "
+        span = self._width - indent
+        head_limit = span - len(prefix)
+        if detail_column > 0:
+            # A fixed detail column only reads as a table when the entry text
+            # stays inside it, so long titles wrap to a continuation line
+            # instead of pushing every detail sideways.
+            head_limit = min(head_limit, max(8, detail_column - indent - len(prefix)))
+        # Entry text wraps rather than being ellipsised: the tail of a long
+        # path is usually the part a reader came for, and clipping it away
+        # hides the very information the report exists to convey.
+        head_chunks = wrap_path_text(text, max(8, head_limit)) or [""]
+        # Entries breathe: a blank line separates them, but a section banner or
+        # its explanation paragraph keeps the first entry tight underneath.
+        if self._body and self._body[-1].strip() and not self._is_rule(self._body[-1]):
+            self._body.append("")
+        head_index = len(self._body)
+        self._body.append(" " * indent + prefix + head_chunks[0])
+        continuation = " " * (indent + len(prefix))
+        self._body.extend(continuation + chunk for chunk in head_chunks[1:])
+        materialized = [(str(label), str(value or "")) for label, value in fields]
+        if materialized:
+            label_width = max(6, max(len(label) for label, _ in materialized))
+            for label, value in materialized:
+                lead = f"{label.ljust(label_width)}  "
+                chunks = wrap_text(value, max(8, span - len(prefix) - len(lead))) or [""]
+                self._body.append(continuation + lead + chunks[0])
+                for chunk in chunks[1:]:
+                    self._body.append(continuation + " " * len(lead) + chunk)
+        if detail:
+            head = head_chunks[0]
+            # A detail can ride on the entry's own line only when that entry
+            # text did not have to wrap; otherwise it belongs underneath.
+            if detail_column > 0 and len(head_chunks) == 1:
+                room = detail_column - indent - len(prefix) - len(head)
+                if room >= 1 and len(detail) <= span - detail_column:
+                    self._body[head_index] = (
+                        " " * indent + prefix + head.ljust(detail_column - indent - len(prefix)) + detail
+                    )
+                    return self
+            for chunk in wrap_text(detail, max(8, span - len(prefix) - 2)):
+                self._body.append(continuation + "  " + chunk)
+        return self
+
+    def table(
+        self,
+        headers: Iterable[str],
+        rows: Iterable[Iterable],
+        *,
+        aligns: str = "",
+        indent: int = 4,
+    ) -> Report:
+        """An aligned column table with a header row and a rule under it.
+
+        ``aligns`` is one character per column, ``<`` or ``>``.  Columns are
+        sized to their content and then trimmed - widest first, never below
+        their header - so the table always fits inside the report width.
+        """
+        head = [str(column) for column in headers]
+        body = [[("" if cell is None else str(cell)) for cell in row] for row in rows]
+        columns = len(head)
+        if not columns:
+            return self
+        aligns = (aligns or "<" * columns).ljust(columns, "<")[:columns]
+        span = self._width - indent
+        widths = [
+            max([len(head[i])] + [len(row[i]) for row in body if i < len(row)])
+            for i in range(columns)
+        ]
+        gaps = 2 * (columns - 1)
+        minimums = [max(6, len(column)) for column in head]
+        while sum(widths) + gaps > span:
+            shrinkable = [i for i in range(columns) if widths[i] > minimums[i]]
+            if not shrinkable:
+                break
+            widths[max(shrinkable, key=lambda i: widths[i])] -= 1
+
+        def render(cells: list[str]) -> str:
+            parts = []
+            for i, cell in enumerate(cells[:columns]):
+                text = clip_text(cell, widths[i])
+                parts.append(text.rjust(widths[i]) if aligns[i] == ">" else text.ljust(widths[i]))
+            return " " * indent + "  ".join(parts).rstrip()
+
+        self._body.append(render(head))
+        self._body.append(" " * indent + "  ".join(_RULE_LIGHT * width for width in widths))
+        for row in body:
+            self._body.append(render(list(row) + [""] * (columns - len(row))))
+        return self
+
+    def entries(self, items: Iterable, **defaults: object) -> Report:
+        """Render an iterable of entry specs, numbered in order.
+
+        Each item is either a ``(text, detail)`` tuple or a mapping of
+        :meth:`entry` keyword arguments (``detail``, ``fields``, ``marker``).
+        ``defaults`` supplies the keyword arguments shared by every item.
+        """
+        for position, item in enumerate(items, start=1):
+            if isinstance(item, tuple):
+                text, detail = (list(item) + [""])[:2]
+                spec: dict = {"text": text, "detail": detail}
+            else:
+                spec = dict(item)
+            spec.setdefault("ordinal", position)
+            merged = {**defaults, **spec}
+            self.entry(str(merged.pop("text", "")), **merged)
+        return self
+
+    def footer(self, lines: Iterable[str] = (), *, indent: int = REPORT_INDENT) -> Report:
+        """Close the report with a light rule and trailing notes."""
+        self.blank()
+        self.rule(indent=indent)
+        for line in lines:
+            self.paragraph(line, indent=indent)
+        return self
+
+    # -- output --------------------------------------------------------
+    def render(self) -> str:
+        """The whole report as one string, always ending in a newline."""
+        lines = self.render_header().split("\n")
+        lines.append("")
+        lines.extend(self._body)
+        # Trailing spaces are invisible in a terminal and noisy in a diff.
+        return "\n".join(line.rstrip() for line in lines).rstrip() + "\n"
 
 VERSION = "1.0.0"
 
@@ -52,7 +527,6 @@ DEFAULT_LIBRARY = r"E:\torrents\final_organized"
 # The canonical order. Index order is the execution order; do not reorder
 # without re-reading the moviehash note in the module docstring.
 STEP_ORDER = ("fetcher", "cleaner", "10bit", "auditor")
-
 
 @dataclass(frozen=True)
 class Step:
@@ -64,7 +538,6 @@ class Step:
     supports_dry_run: bool = True
     supports_limit: bool = True
     supports_nice: bool = False
-
 
 STEPS: dict[str, Step] = {
     "fetcher": Step(
@@ -85,7 +558,6 @@ STEPS: dict[str, Step] = {
     ),
 }
 
-
 @dataclass
 class Config:
     library: Path = Path(DEFAULT_LIBRARY)
@@ -94,7 +566,6 @@ class Config:
     limit: int = 0
     nice: bool = False
     continue_on_error: bool = True
-
 
 # Shown before a step runs, because the failure mode is silent and easy to
 # misread as "nothing to do".
@@ -113,7 +584,6 @@ HINTS: dict[str, str] = {
     ),
 }
 
-
 @dataclass
 class StepResult:
     key: str
@@ -123,12 +593,10 @@ class StepResult:
     seconds: float = 0.0
     detail: str = ""
 
-
 @dataclass
 class Run:
     results: list[StepResult] = field(default_factory=list)
     elapsed: float = 0.0
-
 
 # ---------------------------------------------------------------------------
 # Prerequisites
@@ -148,7 +616,6 @@ def _api_key_present() -> bool:
     )
     return any(str(key or "").strip() for key in keys)
 
-
 def _mkvmerge_present() -> bool:
     try:
         import mkv_track_cleaner as tc
@@ -156,7 +623,6 @@ def _mkvmerge_present() -> bool:
         return True
     except Exception:
         return shutil.which("mkvmerge") is not None
-
 
 def _ffprobe_present() -> bool:
     try:
@@ -171,7 +637,6 @@ def _ffprobe_present() -> bool:
         return probe.find_ffprobe() is not None
     except Exception:
         return shutil.which("ffprobe") is not None
-
 
 PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
     "fetcher": (
@@ -188,7 +653,6 @@ PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
     ),
 }
 
-
 def prerequisite_issue(step: Step) -> str | None:
     """Return a reason to skip ``step``, or ``None`` when it can run."""
     script_path = HERE / step.script
@@ -202,7 +666,6 @@ def prerequisite_issue(step: Step) -> str | None:
         return reason or "prerequisite check failed"
     return None
 
-
 def build_command(step: Step, cfg: Config) -> list[str]:
     """Build the argv for one step, mirroring what you would type by hand."""
     command = [sys.executable, str(HERE / step.script), step.root_flag, str(cfg.library)]
@@ -213,7 +676,6 @@ def build_command(step: Step, cfg: Config) -> list[str]:
     if cfg.nice and step.supports_nice:
         command.append("--nice")
     return command
-
 
 # ---------------------------------------------------------------------------
 # Execution
@@ -244,7 +706,6 @@ def run_step(step: Step, cfg: Config, dry_run_pipeline: bool = False) -> StepRes
     return StepResult(step.key, step.title, "ran", returncode=code,
                       seconds=time.monotonic() - started)
 
-
 def run_pipeline(cfg: Config, dry_run: bool = False) -> Run:
     started = time.monotonic()
     run = Run()
@@ -260,7 +721,6 @@ def run_pipeline(cfg: Config, dry_run: bool = False) -> Run:
                 break
     run.elapsed = time.monotonic() - started
     return run
-
 
 def build_summary(run: Run, cfg: Config) -> str:
     """Render the pipeline summary with the same layout as every tool's report."""
@@ -314,24 +774,21 @@ def build_summary(run: Run, cfg: Config) -> str:
     report.footer(closing)
     return report.render()
 
-
 def resolve_steps(requested: Sequence[str]) -> tuple[str, ...]:
     """Keep the canonical order regardless of the order flags were supplied in."""
     chosen = set(requested)
     return tuple(key for key in STEP_ORDER if key in chosen)
 
-
 def resolve_library(cli_source: Path | None) -> Path:
     """Resolve the library root: explicit flag, then MOVIE_STD_TARGET, then default.
 
-    Docker deployments point ``MOVIE_STD_TARGET`` at the container mount, so
-    honoring it here lets ``docker compose run --rm organize run`` work without
-    retyping ``--source`` on every invocation.
+    Scheduled runs (cron, Task Scheduler, qBittorrent hooks) typically set
+    ``MOVIE_STD_TARGET`` once in the environment, so honoring it here means
+    ``pipeline.py`` can run without retyping ``--source`` on every invocation.
     """
     if cli_source is not None:
         return cli_source.expanduser().resolve()
     return Path(os.environ.get("MOVIE_STD_TARGET") or DEFAULT_LIBRARY).expanduser().resolve()
-
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -365,7 +822,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Print the steps, what needs to be installed, and exit")
     parser.add_argument("--self-test", action="store_true")
     return parser
-
 
 def main(argv: Sequence[str] | None = None) -> int:
     enable_utf8_stdio()
@@ -407,7 +863,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     print()
     print_text(build_summary(run, cfg))
     return 1 if any(r.status == "ran" and r.returncode for r in run.results) else 0
-
 
 # ---------------------------------------------------------------------------
 # SELF-TEST  (offline; never launches a tool)
@@ -503,7 +958,6 @@ def run_self_tests() -> int:
         return 1
     print("SELF-TEST PASSED (step order + flag mapping + skip handling + summary)")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

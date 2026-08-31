@@ -14,7 +14,8 @@ from pathlib import Path
 from reporttext import scorecard
 
 import mkv_track_cleaner as tc
-from common import MediaProbeCache
+
+MediaProbeCache = tc.MediaProbeCache
 
 
 class LanguageAndCommentaryTests(unittest.TestCase):
@@ -221,7 +222,7 @@ class ForeignFilmWithExternalSrtTests(unittest.TestCase):
         tc._target_root = self._real_root
 
     def _write_srt(self) -> None:
-        from common import EXTERNAL_SRT_SUFFIX
+        from mkv_track_cleaner import EXTERNAL_SRT_SUFFIX
         (self.folder / f"Film (2019){EXTERNAL_SRT_SUFFIX}").write_text(
             "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8",
         )

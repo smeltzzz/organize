@@ -82,6 +82,8 @@ v2.3 (one-movie-file-per-folder guarantee)
 from __future__ import annotations
 
 import argparse
+import errno
+import hashlib
 import json
 import logging
 import os
@@ -90,10 +92,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+import time
 import traceback
 import unicodedata
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
@@ -101,23 +105,746 @@ from pathlib import Path
 from stat import S_ISREG
 from typing import Any
 
-from common import (
-    EXTERNAL_SRT_CUE_RE,
-    EXTERNAL_SRT_LANG,
-    EXTERNAL_SRT_MAX_BYTES,
-    EXTERNAL_SRT_SUFFIX,
-    CoordinationLock,
-    LockTimeoutError,
-    Report,
-    atomic_write_text,
-    decode_srt_bytes,
-    enable_utf8_stdio,
-    normalize_srt_newlines,
-    path_is_within,
-    path_norm,
-    paths_equal,
-    print_text,
+# ---------------------------------------------------------------------------
+# Shared helpers (vendored inline)
+#
+# This script is self-contained on purpose: every helper it needs is copied
+# below instead of imported from a shared module, so you can take this single
+# file anywhere and run it with nothing but the Python standard library.
+# The other scripts in this repo carry byte-identical copies of the same
+# helpers; if you change one, keep the others in sync.
+# ---------------------------------------------------------------------------
+
+STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
+
+# ---------------------------------------------------------------------------
+# External English SRT sidecar contract
+# ---------------------------------------------------------------------------
+# Every tool in the pipeline that reasons about an external subtitle agrees on
+# the same conservative contract: a plain-text file beside the movie, small,
+# non-empty, and carrying at least one well-formed cue.  The content verdict
+# lives here so a new tool cannot quietly disagree with the others about
+# whether a sidecar is usable.
+#
+# The cue pattern is the tolerant form: leading whitespace before the cue
+# number is accepted, because some muxers and editors indent it.  This is a
+# "does it look like a subtitle at all" test, not a full SRT parser.
+#
+# Canonical language tag is ISO 639-2/B ``eng`` (``.eng.srt``).  The older
+# ISO 639-1 ``.en.srt`` form is recognized only as a legacy rename source so a
+# library cut over from the previous convention is not stuck in review.
+
+EXTERNAL_SRT_MAX_BYTES = 4 * 1024 * 1024
+
+EXTERNAL_SRT_CUE_RE = re.compile(
+    r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
 )
+
+EXTERNAL_SRT_LANG = "eng"
+
+EXTERNAL_SRT_SUFFIX = f".{EXTERNAL_SRT_LANG}.srt"  # ".eng.srt"
+
+EXTERNAL_SRT_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "cp1252")
+
+def normalize_srt_newlines(text: str) -> str:
+    """Collapse CRLF and bare CR to LF so the cue pattern handles one form."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+def decode_srt_bytes(raw: bytes) -> str | None:
+    """Decode subtitle bytes in the agreed order, or ``None`` if none applies.
+
+    Callers that need a best-effort string anyway (the fetcher inspects a
+    rejected download to explain why it was rejected) decode with
+    ``errors="replace"`` themselves rather than widening this contract.
+    """
+    for encoding in EXTERNAL_SRT_ENCODINGS:
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return None
+
+class LockTimeoutError(TimeoutError):
+    """Raised when a ``CoordinationLock`` cannot be acquired in time.
+
+    Subclasses :class:`TimeoutError` so callers that historically caught the
+    built-in ``TimeoutError`` (e.g. the mkv track cleaner) keep working.
+    """
+
+def try_file_lock(handle: Any, *, strict_non_contention: bool = False) -> bool:
+    """Attempt a non-blocking exclusive lock on ``handle``.
+
+    Returns ``True`` when the lock is taken, ``False`` when it is held by
+    another process.
+
+    ``strict_non_contention`` controls how a *real* OS error is handled:
+
+    * ``False`` (the historical behaviour of the per-tool run locks) treats any
+      ``OSError`` as "busy" — ``10bit.py`` and ``library_auditor.py`` retried
+      every failure until they timed out.
+    * ``True`` (the historical behaviour of the standardizer coordination lock)
+      re-raises genuine errors and only reports the well-known
+      "already locked" codes as busy.
+    """
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+            return True
+        except OSError as exc:
+            if not strict_non_contention:
+                return False
+            if getattr(exc, "winerror", None) in {33, 36} or exc.errno in {
+                errno.EACCES,
+                errno.EAGAIN,
+            }:
+                return False
+            raise
+
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError as exc:
+        if not strict_non_contention:
+            return False
+        # Strict mode: the only expected "busy" condition is the lock being
+        # held by another process, which surfaces as EAGAIN/EWOULDBLOCK (and
+        # occasionally EACCES). Anything else is a real error worth raising.
+        if getattr(exc, "errno", None) in {
+            errno.EACCES,
+            errno.EAGAIN,
+            getattr(errno, "EWOULDBLOCK", errno.EAGAIN),
+        }:
+            return False
+        raise
+
+class CoordinationLock:
+    """Advisory, cross-platform, fail-closed lock shared across the tools.
+
+    This is the single implementation of the lock protocol used by
+    ``movie_standardizer.py``, ``mkv_track_cleaner.py`` and
+    ``subtitle_fetcher.py``.  Because all three hash the *same normalized
+    target path* with the *same lock file name* in the system temp directory,
+    they all contend on the identical file — which is exactly what prevents a
+    qBittorrent completion hook from placing or replacing canonical hardlinks
+    while another tool scans or remuxes them.
+
+    Usable as a context manager::
+
+        with CoordinationLock(library, timeout_seconds=60.0):
+            ...
+
+    or with explicit acquire/release::
+
+        lock = CoordinationLock(target, timeout_seconds=60.0)
+        lock.acquire()
+        try:
+            ...
+        finally:
+            lock.release()
+    """
+
+    def __init__(self, target: Path | str, *, timeout_seconds: float = 60.0) -> None:
+        normalized = os.path.normcase(os.path.normpath(str(target)))
+        key = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
+        self.path = Path(tempfile.gettempdir()) / f"{STANDARDIZER_LOCK_NAME}.{key}"
+        self.timeout_seconds = max(0.0, float(timeout_seconds))
+        self._fh: Any | None = None
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(self.path, "a+b")
+        self._fh = handle
+        # Windows msvcrt locks byte ranges; materialize the first byte once.
+        if handle.seek(0, os.SEEK_END) == 0:
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + self.timeout_seconds
+        try:
+            while not try_file_lock(handle, strict_non_contention=True):
+                if time.monotonic() >= deadline:
+                    raise LockTimeoutError(
+                        f"Timed out after {self.timeout_seconds:.1f}s waiting for "
+                        f"library coordination lock: {self.path}"
+                    )
+                time.sleep(0.1)
+        except BaseException:
+            handle.close()
+            self._fh = None
+            raise
+
+    def release(self) -> None:
+        handle = self._fh
+        if handle is None:
+            return
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+                except OSError:
+                    pass
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+            self._fh = None
+
+    def __enter__(self) -> CoordinationLock:
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.release()
+
+def atomic_write_text(path: Path, text: str) -> None:
+    r"""Publish ``text`` to ``path`` atomically.
+
+    Writes through a unique sibling file then ``os.replace``\ s it into place, so
+    a crash never leaves a truncated report and a read in progress always sees
+    either the previous file or the complete new one.  On failure the staged
+    file is removed and the prior report is retained.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = path.with_name(f".{path.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+    try:
+        staged.write_text(text, encoding="utf-8")
+        os.replace(str(staged), str(path))
+    except OSError:
+        try:
+            staged.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+def path_is_within(candidate: Path, parent: Path) -> bool:
+    """True when ``candidate`` is ``parent`` or a descendant after normalization.
+
+    Uses ``resolve(strict=False)`` so it also works for paths that have not been
+    created yet (e.g. the report/log files in a not-yet-existing output dir).
+    """
+    try:
+        candidate.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        return True
+    except (OSError, ValueError):
+        return False
+
+def path_norm(path: Path | str) -> str:
+    """Normalize a path the same way every tool compares them.
+
+    ``normcase`` lower-cases on Windows and is a no-op on POSIX; ``normpath``
+    collapses ``..`` and duplicate separators.  Matching this exactly is what
+    lets the standardizer, cleaner and subtitle fetcher agree on a lock key and
+    on whether two paths are the same file.
+    """
+    return os.path.normcase(os.path.normpath(str(path)))
+
+def paths_equal(a: Path | str, b: Path | str) -> bool:
+    """True when two paths refer to the same file.
+
+    If both paths already exist, ``samefile`` resolves hard links and symlinks
+    (the most accurate answer); otherwise it falls back to the normalized-text
+    comparison used for paths that may not have been created yet.
+    """
+    pa = Path(a) if isinstance(a, str) else a
+    pb = Path(b) if isinstance(b, str) else b
+    try:
+        if pa.exists() and pb.exists():
+            return pa.samefile(pb)
+    except OSError:
+        pass
+    return path_norm(pa) == path_norm(pb)
+
+# ---------------------------------------------------------------------------
+# Plain-text report renderer
+# ---------------------------------------------------------------------------
+# Every tool publishes exactly one replaceable plain-text report, and each one
+# used to hand-roll its own separators, label padding and section banners.  The
+# result was six reports that looked nothing alike, where the one thing the
+# reader came for - "what needs my attention?" - was buried under a wall of
+# undifferentiated lines.
+#
+# ``Report`` is now the single source of that layout: a boxed header with
+# aligned metadata, a right-aligned scorecard, and titled sections whose
+# entries share one hanging indent.  It stays plain text on purpose: reports
+# are read in a terminal, in a text editor, and pasted into bug reports.
+#
+# Every glyph used here is single-width and present in both UTF-8 and the
+# legacy Windows console code pages (cp437/cp850), so a report never turns
+# into question marks on an old console.
+
+REPORT_WIDTH = 96
+
+REPORT_MIN_WIDTH = 64
+
+REPORT_INDENT = 2
+
+_RULE_HEAVY = "═"
+
+_RULE_LIGHT = "─"
+
+def enable_utf8_stdio() -> None:
+    """Pin this process's console streams to UTF-8 with replacement errors.
+
+    The reports are full of box-drawing characters, and every tool now prints
+    one.  Two failures follow from leaving the stream encoding to the locale:
+    a console that cannot represent ``\u2550`` raises ``UnicodeEncodeError``
+    half-way through a run, and a parent that captures a child's output with
+    ``text=True`` decodes it with the *locale* encoding - cp1252 on Windows -
+    which turns those same bytes into a ``UnicodeDecodeError``.
+
+    So every tool pins its own output to UTF-8 at startup, and every caller
+    that captures a child decodes it as UTF-8.  ``errors="replace"`` means a
+    console that still cannot cope degrades to ``?`` instead of aborting work
+    that has already been done.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # a replaced stream, e.g. under redirect_stdout
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):  # closed or detached stream
+            pass
+
+def print_text(text: str) -> None:
+    """Print report text without ever raising on a legacy console encoding.
+
+    Reports contain box-drawing characters.  On a console or pipe whose
+    encoding cannot represent them, ``print`` raises ``UnicodeEncodeError``,
+    which used to surface as a crash *after* the work was already done.  The
+    fallback writes the same text with unrepresentable characters replaced.
+    """
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:
+        try:
+            encoding = sys.stdout.encoding or "utf-8"
+            sys.stdout.buffer.write((text + "\n").encode(encoding, errors="replace"))
+            sys.stdout.buffer.flush()
+        except Exception:  # pragma: no cover - a stream that cannot be written at all
+            print(text.encode("ascii", errors="replace").decode("ascii"), flush=True)
+
+def clip_text(text: str, width: int, *, ellipsis: str = "...") -> str:
+    """Shorten ``text`` to at most ``width`` columns, marking the cut."""
+    text = str(text)
+    if width <= 0:
+        return ""
+    if len(text) <= width:
+        return text
+    if width <= len(ellipsis):
+        return text[:width]
+    return text[: width - len(ellipsis)].rstrip() + ellipsis
+
+def wrap_text(text: str, width: int) -> list[str]:
+    """Wrap ``text`` to ``width`` columns, preserving explicit line breaks."""
+    width = max(1, int(width))
+    out: list[str] = []
+    for paragraph in str(text).split("\n"):
+        if not paragraph.strip():
+            out.append("")
+            continue
+        chunks = textwrap.wrap(
+            paragraph,
+            width=width,
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+        out.extend(chunks or [""])
+    return out
+
+_PATH_BREAK_RE = re.compile(r"(?<=[/\\])|(?<=\s)")
+
+def _pack_on_separators(text: str, width: int) -> list[str]:
+    """Greedily fill lines, breaking only after a separator or a space."""
+    lines: list[str] = []
+    current = ""
+    for token in (tok for tok in _PATH_BREAK_RE.split(text) if tok):
+        if len(token) > width:
+            if current.strip():
+                lines.append(current.rstrip())
+            current = ""
+            lines.extend(line.rstrip() for line in wrap_text(token, width))
+            continue
+        if current and len(current) + len(token) > width:
+            lines.append(current.rstrip())
+            current = token
+        else:
+            current += token
+    if current.strip():
+        lines.append(current.rstrip())
+    return lines
+
+def wrap_path_text(text: str, width: int) -> list[str]:
+    """Wrap ``text`` on path separators and spaces, keeping names whole.
+
+    Report lines are usually paths, and the tail of a path - the movie folder
+    or file name - is what a reader scans for.  Breaking after ``/`` and ``\\``
+    keeps that name on one line, where ``wrap_text`` would happily split it in
+    half.  Only a single component longer than ``width`` is hard-broken, and
+    nothing is ever ellipsised away.
+    """
+    width = max(1, int(width))
+    text = str(text)
+    if len(text) <= width:
+        return [text]
+    out: list[str] = []
+    for paragraph in text.split("\n"):
+        if not paragraph.strip():
+            out.append("")
+        elif len(paragraph) <= width:
+            out.append(paragraph.rstrip())
+        else:
+            out.extend(_pack_on_separators(paragraph, width))
+    return out or [""]
+
+class Report:
+    """Builder for one tool's plain-text report.
+
+    The layout is fixed so every tool reads the same way::
+
+        +--------------------------------------------------------------+
+        |  boxed header: title, subtitle, aligned metadata             |
+        +--------------------------------------------------------------+
+
+          scorecard: right-aligned counts, one line per outcome
+
+          ══ SECTION TITLE ═════════════════════════════════════  n of m ══
+          wrapped explanation of why this section matters
+
+             1  first entry
+                Reason    aligned, wrapped detail field
+                Next      the thing to do about it
+
+    Nothing here writes to disk; call :meth:`render` and hand the text to
+    ``atomic_write_text``.
+    """
+
+    def __init__(self, title: str, subtitle: str = "", *, width: int = REPORT_WIDTH) -> None:
+        self._title = title
+        self._subtitle = subtitle
+        self._width = max(REPORT_MIN_WIDTH, int(width))
+        self._meta: list[tuple[str, str]] = []
+        self._body: list[str] = []
+
+    # -- geometry ------------------------------------------------------
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def _inner(self) -> int:
+        """Columns available inside the header box (``║ `` + text + `` ║``)."""
+        return self._width - 4
+
+    # -- header --------------------------------------------------------
+    def meta(self, label: str, value: object) -> Report:
+        """Add one ``label  value`` row to the boxed header."""
+        self._meta.append((str(label), "" if value is None else str(value)))
+        return self
+
+    def metas(self, pairs: Iterable[tuple[str, object]]) -> Report:
+        for label, value in pairs:
+            self.meta(label, value)
+        return self
+
+    @staticmethod
+    def _is_rule(line: str) -> bool:
+        """True for a line that is only rule characters (used to space entries)."""
+        stripped = line.strip()
+        return bool(stripped) and set(stripped) <= {_RULE_HEAVY, _RULE_LIGHT}
+
+    def _box_row(self, text: str) -> str:
+        return "║ " + clip_text(text, self._inner, ellipsis="..").ljust(self._inner) + " ║"
+
+    def render_header(self) -> str:
+        """Render just the boxed header (used for the startup banner too)."""
+        lines = ["╔" + _RULE_HEAVY * (self._width - 2) + "╗"]
+        lines.append(self._box_row(self._title))
+        if self._subtitle:
+            for chunk in wrap_text(self._subtitle, self._inner):
+                lines.append(self._box_row(chunk))
+        if self._meta:
+            lines.append("╟" + _RULE_LIGHT * (self._width - 2) + "╢")
+            label_width = max(len(label) for label, _ in self._meta)
+            value_width = self._inner - label_width - 2
+            for label, value in self._meta:
+                if not value:
+                    lines.append(self._box_row(label))
+                    continue
+                # Long values here are usually paths; break them at a
+                # separator so a directory name is not split mid-word.
+                chunks = wrap_path_text(value, value_width) or [""]
+                pad = " " * (label_width + 2)
+                for position, chunk in enumerate(chunks):
+                    lead = f"{label.ljust(label_width)}  " if position == 0 else pad
+                    lines.append(self._box_row(lead + chunk))
+        lines.append("╚" + _RULE_HEAVY * (self._width - 2) + "╝")
+        return "\n".join(lines)
+
+    # -- body ----------------------------------------------------------
+    def blank(self, count: int = 1) -> Report:
+        self._body.extend([""] * max(0, count))
+        return self
+
+    def rule(self, char: str = _RULE_LIGHT, *, indent: int = REPORT_INDENT) -> Report:
+        self._body.append(" " * indent + char * max(0, self._width - indent))
+        return self
+
+    def paragraph(self, text: str, *, indent: int = REPORT_INDENT) -> Report:
+        """A wrapped block of prose; leading spaces on continuation lines."""
+        for chunk in wrap_text(text, self._width - indent):
+            self._body.append(" " * indent + chunk)
+        return self
+
+    def title_line(self, text: str, *, right: str = "", indent: int = REPORT_INDENT) -> Report:
+        """``text`` left-aligned with ``right`` pushed to the right margin."""
+        span = self._width - indent
+        if not right:
+            self._body.append(" " * indent + clip_text(text, span))
+            return self
+        gap = span - len(right) - len(text)
+        if gap < 2:
+            self._body.append(" " * indent + clip_text(f"{text}  {right}", span))
+        else:
+            self._body.append(" " * indent + text + " " * gap + right)
+        return self
+
+    def scorecard(self, rows: Iterable[tuple], *, indent: int = REPORT_INDENT) -> Report:
+        """Render ``(count, label, hint)`` rows between two light rules.
+
+        The count is right-aligned so a reader can scan the numbers as a
+        column, and the hint column is clipped rather than wrapped: a scorecard
+        is meant to fit on one screen.
+        """
+        materialized = [(str(count), str(label), str(hint or "")) for count, label, hint in rows]
+        if not materialized:
+            return self
+        count_width = max(4, max(len(count) for count, _, _ in materialized))
+        label_width = max(len(label) for _, label, _ in materialized)
+        span = self._width - indent
+        self.rule(indent=indent)
+        for count, label, hint in materialized:
+            line = f"{count:>{count_width}}   {label:<{label_width}}"
+            if hint:
+                room = span - len(line) - 3
+                if room > 8:
+                    line += "   " + clip_text(hint, room)
+            self._body.append(" " * indent + clip_text(line, span))
+        self.rule(indent=indent)
+        return self
+
+    def section(
+        self,
+        title: str,
+        *,
+        count: int | None = None,
+        total: int | None = None,
+        intro: str = "",
+        indent: int = REPORT_INDENT,
+    ) -> Report:
+        """Open a major section: a heavy banner plus an optional explanation."""
+        if self._body and self._body[-1].strip():
+            self.blank()
+        tally = ""
+        if count is not None:
+            # A partial or interrupted run can report more items in a group than
+            # the scan counted; "5 of 3" would be nonsense, so the total is only
+            # shown when it is actually the larger number.
+            show_total = total is not None and int(total) >= int(count)
+            tally = f"{count} of {total}" if show_total else str(count)
+        span = self._width - indent
+        head = f"{_RULE_HEAVY}{_RULE_HEAVY} {title} "
+        tail = f" {tally} {_RULE_HEAVY}{_RULE_HEAVY}" if tally else ""
+        fill = span - len(head) - len(tail)
+        if fill < 3:
+            self._body.append(" " * indent + clip_text(head.strip() + ("  " + tally if tally else ""), span,
+                                                      ellipsis=""))
+        else:
+            self._body.append(" " * indent + head + _RULE_HEAVY * fill + tail)
+        if intro:
+            self.blank()
+            self.paragraph(intro, indent=indent)
+        self.blank()
+        return self
+
+    def subsection(
+        self,
+        title: str,
+        *,
+        count: int | None = None,
+        indent: int = REPORT_INDENT,
+    ) -> Report:
+        """Open a labelled group inside a section (one light rule, not a box)."""
+        if self._body and self._body[-1].strip():
+            self.blank()
+        span = self._width - indent
+        tally = f" {count}" if count is not None else ""
+        head = f"{_RULE_LIGHT}{_RULE_LIGHT} {title} "
+        tail = f"{tally} {_RULE_LIGHT}{_RULE_LIGHT}"
+        fill = span - len(head) - len(tail)
+        if fill < 3:
+            self._body.append(" " * indent + clip_text(head.strip() + tally, span, ellipsis=""))
+        else:
+            self._body.append(" " * indent + head + _RULE_LIGHT * fill + tail)
+        return self
+
+    def entry(
+        self,
+        text: str,
+        *,
+        detail: str = "",
+        ordinal: int | None = None,
+        marker: str = "",
+        fields: Iterable[tuple[str, str]] = (),
+        detail_column: int = 0,
+        indent: int = 4,
+    ) -> Report:
+        """One item in a section.
+
+        ``ordinal`` numbers the entry; ``marker`` is a short tag used instead
+        when numbering would be noise.  ``detail_column`` puts a short detail
+        on the same line at a fixed column (used for name/sidecar tables) and
+        falls back to a wrapped line underneath when it would not fit.
+        ``fields`` are ``label  value`` pairs aligned under the entry text.
+        """
+        if ordinal is not None:
+            prefix = f"{ordinal:>4}  "
+        elif marker:
+            prefix = f"{marker:<4}  "
+        else:
+            prefix = "      "
+        span = self._width - indent
+        head_limit = span - len(prefix)
+        if detail_column > 0:
+            # A fixed detail column only reads as a table when the entry text
+            # stays inside it, so long titles wrap to a continuation line
+            # instead of pushing every detail sideways.
+            head_limit = min(head_limit, max(8, detail_column - indent - len(prefix)))
+        # Entry text wraps rather than being ellipsised: the tail of a long
+        # path is usually the part a reader came for, and clipping it away
+        # hides the very information the report exists to convey.
+        head_chunks = wrap_path_text(text, max(8, head_limit)) or [""]
+        # Entries breathe: a blank line separates them, but a section banner or
+        # its explanation paragraph keeps the first entry tight underneath.
+        if self._body and self._body[-1].strip() and not self._is_rule(self._body[-1]):
+            self._body.append("")
+        head_index = len(self._body)
+        self._body.append(" " * indent + prefix + head_chunks[0])
+        continuation = " " * (indent + len(prefix))
+        self._body.extend(continuation + chunk for chunk in head_chunks[1:])
+        materialized = [(str(label), str(value or "")) for label, value in fields]
+        if materialized:
+            label_width = max(6, max(len(label) for label, _ in materialized))
+            for label, value in materialized:
+                lead = f"{label.ljust(label_width)}  "
+                chunks = wrap_text(value, max(8, span - len(prefix) - len(lead))) or [""]
+                self._body.append(continuation + lead + chunks[0])
+                for chunk in chunks[1:]:
+                    self._body.append(continuation + " " * len(lead) + chunk)
+        if detail:
+            head = head_chunks[0]
+            # A detail can ride on the entry's own line only when that entry
+            # text did not have to wrap; otherwise it belongs underneath.
+            if detail_column > 0 and len(head_chunks) == 1:
+                room = detail_column - indent - len(prefix) - len(head)
+                if room >= 1 and len(detail) <= span - detail_column:
+                    self._body[head_index] = (
+                        " " * indent + prefix + head.ljust(detail_column - indent - len(prefix)) + detail
+                    )
+                    return self
+            for chunk in wrap_text(detail, max(8, span - len(prefix) - 2)):
+                self._body.append(continuation + "  " + chunk)
+        return self
+
+    def table(
+        self,
+        headers: Iterable[str],
+        rows: Iterable[Iterable],
+        *,
+        aligns: str = "",
+        indent: int = 4,
+    ) -> Report:
+        """An aligned column table with a header row and a rule under it.
+
+        ``aligns`` is one character per column, ``<`` or ``>``.  Columns are
+        sized to their content and then trimmed - widest first, never below
+        their header - so the table always fits inside the report width.
+        """
+        head = [str(column) for column in headers]
+        body = [[("" if cell is None else str(cell)) for cell in row] for row in rows]
+        columns = len(head)
+        if not columns:
+            return self
+        aligns = (aligns or "<" * columns).ljust(columns, "<")[:columns]
+        span = self._width - indent
+        widths = [
+            max([len(head[i])] + [len(row[i]) for row in body if i < len(row)])
+            for i in range(columns)
+        ]
+        gaps = 2 * (columns - 1)
+        minimums = [max(6, len(column)) for column in head]
+        while sum(widths) + gaps > span:
+            shrinkable = [i for i in range(columns) if widths[i] > minimums[i]]
+            if not shrinkable:
+                break
+            widths[max(shrinkable, key=lambda i: widths[i])] -= 1
+
+        def render(cells: list[str]) -> str:
+            parts = []
+            for i, cell in enumerate(cells[:columns]):
+                text = clip_text(cell, widths[i])
+                parts.append(text.rjust(widths[i]) if aligns[i] == ">" else text.ljust(widths[i]))
+            return " " * indent + "  ".join(parts).rstrip()
+
+        self._body.append(render(head))
+        self._body.append(" " * indent + "  ".join(_RULE_LIGHT * width for width in widths))
+        for row in body:
+            self._body.append(render(list(row) + [""] * (columns - len(row))))
+        return self
+
+    def entries(self, items: Iterable, **defaults: object) -> Report:
+        """Render an iterable of entry specs, numbered in order.
+
+        Each item is either a ``(text, detail)`` tuple or a mapping of
+        :meth:`entry` keyword arguments (``detail``, ``fields``, ``marker``).
+        ``defaults`` supplies the keyword arguments shared by every item.
+        """
+        for position, item in enumerate(items, start=1):
+            if isinstance(item, tuple):
+                text, detail = (list(item) + [""])[:2]
+                spec: dict = {"text": text, "detail": detail}
+            else:
+                spec = dict(item)
+            spec.setdefault("ordinal", position)
+            merged = {**defaults, **spec}
+            self.entry(str(merged.pop("text", "")), **merged)
+        return self
+
+    def footer(self, lines: Iterable[str] = (), *, indent: int = REPORT_INDENT) -> Report:
+        """Close the report with a light rule and trailing notes."""
+        self.blank()
+        self.rule(indent=indent)
+        for line in lines:
+            self.paragraph(line, indent=indent)
+        return self
+
+    # -- output --------------------------------------------------------
+    def render(self) -> str:
+        """The whole report as one string, always ending in a newline."""
+        lines = self.render_header().split("\n")
+        lines.append("")
+        lines.extend(self._body)
+        # Trailing spaces are invisible in a terminal and noisy in a diff.
+        return "\n".join(line.rstrip() for line in lines).rstrip() + "\n"
 
 # =====================================================================
 # CONFIGURATION  (CLI flags and supported environment variables override these)
@@ -151,8 +878,9 @@ ARTWORK_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 # stays media-only.
 LOG_FILE = r"E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer.log"
 REPORT_FILE = r"E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt"
-# The external-SRT size limit and cue pattern are imported from common.py so
-# this tool cannot drift from the others on what counts as a usable subtitle.
+# The external-SRT size limit and cue pattern are vendored into this script
+# (see the shared helpers section below) so this tool cannot drift from the
+# others on what counts as a usable subtitle.
 
 # Canonical-library contract: output no artwork, extras, cleanup artifacts,
 # or duplicate-management actions—only one MKV and English subtitles.
@@ -475,7 +1203,6 @@ _WINDOWS_RESERVED = frozenset({
 # CONFIG OBJECT / LOGGING
 # =====================================================================
 
-
 @dataclass
 class Config:
     target_dir: Path = field(default_factory=lambda: Path(TARGET_DIR))
@@ -508,10 +1235,8 @@ class Config:
     def min_movie_bytes(self) -> int:
         return int(self.min_movie_size_mb * 1024 * 1024)
 
-
 CFG = Config()
 LOG = logging.getLogger("movie_standardizer")
-
 
 @dataclass
 class RunSummary:
@@ -526,13 +1251,11 @@ class RunSummary:
     failed: int = 0
     events: list[dict[str, str]] = field(default_factory=list)
 
-
 RUN_SUMMARY = RunSummary()
 # Per-run, human-readable events captured for the end-of-run text report.
 # Always collected (not gated on the optional JSON manifest) so every run
 # leaves a clear, self-contained report of what was done.
 RUN_EVENTS: list[dict[str, str]] = []
-
 
 def record_outcome(
     status: str,
@@ -566,7 +1289,6 @@ def record_outcome(
     if CFG.manifest_file:
         RUN_SUMMARY.events.append(event)
 
-
 def decline_source(item: Path, reason: str) -> None:
     """Record a source item this run deliberately left in the torrent folder.
 
@@ -577,7 +1299,6 @@ def decline_source(item: Path, reason: str) -> None:
     gives the report an actionable "still in source" section.
     """
     record_outcome("skipped", "left in source", src=item, reason=reason)
-
 
 def write_manifest() -> None:
     """Write the optional JSON run manifest after all media actions complete."""
@@ -601,7 +1322,6 @@ def write_manifest() -> None:
     except OSError as exc:
         RUN_SUMMARY.failed += 1
         LOG.error("Could not write manifest %s: %s", CFG.manifest_file, exc)
-
 
 def build_report() -> str:
     """Render the run report: what needs a decision first, then the full ledger.
@@ -721,7 +1441,6 @@ def build_report() -> str:
     ])
     return report.render()
 
-
 def write_report() -> None:
     """Write the human-readable run report (and echo it) for the terminal/user."""
     text = build_report()
@@ -732,7 +1451,6 @@ def write_report() -> None:
             LOG.info("Report written to %s", CFG.report_file)
         except OSError as exc:
             LOG.error("Could not write report %s: %s", CFG.report_file, exc)
-
 
 def setup_logging(cfg: Config) -> None:
     for handler in LOG.handlers[:]:
@@ -758,17 +1476,14 @@ def setup_logging(cfg: Config) -> None:
         except OSError as exc:
             LOG.warning("Cannot write log file %s: %s", cfg.log_file, exc)
 
-
 # =====================================================================
 # PATH / FS HELPERS
 # =====================================================================
-
 
 def max_movie_year() -> int:
     # Deliberately naive: the user's *local* calendar year is the right
     # reference for what counts as a plausible release year.
     return datetime.now().year + 1  # noqa: DTZ005 - local year is intentional
-
 
 def is_valid_year(value: int | str) -> bool:
     try:
@@ -777,10 +1492,8 @@ def is_valid_year(value: int | str) -> bool:
         return False
     return MIN_YEAR <= year <= max_movie_year()
 
-
 def nfc(text: str) -> str:
     return unicodedata.normalize("NFC", text)
-
 
 def file_size(path: Path) -> int:
     try:
@@ -788,18 +1501,15 @@ def file_size(path: Path) -> int:
     except OSError:
         return 0
 
-
 def is_skipped_junk_name(name: str) -> bool:
     lower = name.lower()
     if lower in SKIP_NAME_EXACT or lower.startswith("."):
         return True
     return any(lower.endswith(suf) for suf in SKIP_NAME_SUFFIXES)
 
-
 # =====================================================================
 # NAME PARSING
 # =====================================================================
-
 
 @dataclass(frozen=True)
 class ParsedName:
@@ -841,13 +1551,11 @@ class ParsedName:
             return f"{stem}-{use_part}"
         return stem
 
-
 def is_tv_show(name: str) -> bool:
     if not name:
         return False
     # Don't treat a lone movie-like "Se7en" / "S.W.A.T" as TV.
     return bool(_TV_RE.search(name.replace("_", " ")))
-
 
 # Tags that are safe to peel even when they are common English words,
 # but ONLY after a strong technical tag has already been seen.
@@ -861,7 +1569,6 @@ _WEAK_TAG_TOKENS = frozenset({
 _RE_CHANNELS_TAG = re.compile(r"\d+ch")
 _RE_AUDIO_JOINED_TAG = re.compile(r"(?:dd[p+]?|aac|dts|truehd|eac3|ac3|atmos)\d+(?:[.\-]\d+)?")
 _RE_RARBG_PART = re.compile(r"r\d+")
-
 
 def _is_tag_token(token: str, *, allow_weak: bool = True) -> bool:
     t = token.lower().strip("[](){}.-_")
@@ -880,7 +1587,6 @@ def _is_tag_token(token: str, *, allow_weak: bool = True) -> bool:
         return True
     return bool(_RE_RARBG_PART.fullmatch(t))  # RARBG r00, r01
 
-
 def _is_tag_block(block: str) -> bool:
     inner = block.strip("[](){} \t")
     if not inner:
@@ -895,7 +1601,6 @@ def _is_tag_block(block: str) -> bool:
         return False
     return all(_is_tag_token(t) for t in tokens)
 
-
 def _strip_website_prefix(name: str) -> str:
     prev = None
     text = name
@@ -906,7 +1611,6 @@ def _strip_website_prefix(name: str) -> str:
             break
         text = nxt.strip(" -_")
     return text
-
 
 def _extract_part(name: str) -> tuple[str, str | None]:
     match = _PART_RE.search(name)
@@ -933,7 +1637,6 @@ def _extract_part(name: str) -> tuple[str, str | None]:
     cleaned = (name[: match.start()] + " " + name[match.end() :]).strip()
     return cleaned, part
 
-
 def _extract_provider_id(text: str) -> tuple[str, str | None]:
     """Extract a bracketed Jellyfin-supported provider ID without title pollution."""
     match = _PROVIDER_ID_RE.search(text)
@@ -941,7 +1644,6 @@ def _extract_provider_id(text: str) -> tuple[str, str | None]:
         return text, None
     cleaned = (text[:match.start()] + " " + text[match.end():]).strip(" -_.")
     return cleaned, match.group(1).lower()
-
 
 def _extract_resolution_label(text: str) -> str | None:
     """Return the highest explicit resolution label in a scene-style name."""
@@ -951,12 +1653,10 @@ def _extract_resolution_label(text: str) -> str | None:
     normalized = {"4k": "2160p", "5k": "2880p", "8k": "4320p"}
     return normalized.get(matches[0], matches[0])
 
-
 def _extract_3d_label(text: str) -> str | None:
     """Return Jellyfin's documented 3D label form, e.g. ``3D_HSBS``."""
     match = _3D_RE.search(text)
     return f"3D_{match.group(1).upper()}" if match else None
-
 
 def _extract_edition(text: str) -> tuple[str, str | None]:
     found: str | None = None
@@ -968,7 +1668,6 @@ def _extract_edition(text: str) -> tuple[str, str | None]:
             break
     remaining = re.sub(r"\s+", " ", remaining).strip(" -_.")
     return remaining, found
-
 
 def _score_year_match(name: str, match: re.Match[str]) -> int:
     year = int(match.group(1))
@@ -1021,7 +1720,6 @@ def _score_year_match(name: str, match: re.Match[str]) -> int:
         score -= 8
     return score
 
-
 def _pick_year(name: str) -> tuple[str, int | None]:
     candidates: list[tuple[int, re.Match[str]]] = []
     for match in _YEAR_RE.finditer(name):
@@ -1037,7 +1735,6 @@ def _pick_year(name: str) -> tuple[str, int | None]:
     # Drop the opening wrapper of "(2020)" / "[2020]" that stayed in the title.
     title = re.sub(r"[\s._\-]*[\(\[\{]\s*$", "", title)
     return title, year
-
 
 def _peel_hyphen_tags(token: str, *, allow_weak: bool) -> str:
     bits = token.split("-")
@@ -1055,7 +1752,6 @@ def _peel_hyphen_tags(token: str, *, allow_weak: bool) -> str:
             continue
         break
     return "-".join(bits)
-
 
 def _strip_trailing_tags(title: str) -> str:
     text = title.strip()
@@ -1086,7 +1782,6 @@ def _strip_trailing_tags(title: str) -> str:
         break
     return " ".join(parts)
 
-
 def _strip_leading_tag_blocks(title: str) -> str:
     text = title.strip()
     while True:
@@ -1102,7 +1797,6 @@ def _strip_leading_tag_blocks(title: str) -> str:
         break
     return text
 
-
 def _clean_separators(title: str) -> str:
     text = title.replace("·", " ").replace("–", "-").replace("—", "-")
     # Keep Dr. / Mr. / St. so they don't become "Dr Strangelove".
@@ -1113,7 +1807,6 @@ def _clean_separators(title: str) -> str:
     text = re.sub(r"\s+", " ", text)
     return text.strip(" \t-_,.;")
 
-
 def _is_stylized_token(word: str) -> bool:
     """True for Se7en / iPhone / McConaughey / WALL-E-style tokens we must not smash."""
     if any(c.isdigit() for c in word) and any(c.isalpha() for c in word):
@@ -1121,7 +1814,6 @@ def _is_stylized_token(word: str) -> bool:
     if word and word[0].islower() and any(c.isupper() for c in word[1:]):
         return True
     return bool(re.match(r"(?:Mc|Mac)[A-Z]", word))
-
 
 def _title_case_word(word: str, index: int, total: int, after_break: bool) -> str:
     if not word:
@@ -1147,7 +1839,6 @@ def _title_case_word(word: str, index: int, total: int, after_break: bool) -> st
         cased = head[:1].upper() + head[1:].lower() if head else ""
         return cased + "'" + "'".join(p.lower() for p in rest)
     return word[:1].upper() + word[1:].lower()
-
 
 def custom_title_case(title: str) -> str:
     text = title.strip()
@@ -1189,7 +1880,6 @@ def custom_title_case(title: str) -> str:
         written += 1
     return " ".join(out)
 
-
 def sanitize_filename(name: str) -> str:
     """Make a cross-platform, Plex/Jellyfin-safe file/folder name."""
     text = nfc(name)
@@ -1209,7 +1899,6 @@ def sanitize_filename(name: str) -> str:
         encoded = text.encode("utf-8")[:200]
         text = encoded.decode("utf-8", errors="ignore").rstrip(" .")
     return text
-
 
 @lru_cache(maxsize=8192)
 def parse_movie_name(name: str) -> ParsedName:
@@ -1286,11 +1975,9 @@ def parse_movie_name(name: str) -> ParsedName:
         raw=raw,
     )
 
-
 # =====================================================================
 # SUBTITLE LANGUAGE
 # =====================================================================
-
 
 @lru_cache(maxsize=4096)
 def subtitle_suffix(filename: str) -> str:
@@ -1337,12 +2024,10 @@ def subtitle_suffix(filename: str) -> str:
         return "." + ".".join(bits) + ext.lower()
     return ext.lower()
 
-
 def is_english_subtitle(path: Path) -> bool:
     """Return true only when the sidecar carries an English language suffix."""
     suffix_fields = {field.casefold() for field in subtitle_suffix(path.name).split(".") if field}
     return EXTERNAL_SRT_LANG in suffix_fields or "en" in suffix_fields
-
 
 def is_valid_plain_english_srt(path: Path) -> tuple[bool, str]:
     """Admit only one direct-play-safe normal English SRT into the library.
@@ -1375,7 +2060,6 @@ def is_valid_plain_english_srt(path: Path) -> tuple[bool, str]:
         return False, "subtitle does not contain a valid numbered SRT cue"
     return True, "validated normal English SRT"
 
-
 def _strip_known_sub_suffixes(stem: str) -> str:
     cleaned = stem
     while True:
@@ -1384,19 +2068,15 @@ def _strip_known_sub_suffixes(stem: str) -> str:
             return cleaned
         cleaned = nxt
 
-
 # =====================================================================
 # MEDIA CLASSIFICATION / SCAN
 # =====================================================================
 
-
 def is_extra_folder_name(name: str) -> bool:
     return name.strip().lower() in EXTRA_FOLDER_NAMES
 
-
 def is_disc_folder_name(name: str) -> bool:
     return name.strip().lower() in DISC_FOLDER_NAMES
-
 
 def path_has_disc_structure(root: Path) -> bool:
     if not root.is_dir():
@@ -1421,7 +2101,6 @@ def path_has_disc_structure(root: Path) -> bool:
         return False
     return False
 
-
 def path_inside_named(path: Path, names: frozenset[str], stop_at: Path | None = None) -> bool:
     for parent in path.parents:
         if stop_at is not None and path_norm(parent) == path_norm(stop_at):
@@ -1429,7 +2108,6 @@ def path_inside_named(path: Path, names: frozenset[str], stop_at: Path | None = 
         if parent.name.lower() in names:
             return True
     return False
-
 
 def is_extra_video(path: Path, *, root: Path | None = None, size: int | None = None) -> bool:
     """True if this video should not be treated as a feature film."""
@@ -1441,20 +2119,17 @@ def is_extra_video(path: Path, *, root: Path | None = None, size: int | None = N
     name = path.name
     return bool(_EXTRA_NAME_RE.search(name))
 
-
 def is_artwork_file(path: Path) -> bool:
     if path.suffix.lower() not in ARTWORK_EXTENSIONS:
         return False
     stem = path.stem.lower()
     return stem in ARTWORK_NAMES or bool(_ARTWORK_NUMBERED_BACKDROP_RE.fullmatch(stem))
 
-
 @dataclass
 class ScannedFile:
     path: Path
     size: int
     kind: str  # video, subtitle, artwork, extra, other
-
 
 @dataclass
 class FolderScan:
@@ -1477,7 +2152,6 @@ class FolderScan:
     @property
     def extras(self) -> list[ScannedFile]:
         return [f for f in self.files if f.kind == "extra"]
-
 
 def scan_tree(root: Path) -> FolderScan:
     files: list[ScannedFile] = []
@@ -1532,7 +2206,6 @@ def scan_tree(root: Path) -> FolderScan:
                 files.append(ScannedFile(path, size, "other"))
     return FolderScan(root, files, is_disc)
 
-
 # Folder names that carry no movie information (typical save-path names).
 # When the movie folder has one of these names, its name must NOT override
 # a usable parsed filename ("downloads" → "Src (2019)" would be wrong).
@@ -1546,7 +2219,6 @@ _GENERIC_FOLDER_STEMS = frozenset({
     "transmission", "tv", "unpacked", "unsorted", "video", "videos", "watch",
 })
 
-
 def stem_is_generic(stem: str) -> bool:
     cleaned = re.sub(r"[\s._\-]+", "", stem).lower()
     if cleaned in GENERIC_STEMS:
@@ -1559,7 +2231,6 @@ def stem_is_generic(stem: str) -> bool:
             return True
     return False
 
-
 # Folder names that are collections of several movies, not one movie's name.
 # When the movie folder carries one of these, its name must NOT override the
 # identity parsed from the actual video file ("Duo.Collection" containing
@@ -1568,11 +2239,9 @@ _COLLECTION_FOLDER_RE = re.compile(
     r"(?i)(?:^|[\s._\-])(trilogy|collection|anthology|duology|quadrilogy|pentalogy|saga|franchise|boxset|box[\s._\-]?set|series)(?:$|[\s._\-])"
 )
 
-
 def folder_name_is_generic(name: str) -> bool:
     cleaned = re.sub(r"[\s._\-]+", "", name).lower()
     return cleaned in _GENERIC_FOLDER_STEMS
-
 
 def parse_video_identity(video: Path, fallback: Path | None = None) -> ParsedName:
     parsed = parse_movie_name(video.name)
@@ -1603,7 +2272,6 @@ def parse_video_identity(video: Path, fallback: Path | None = None) -> ParsedNam
     # A generic parent ("downloads") must never rename the movie; prefer
     # whatever the filename itself parsed to.
     return parsed
-
 
 def match_subtitles_for_video(
     video: Path,
@@ -1649,7 +2317,6 @@ def match_subtitles_for_video(
 # FILE ACTIONS
 # =====================================================================
 
-
 def dest_for(
     parsed: ParsedName,
     ext: str,
@@ -1662,12 +2329,10 @@ def dest_for(
         return CFG.target_dir / parsed.folder_name / filename
     return CFG.target_dir / filename
 
-
 def _ensure_parent(path: Path) -> None:
     if CFG.dry_run:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-
 
 def _quarantine_destination(candidate: Path) -> Path:
     """Create a unique, non-media-tree destination for a quarantined candidate."""
@@ -1681,7 +2346,6 @@ def _quarantine_destination(candidate: Path) -> Path:
     if not base.exists() and not base.is_symlink():
         return base
     return base.with_name(f"{base.name}.conflict.{uuid.uuid4().hex[:12]}")
-
 
 def dispose_candidate(candidate: Path, *, action: str, reason: str) -> str:
     """Report, quarantine, or explicitly delete a maintenance candidate safely."""
@@ -1718,11 +2382,9 @@ def dispose_candidate(candidate: Path, *, action: str, reason: str) -> str:
         return "deleted"
     raise ValueError(f"Unknown maintenance mode: {mode}")
 
-
 def _staging_path(dest: Path, label: str) -> Path:
     """Return a collision-resistant sibling path on the destination volume."""
     return dest.with_name(f".{dest.name}.{label}.{os.getpid()}.{uuid.uuid4().hex}")
-
 
 def _unlink_if_file(path: Path) -> None:
     """Remove only an ordinary staging file or symlink created by this process."""
@@ -1731,7 +2393,6 @@ def _unlink_if_file(path: Path) -> None:
             path.unlink()
     except OSError:
         pass
-
 
 def _replace_with(src_action_name: str, dest: Path, producer) -> bool:
     """Stage a replacement beside ``dest`` and atomically commit it when possible.
@@ -1753,11 +2414,9 @@ def _replace_with(src_action_name: str, dest: Path, producer) -> bool:
         _unlink_if_file(tmp)
         raise
 
-
 def _create_hardlink(src: Path, dest: Path) -> None:
     """Create one hardlink or raise; never fall back to copying or moving."""
     os.link(str(src), str(dest))
-
 
 @dataclass(frozen=True)
 class MediaTechnicalInfo:
@@ -1786,7 +2445,6 @@ class MediaTechnicalInfo:
             return 1  # 720p
         return 0
 
-
 def find_ffprobe(explicit: str = "ffprobe") -> str | None:
     """Find ffprobe without making it a prerequisite for initial placement."""
     candidates: list[str] = []
@@ -1814,20 +2472,17 @@ def find_ffprobe(explicit: str = "ffprobe") -> str | None:
         seen.add(candidate)
     return None
 
-
 def _probe_int(value: Any) -> int:
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
         return 0
 
-
 def _probe_float(value: Any) -> float:
     try:
         return max(0.0, float(value))
     except (TypeError, ValueError):
         return 0.0
-
 
 def _stream_bit_depth(stream: dict) -> int:
     raw = _probe_int(stream.get("bits_per_raw_sample"))
@@ -1836,7 +2491,6 @@ def _stream_bit_depth(stream: dict) -> int:
     pix_fmt = str(stream.get("pix_fmt") or "").casefold()
     match = re.search(r"(?:p|p0)(10|12|14|16)(?:le|be)?$", pix_fmt)
     return int(match.group(1)) if match else 8
-
 
 def _stream_is_hdr(stream: dict) -> bool:
     transfer = str(stream.get("color_transfer") or "").casefold()
@@ -1848,7 +2502,6 @@ def _stream_is_hdr(stream: dict) -> bool:
         if isinstance(item, dict)
     ).casefold()
     return any(marker in side_data for marker in ("dovi", "dolby vision", "hdr dynamic"))
-
 
 def probe_media(path: Path, ffprobe: str) -> tuple[MediaTechnicalInfo | None, str]:
     """Inspect one movie for conservative identity and quality comparison."""
@@ -1908,7 +2561,6 @@ def probe_media(path: Path, ffprobe: str) -> tuple[MediaTechnicalInfo | None, st
         audio_bitrate=_probe_int(audio.get("bit_rate")),
     ), ""
 
-
 def technical_quality_score(info: MediaTechnicalInfo) -> float:
     """Balanced score; a replacement still must pass all downgrade guards."""
     codec_bonus = {
@@ -1926,7 +2578,6 @@ def technical_quality_score(info: MediaTechnicalInfo) -> float:
         + audio_mbps * 2.0
         + codec_bonus
     )
-
 
 def _movie_upgrade_decision(src: Path, dest: Path) -> tuple[bool, str]:
     """Require same-cut identity and a meaningful, non-regressive upgrade."""
@@ -1978,7 +2629,6 @@ def _movie_upgrade_decision(src: Path, dest: Path) -> tuple[bool, str]:
         f"score {source_score:.1f} vs {existing_score:.1f}, +{gain:.1f})"
     )
 
-
 def should_replace(src: Path, dest: Path) -> tuple[bool, str]:
     """Decide whether a destination may be replaced without relying on size alone."""
     if not dest.exists():
@@ -2001,7 +2651,6 @@ def should_replace(src: Path, dest: Path) -> tuple[bool, str]:
     if src_sz == dest_sz:
         return False, "same-size-exists"
     return False, f"dest-larger ({dest_sz} >= {src_sz})"
-
 
 def process_file_action(src: Path, dest: Path) -> bool:
     """Hardlink ``src`` to ``dest`` safely and idempotently.
@@ -2054,7 +2703,6 @@ def process_file_action(src: Path, dest: Path) -> bool:
         record_outcome("failed", mode, src=src, dest=dest, reason=str(exc))
         return False
 
-
 def process_disc_folder(src_dir: Path, parsed: ParsedName) -> bool:
     """Hardlink a disc tree only when called explicitly (canonical scans skip discs)."""
     dest_root = CFG.target_dir / parsed.folder_name
@@ -2072,7 +2720,6 @@ def process_disc_folder(src_dir: Path, parsed: ParsedName) -> bool:
                 ok = False
     return ok
 
-
 def copy_extras_into(src_root: Path, dest_movie_folder: Path, extras: Sequence[ScannedFile]) -> None:
     if not CFG.copy_extras or not extras:
         return
@@ -2089,13 +2736,11 @@ def copy_extras_into(src_root: Path, dest_movie_folder: Path, extras: Sequence[S
             rel = Path("extras") / rel.name
         process_file_action(item.path, dest_movie_folder / rel)
 
-
 def copy_artwork_into(dest_movie_folder: Path, artwork: Sequence[ScannedFile]) -> None:
     if not CFG.copy_artwork or not artwork or not CFG.create_subfolders:
         return
     for item in artwork:
         process_file_action(item.path, dest_movie_folder / item.path.name.lower())
-
 
 def pair_idx_files(subtitles: Sequence[ScannedFile]) -> dict[Path, Path]:
     """Map .sub → sibling .idx when both exist (VobSub pair)."""
@@ -2108,11 +2753,9 @@ def pair_idx_files(subtitles: Sequence[ScannedFile]) -> dict[Path, Path]:
             pairs[item.path] = idx
     return pairs
 
-
 # =====================================================================
 # PROCESSING
 # =====================================================================
-
 
 def place_one_safe_external_srt(candidates: Sequence[Path], destination: Path) -> None:
     """Place one validated normal English SRT and never overwrite a sidecar."""
@@ -2136,13 +2779,11 @@ def place_one_safe_external_srt(candidates: Sequence[Path], destination: Path) -
         return
     process_file_action(source, destination)
 
-
 def skip_tv(name: str, origin: str) -> bool:
     if CFG.skip_tv_shows and is_tv_show(name):
         LOG.info("Skipping TV show (%s): %s", origin, name)
         return True
     return False
-
 
 def handle_single_file(path: Path) -> None:
     if is_skipped_junk_name(path.name):
@@ -2203,7 +2844,6 @@ def handle_single_file(path: Path) -> None:
             LOG.warning("Cannot list sidecars in %s: %s", parent, exc)
         place_one_safe_external_srt(sidecars, dest.with_name(parsed.file_stem(parsed.part) + EXTERNAL_SRT_SUFFIX))
 
-
 def _group_videos(videos: Sequence[ScannedFile], root: Path) -> dict[tuple, list[tuple[ScannedFile, ParsedName]]]:
     groups: dict[tuple, list[tuple[ScannedFile, ParsedName]]] = {}
     for video in videos:
@@ -2215,7 +2855,6 @@ def _group_videos(videos: Sequence[ScannedFile], root: Path) -> dict[tuple, list
         groups.setdefault(key, []).append((video, parsed))
     return groups
 
-
 # Non-MKV containers a finished movie can plausibly arrive in. Used only to
 # explain a decline precisely — this tool never transcodes, so these are always
 # left where they are. The vocabulary matches library_auditor.MOVIE_EXTENSIONS
@@ -2226,7 +2865,6 @@ OTHER_MOVIE_EXTENSIONS = frozenset({
     ".m2v", ".divx", ".f4v", ".mxf", ".dv", ".wtv", ".dvr-ms", ".iso", ".img",
     ".nrg",
 })
-
 
 def explain_no_canonical_video(root: Path) -> str:
     """Return an actionable reason when a folder yields no placeable MKV.
@@ -2270,7 +2908,6 @@ def explain_no_canonical_video(root: Path) -> str:
     if biggest_other and biggest_other >= CFG.min_movie_bytes:
         return f"not an MKV ({biggest_other / (1024 * 1024):.0f} MB); this tool never transcodes"
     return "no movie-sized video found inside"
-
 
 def handle_directory(path: Path) -> None:
     name = path.name
@@ -2388,7 +3025,6 @@ def handle_directory(path: Path) -> None:
         if process_file_action(best_video.path, dest):
             _place_subs(best_video.path, parsed, scan.subtitles, dest, multi=multi_titles, part=None)
 
-
 def _place_subs(
     video: Path,
     parsed: ParsedName,
@@ -2400,7 +3036,6 @@ def _place_subs(
 ) -> None:
     matched = match_subtitles_for_video(video, parsed, subtitles, multi=multi)
     place_one_safe_external_srt([sub.path for sub in matched], video_dest.with_name(parsed.file_stem(part) + EXTERNAL_SRT_SUFFIX))
-
 
 def handle_item(item_path: Path) -> None:
     try:
@@ -2424,11 +3059,9 @@ def handle_item(item_path: Path) -> None:
         LOG.error("Failed to process %s: %s", item_path, exc)
         record_outcome("failed", "process item", src=item_path, reason=str(exc))
 
-
 # =====================================================================
 # TARGET MAINTENANCE
 # =====================================================================
-
 
 def clean_existing_extras(target: Path) -> None:
     LOG.info("--- Target extras cleanup: %s ---", target)
@@ -2466,7 +3099,6 @@ def clean_existing_extras(target: Path) -> None:
                     deleted_files += 1
     LOG.info("--- Extras cleanup done. Folders=%d files=%d ---", deleted_folders, deleted_files)
 
-
 def _folder_has_files(folder: Path) -> bool:
     """True if folder holds at least one file anywhere below it.
 
@@ -2483,7 +3115,6 @@ def _folder_has_files(folder: Path) -> bool:
         if files:
             return True
     return had_error
-
 
 def _is_jellyfin_multi_version_folder(folder: Path) -> bool:
     """Detect documented direct-child Jellyfin versions with an exact prefix."""
@@ -2506,7 +3137,6 @@ def _is_jellyfin_multi_version_folder(folder: Path) -> bool:
         return True  # Cannot prove safety; never collapse a potentially valid set.
     return False
 
-
 def _largest_video_in(folder: Path) -> tuple[Path | None, int]:
     best: Path | None = None
     best_sz = 0
@@ -2524,7 +3154,6 @@ def _largest_video_in(folder: Path) -> tuple[Path | None, int]:
             if sz > best_sz:
                 best, best_sz = path, sz
     return best, best_sz
-
 
 def deduplicate_movies(target: Path) -> None:
     if not CFG.enable_deduplication:
@@ -2659,13 +3288,11 @@ def deduplicate_movies(target: Path) -> None:
 
     LOG.info("--- Duplicate scan done. Deleted=%d ambiguous-kept=%d ---", deleted, kept_conflicts)
 
-
 # =====================================================================
 # CLI / QBITTORRENT ARGUMENTS
 # =====================================================================
 
 __version__ = "3.0.0"
-
 
 def resolve_input_path(positional: Sequence[str]) -> Path | None:
     """Interpret qBittorrent ``%F`` or ``%D %N`` (and a few mix-ups)."""
@@ -2700,7 +3327,6 @@ def resolve_input_path(positional: Sequence[str]) -> Path | None:
     # Last resort
     return first
 
-
 def apply_env(cfg: Config) -> None:
     mapping: dict[str, tuple[str, Callable[[str], Any]]] = {
         "MOVIE_STD_TARGET": ("target_dir", Path),
@@ -2720,7 +3346,6 @@ def apply_env(cfg: Config) -> None:
         raw = os.environ.get(env)
         if raw:
             setattr(cfg, attr, caster(raw))
-
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -2761,7 +3386,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--self-test", action="store_true", help="Run built-in tests and exit")
     return p
 
-
 def cfg_from_args(args: argparse.Namespace) -> Config:
     cfg = Config()
     apply_env(cfg)
@@ -2794,11 +3418,9 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
     cfg.maintenance_mode = cfg.maintenance_mode.upper()
     return cfg
 
-
 _TV_CATEGORY_TOKENS = frozenset({
     "tv", "tvshow", "tvshows", "show", "shows", "series", "anime", "sonarr",
 })
-
 
 def _filesystem_device(path: Path) -> int:
     """Return the device ID for an existing ancestor of ``path``."""
@@ -2806,7 +3428,6 @@ def _filesystem_device(path: Path) -> int:
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
     return int(probe.stat().st_dev)
-
 
 def validate_config(cfg: Config) -> list[str]:
     """Return actionable configuration errors before any filesystem mutation."""
@@ -2853,7 +3474,6 @@ def validate_config(cfg: Config) -> list[str]:
             errors.append("--log must be outside --source so batch scans do not treat it as input")
     return errors
 
-
 def category_is_tv(category: str) -> bool:
     """True for TV-ish qBittorrent categories ("tv", "tv-sonarr", "series.anime")."""
     if not category:
@@ -2861,7 +3481,6 @@ def category_is_tv(category: str) -> bool:
     token = category.strip().lower()
     parts = [p for p in re.split(r"[\s._\-/]+", token) if p]
     return any(p in _TV_CATEGORY_TOKENS for p in parts)
-
 
 def validate_automated_input(item_path: Path, cfg: Config) -> str | None:
     """Reject unsafe qBittorrent paths before the organizer touches media."""
@@ -2877,7 +3496,6 @@ def validate_automated_input(item_path: Path, cfg: Config) -> str | None:
     except OSError as exc:
         return f"could not validate qBittorrent input: {exc}"
     return None
-
 
 def batch_scan(source: Path) -> None:
     LOG.info("--- Batch scan: %s ---", source)
@@ -2899,7 +3517,6 @@ def batch_scan(source: Path) -> None:
         count += 1
     LOG.info("--- Batch scan finished (%d items) ---", count)
 
-
 def _print_banner() -> None:
     """One-screen summary of what this run will do, for the live terminal."""
     mode = "DRY-RUN (no files written)" if CFG.dry_run else "LIVE (hardlink into library)"
@@ -2914,7 +3531,6 @@ def _print_banner() -> None:
     print(f"Min size  : {CFG.min_movie_size_mb:.0f} MB   Skip TV: {CFG.skip_tv_shows}")
     print("=" * 70)
     print("Scanning for completed movie torrents to organize...\n", flush=True)
-
 
 def run(args: argparse.Namespace) -> int:
     global CFG, RUN_SUMMARY, RUN_EVENTS
@@ -2979,16 +3595,13 @@ def run(args: argparse.Namespace) -> int:
         )
     return 1 if RUN_SUMMARY.failed else 0
 
-
 # =====================================================================
 # SELF-TEST
 # =====================================================================
 
-
 def _assert_eq(actual, expected, label: str, errors: list[str]) -> None:
     if actual != expected:
         errors.append(f"{label}: got {actual!r} expected {expected!r}")
-
 
 def run_canonical_self_tests() -> int:
     """Exercise the exact canonical-output contract in isolated temp folders."""
@@ -3093,11 +3706,9 @@ def run_canonical_self_tests() -> int:
     print("SELF-TEST PASSED (canonical MKV + English subtitles + skip and safety guards)")
     return 0
 
-
 # =====================================================================
 # ENTRY
 # =====================================================================
-
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
@@ -3117,7 +3728,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         except Exception:  # noqa: BLE001 - logging itself is failing
             traceback.print_exc()
         return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -12,6 +12,12 @@ from reporttext import scorecard, section
 
 import movie_standardizer as ms
 
+path_is_within = ms.path_is_within
+path_norm = ms.path_norm
+paths_equal = ms.paths_equal
+CoordinationLock = ms.CoordinationLock
+STANDARDIZER_LOCK_NAME = ms.STANDARDIZER_LOCK_NAME
+
 
 class ParseMovieNameTests(unittest.TestCase):
     def test_canonical(self) -> None:
@@ -590,6 +596,49 @@ class AtomicReportTests(_RunStateMixin):
         payload = json.loads(manifest.read_text(encoding="utf-8"))
         self.assertEqual(payload["summary"]["completed"], 1)
         self.assertEqual(sorted(p.name for p in manifest.parent.iterdir()), ["manifest.json"])
+
+
+class PathHelpersTests(unittest.TestCase):
+    def test_path_is_within(self) -> None:
+        root = Path("/data/library")
+        self.assertTrue(path_is_within(Path("/data/library/movie"), root))
+        self.assertTrue(path_is_within(root, root))
+        self.assertFalse(path_is_within(Path("/data/other/movie"), root))
+        self.assertFalse(path_is_within(Path("/other"), root))
+
+    def test_path_norm_and_equal(self) -> None:
+        left = Path("/tmp/./media/../media/film.mkv")
+        right = Path("/tmp/media/film.mkv")
+        # normpath collapses the .. and duplicate segments.
+        self.assertEqual(path_norm(left), path_norm(right))
+
+    def test_paths_equal_samefile(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "a.mkv"
+            f.write_bytes(b"x")
+            link = Path(td) / "b.mkv"
+            try:
+                link.hardlink_to(f)
+            except OSError:
+                self.skipTest("hardlink not supported on this filesystem")
+            self.assertTrue(paths_equal(f, link))
+
+
+class CoordinationLockTests(unittest.TestCase):
+    def test_acquire_release_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with CoordinationLock(Path(td) / "lib", timeout_seconds=10.0):
+                pass  # no exception means the lock was taken and released cleanly
+
+    def test_path_is_deterministic(self) -> None:
+        # The lock path must be identical for identical normalized targets so the
+        # standardizer, cleaner and subtitle fetcher contend on the same file.
+        # normpath collapses "." and ".."; on Windows normcase also lower-cases,
+        # which is exactly what makes the tools agree on a shared key.
+        lock_a = CoordinationLock(Path("/Data/./Library"))
+        lock_b = CoordinationLock("/Data/Library")
+        self.assertEqual(lock_a.path, lock_b.path)
+        self.assertIn(STANDARDIZER_LOCK_NAME, lock_a.path.name)
 
 
 if __name__ == "__main__":
