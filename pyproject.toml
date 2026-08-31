@@ -1,6 +1,6 @@
 [project]
 name = "organize"
-version = "3.2.0"
+version = "3.3.0"
 description = "The Definitive Media Management Toolkit for Jellyfin & Plex"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,13 +24,18 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/smeltzzz/organize"
-Documentation = "https://github.com/smeltzzz/organize#-documentation"
+Documentation = "https://github.com/smeltzzz/organize"
 "Source Code" = "https://github.com/smeltzzz/organize"
 "Bug Tracker" = "https://github.com/smeltzzz/organize/issues"
 Changelog = "https://github.com/smeltzzz/organize/blob/main/CHANGELOG.md"
 
 [project.scripts]
 organize = "organize:main"
+
+[project.optional-dependencies]
+# Development only (running the test suite). The runtime tools have no
+# third-party dependencies at all.
+dev = ["pytest>=7.0"]
 
 [tool.pytest.ini_options]
 # Make `pytest` discover the tests/ directory and put the repository root on

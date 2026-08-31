@@ -42,7 +42,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-VERSION = "3.2.0"
+VERSION = "3.3.0"
 
 # ANSI styling helpers (with safe fallbacks)
 _SUPPORTS_COLOR = (
@@ -594,8 +594,8 @@ def _reconfigure_stdio_for_windows() -> None:
     tools and guarantees the output path cannot crash on an unencodable
     character.
 
-    Kept inline (``common.enable_utf8_stdio`` does the same thing) so this
-    entrypoint stays importable with nothing but the standard library.
+    Kept inline so this entrypoint stays importable with nothing but the
+    standard library (the tool scripts pin their own stdio the same way).
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -614,7 +614,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Handle internal self-test flag
     if "--internal-self-test" in raw_args:
         # Run verify of organize itself
-        assert (HERE / "common.py").is_file(), "common.py missing"
         assert (HERE / "pipeline.py").is_file(), "pipeline.py missing"
         print("organize.py internal self-test: OK")
         return 0

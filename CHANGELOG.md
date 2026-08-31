@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-08-30
+
+### Changed
+- **The repo is now as simple as the tools are standalone.** The shared module `common.py` is gone: every helper it provided (report rendering, fail-closed locks, the SRT sidecar contract, probe cache, atomic writes) is now **vendored inline** in a clearly marked section at the top of each script that uses it. Each of the five tools is a single self-contained file — copy just the one(s) you need into your own setup and run them with nothing but Python 3.11+ and the standard library. `organize.py` (unified CLI / doctor) and `pipeline.py` (ordered sweep) remain as the convenience layer on top.
+- `tests/test_common.py` was dissolved: its suites now live next to the code they exercise (`test_10bit.py`, `test_movie_standardizer.py`, `test_subtitle_fetcher.py`, `test_reports.py`), including a rewritten "no tool keeps a divergent copy of the subtitle contract" suite that compares the vendored copies against each other.
+- README rewritten as a single document: what the toolkit does, the file map, per-tool quickstarts, and how to adopt just one tool.
+
+### Removed
+- Docker support (`Dockerfile`, `docker-compose.yml`, `.dockerignore`) — the toolkit never needed a container to begin with.
+- Windows launcher scripts (`organize.bat`, `organize.ps1`) and shell wrappers (`organize.sh`, `run_tests.sh`) — `python organize.py ...` is the one documented way to run everything.
+- The `docs/` folder (architecture, configuration, FAQ, Docker and OS-specific guides) — the README is now the only documentation.
+- `requirements.txt` / `requirements-dev.txt` — there are no runtime dependencies; `pytest` moved to the `dev` extra in `pyproject.toml`.
+
+### Compatibility note
+- If you import `common` directly from an external script, update it to import the helpers from a tool instead (e.g. `from library_auditor import Report`); every tool exports the shared helpers it vendors. All documented CLI behaviour is unchanged.
+
+## [3.2.0]
+
 ### Changed
 - **Every report now shares one layout.** A new renderer in `common.py` (`Report`, `report_banner`, `print_text`) draws all six reports — `subtitle_fetcher.py`, `library_auditor.py`, `mkv_track_cleaner.py`, `movie_standardizer.py`, `10bit.py` and the `pipeline.py` summary — with the same boxed header, the same right-aligned scorecard, and the same titled sections. Each report leads with the counts, then a one-line "Start here:", then the groups ordered by how cheap the fix is, then the full inventory. Nothing overflows the page and no line carries trailing whitespace.
 - **`subtitle_fetcher.py`'s report answers the two questions you actually ask.** Movies are no longer dumped into one flat list tagged with a status word: every result now carries a machine-readable reason, so the report splits cleanly into **MOVIES THAT NEED A SUBTITLE** (grouped by the fix — unusable sidecar, misnamed sidecar, layout defect, held for review, no provider match, deferred by quota, error) and **MOVIES THAT ALREADY HAVE AN EXTERNAL `.eng.srt`** (every covered movie listed with its sidecar file name). Movies the UTC cap cut off before they were scanned are now *named* in the report instead of only counted.

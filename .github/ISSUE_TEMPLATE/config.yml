@@ -1,14 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: 📖 Documentation
-    url: https://github.com/smeltzzz/organize#-documentation
-    about: Start with the README and the docs/ guides — most setup questions are answered there.
-  - name: ❓ FAQ & Troubleshooting
-    url: https://github.com/smeltzzz/organize/blob/main/docs/FAQ_TROUBLESHOOTING.md
-    about: Seeding deferrals, INVALID_SIDECAR findings, quota limits, and disk-space refusals.
+    url: https://github.com/smeltzzz/organize
+    about: Start with the README — what each file does, per-tool quickstarts, and how to adopt just the tools you need.
   - name: ⚙️ Configuration Reference
-    url: https://github.com/smeltzzz/organize/blob/main/docs/CONFIGURATION_REFERENCE.md
-    about: Every CLI flag, default, environment variable, and exit code for all five tools.
+    url: https://github.com/smeltzzz/organize/blob/main/.env.example
+    about: Every supported environment variable with its default and purpose (plus each tool's --help for flags and exit codes).
   - name: 💬 Discussions & Q&A
     url: https://github.com/smeltzzz/organize/discussions
     about: Ask questions and share your pipeline setup with other Jellyfin users.

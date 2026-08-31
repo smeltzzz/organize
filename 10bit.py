@@ -26,6 +26,7 @@ Zero Python third-party dependencies.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -34,9 +35,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
+import threading
 import time
 import traceback
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -44,17 +47,719 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from common import (
-    MediaProbeCache,
-    Report,
-    atomic_write_text,
-    enable_utf8_stdio,
-    format_bytes,
-    format_duration,
-    path_is_within,
-    print_text,
-    try_file_lock,
-)
+# ---------------------------------------------------------------------------
+# Shared helpers (vendored inline)
+#
+# This script is self-contained on purpose: every helper it needs is copied
+# below instead of imported from a shared module, so you can take this single
+# file anywhere and run it with nothing but the Python standard library.
+# The other scripts in this repo carry byte-identical copies of the same
+# helpers; if you change one, keep the others in sync.
+# ---------------------------------------------------------------------------
+
+def try_file_lock(handle: Any, *, strict_non_contention: bool = False) -> bool:
+    """Attempt a non-blocking exclusive lock on ``handle``.
+
+    Returns ``True`` when the lock is taken, ``False`` when it is held by
+    another process.
+
+    ``strict_non_contention`` controls how a *real* OS error is handled:
+
+    * ``False`` (the historical behaviour of the per-tool run locks) treats any
+      ``OSError`` as "busy" — ``10bit.py`` and ``library_auditor.py`` retried
+      every failure until they timed out.
+    * ``True`` (the historical behaviour of the standardizer coordination lock)
+      re-raises genuine errors and only reports the well-known
+      "already locked" codes as busy.
+    """
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+            return True
+        except OSError as exc:
+            if not strict_non_contention:
+                return False
+            if getattr(exc, "winerror", None) in {33, 36} or exc.errno in {
+                errno.EACCES,
+                errno.EAGAIN,
+            }:
+                return False
+            raise
+
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError as exc:
+        if not strict_non_contention:
+            return False
+        # Strict mode: the only expected "busy" condition is the lock being
+        # held by another process, which surfaces as EAGAIN/EWOULDBLOCK (and
+        # occasionally EACCES). Anything else is a real error worth raising.
+        if getattr(exc, "errno", None) in {
+            errno.EACCES,
+            errno.EAGAIN,
+            getattr(errno, "EWOULDBLOCK", errno.EAGAIN),
+        }:
+            return False
+        raise
+
+def atomic_write_text(path: Path, text: str) -> None:
+    r"""Publish ``text`` to ``path`` atomically.
+
+    Writes through a unique sibling file then ``os.replace``\ s it into place, so
+    a crash never leaves a truncated report and a read in progress always sees
+    either the previous file or the complete new one.  On failure the staged
+    file is removed and the prior report is retained.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = path.with_name(f".{path.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+    try:
+        staged.write_text(text, encoding="utf-8")
+        os.replace(str(staged), str(path))
+    except OSError:
+        try:
+            staged.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+class MediaProbeCache:
+    """Best-effort ``(path, size, mtime) -> probe payload`` cache.
+
+    ``10bit.py`` spawns one ``ffprobe`` per movie and ``mkv_track_cleaner.py``
+    spawns one ``mkvmerge -J`` per movie, on every single run, even for a
+    library that has not changed since the last sweep. Those subprocesses
+    dominate the cost of a maintenance run.
+
+    A probe is a pure function of a file's bytes, so a stored payload is reused
+    only while both the size and ``st_mtime_ns`` are unchanged. Crucially, only
+    the *probe output* is cached and never a tool's verdict: every consumer
+    still re-derives its own decision from live filesystem state. A cached
+    entry therefore cannot make a tool blind to a change it must react to — a
+    sidecar appearing next to a movie, a hardlink count dropping when seeding
+    stops, or a remux landing.
+
+    Deliberately fail-open on reads and fail-silent on writes: a missing,
+    unreadable, truncated, corrupt, foreign or stale cache is a miss rather
+    than an error, and a cache that cannot be saved costs only the next run's
+    speed. Nothing here can turn a correct run into an incorrect one.
+
+    ``path_norm`` keys mean the two tools agree on identity the same way they
+    already agree on lock keys.
+    """
+
+    SCHEMA = 1
+
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        tool: str = "probe",
+        enabled: bool = True,
+        max_entries: int = 20000,
+    ) -> None:
+        self.path = Path(path)
+        self.tool = tool
+        self.enabled = bool(enabled)
+        self.max_entries = max(1, int(max_entries))
+        self.hits = 0
+        self.misses = 0
+        self._lock = threading.Lock()
+        self._entries: dict[str, dict[str, Any]] = {}
+        self._dirty = False
+        if self.enabled:
+            self._load()
+
+    def _load(self) -> None:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(raw, dict):
+            return
+        if raw.get("schema") != self.SCHEMA or raw.get("tool") != self.tool:
+            # A different tool's cache or an older format: start clean rather
+            # than guess at a layout we do not understand.
+            return
+        entries = raw.get("entries")
+        if not isinstance(entries, dict):
+            return
+        self._entries = {
+            str(key): value for key, value in entries.items() if isinstance(value, dict)
+        }
+
+    def get(self, file_path: Path | str, size: int, mtime_ns: int) -> dict[str, Any] | None:
+        """Return a stored payload for an unchanged file, else ``None``."""
+        if not self.enabled:
+            self.misses += 1
+            return None
+        key = path_norm(file_path)
+        with self._lock:
+            entry = self._entries.get(key)
+            if (
+                entry is not None
+                and entry.get("size") == int(size)
+                and entry.get("mtime_ns") == int(mtime_ns)
+            ):
+                payload = entry.get("payload")
+                if isinstance(payload, dict):
+                    self.hits += 1
+                    return payload
+            self.misses += 1
+            return None
+
+    def put(self, file_path: Path | str, size: int, mtime_ns: int, payload: dict[str, Any]) -> None:
+        """Store a probe payload, evicting oldest entries past ``max_entries``."""
+        if not self.enabled:
+            return
+        key = path_norm(file_path)
+        with self._lock:
+            # Pop-then-insert refreshes recency: a plain dict preserves
+            # insertion order but has no OrderedDict.move_to_end.
+            self._entries.pop(key, None)
+            self._entries[key] = {
+                "size": int(size),
+                "mtime_ns": int(mtime_ns),
+                "payload": payload,
+            }
+            while len(self._entries) > self.max_entries:
+                self._entries.pop(next(iter(self._entries)), None)
+            self._dirty = True
+
+    def save(self) -> None:
+        """Persist the cache atomically. Failures are swallowed by design."""
+        if not self.enabled or not self._dirty:
+            return
+        with self._lock:
+            snapshot = dict(self._entries)
+            self._dirty = False
+        document = {"schema": self.SCHEMA, "tool": self.tool, "entries": snapshot}
+        try:
+            atomic_write_text(
+                self.path,
+                json.dumps(document, separators=(",", ":"), ensure_ascii=False) + "\n",
+            )
+        except OSError:
+            pass
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+def path_is_within(candidate: Path, parent: Path) -> bool:
+    """True when ``candidate`` is ``parent`` or a descendant after normalization.
+
+    Uses ``resolve(strict=False)`` so it also works for paths that have not been
+    created yet (e.g. the report/log files in a not-yet-existing output dir).
+    """
+    try:
+        candidate.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        return True
+    except (OSError, ValueError):
+        return False
+
+def path_norm(path: Path | str) -> str:
+    """Normalize a path the same way every tool compares them.
+
+    ``normcase`` lower-cases on Windows and is a no-op on POSIX; ``normpath``
+    collapses ``..`` and duplicate separators.  Matching this exactly is what
+    lets the standardizer, cleaner and subtitle fetcher agree on a lock key and
+    on whether two paths are the same file.
+    """
+    return os.path.normcase(os.path.normpath(str(path)))
+
+REPORT_WIDTH = 96
+
+REPORT_MIN_WIDTH = 64
+
+REPORT_INDENT = 2
+
+_RULE_HEAVY = "═"
+
+_RULE_LIGHT = "─"
+
+def enable_utf8_stdio() -> None:
+    """Pin this process's console streams to UTF-8 with replacement errors.
+
+    The reports are full of box-drawing characters, and every tool now prints
+    one.  Two failures follow from leaving the stream encoding to the locale:
+    a console that cannot represent ``\u2550`` raises ``UnicodeEncodeError``
+    half-way through a run, and a parent that captures a child's output with
+    ``text=True`` decodes it with the *locale* encoding - cp1252 on Windows -
+    which turns those same bytes into a ``UnicodeDecodeError``.
+
+    So every tool pins its own output to UTF-8 at startup, and every caller
+    that captures a child decodes it as UTF-8.  ``errors="replace"`` means a
+    console that still cannot cope degrades to ``?`` instead of aborting work
+    that has already been done.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # a replaced stream, e.g. under redirect_stdout
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):  # closed or detached stream
+            pass
+
+def print_text(text: str) -> None:
+    """Print report text without ever raising on a legacy console encoding.
+
+    Reports contain box-drawing characters.  On a console or pipe whose
+    encoding cannot represent them, ``print`` raises ``UnicodeEncodeError``,
+    which used to surface as a crash *after* the work was already done.  The
+    fallback writes the same text with unrepresentable characters replaced.
+    """
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:
+        try:
+            encoding = sys.stdout.encoding or "utf-8"
+            sys.stdout.buffer.write((text + "\n").encode(encoding, errors="replace"))
+            sys.stdout.buffer.flush()
+        except Exception:  # pragma: no cover - a stream that cannot be written at all
+            print(text.encode("ascii", errors="replace").decode("ascii"), flush=True)
+
+def clip_text(text: str, width: int, *, ellipsis: str = "...") -> str:
+    """Shorten ``text`` to at most ``width`` columns, marking the cut."""
+    text = str(text)
+    if width <= 0:
+        return ""
+    if len(text) <= width:
+        return text
+    if width <= len(ellipsis):
+        return text[:width]
+    return text[: width - len(ellipsis)].rstrip() + ellipsis
+
+def wrap_text(text: str, width: int) -> list[str]:
+    """Wrap ``text`` to ``width`` columns, preserving explicit line breaks."""
+    width = max(1, int(width))
+    out: list[str] = []
+    for paragraph in str(text).split("\n"):
+        if not paragraph.strip():
+            out.append("")
+            continue
+        chunks = textwrap.wrap(
+            paragraph,
+            width=width,
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+        out.extend(chunks or [""])
+    return out
+
+_PATH_BREAK_RE = re.compile(r"(?<=[/\\])|(?<=\s)")
+
+def _pack_on_separators(text: str, width: int) -> list[str]:
+    """Greedily fill lines, breaking only after a separator or a space."""
+    lines: list[str] = []
+    current = ""
+    for token in (tok for tok in _PATH_BREAK_RE.split(text) if tok):
+        if len(token) > width:
+            if current.strip():
+                lines.append(current.rstrip())
+            current = ""
+            lines.extend(line.rstrip() for line in wrap_text(token, width))
+            continue
+        if current and len(current) + len(token) > width:
+            lines.append(current.rstrip())
+            current = token
+        else:
+            current += token
+    if current.strip():
+        lines.append(current.rstrip())
+    return lines
+
+def wrap_path_text(text: str, width: int) -> list[str]:
+    """Wrap ``text`` on path separators and spaces, keeping names whole.
+
+    Report lines are usually paths, and the tail of a path - the movie folder
+    or file name - is what a reader scans for.  Breaking after ``/`` and ``\\``
+    keeps that name on one line, where ``wrap_text`` would happily split it in
+    half.  Only a single component longer than ``width`` is hard-broken, and
+    nothing is ever ellipsised away.
+    """
+    width = max(1, int(width))
+    text = str(text)
+    if len(text) <= width:
+        return [text]
+    out: list[str] = []
+    for paragraph in text.split("\n"):
+        if not paragraph.strip():
+            out.append("")
+        elif len(paragraph) <= width:
+            out.append(paragraph.rstrip())
+        else:
+            out.extend(_pack_on_separators(paragraph, width))
+    return out or [""]
+
+def format_bytes(size: int | float | None) -> str:
+    """Human file size with the unit spacing the reports use."""
+    if size is None or size <= 0:
+        return "0 B"
+    value = float(size)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024 or unit == "TiB":
+            if unit == "B":
+                return f"{int(value)} B"
+            return f"{value:.2f} {unit}"
+        value /= 1024
+    return f"{value:.2f} TiB"  # pragma: no cover - unreachable
+
+def format_duration(seconds: float | None) -> str:
+    """``H:MM:SS`` (or ``M:SS`` under an hour); an em-dash-free ``-`` when unknown."""
+    if not seconds or seconds <= 0:
+        return "-"
+    total = int(round(seconds))
+    hours, total = divmod(total, 3600)
+    minutes, secs = divmod(total, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+class Report:
+    """Builder for one tool's plain-text report.
+
+    The layout is fixed so every tool reads the same way::
+
+        +--------------------------------------------------------------+
+        |  boxed header: title, subtitle, aligned metadata             |
+        +--------------------------------------------------------------+
+
+          scorecard: right-aligned counts, one line per outcome
+
+          ══ SECTION TITLE ═════════════════════════════════════  n of m ══
+          wrapped explanation of why this section matters
+
+             1  first entry
+                Reason    aligned, wrapped detail field
+                Next      the thing to do about it
+
+    Nothing here writes to disk; call :meth:`render` and hand the text to
+    ``atomic_write_text``.
+    """
+
+    def __init__(self, title: str, subtitle: str = "", *, width: int = REPORT_WIDTH) -> None:
+        self._title = title
+        self._subtitle = subtitle
+        self._width = max(REPORT_MIN_WIDTH, int(width))
+        self._meta: list[tuple[str, str]] = []
+        self._body: list[str] = []
+
+    # -- geometry ------------------------------------------------------
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def _inner(self) -> int:
+        """Columns available inside the header box (``║ `` + text + `` ║``)."""
+        return self._width - 4
+
+    # -- header --------------------------------------------------------
+    def meta(self, label: str, value: object) -> Report:
+        """Add one ``label  value`` row to the boxed header."""
+        self._meta.append((str(label), "" if value is None else str(value)))
+        return self
+
+    def metas(self, pairs: Iterable[tuple[str, object]]) -> Report:
+        for label, value in pairs:
+            self.meta(label, value)
+        return self
+
+    @staticmethod
+    def _is_rule(line: str) -> bool:
+        """True for a line that is only rule characters (used to space entries)."""
+        stripped = line.strip()
+        return bool(stripped) and set(stripped) <= {_RULE_HEAVY, _RULE_LIGHT}
+
+    def _box_row(self, text: str) -> str:
+        return "║ " + clip_text(text, self._inner, ellipsis="..").ljust(self._inner) + " ║"
+
+    def render_header(self) -> str:
+        """Render just the boxed header (used for the startup banner too)."""
+        lines = ["╔" + _RULE_HEAVY * (self._width - 2) + "╗"]
+        lines.append(self._box_row(self._title))
+        if self._subtitle:
+            for chunk in wrap_text(self._subtitle, self._inner):
+                lines.append(self._box_row(chunk))
+        if self._meta:
+            lines.append("╟" + _RULE_LIGHT * (self._width - 2) + "╢")
+            label_width = max(len(label) for label, _ in self._meta)
+            value_width = self._inner - label_width - 2
+            for label, value in self._meta:
+                if not value:
+                    lines.append(self._box_row(label))
+                    continue
+                # Long values here are usually paths; break them at a
+                # separator so a directory name is not split mid-word.
+                chunks = wrap_path_text(value, value_width) or [""]
+                pad = " " * (label_width + 2)
+                for position, chunk in enumerate(chunks):
+                    lead = f"{label.ljust(label_width)}  " if position == 0 else pad
+                    lines.append(self._box_row(lead + chunk))
+        lines.append("╚" + _RULE_HEAVY * (self._width - 2) + "╝")
+        return "\n".join(lines)
+
+    # -- body ----------------------------------------------------------
+    def blank(self, count: int = 1) -> Report:
+        self._body.extend([""] * max(0, count))
+        return self
+
+    def rule(self, char: str = _RULE_LIGHT, *, indent: int = REPORT_INDENT) -> Report:
+        self._body.append(" " * indent + char * max(0, self._width - indent))
+        return self
+
+    def paragraph(self, text: str, *, indent: int = REPORT_INDENT) -> Report:
+        """A wrapped block of prose; leading spaces on continuation lines."""
+        for chunk in wrap_text(text, self._width - indent):
+            self._body.append(" " * indent + chunk)
+        return self
+
+    def title_line(self, text: str, *, right: str = "", indent: int = REPORT_INDENT) -> Report:
+        """``text`` left-aligned with ``right`` pushed to the right margin."""
+        span = self._width - indent
+        if not right:
+            self._body.append(" " * indent + clip_text(text, span))
+            return self
+        gap = span - len(right) - len(text)
+        if gap < 2:
+            self._body.append(" " * indent + clip_text(f"{text}  {right}", span))
+        else:
+            self._body.append(" " * indent + text + " " * gap + right)
+        return self
+
+    def scorecard(self, rows: Iterable[tuple], *, indent: int = REPORT_INDENT) -> Report:
+        """Render ``(count, label, hint)`` rows between two light rules.
+
+        The count is right-aligned so a reader can scan the numbers as a
+        column, and the hint column is clipped rather than wrapped: a scorecard
+        is meant to fit on one screen.
+        """
+        materialized = [(str(count), str(label), str(hint or "")) for count, label, hint in rows]
+        if not materialized:
+            return self
+        count_width = max(4, max(len(count) for count, _, _ in materialized))
+        label_width = max(len(label) for _, label, _ in materialized)
+        span = self._width - indent
+        self.rule(indent=indent)
+        for count, label, hint in materialized:
+            line = f"{count:>{count_width}}   {label:<{label_width}}"
+            if hint:
+                room = span - len(line) - 3
+                if room > 8:
+                    line += "   " + clip_text(hint, room)
+            self._body.append(" " * indent + clip_text(line, span))
+        self.rule(indent=indent)
+        return self
+
+    def section(
+        self,
+        title: str,
+        *,
+        count: int | None = None,
+        total: int | None = None,
+        intro: str = "",
+        indent: int = REPORT_INDENT,
+    ) -> Report:
+        """Open a major section: a heavy banner plus an optional explanation."""
+        if self._body and self._body[-1].strip():
+            self.blank()
+        tally = ""
+        if count is not None:
+            # A partial or interrupted run can report more items in a group than
+            # the scan counted; "5 of 3" would be nonsense, so the total is only
+            # shown when it is actually the larger number.
+            show_total = total is not None and int(total) >= int(count)
+            tally = f"{count} of {total}" if show_total else str(count)
+        span = self._width - indent
+        head = f"{_RULE_HEAVY}{_RULE_HEAVY} {title} "
+        tail = f" {tally} {_RULE_HEAVY}{_RULE_HEAVY}" if tally else ""
+        fill = span - len(head) - len(tail)
+        if fill < 3:
+            self._body.append(" " * indent + clip_text(head.strip() + ("  " + tally if tally else ""), span,
+                                                      ellipsis=""))
+        else:
+            self._body.append(" " * indent + head + _RULE_HEAVY * fill + tail)
+        if intro:
+            self.blank()
+            self.paragraph(intro, indent=indent)
+        self.blank()
+        return self
+
+    def subsection(
+        self,
+        title: str,
+        *,
+        count: int | None = None,
+        indent: int = REPORT_INDENT,
+    ) -> Report:
+        """Open a labelled group inside a section (one light rule, not a box)."""
+        if self._body and self._body[-1].strip():
+            self.blank()
+        span = self._width - indent
+        tally = f" {count}" if count is not None else ""
+        head = f"{_RULE_LIGHT}{_RULE_LIGHT} {title} "
+        tail = f"{tally} {_RULE_LIGHT}{_RULE_LIGHT}"
+        fill = span - len(head) - len(tail)
+        if fill < 3:
+            self._body.append(" " * indent + clip_text(head.strip() + tally, span, ellipsis=""))
+        else:
+            self._body.append(" " * indent + head + _RULE_LIGHT * fill + tail)
+        return self
+
+    def entry(
+        self,
+        text: str,
+        *,
+        detail: str = "",
+        ordinal: int | None = None,
+        marker: str = "",
+        fields: Iterable[tuple[str, str]] = (),
+        detail_column: int = 0,
+        indent: int = 4,
+    ) -> Report:
+        """One item in a section.
+
+        ``ordinal`` numbers the entry; ``marker`` is a short tag used instead
+        when numbering would be noise.  ``detail_column`` puts a short detail
+        on the same line at a fixed column (used for name/sidecar tables) and
+        falls back to a wrapped line underneath when it would not fit.
+        ``fields`` are ``label  value`` pairs aligned under the entry text.
+        """
+        if ordinal is not None:
+            prefix = f"{ordinal:>4}  "
+        elif marker:
+            prefix = f"{marker:<4}  "
+        else:
+            prefix = "      "
+        span = self._width - indent
+        head_limit = span - len(prefix)
+        if detail_column > 0:
+            # A fixed detail column only reads as a table when the entry text
+            # stays inside it, so long titles wrap to a continuation line
+            # instead of pushing every detail sideways.
+            head_limit = min(head_limit, max(8, detail_column - indent - len(prefix)))
+        # Entry text wraps rather than being ellipsised: the tail of a long
+        # path is usually the part a reader came for, and clipping it away
+        # hides the very information the report exists to convey.
+        head_chunks = wrap_path_text(text, max(8, head_limit)) or [""]
+        # Entries breathe: a blank line separates them, but a section banner or
+        # its explanation paragraph keeps the first entry tight underneath.
+        if self._body and self._body[-1].strip() and not self._is_rule(self._body[-1]):
+            self._body.append("")
+        head_index = len(self._body)
+        self._body.append(" " * indent + prefix + head_chunks[0])
+        continuation = " " * (indent + len(prefix))
+        self._body.extend(continuation + chunk for chunk in head_chunks[1:])
+        materialized = [(str(label), str(value or "")) for label, value in fields]
+        if materialized:
+            label_width = max(6, max(len(label) for label, _ in materialized))
+            for label, value in materialized:
+                lead = f"{label.ljust(label_width)}  "
+                chunks = wrap_text(value, max(8, span - len(prefix) - len(lead))) or [""]
+                self._body.append(continuation + lead + chunks[0])
+                for chunk in chunks[1:]:
+                    self._body.append(continuation + " " * len(lead) + chunk)
+        if detail:
+            head = head_chunks[0]
+            # A detail can ride on the entry's own line only when that entry
+            # text did not have to wrap; otherwise it belongs underneath.
+            if detail_column > 0 and len(head_chunks) == 1:
+                room = detail_column - indent - len(prefix) - len(head)
+                if room >= 1 and len(detail) <= span - detail_column:
+                    self._body[head_index] = (
+                        " " * indent + prefix + head.ljust(detail_column - indent - len(prefix)) + detail
+                    )
+                    return self
+            for chunk in wrap_text(detail, max(8, span - len(prefix) - 2)):
+                self._body.append(continuation + "  " + chunk)
+        return self
+
+    def table(
+        self,
+        headers: Iterable[str],
+        rows: Iterable[Iterable],
+        *,
+        aligns: str = "",
+        indent: int = 4,
+    ) -> Report:
+        """An aligned column table with a header row and a rule under it.
+
+        ``aligns`` is one character per column, ``<`` or ``>``.  Columns are
+        sized to their content and then trimmed - widest first, never below
+        their header - so the table always fits inside the report width.
+        """
+        head = [str(column) for column in headers]
+        body = [[("" if cell is None else str(cell)) for cell in row] for row in rows]
+        columns = len(head)
+        if not columns:
+            return self
+        aligns = (aligns or "<" * columns).ljust(columns, "<")[:columns]
+        span = self._width - indent
+        widths = [
+            max([len(head[i])] + [len(row[i]) for row in body if i < len(row)])
+            for i in range(columns)
+        ]
+        gaps = 2 * (columns - 1)
+        minimums = [max(6, len(column)) for column in head]
+        while sum(widths) + gaps > span:
+            shrinkable = [i for i in range(columns) if widths[i] > minimums[i]]
+            if not shrinkable:
+                break
+            widths[max(shrinkable, key=lambda i: widths[i])] -= 1
+
+        def render(cells: list[str]) -> str:
+            parts = []
+            for i, cell in enumerate(cells[:columns]):
+                text = clip_text(cell, widths[i])
+                parts.append(text.rjust(widths[i]) if aligns[i] == ">" else text.ljust(widths[i]))
+            return " " * indent + "  ".join(parts).rstrip()
+
+        self._body.append(render(head))
+        self._body.append(" " * indent + "  ".join(_RULE_LIGHT * width for width in widths))
+        for row in body:
+            self._body.append(render(list(row) + [""] * (columns - len(row))))
+        return self
+
+    def entries(self, items: Iterable, **defaults: object) -> Report:
+        """Render an iterable of entry specs, numbered in order.
+
+        Each item is either a ``(text, detail)`` tuple or a mapping of
+        :meth:`entry` keyword arguments (``detail``, ``fields``, ``marker``).
+        ``defaults`` supplies the keyword arguments shared by every item.
+        """
+        for position, item in enumerate(items, start=1):
+            if isinstance(item, tuple):
+                text, detail = (list(item) + [""])[:2]
+                spec: dict = {"text": text, "detail": detail}
+            else:
+                spec = dict(item)
+            spec.setdefault("ordinal", position)
+            merged = {**defaults, **spec}
+            self.entry(str(merged.pop("text", "")), **merged)
+        return self
+
+    def footer(self, lines: Iterable[str] = (), *, indent: int = REPORT_INDENT) -> Report:
+        """Close the report with a light rule and trailing notes."""
+        self.blank()
+        self.rule(indent=indent)
+        for line in lines:
+            self.paragraph(line, indent=indent)
+        return self
+
+    # -- output --------------------------------------------------------
+    def render(self) -> str:
+        """The whole report as one string, always ending in a newline."""
+        lines = self.render_header().split("\n")
+        lines.append("")
+        lines.extend(self._body)
+        # Trailing spaces are invisible in a terminal and noisy in a diff.
+        return "\n".join(line.rstrip() for line in lines).rstrip() + "\n"
 
 # =============================================================================
 # CONFIGURATION  (CLI flags override these)
@@ -141,7 +846,6 @@ CATEGORY_LABELS = {
 # DATA
 # =============================================================================
 
-
 @dataclass
 class Config:
     source_dir: Path = field(default_factory=lambda: Path(SOURCE_DIR))
@@ -164,7 +868,6 @@ class Config:
     def min_bytes(self) -> int:
         return int(self.min_file_size_mb * 1024 * 1024)
 
-
 @dataclass
 class ProbeResult:
     path: str
@@ -184,11 +887,9 @@ class ProbeResult:
     duration_sec: float | None = None
     error: str = ""
 
-
 CFG = Config()
 PRINT_LOCK = Lock()
 _ACTIVE_LOG_FILE: Path | None = None
-
 
 def log(msg: str, level: str = "INFO", log_file: Path | None = None) -> None:
     """Print a timestamped event and append the identical event to this script's log."""
@@ -206,11 +907,9 @@ def log(msg: str, level: str = "INFO", log_file: Path | None = None) -> None:
             # Logging must never make this read-only inspector alter or abandon media work.
             pass
 
-
 # =============================================================================
 # FFPROBE LOCATION
 # =============================================================================
-
 
 def find_ffprobe(explicit: str | None = None) -> str | None:
     candidates: list[str] = []
@@ -238,7 +937,6 @@ def find_ffprobe(explicit: str | None = None) -> str | None:
             return str(path)
     return which
 
-
 def ffprobe_works(binary: str) -> bool:
     try:
         r = subprocess.run(
@@ -251,10 +949,8 @@ def ffprobe_works(binary: str) -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
 
-
 class LockUnavailable(RuntimeError):
     """Raised when another inspector instance owns the run lock."""
-
 
 class ExclusiveRunLock:
     """A fail-closed advisory lock compatible with Windows and POSIX hosts."""
@@ -308,11 +1004,9 @@ class ExclusiveRunLock:
             self.handle.close()
             self.handle = None
 
-
 # =============================================================================
 # BIT DEPTH / HDR CLASSIFICATION  (pure — unit-tested)
 # =============================================================================
-
 
 def _as_int(value: Any) -> int | None:
     if value is None or value == "" or value == "N/A":
@@ -322,7 +1016,6 @@ def _as_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
 
-
 def _as_float(value: Any) -> float | None:
     if value is None or value == "" or value == "N/A":
         return None
@@ -330,7 +1023,6 @@ def _as_float(value: Any) -> float | None:
         return float(str(value).strip())
     except (TypeError, ValueError):
         return None
-
 
 def bit_depth_from_pix_fmt(pix_fmt: str) -> int | None:
     fmt = (pix_fmt or "").lower().strip()
@@ -351,7 +1043,6 @@ def bit_depth_from_pix_fmt(pix_fmt: str) -> int | None:
             return n
     return None
 
-
 def bit_depth_from_profile(profile: str) -> int | None:
     p = (profile or "").lower()
     if not p:
@@ -363,7 +1054,6 @@ def bit_depth_from_profile(profile: str) -> int | None:
     if "main 8" in p or p in {"main", "high", "baseline", "constrained baseline"}:
         return None  # not decisive
     return None
-
 
 def resolve_bit_depth(stream: dict[str, Any]) -> tuple[int | None, str]:
     """Return confirmed bit depth and evidence; never assume unknown is 8-bit."""
@@ -380,11 +1070,9 @@ def resolve_bit_depth(stream: dict[str, Any]) -> tuple[int | None, str]:
         return from_prof, f"codec profile {profile}"
     return None, "no reliable raw-sample, pixel-format, or profile bit-depth metadata"
 
-
 def _iter_side_data(stream: dict[str, Any]) -> list[dict[str, Any]]:
     raw = stream.get("side_data_list") or []
     return [sd for sd in raw if isinstance(sd, dict)]
-
 
 def _tag_blob(stream: dict[str, Any], fmt: dict[str, Any] | None) -> str:
     parts: list[str] = []
@@ -395,7 +1083,6 @@ def _tag_blob(stream: dict[str, Any], fmt: dict[str, Any] | None) -> str:
         for key, val in src.items():
             parts.append(f"{key}={val}")
     return " ".join(parts).lower()
-
 
 def classify_hdr(stream: dict[str, Any], fmt: dict[str, Any] | None = None) -> tuple[bool, list[str], list[str]]:
     """Return HDR status, labels, and evidence. BT.2020 primaries alone are not HDR."""
@@ -465,7 +1152,6 @@ def classify_hdr(stream: dict[str, Any], fmt: dict[str, Any] | None = None) -> t
     is_hdr = bool(unique) or transfer in HDR_TRANSFERS
     return is_hdr, unique, list(dict.fromkeys(evidence))
 
-
 def pick_video_stream(payload: dict[str, Any]) -> dict[str, Any] | None:
     streams = [s for s in payload.get("streams", []) if isinstance(s, dict)]
     real = [
@@ -486,7 +1172,6 @@ def pick_video_stream(payload: dict[str, Any]) -> dict[str, Any] | None:
     )
     return real[0]
 
-
 def categorize(bit_depth: int | None, is_hdr: bool) -> str:
     if bit_depth is None:
         return STATUS_REVIEW_UNKNOWN_DEPTH
@@ -497,7 +1182,6 @@ def categorize(bit_depth: int | None, is_hdr: bool) -> str:
     if is_hdr:
         return STATUS_SKIP_HDR
     return STATUS_SKIP_SDR
-
 
 def result_from_probe(
     path: str,
@@ -560,15 +1244,12 @@ def result_from_probe(
         duration_sec=duration,
     )
 
-
 # =============================================================================
 # FILE DISCOVERY
 # =============================================================================
 
-
 def is_skipped_dir(name: str) -> bool:
     return name.strip().lower() in SKIP_DIR_NAMES
-
 
 def is_junk_name(name: str) -> bool:
     lower = name.lower()
@@ -579,7 +1260,6 @@ def is_junk_name(name: str) -> bool:
     if re.search(r"(?i)(?:^|[._\-\s])(sample|trailer|teaser)(?:[._\-\s]|$)", Path(name).stem):
         return True
     return False
-
 
 def discover_videos(root: Path, cfg: Config) -> list[Path]:
     found: list[Path] = []
@@ -603,11 +1283,9 @@ def discover_videos(root: Path, cfg: Config) -> list[Path]:
     found.sort(key=lambda p: str(p).casefold())
     return found
 
-
 # =============================================================================
 # PROBE
 # =============================================================================
-
 
 def run_ffprobe(binary: str, file_path: Path, cfg: Config) -> dict[str, Any]:
     cmd = [
@@ -655,7 +1333,6 @@ def run_ffprobe(binary: str, file_path: Path, cfg: Config) -> dict[str, Any]:
         raise RuntimeError("ffprobe JSON was not an object")
     return payload
 
-
 def inspect_movie(
     file_path: Path,
     cfg: Config,
@@ -694,21 +1371,17 @@ def inspect_movie(
             error=str(exc),
         )
 
-
 # =============================================================================
 # REPORT
 # =============================================================================
-
 
 def fmt_size(n: int) -> str:
     """Human file size, formatted the same way in every tool's report."""
     return format_bytes(n)
 
-
 def fmt_dur(seconds: float | None) -> str:
     """Human duration, formatted the same way in every tool's report."""
     return format_duration(seconds)
-
 
 @dataclass(frozen=True)
 class ActionGroup:
@@ -724,7 +1397,6 @@ class ActionGroup:
     scorecard_label: str
     scorecard_hint: str
     action: str
-
 
 ACTION_GROUPS: tuple[ActionGroup, ...] = (
     ActionGroup(
@@ -773,7 +1445,6 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         "Do nothing. Re-encoding an already high bit-depth file only loses quality.",
     ),
 )
-
 
 def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) -> str:
     """Render the inspector report: what to re-encode first, what never to touch last."""
@@ -856,7 +1527,6 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
     ])
     return report.render()
 
-
 def write_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) -> bool:
     """Publish the sole inspector artifact as a complete atomic text report."""
     try:
@@ -866,11 +1536,9 @@ def write_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
         log(f"[ERROR] Cannot write report {cfg.report_file}: {exc}")
         return False
 
-
 # =============================================================================
 # DRIVER
 # =============================================================================
-
 
 def validate_config(cfg: Config) -> list[str]:
     """Return actionable safety errors before probing or writing any outputs."""
@@ -896,11 +1564,9 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append("--log and --report must be different files")
     return errors
 
-
 def run_lock_path(source_dir: Path) -> Path:
     key = hashlib.sha256(str(source_dir.resolve(strict=False)).encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
     return Path(tempfile.gettempdir()) / f"{LOCK_NAME}.{key}"
-
 
 def scan(cfg: Config) -> int:
     log("=" * 79)
@@ -1011,11 +1677,9 @@ def scan(cfg: Config) -> int:
         return 3
     return 0
 
-
 # =============================================================================
 # CLI
 # =============================================================================
-
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -1044,7 +1708,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--self-test", action="store_true")
     return p
 
-
 def cfg_from_args(args: argparse.Namespace) -> Config:
     workers = args.workers if args.workers > 0 else (os.cpu_count() or 4)
     return Config(
@@ -1065,16 +1728,13 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         use_cache=bool(args.use_cache),
     )
 
-
 # =============================================================================
 # SELF-TEST
 # =============================================================================
 
-
 def _assert(cond: bool, msg: str, errors: list[str]) -> None:
     if not cond:
         errors.append(msg)
-
 
 def run_self_tests() -> int:
     errors: list[str] = []
@@ -1262,7 +1922,6 @@ def run_self_tests() -> int:
     print("SELF-TEST PASSED (fail-closed classification + HDR rules + discovery + single report)")
     return 0
 
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -1299,7 +1958,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception:
         traceback.print_exc()
         return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())
