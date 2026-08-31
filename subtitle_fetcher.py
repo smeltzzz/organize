@@ -7,20 +7,22 @@ canonical movie library and create at most one validated external English SRT
 sidecar per MKV. This single script owns its persistent UTC request ledger;
 there is no separate queue script or launcher to run.
 
-When configured, it always attempts the exact OpenSubtitles moviehash first.
-After a hash miss, it automatically allows only a high-confidence exact
-title/year candidate. An optional score-gated SubDL release-aware lookup is the final
-fallback; because SubDL has no equivalent release hash, it is never allowed ahead of an available
-OpenSubtitles hash match. A wrong cut is held for review rather than downloaded.
+OpenSubtitles and SubDL are treated as equal sources. Both providers'
+release-identifying routes are consulted for every movie - the exact
+OpenSubtitles moviehash and SubDL's score-gated release-aware filename
+match (score >= 0.80) - and the qualifying release with the most downloads
+is downloaded, whichever provider it came from. When neither release route
+yields a pick, both providers' strict title/year routes are pooled the same
+way. A wrong cut or a tie the quality signals cannot break is held for
+review rather than downloaded.
 
-On both OpenSubtitles routes a candidate is auto-selected only when its
-release name carries the movie title, the release year, and an explicit
-Blu-ray keyword (``BluRay``, ``Blu-ray``, ``BLU RAY``, ...). Among the
-qualifying candidates the one with the highest download count wins; the
-trusted flag, community rating and votes remain as tiebreakers, and a tie
-they cannot break is held for manual review. There is no separate
-rating/votes quality floor, so popular but unvoted subtitles for big-name
-movies are fetched automatically.
+A candidate is auto-selected only when its release name carries the movie
+title, the release year, and an explicit Blu-ray keyword (``BluRay``,
+``Blu-ray``, ``BLU RAY``, ...). Among the qualifying candidates the one
+with the highest download count wins; the trusted flag, community rating and
+votes remain as tiebreakers, and a tie they cannot break is held for manual
+review. There is no separate rating/votes quality floor, so popular but
+unvoted subtitles for big-name movies are fetched automatically.
 
 The position in the pipeline is deliberate, not cosmetic. The moviehash is the
 file size plus the sum of the first and last 64 KiB, and this tool submits it
@@ -889,8 +891,8 @@ SUBDL_DEFAULT_SEARCH_DAILY_CAP = 2_000
 SUBDL_DEFAULT_DAILY_CAP = 50
 SUBDL_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
-__version__ = "2.8.0"
-APP_USER_AGENT = "JellyfinMovieSubtitleFetcher v2.8"
+__version__ = "2.9.0"
+APP_USER_AGENT = "JellyfinMovieSubtitleFetcher v2.9"
 API_BASE = "https://api.opensubtitles.com/api/v1"
 
 # The preceding standardizer emits canonical MKV movies only. Limiting the
@@ -942,8 +944,9 @@ EDITION_MARKERS = frozenset({
 BLURAY_RELEASE_RE = re.compile(r"blu[\s._-]*ray", re.IGNORECASE)
 # One sentence for the banner and the report: what automatic selection does.
 SELECTION_POLICY_TEXT = (
-    "auto-selects the release that names the movie and its release year, "
-    "carries a Blu-ray keyword, and has the most downloads"
+    "auto-selects, across OpenSubtitles and SubDL as equal sources, "
+    "the release that names the movie and its release year, carries a "
+    "Blu-ray keyword, and has the most downloads"
 )
 # SubDL documents this as a confident release-level filename match. It applies
 # only to its /files/search endpoint; title-only fallback retains its separate
@@ -2165,6 +2168,59 @@ def pick_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity)
         return None, "multiple equally ranked title/year-exact Blu-ray SRT candidates require review"
     return top, "title/year exact; Blu-ray release naming the movie and its release year; highest download count"
 
+def pick_pooled_candidates(
+    entries: list[tuple[Candidate, str, str, str]],
+    identity: MovieIdentity | None,
+) -> tuple[Candidate | None, str, str, str]:
+    """Rank same-tier candidates from different providers as equal sources.
+
+    ``entries`` are ``(candidate, provider, method, provider_reason)`` tuples,
+    at most one per provider. A lone entry stands exactly as its provider
+    selected it. When both providers contribute, every contributor must also
+    carry the release-name policy - movie title, release year and an explicit
+    Blu-ray keyword - and the highest download count wins regardless of
+    provider; an unbroken tie is held for manual review rather than resolved
+    by a provider default.
+    """
+    if not entries:
+        return None, "", "", ""
+    if len(entries) == 1:
+        candidate, provider, method, reason = entries[0]
+        return candidate, provider, method, reason
+    conforming: list[tuple[Candidate, str, str, str]] = []
+    rejected: list[str] = []
+    for candidate, provider, method, reason in entries:
+        if release_has_bluray_keyword(candidate.release) and (
+            identity is None or release_matches_movie_identity(candidate.release, identity)
+        ):
+            conforming.append((candidate, provider, method, reason))
+        else:
+            rejected.append(provider_label(provider))
+    if not conforming:
+        return (
+            None, "", "",
+            f"no release met the selection policy on either provider ({'; '.join(rejected)} rejected)",
+        )
+    if len(conforming) == 1:
+        candidate, provider, method, reason = conforming[0]
+        return candidate, provider, method, f"{reason}; {'; '.join(rejected)} release did not meet the selection policy"
+    conforming.sort(
+        key=lambda entry: (
+            *candidate_rank_key(entry[0]),
+            entry[1], str(entry[0].file_id), entry[0].release.casefold(),
+        ),
+    )
+    top_key = candidate_rank_key(conforming[0][0])
+    tied = [entry for entry in conforming if candidate_rank_key(entry[0]) == top_key]
+    if len(tied) != 1:
+        return None, "", "", "multiple equally ranked candidates across providers require review"
+    candidate, provider, method, reason = tied[0]
+    loser = next(entry for entry in conforming if entry[1] != provider)
+    return (
+        candidate, provider, method,
+        f"{reason}; best across both providers (beats {provider_label(loser[1])})",
+    )
+
 def looks_like_srt(text: str) -> bool:
     """The shared verdict on whether text contains a well-formed SRT cue.
 
@@ -2389,6 +2445,36 @@ def run_self_tests() -> int:
           "forced/foreign-part candidates must be excluded")
     check(pick_candidate([candidate for candidate in cands if not candidate.moviehash_match], Config()) is None,
           "no hash match → none")
+    os_pick = next(candidate for candidate in cands if candidate.file_id == 7)
+    subdl_pick = next(candidate for candidate in cands if candidate.file_id == 8)
+    web_pick = next(candidate for candidate in cands if candidate.file_id == 10)
+    # Equal sources: when both providers offer a qualifying release, the
+    # most-downloaded one wins regardless of provider.
+    pooled, pooled_provider, _pooled_method, pooled_reason = pick_pooled_candidates(
+        [(subdl_pick, PROVIDER_SUBDL, "subdl-release", "subdl release match"),
+         (os_pick, PROVIDER_OPENSUBTITLES, "hash", "moviehash match")],
+        hash_identity,
+    )
+    check(pooled is not None and pooled.file_id == 7 and pooled_provider == PROVIDER_OPENSUBTITLES,
+          f"pool picks the most-downloaded release across providers ({pooled_reason})")
+    # A non-qualifying (WEB) release from one provider never beats a
+    # qualifying release from the other.
+    pooled2, provider2, _method2, reason2 = pick_pooled_candidates(
+        [(web_pick, PROVIDER_SUBDL, "subdl-release", "subdl release match"),
+         (os_pick, PROVIDER_OPENSUBTITLES, "hash", "moviehash match")],
+        hash_identity,
+    )
+    check(pooled2 is not None and pooled2.file_id == 7 and provider2 == PROVIDER_OPENSUBTITLES,
+          f"non-qualifying provider release loses to the qualifying one ({reason2})")
+    # An unbroken cross-provider tie is held for review, not defaulted.
+    twin_pick = Candidate(**os_pick.__dict__)
+    tied_pool, _p, _m, tied_reason = pick_pooled_candidates(
+        [(os_pick, PROVIDER_OPENSUBTITLES, "hash", "moviehash match"),
+         (twin_pick, PROVIDER_SUBDL, "subdl-release", "subdl release match")],
+        hash_identity,
+    )
+    check(tied_pool is None and "review" in tied_reason,
+          f"cross-provider ties remain review-only ({tied_reason})")
 
     sample = (
         "1\n"
@@ -2804,11 +2890,11 @@ def provider_policy_text(cfg: QueueConfig) -> str:
             return "OpenSubtitles exact moviehash matching only"
         return "title/year fallback disabled"
     if cfg.api_key.strip() and cfg.subdl_api_key.strip():
-        return "OpenSubtitles exact moviehash first · SubDL release-aware fallback (score ≥ 0.80)"
+        return "OpenSubtitles + SubDL as equal sources (release match scored ≥ 0.80) · most downloads wins"
     if cfg.api_key.strip():
-        return "OpenSubtitles exact moviehash first · conservative title/year fallback"
+        return "OpenSubtitles only · exact moviehash then conservative title/year"
     if cfg.subdl_api_key.strip():
-        return "SubDL release-aware matching (score ≥ 0.80) · no exact moviehash provider"
+        return "SubDL only (release match scored ≥ 0.80) · no exact moviehash provider"
     return "no provider configured"
 
 def movie_key(video: Path, snapshot: VideoSnapshot) -> str:
@@ -2899,13 +2985,17 @@ def relative_text(path: Path, root: Path) -> str:
 def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     """Process one daily batch with independent provider quotas.
 
-    OpenSubtitles remains the only exact-release (OSHash) source. SubDL runs
-    only after OpenSubtitles has no safe candidate or is unavailable for the
-    day; its documented filename match is score-gated, then its strict
-    title/year route is used only when filename matching found no usable candidate.
-    Automatic OpenSubtitles selection only accepts a release that names the
-    movie and its release year and carries a Blu-ray keyword, and ranks those
-    by download count.
+    OpenSubtitles and SubDL are equal sources. Each movie is offered both
+    providers' release-identifying routes - OpenSubtitles exact moviehash and
+    SubDL score-gated filename match (score >= 0.80) - and the qualifying
+    release with the most downloads wins, regardless of provider. When
+    neither release route produces a pick, both providers' strict title/year
+    routes are pooled the same way; SubDL's generic title route is used only
+    when its release lookup returned no candidates at all, so a low-score
+    release match never weakens to a generic one.
+    Automatic selection only accepts a release that names the movie and its
+    release year and carries a Blu-ray keyword, and ranks those by download
+    count.
     """
     state = load_state(cfg.log_file, cfg.library)
     today = utc_day()
@@ -3051,6 +3141,20 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         identity = movie_identity_from_video(video)
 
         open_lookup_error = ""
+        pool_reasons: list[str] = []
+        os_tier1: Candidate | None = None
+        os_tier1_reason = (
+            "no usable Blu-ray English moviehash-matched human SRT "
+            "naming the movie and its release year"
+        )
+        subdl_tier1: Candidate | None = None
+        subdl_tier1_reason = ""
+        subdl_release_candidates: list[Candidate] = []
+
+        # Tier 1 - release-identifying routes, queried as equal sources:
+        # OpenSubtitles' exact-moviehash match and SubDL's score-gated
+        # filename match. Whichever qualifying release has the most downloads
+        # wins, regardless of provider.
         if open_available and open_client is not None:
             providers_checked.append(PROVIDER_OPENSUBTITLES)
             emit(index, "SEARCH", video, "calculating moviehash and checking OpenSubtitles")
@@ -3076,7 +3180,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 continue
             try:
                 candidates = open_client.search(movie_hash=digest, query=video.stem)
-                pick = pick_candidate(candidates, fetcher_cfg, identity=identity)
+                os_tier1 = pick_candidate(candidates, fetcher_cfg, identity=identity)
             except (RuntimeError, ValueError) as exc:
                 if not subdl_available:
                     set_movie_status(
@@ -3090,11 +3194,21 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                     emit(index, "ERROR", video, str(exc))
                     continue
                 open_lookup_error = f"OpenSubtitles moviehash lookup failed: {exc}"
+                pool_reasons.append(open_lookup_error)
                 emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
-            if pick is not None:
-                selected_provider = PROVIDER_OPENSUBTITLES
-                selection_method = "hash"
-                selection_reason = "moviehash match; Blu-ray release naming the movie and its release year; highest download count"
+            if os_tier1 is not None:
+                os_tier1_reason = (
+                    "moviehash match; Blu-ray release naming the movie and its release year; "
+                    "highest download count"
+                )
+
+        if os_tier1 is not None and (not cfg.identity_fallback or identity is None):
+            # A strict hash match stands alone when nothing else may be
+            # asked: the title/year fallback is disabled, or the filename
+            # carries no canonical Title (Year) pair to search by.
+            pick, selected_provider, selection_method, selection_reason = (
+                os_tier1, PROVIDER_OPENSUBTITLES, "hash", os_tier1_reason,
+            )
 
         if pick is None:
             if not cfg.identity_fallback:
@@ -3132,76 +3246,24 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 results.append(result)
                 emit(index, "REVIEW", video, detail)
                 continue
+            assert identity is not None
 
-            identity_reasons: list[str] = [open_lookup_error] if open_lookup_error else []
-            if open_available and open_client is not None and not open_lookup_error:
-                emit(index, "FALLBACK", video,
-                     f"exact hash missed; checking OpenSubtitles title/year: {identity.title} ({identity.year})")
-                try:
-                    identity_candidates = open_client.search_identity(identity)
-                    pick, selection_reason = pick_identity_candidate(identity_candidates, identity)
-                except (RuntimeError, ValueError) as exc:
-                    if not subdl_available:
-                        set_movie_status(
-                            record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1,
-                            providers_checked=providers_checked,
-                        )
-                        ledger["errors"] += 1
-                        persist_state(state, cfg.log_file)
-                        result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
-                        results.append(result)
-                        emit(index, "ERROR", video, str(exc))
-                        continue
-                    open_lookup_error = f"OpenSubtitles title/year lookup failed: {exc}"
-                    identity_reasons.append(open_lookup_error)
-                    emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
-                if pick is not None:
-                    selected_provider = PROVIDER_OPENSUBTITLES
-                    selection_method = "identity"
-                elif not open_lookup_error:
-                    identity_reasons.append(f"OpenSubtitles: {selection_reason}")
-            elif open_client is not None and not open_lookup_error:
-                identity_reasons.append("OpenSubtitles: daily download cap exhausted")
-
-            if pick is None and subdl_available and subdl_client is not None:
+            if subdl_available and subdl_client is not None:
                 providers_checked.append(PROVIDER_SUBDL)
-                prefix = (
-                    "OpenSubtitles lookup failed; " if open_lookup_error else
-                    "OpenSubtitles missed; " if open_available else
-                    "OpenSubtitles quota exhausted; " if open_client is not None else ""
-                )
                 emit(
                     index,
-                    "FALLBACK",
+                    "SEARCH",
                     video,
-                    f"{prefix}checking SubDL release-aware filename match: {video.name}",
+                    f"checking SubDL release-aware filename match: {video.name}",
                 )
                 try:
                     subdl_lookup_attempted = True
-                    subdl_candidates, subdl_downloads = subdl_client.search_filename(video.name, identity)
-                    pick, selection_reason = pick_subdl_identity_candidate(
-                        subdl_candidates, identity, require_release_match_score=True,
+                    subdl_release_candidates, subdl_downloads = subdl_client.search_filename(
+                        video.name, identity,
                     )
-                    if pick is not None:
-                        selected_provider = PROVIDER_SUBDL
-                        selection_method = "subdl-release"
-                    elif not subdl_candidates:
-                        # The local canonical filename deliberately omits scene
-                        # tags. If SubDL cannot resolve it at all, use its
-                        # documented title route once, still requiring exact
-                        # provider title/year metadata and one unambiguous SRT.
-                        emit(
-                            index,
-                            "FALLBACK",
-                            video,
-                            f"SubDL filename lookup found no usable candidate; checking strict title/year: "
-                            f"{identity.title} ({identity.year})",
-                        )
-                        subdl_candidates, subdl_downloads = subdl_client.search_identity(identity)
-                        pick, selection_reason = pick_subdl_identity_candidate(subdl_candidates, identity)
-                        if pick is not None:
-                            selected_provider = PROVIDER_SUBDL
-                            selection_method = "subdl-identity"
+                    subdl_tier1, subdl_tier1_reason = pick_subdl_identity_candidate(
+                        subdl_release_candidates, identity, require_release_match_score=True,
+                    )
                 except SubdlSearchQuotaExhausted as exc:
                     # The callback fires before an outbound request. This movie
                     # was not fully evaluated, so defer it rather than turning a
@@ -3224,15 +3286,132 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                     results.append(result)
                     emit(index, "ERROR", video, detail)
                     continue
-                if pick is None:
-                    identity_reasons.append(f"SubDL: {selection_reason}")
-            elif pick is None and subdl_client is not None:
+            elif subdl_client is not None:
                 if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
-                    identity_reasons.append("SubDL: daily download cap exhausted")
+                    pool_reasons.append("SubDL: daily download cap exhausted")
                 elif not subdl_search_has_quota(cfg, ledger):
-                    identity_reasons.append("SubDL: daily search cap exhausted")
+                    pool_reasons.append("SubDL: daily search cap exhausted")
                 else:
-                    identity_reasons.append("SubDL: identity fallback disabled")
+                    pool_reasons.append("SubDL: identity fallback disabled")
+
+            tier1_entries: list[tuple[Candidate, str, str, str]] = []
+            if os_tier1 is not None:
+                tier1_entries.append((os_tier1, PROVIDER_OPENSUBTITLES, "hash", os_tier1_reason))
+            if subdl_tier1 is not None:
+                tier1_entries.append((subdl_tier1, PROVIDER_SUBDL, "subdl-release", subdl_tier1_reason))
+            elif subdl_client is not None and subdl_lookup_attempted:
+                if not subdl_release_candidates:
+                    # The title route below will explain this provider's miss.
+                    pass
+                else:
+                    # A low-score or ambiguous release match deliberately does
+                    # not weaken to SubDL's generic title route, so this is the
+                    # final SubDL verdict for the review detail.
+                    pool_reasons.append(f"SubDL: {subdl_tier1_reason}")
+
+            pick, selected_provider, selection_method, selection_reason = pick_pooled_candidates(
+                tier1_entries, identity,
+            )
+            if pick is None and selection_reason:
+                pool_reasons.append(selection_reason)
+
+            if pick is None:
+                # Tier 2 - strict title/year routes, also queried as equal
+                # sources: OpenSubtitles title/year and SubDL's documented
+                # title search.
+                os_tier2: Candidate | None = None
+                os_tier2_reason = ""
+                subdl_tier2: Candidate | None = None
+                subdl_tier2_reason = ""
+                if open_available and open_client is not None and not open_lookup_error:
+                    emit(
+                        index, "FALLBACK", video,
+                        f"checking OpenSubtitles title/year: {identity.title} ({identity.year})",
+                    )
+                    try:
+                        identity_candidates = open_client.search_identity(identity)
+                        os_tier2, os_tier2_reason = pick_identity_candidate(identity_candidates, identity)
+                    except (RuntimeError, ValueError) as exc:
+                        if not subdl_available:
+                            set_movie_status(
+                                record, "error", str(exc),
+                                attempts=int(record.get("attempts", 0) or 0) + 1,
+                                providers_checked=providers_checked,
+                            )
+                            ledger["errors"] += 1
+                            persist_state(state, cfg.log_file)
+                            result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
+                            results.append(result)
+                            emit(index, "ERROR", video, str(exc))
+                            continue
+                        open_lookup_error = f"OpenSubtitles title/year lookup failed: {exc}"
+                        pool_reasons.append(open_lookup_error)
+                        emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
+                elif open_client is not None and not open_lookup_error:
+                    pool_reasons.append("OpenSubtitles: daily download cap exhausted")
+
+                # The local canonical filename deliberately omits scene tags.
+                # If SubDL's release lookup resolved nothing at all, use its
+                # documented title route once, still requiring exact provider
+                # title/year metadata. A low-score release match never weakens
+                # to the generic route.
+                subdl_title_allowed = subdl_lookup_attempted and not subdl_release_candidates
+                if (
+                    subdl_available and subdl_client is not None
+                    and subdl_title_allowed
+                ):
+                    emit(
+                        index, "FALLBACK", video,
+                        f"checking SubDL strict title/year: {identity.title} ({identity.year})",
+                    )
+                    try:
+                        subdl_title_candidates, subdl_downloads = subdl_client.search_identity(identity)
+                        subdl_tier2, subdl_tier2_reason = pick_subdl_identity_candidate(
+                            subdl_title_candidates, identity,
+                        )
+                    except SubdlSearchQuotaExhausted as exc:
+                        # The callback fires before an outbound request. This
+                        # movie was not fully evaluated, so defer it rather
+                        # than turning a temporary provider limit into a
+                        # manual-review decision.
+                        detail = str(exc)
+                        result = JobResult(video, "skip", detail, reason=REASON_QUOTA)
+                        results.append(result)
+                        emit(index, "SKIP", video, detail)
+                        continue
+                    except (RuntimeError, ValueError) as exc:
+                        detail = f"SubDL lookup failed: {exc}"
+                        set_movie_status(
+                            record, "error", detail, moviehash=digest,
+                            attempts=int(record.get("attempts", 0) or 0) + 1,
+                            providers_checked=providers_checked,
+                        )
+                        ledger["errors"] += 1
+                        persist_state(state, cfg.log_file)
+                        result = JobResult(video, "error", detail, reason=REASON_ERROR)
+                        results.append(result)
+                        emit(index, "ERROR", video, detail)
+                        continue
+
+                tier2_entries: list[tuple[Candidate, str, str, str]] = []
+                if os_tier2 is not None:
+                    tier2_entries.append((os_tier2, PROVIDER_OPENSUBTITLES, "identity", os_tier2_reason))
+                elif open_client is not None and not open_lookup_error:
+                    pool_reasons.append(
+                        "OpenSubtitles: daily download cap exhausted"
+                        if not open_available else
+                        f"OpenSubtitles: {os_tier2_reason}"
+                    )
+                if subdl_tier2 is not None:
+                    tier2_entries.append((subdl_tier2, PROVIDER_SUBDL, "subdl-identity", subdl_tier2_reason))
+                elif subdl_client is not None and subdl_title_allowed:
+                    pool_reasons.append(f"SubDL: {subdl_tier2_reason}")
+
+                pick, selected_provider, selection_method, selection_reason = pick_pooled_candidates(
+                    tier2_entries, identity,
+                )
+                if pick is None and selection_reason:
+                    pool_reasons.append(selection_reason)
 
             if pick is None and subdl_client is not None and not subdl_lookup_attempted and not subdl_available:
                 if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
@@ -3245,7 +3424,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 continue
 
             if pick is None:
-                reason = "; ".join(identity_reasons) or selection_reason
+                reason = "; ".join(pool_reasons) or selection_reason
                 detail = f"identity fallback held for review: {reason}"
                 set_movie_status(
                     record, "manual_review", detail, moviehash=digest,
@@ -3644,10 +3823,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Fetch one validated external English SRT per Jellyfin MKV. "
-            "OpenSubtitles exact moviehash is preferred; SubDL is an optional "
-            "score-gated release-aware fallback when no hash-safe result is available. "
-            "A candidate is auto-selected only when its release name names the movie "
-            "and its release year, carries a Blu-ray keyword, and has the most downloads."
+            "OpenSubtitles and SubDL are equal sources: both providers' "
+            "release-identifying routes are consulted (SubDL's score-gated "
+            "release match requires score >= 0.80), and the qualifying release "
+            "with the most downloads wins. A candidate is auto-selected only "
+            "when its release name names the movie and its release year, "
+            "carries a Blu-ray keyword, and has the most downloads."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

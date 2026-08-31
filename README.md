@@ -45,7 +45,7 @@ binaries (`mkvmerge`, `ffprobe`) and, for subtitle fetching, a free API key.
 | :--- | :--- |
 | 🫧 **Zero pip installs** | A tool is a single file. Copy it, run it, done. |
 | 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
-| 💬 **Exact-match subtitles** | OpenSubtitles moviehash matching while container bytes are still pristine, then SubDL's release-aware filename match (score ≥ 0.80 only) with a strict title/year fallback. |
+| 💬 **Exact-match subtitles** | OpenSubtitles and SubDL are equal sources: both providers' release-identifying routes are consulted (SubDL's release match needs score ≥ 0.80) and the qualifying release with the most downloads wins, with a strict title/year fallback. |
 | ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track (or best non-commentary audio on foreign films with a validated `.eng.srt`) and drops commentary, dubs, and embedded bitmap subtitles — video untouched. |
 | 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
@@ -154,10 +154,14 @@ and fails if they drift.
 
 ### 1 · `subtitle_fetcher.py` — validated English subtitles
 
-Fetches one external `.eng.srt` per movie. OpenSubtitles exact-release
-moviehash matching runs first (while the MKV bytes are still pristine); SubDL
-enters only when no hash-safe result exists, and its automatic picks require a
-match score ≥ 0.80. Every download is re-validated (regular file, size cap,
+Fetches one external `.eng.srt` per movie. OpenSubtitles and SubDL are
+treated as **equal sources**: both providers' release-identifying routes are
+consulted for every movie — the exact OpenSubtitles moviehash (while the MKV
+bytes are still pristine) and SubDL's release-aware filename match, whose
+automatic picks require a score ≥ 0.80 — and the qualifying release with the
+**most downloads** is fetched, whichever provider it came from. When neither
+release route yields a pick, both providers' strict title/year routes are
+pooled the same way. Every download is re-validated (regular file, size cap,
 decodable text, at least one well-formed cue) before it is written.
 
 ```bash
@@ -258,8 +262,8 @@ wrong.
 │ 1 · standardize       │   parse scene names, skip TV / discs / splits
 └───────────┬───────────┘
             ▼
-┌───────────────────────┐   exact OSHash match (moviehash_match=only),
-│ 2 · subtitles         │   OpenSubtitles hash first, score-gated SubDL fallback
+┌───────────────────────┐   OpenSubtitles moviehash + SubDL release match
+│ 2 · subtitles         │   as equal sources; most downloads wins
 └───────────┬───────────┘
             ▼
 ┌───────────────────────┐   lossless mkvmerge remux: 1 best audio,
@@ -330,8 +334,8 @@ Everything is overridable per run with CLI flags (see each tool's
 
 | Variable | Used by | Purpose |
 | :--- | :--- | :--- |
-| `OPENSUBTITLES_API_KEY` | subtitle_fetcher | Exact-moviehash subtitle source (recommended) |
-| `SUBDL_API_KEY` | subtitle_fetcher | Optional score-gated fallback provider |
+| `OPENSUBTITLES_API_KEY` | subtitle_fetcher | Subtitle source (exact-moviehash matching) |
+| `SUBDL_API_KEY` | subtitle_fetcher | Equal subtitle source (release match scored ≥ 0.80) |
 | `MOVIE_STD_SOURCE` / `MOVIE_STD_TARGET` | movie_standardizer, pipeline | Download / library roots |
 | `MOVIE_STD_LOCK_TIMEOUT` | movie_standardizer | Coordination-lock wait (default 60 s) |
 | `MOVIE_STD_MAINTENANCE_MODE` | movie_standardizer | `REPORT` (default) / `QUARANTINE` / `DELETE` for duplicates |

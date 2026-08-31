@@ -155,7 +155,7 @@ def print_dashboard() -> None:
 
     print(bold("  WORKFLOW PIPELINE:"))
     print(f"    {cyan('1. standardize')} {SYM_ARROW} qBittorrent completion hook: hardlinks & names into Title (Year)")
-    print(f"    {cyan('2. subtitles')}   {SYM_ARROW} OpenSubtitles OSHash first + score-gated SubDL fallback: English UTF-8 SRT (pre-remux)")
+    print(f"    {cyan('2. subtitles')}   {SYM_ARROW} OpenSubtitles + SubDL equal sources (SubDL release match scored ≥ 0.80): English UTF-8 SRT (pre-remux)")
     print(f"    {cyan('3. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps 1 audio, drops commentary & bloat")
     print(f"    {cyan('4. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect native HDR")
     print(f"    {cyan('5. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
@@ -311,14 +311,14 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             name="OpenSubtitles API Key",
             status="ok",
             message=f"Configured ({mask_key(opensubtitles_key)})",
-            detail="Enables byte-identical OSHash subtitle matching before any fallback",
+            detail="Enables byte-identical OSHash subtitle matching (an equal source to SubDL)",
         ))
     if subdl_key:
         checks.append(DiagnosticCheck(
             name="SubDL API Key",
             status="ok",
             message=f"Configured ({mask_key(subdl_key)})",
-            detail="Enables score-gated release-aware fallback and can run as the sole provider",
+            detail="Enables score-gated release-aware matching (score ≥ 0.80) as an equal source; can also run as the sole provider",
         ))
     if not opensubtitles_key and not subdl_key:
         checks.append(DiagnosticCheck(
