@@ -14,11 +14,13 @@ fallback; because SubDL has no equivalent release hash, it is never allowed ahea
 OpenSubtitles hash match. A wrong cut is held for review rather than downloaded.
 
 On both OpenSubtitles routes a candidate is auto-selected only when its
-release name names the movie and carries an explicit Blu-ray keyword
-(``BluRay``, ``Blu-ray``, ``BLU RAY``, ...). Among the qualifying candidates
-the one with the highest download count wins; the trusted flag, community
-rating and votes remain as tiebreakers, and a tie they cannot break is held
-for manual review.
+release name carries the movie title, the release year, and an explicit
+Blu-ray keyword (``BluRay``, ``Blu-ray``, ``BLU RAY``, ...). Among the
+qualifying candidates the one with the highest download count wins; the
+trusted flag, community rating and votes remain as tiebreakers, and a tie
+they cannot break is held for manual review. There is no separate
+rating/votes quality floor, so popular but unvoted subtitles for big-name
+movies are fetched automatically.
 
 The position in the pipeline is deliberate, not cosmetic. The moviehash is the
 file size plus the sum of the first and last 64 KiB, and this tool submits it
@@ -887,8 +889,8 @@ SUBDL_DEFAULT_SEARCH_DAILY_CAP = 2_000
 SUBDL_DEFAULT_DAILY_CAP = 50
 SUBDL_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
-__version__ = "2.7.0"
-APP_USER_AGENT = "JellyfinMovieSubtitleFetcher v2.7"
+__version__ = "2.8.0"
+APP_USER_AGENT = "JellyfinMovieSubtitleFetcher v2.8"
 API_BASE = "https://api.opensubtitles.com/api/v1"
 
 # The preceding standardizer emits canonical MKV movies only. Limiting the
@@ -940,12 +942,9 @@ EDITION_MARKERS = frozenset({
 BLURAY_RELEASE_RE = re.compile(r"blu[\s._-]*ray", re.IGNORECASE)
 # One sentence for the banner and the report: what automatic selection does.
 SELECTION_POLICY_TEXT = (
-    "auto-selects the release that names the movie, carries a Blu-ray keyword, "
-    "and has the most downloads"
+    "auto-selects the release that names the movie and its release year, "
+    "carries a Blu-ray keyword, and has the most downloads"
 )
-MIN_IDENTITY_RATING = 6.0
-MIN_IDENTITY_VOTES = 3
-MIN_IDENTITY_DOWNLOADS = 50
 # SubDL documents this as a confident release-level filename match. It applies
 # only to its /files/search endpoint; title-only fallback retains its separate
 # strict identity and provider-quality policy.
@@ -2030,6 +2029,24 @@ def release_matches_movie_title(release: str, title: str) -> bool:
     normalized_release = normalize_title(release or "")
     return re.search(rf"(?<!\w){re.escape(normalized_title)}(?!\w)", normalized_release) is not None
 
+def release_contains_year(release: str, year: int) -> bool:
+    """True when the release name carries ``year`` as a standalone number.
+
+    Digit boundaries keep "2009" from matching "20091" and let the check run
+    on the normalized name, where ``.``/``-``/``_`` separators are spaces.
+    """
+    if not 1000 <= int(year) <= 9999:
+        return False
+    normalized_release = normalize_title(release or "")
+    return re.search(rf"(?<!\d){int(year)}(?!\d)", normalized_release) is not None
+
+def release_matches_movie_identity(release: str, identity: MovieIdentity) -> bool:
+    """True when the release name names the movie: title and release year."""
+    return (
+        release_matches_movie_title(release, identity.title)
+        and release_contains_year(release, identity.year)
+    )
+
 def candidate_rank_key(candidate: Candidate) -> tuple:
     """Downloads-first selection key shared by every automatic picker.
 
@@ -2084,21 +2101,23 @@ def _is_normal_english_human_candidate(candidate: Candidate) -> bool:
         and not candidate.hearing_impaired
         and not candidate.foreign_parts_only
     )
-def pick_candidate(cands: Sequence[Candidate], cfg: Config, *, title: str = "") -> Candidate | None:
+def pick_candidate(
+    cands: Sequence[Candidate], cfg: Config, *, identity: MovieIdentity | None = None,
+) -> Candidate | None:
     """Return one strict best candidate for the requested English subtitle mode.
 
     A candidate must be a moviehash match on a normal English human SRT whose
-    release name carries an explicit Blu-ray keyword and, when ``title`` is
-    given, names the movie. Among the qualifying candidates the highest
-    download count wins; the trusted flag, rating and votes remain as
-    tiebreakers. This yields one deterministic SRT.
+    release name carries an explicit Blu-ray keyword and, when ``identity`` is
+    given, names the movie (title and release year). Among the qualifying
+    candidates the highest download count wins; the trusted flag, rating and
+    votes remain as tiebreakers. This yields one deterministic SRT.
     """
     usable = [
         candidate for candidate in cands
         if candidate.moviehash_match
         and _is_normal_english_human_candidate(candidate)
         and release_has_bluray_keyword(candidate.release)
-        and (not title or release_matches_movie_title(candidate.release, title))
+        and (identity is None or release_matches_movie_identity(candidate.release, identity))
     ]
     if not usable:
         return None
@@ -2111,13 +2130,16 @@ def pick_candidate(cands: Sequence[Candidate], cfg: Config, *, title: str = "") 
     return usable[0]
 
 def pick_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity) -> tuple[Candidate | None, str]:
-    """Choose one non-hash candidate only when identity and quality are strong.
+    """Choose one non-hash candidate when identity and release name agree.
 
     Title/year must exactly match provider feature metadata, and the release
-    name must name the movie and carry an explicit Blu-ray keyword. Among the
-    qualifying candidates the highest download count wins. Edition-labelled
-    releases are deliberately not auto-selected because a canonical local name
-    contains no reliable edition/cut marker to compare against.
+    name must carry the movie title, the release year, and an explicit
+    Blu-ray keyword. Among the qualifying candidates the highest download
+    count wins, with the trusted flag, rating and votes as tiebreakers - no
+    separate quality floor, so popular but unvoted subtitles still fetch.
+    Edition-labelled releases are deliberately not auto-selected because a
+    canonical local name contains no reliable edition/cut marker to compare
+    against.
     """
     usable = [
         candidate for candidate in cands
@@ -2126,16 +2148,10 @@ def pick_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity)
         and normalize_title(candidate.feature_title) == identity.normalized_title
         and not release_has_edition_marker(candidate.release)
         and release_has_bluray_keyword(candidate.release)
-        and release_matches_movie_title(candidate.release, identity.title)
-        and candidate.rating >= MIN_IDENTITY_RATING
-        and candidate.votes >= MIN_IDENTITY_VOTES
-        and candidate.downloads >= MIN_IDENTITY_DOWNLOADS
-        and (candidate.trusted or (
-            candidate.rating >= 8.0 and candidate.votes >= 20 and candidate.downloads >= 200
-        ))
+        and release_matches_movie_identity(candidate.release, identity)
     ]
     if not usable:
-        return None, "no title/year-exact Blu-ray release naming the movie met the automatic quality policy"
+        return None, "no title/year-exact Blu-ray release naming the movie and its release year"
     usable.sort(
         key=lambda candidate: (
             *candidate_rank_key(candidate),
@@ -2147,7 +2163,7 @@ def pick_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity)
     tied = [candidate for candidate in usable if candidate_rank_key(candidate) == top_key]
     if len(tied) != 1:
         return None, "multiple equally ranked title/year-exact Blu-ray SRT candidates require review"
-    return top, "title/year exact; Blu-ray release naming the movie; highest download count"
+    return top, "title/year exact; Blu-ray release naming the movie and its release year; highest download count"
 
 def looks_like_srt(text: str) -> bool:
     """The shared verdict on whether text contains a well-formed SRT cue.
@@ -2334,25 +2350,39 @@ def run_self_tests() -> int:
                 "language": "en",
                 "files": [{"file_id": 10, "file_name": "Knowing.2009.1080p.WEB.ENG.srt"}],
             }},
+            {"attributes": {
+                "moviehash_match": True, "download_count": 7000, "from_trusted": True,
+                "ratings": 10, "votes": 100,
+                "machine_translated": False, "ai_translated": False,
+                "hearing_impaired": False, "foreign_parts_only": False,
+                "language": "en",
+                "files": [{"file_id": 11, "file_name": "Knowing.2010.1080p.BluRay.ENG.srt"}],
+            }},
         ]
     }
     cands = parse_candidates(payload)
-    # Downloads-first: without a title the most-downloaded Blu-ray release
-    # wins even though it names another movie; with the movie title the
-    # Inception upload drops out and the Knowing release with the most
-    # downloads wins. The 50k-download WEB release never qualifies.
+    hash_identity = MovieIdentity("Knowing", 2009, "knowing")
+    # Downloads-first: without an identity the most-downloaded Blu-ray release
+    # wins even though it names another movie; with the movie identity the
+    # Inception upload and the wrong-year Knowing upload drop out and the
+    # 2009 Knowing release with the most downloads wins. The 50k-download WEB
+    # release never qualifies.
     pick = pick_candidate(cands, Config())
     check(pick is not None and pick.file_id == 9, f"downloads-first pick {pick}")
-    pick_titled = pick_candidate(cands, Config(), title="Knowing")
-    check(pick_titled is not None and pick_titled.file_id == 7, f"titled downloads-first pick {pick_titled}")
+    pick_named = pick_candidate(cands, Config(), identity=hash_identity)
+    check(pick_named is not None and pick_named.file_id == 7, f"named downloads-first pick {pick_named}")
     web_candidate = next(candidate for candidate in cands if candidate.file_id == 10)
     check(pick_candidate([web_candidate], Config()) is None,
           "non-Blu-ray release must not be auto-selected")
     inception_candidate = next(candidate for candidate in cands if candidate.file_id == 9)
-    check(pick_candidate([inception_candidate], Config(), title="Knowing") is None,
+    check(pick_candidate([inception_candidate], Config(), identity=hash_identity) is None,
           "release for another movie must not be picked")
-    check(pick_candidate([inception_candidate], Config(), title="Inception") is not None,
-          "title-matched release is selectable")
+    check(pick_candidate([inception_candidate], Config(),
+                         identity=MovieIdentity("Inception", 2010, "inception")) is not None,
+          "title/year-matched release is selectable")
+    wrong_year = next(candidate for candidate in cands if candidate.file_id == 11)
+    check(pick_candidate([wrong_year], Config(), identity=hash_identity) is None,
+          "wrong release year must not be picked")
     check(pick_candidate([candidate for candidate in cands if candidate.hearing_impaired], Config()) is None,
           "SDH candidates must be excluded")
     check(pick_candidate([candidate for candidate in cands if candidate.foreign_parts_only], Config()) is None,
@@ -2403,6 +2433,14 @@ def run_self_tests() -> int:
     tied_pick, tied_reason = pick_identity_candidate([popular_id, twin_id], subdl_identity)
     check(tied_pick is None and "review" in tied_reason,
           f"tied download counts still held for review ({tied_reason})")
+    # No quality floor: a popular-but-unvoted Blu-ray release is auto-selected.
+    fresh_id = ident_candidate(25, "Knowing.2009.1080p.BluRay.ENG.srt", 120, 0.0, 0, False)
+    fresh_pick, fresh_reason = pick_identity_candidate([fresh_id], subdl_identity)
+    check(fresh_pick is not None and fresh_pick.file_id == 25,
+          f"popular-but-unvoted subtitle is auto-selected ({fresh_reason})")
+    wrong_year_id = ident_candidate(26, "Knowing.2010.1080p.BluRay.ENG.srt", 9999, 10.0, 100, True)
+    check(pick_identity_candidate([wrong_year_id], subdl_identity)[0] is None,
+          "wrong release year must not pass the identity policy")
     check(
         normalize_subdl_download_url("/subtitle/fixture/file") == "https://dl.subdl.com/subtitle/fixture/file",
         "SubDL relative download URL is constrained",
@@ -2866,7 +2904,8 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     day; its documented filename match is score-gated, then its strict
     title/year route is used only when filename matching found no usable candidate.
     Automatic OpenSubtitles selection only accepts a release that names the
-    movie and carries a Blu-ray keyword, and ranks those by download count.
+    movie and its release year and carries a Blu-ray keyword, and ranks those
+    by download count.
     """
     state = load_state(cfg.log_file, cfg.library)
     today = utc_day()
@@ -2998,7 +3037,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         pick: Candidate | None = None
         selected_provider = ""
         selection_method = ""
-        selection_reason = "no usable Blu-ray English moviehash-matched human SRT"
+        selection_reason = "no usable Blu-ray English moviehash-matched human SRT naming the movie and its release year"
         providers_checked: list[str] = []
         subdl_downloads: dict[str, SubdlDownload] = {}
         # Distinguish an exhausted SubDL cap before a lookup from a filename
@@ -3037,10 +3076,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 continue
             try:
                 candidates = open_client.search(movie_hash=digest, query=video.stem)
-                pick = pick_candidate(
-                    candidates, fetcher_cfg,
-                    title=identity.title if identity is not None else "",
-                )
+                pick = pick_candidate(candidates, fetcher_cfg, identity=identity)
             except (RuntimeError, ValueError) as exc:
                 if not subdl_available:
                     set_movie_status(
@@ -3058,12 +3094,12 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             if pick is not None:
                 selected_provider = PROVIDER_OPENSUBTITLES
                 selection_method = "hash"
-                selection_reason = "moviehash match; Blu-ray release naming the movie; highest download count"
+                selection_reason = "moviehash match; Blu-ray release naming the movie and its release year; highest download count"
 
         if pick is None:
             if not cfg.identity_fallback:
                 detail = (
-                    "no usable Blu-ray English moviehash-matched human SRT"
+                    "no usable Blu-ray English moviehash-matched human SRT naming the movie and its release year"
                     if open_available else
                     "no exact-moviehash provider is available and title/year fallback is disabled"
                 )
@@ -3610,8 +3646,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Fetch one validated external English SRT per Jellyfin MKV. "
             "OpenSubtitles exact moviehash is preferred; SubDL is an optional "
             "score-gated release-aware fallback when no hash-safe result is available. "
-            "A candidate is auto-selected only when its release name names the movie, "
-            "carries a Blu-ray keyword, and has the most downloads."
+            "A candidate is auto-selected only when its release name names the movie "
+            "and its release year, carries a Blu-ray keyword, and has the most downloads."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

@@ -1138,12 +1138,14 @@ class SubdlIntegrationTests(unittest.TestCase):
 
 
 class SelectionPolicyTests(unittest.TestCase):
-    """OpenSubtitles auto-selection: title match, Blu-ray keyword, most downloads.
+    """OpenSubtitles auto-selection: title + release year, Blu-ray keyword, most downloads.
 
-    The policy: a candidate is auto-selected only when its release name names
-    the movie, carries an explicit Blu-ray keyword, and has the most
-    downloads. Trusted/rating/votes remain tiebreakers, and an unbroken
-    download tie on the identity route is still held for manual review.
+    The policy: a candidate is auto-selected only when its release name carries
+    the movie title, the release year, and an explicit Blu-ray keyword; among
+    the qualifying candidates the one with the most downloads wins. There is no
+    rating/votes quality floor (popular-but-unvoted subtitles fetch too);
+    trusted/rating/votes remain tiebreakers, and an unbroken download tie on
+    the identity route is still held for manual review.
     """
 
     def identity(self) -> sf.MovieIdentity:
@@ -1205,15 +1207,35 @@ class SelectionPolicyTests(unittest.TestCase):
         web = self.candidate(1, "Knowing.2009.1080p.WEB.ENG.srt", downloads=10_000,
                              rating=10.0, votes=100, trusted=True)
         self.assertIsNone(sf.pick_candidate([web], sf.Config()))
-        self.assertIsNone(sf.pick_candidate([web], sf.Config(), title="Knowing"))
+        self.assertIsNone(sf.pick_candidate([web], sf.Config(), identity=self.identity()))
+
+    def test_release_contains_year_is_standalone_number_bounded(self) -> None:
+        self.assertTrue(sf.release_contains_year("Knowing.2009.1080p.BluRay.x264", 2009))
+        self.assertTrue(sf.release_contains_year("Knowing (2009) 1080p BluRay", 2009))
+        self.assertFalse(sf.release_contains_year("Knowing.2010.1080p.BluRay.x264", 2009))
+        self.assertFalse(sf.release_contains_year("Knowing.1080p.BluRay.x264", 2009))
+        self.assertFalse(sf.release_contains_year("Knowing.20091.1080p.BluRay", 2009))
+        self.assertFalse(sf.release_contains_year("Knowing.20091.1080p.BluRay", 9))
 
     def test_title_mismatch_is_never_selected(self) -> None:
         other = self.candidate(1, "Inception.2010.1080p.BluRay.ENG.srt", downloads=10_000,
                                rating=10.0, votes=100, trusted=True)
-        self.assertIsNone(sf.pick_candidate([other], sf.Config(), title="Knowing"))
-        self.assertIsNotNone(sf.pick_candidate([other], sf.Config(), title="Inception"))
-        # Without a title the hash route still selects the Blu-ray release.
+        self.assertIsNone(sf.pick_candidate([other], sf.Config(), identity=self.identity()))
+        self.assertIsNotNone(sf.pick_candidate([other], sf.Config(),
+                                               identity=sf.MovieIdentity("Inception", 2010, "inception")))
+        # Without an identity the hash route still selects the Blu-ray release.
         self.assertIsNotNone(sf.pick_candidate([other], sf.Config()))
+
+    def test_wrong_release_year_is_never_selected(self) -> None:
+        wrong_year = self.candidate(1, "Knowing.2010.1080p.BluRay.ENG.srt", downloads=10_000,
+                                    rating=10.0, votes=100, trusted=True)
+        self.assertIsNone(sf.pick_candidate([wrong_year], sf.Config(), identity=self.identity()))
+        pick, _reason = sf.pick_identity_candidate(
+            [self.candidate(2, "Knowing.2010.1080p.BluRay.ENG.srt", moviehash_match=False,
+                            downloads=10_000, rating=10.0, votes=100, trusted=True)],
+            self.identity(),
+        )
+        self.assertIsNone(pick)
 
     def test_identity_pick_requires_bluray_and_picks_most_downloads(self) -> None:
         identity = self.identity()
@@ -1221,9 +1243,23 @@ class SelectionPolicyTests(unittest.TestCase):
                                  downloads=300, rating=8.5, votes=25)
         elite = self.candidate(2, "Knowing.2009.2160p.BluRay.ENG.srt", moviehash_match=False,
                                downloads=100, rating=10.0, votes=50, trusted=True)
-        web = self.candidate(3, "Knowing.2009.1080p.WEB.ENG.srt", moviehash_match=False,
+        # No quality floor: this fresh, unvoted upload wins purely on downloads.
+        fresh = self.candidate(3, "Knowing.2009.1080p.BluRay.OTHER-GROUP.srt", moviehash_match=False,
+                               downloads=500, rating=0.0, votes=0, trusted=False)
+        web = self.candidate(4, "Knowing.2009.1080p.WEB.ENG.srt", moviehash_match=False,
                              downloads=9_999, rating=10.0, votes=100, trusted=True)
-        pick, reason = sf.pick_identity_candidate([elite, popular, web], identity)
+        pick, reason = sf.pick_identity_candidate([elite, popular, fresh, web], identity)
+        self.assertIsNotNone(pick)
+        assert pick is not None
+        self.assertEqual(pick.file_id, 3)
+        self.assertIn("highest download count", reason)
+
+    def test_unvoted_popular_subtitle_is_auto_selected(self) -> None:
+        # Big-name movie, popular but no votes/rating/trusted yet: fetch it.
+        identity = self.identity()
+        fresh = self.candidate(1, "Knowing.2009.1080p.BluRay.ENG.srt", moviehash_match=False,
+                               downloads=120, rating=0.0, votes=0, trusted=False)
+        pick, reason = sf.pick_identity_candidate([fresh], identity)
         self.assertIsNotNone(pick)
         assert pick is not None
         self.assertEqual(pick.file_id, 1)
