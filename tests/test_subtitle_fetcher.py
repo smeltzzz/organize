@@ -1135,3 +1135,114 @@ class SubdlIntegrationTests(unittest.TestCase):
                 library=library, log_file=root / "none.log", report_file=root / "none.txt",
             ))
             self.assertIn("configure OPENSUBTITLES_API_KEY and/or SUBDL_API_KEY", errors)
+
+
+class SelectionPolicyTests(unittest.TestCase):
+    """OpenSubtitles auto-selection: title match, Blu-ray keyword, most downloads.
+
+    The policy: a candidate is auto-selected only when its release name names
+    the movie, carries an explicit Blu-ray keyword, and has the most
+    downloads. Trusted/rating/votes remain tiebreakers, and an unbroken
+    download tie on the identity route is still held for manual review.
+    """
+
+    def identity(self) -> sf.MovieIdentity:
+        return sf.MovieIdentity(title="Knowing", year=2009, normalized_title="knowing")
+
+    def candidate(self, file_id: int, release: str, **overrides: object) -> sf.Candidate:
+        base: dict[str, object] = {
+            "file_id": file_id,
+            "release": release,
+            "moviehash_match": True,
+            "downloads": 0,
+            "votes": 0,
+            "rating": 0.0,
+            "trusted": False,
+            "hearing_impaired": False,
+            "machine_translated": False,
+            "ai_translated": False,
+            "foreign_parts_only": False,
+            "language": "en",
+            "feature_title": "Knowing",
+            "feature_year": 2009,
+        }
+        base.update(overrides)
+        return sf.Candidate(**base)  # type: ignore[arg-type]
+
+    def test_bluray_keyword_requires_the_keyword(self) -> None:
+        for release in (
+            "Knowing.2009.1080p.BluRay.x264-GROUP",
+            "Knowing.2009.2160p.Blu-ray.x265",
+            "KNOWING.2009.BLURAY",
+            "Knowing.2009.1080p.blu ray.x264",
+            "Knowing 2009 Blu.Ray x264",
+        ):
+            with self.subTest(release=release):
+                self.assertTrue(sf.release_has_bluray_keyword(release))
+        for release in ("Knowing.2009.1080p.WEB.x264", "Knowing.2009.720p.HDTV",
+                        "Knowing.2009.BDRip.x264", "Knowing.2009.x264", ""):
+            with self.subTest(release=release):
+                self.assertFalse(sf.release_has_bluray_keyword(release))
+
+    def test_title_match_is_phrase_bounded(self) -> None:
+        self.assertTrue(sf.release_matches_movie_title("Knowing.2009.1080p.BluRay.x264", "Knowing"))
+        self.assertTrue(sf.release_matches_movie_title("dune.part.two.2024.2160p.bluray", "Dune: Part Two"))
+        self.assertFalse(sf.release_matches_movie_title("Aliens.1986.1080p.BluRay.x264", "Alien"))
+        self.assertFalse(sf.release_matches_movie_title("Alien.1979.1080p.BluRay.x264", "Aliens"))
+        self.assertFalse(sf.release_matches_movie_title("Inception.2010.1080p.BluRay.x264", "Knowing"))
+        self.assertFalse(sf.release_matches_movie_title("Knowing.2009.1080p.BluRay.x264", ""))
+
+    def test_most_downloads_wins_over_trusted_and_rating(self) -> None:
+        popular = self.candidate(1, "Knowing.2009.1080p.BluRay.ENG.srt", downloads=500, rating=6.5, votes=10)
+        elite = self.candidate(2, "Knowing.2009.2160p.BluRay.ENG.srt", downloads=300,
+                               rating=10.0, votes=100, trusted=True)
+        pick = sf.pick_candidate([elite, popular], sf.Config())
+        self.assertIsNotNone(pick)
+        assert pick is not None
+        self.assertEqual(pick.file_id, 1)
+
+    def test_non_bluray_release_is_never_selected(self) -> None:
+        web = self.candidate(1, "Knowing.2009.1080p.WEB.ENG.srt", downloads=10_000,
+                             rating=10.0, votes=100, trusted=True)
+        self.assertIsNone(sf.pick_candidate([web], sf.Config()))
+        self.assertIsNone(sf.pick_candidate([web], sf.Config(), title="Knowing"))
+
+    def test_title_mismatch_is_never_selected(self) -> None:
+        other = self.candidate(1, "Inception.2010.1080p.BluRay.ENG.srt", downloads=10_000,
+                               rating=10.0, votes=100, trusted=True)
+        self.assertIsNone(sf.pick_candidate([other], sf.Config(), title="Knowing"))
+        self.assertIsNotNone(sf.pick_candidate([other], sf.Config(), title="Inception"))
+        # Without a title the hash route still selects the Blu-ray release.
+        self.assertIsNotNone(sf.pick_candidate([other], sf.Config()))
+
+    def test_identity_pick_requires_bluray_and_picks_most_downloads(self) -> None:
+        identity = self.identity()
+        popular = self.candidate(1, "Knowing.2009.1080p.BluRay.ENG.srt", moviehash_match=False,
+                                 downloads=300, rating=8.5, votes=25)
+        elite = self.candidate(2, "Knowing.2009.2160p.BluRay.ENG.srt", moviehash_match=False,
+                               downloads=100, rating=10.0, votes=50, trusted=True)
+        web = self.candidate(3, "Knowing.2009.1080p.WEB.ENG.srt", moviehash_match=False,
+                             downloads=9_999, rating=10.0, votes=100, trusted=True)
+        pick, reason = sf.pick_identity_candidate([elite, popular, web], identity)
+        self.assertIsNotNone(pick)
+        assert pick is not None
+        self.assertEqual(pick.file_id, 1)
+        self.assertIn("highest download count", reason)
+
+    def test_identity_pick_without_bluray_is_held(self) -> None:
+        identity = self.identity()
+        web = self.candidate(1, "Knowing.2009.1080p.WEB.ENG.srt", moviehash_match=False,
+                             downloads=9_999, rating=10.0, votes=100, trusted=True)
+        pick, reason = sf.pick_identity_candidate([web], identity)
+        self.assertIsNone(pick)
+        self.assertIn("Blu-ray", reason)
+
+    def test_identity_download_count_tie_still_requires_review(self) -> None:
+        identity = self.identity()
+        a = self.candidate(1, "Knowing.2009.1080p.BluRay.A-GROUP.srt", moviehash_match=False,
+                           downloads=300, rating=8.5, votes=25)
+        b = self.candidate(2, "Knowing.2009.1080p.BluRay.B-GROUP.srt", moviehash_match=False,
+                           downloads=300, rating=8.5, votes=25)
+        pick, reason = sf.pick_identity_candidate([a, b], identity)
+        self.assertIsNone(pick)
+        self.assertIn("review", reason)

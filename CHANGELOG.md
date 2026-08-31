@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`subtitle_fetcher.py` picks the Blu-ray release that names the movie with the most downloads.** Automatic selection on both OpenSubtitles routes (exact-moviehash and the conservative title/year fallback) now requires the candidate's release name to name the movie and to carry an explicit Blu-ray keyword (`BluRay`, `Blu-ray`, `BLU RAY`, ...), and ranks the qualifying candidates by download count instead of trusted/rating/votes — those quality signals remain as tiebreakers. A download-count tie that the quality signals cannot break is still held for manual review. The score-gated SubDL fallback is unchanged.
+
 ## [3.3.0] - 2026-08-30
 
 ### Changed
