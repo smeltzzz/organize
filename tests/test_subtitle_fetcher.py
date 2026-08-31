@@ -1135,3 +1135,395 @@ class SubdlIntegrationTests(unittest.TestCase):
                 library=library, log_file=root / "none.log", report_file=root / "none.txt",
             ))
             self.assertIn("configure OPENSUBTITLES_API_KEY and/or SUBDL_API_KEY", errors)
+
+
+class SelectionPolicyTests(unittest.TestCase):
+    """OpenSubtitles auto-selection: title + release year, Blu-ray keyword, most downloads.
+
+    The policy: a candidate is auto-selected only when its release name carries
+    the movie title, the release year, and an explicit Blu-ray keyword; among
+    the qualifying candidates the one with the most downloads wins. There is no
+    rating/votes quality floor (popular-but-unvoted subtitles fetch too);
+    trusted/rating/votes remain tiebreakers, and an unbroken download tie on
+    the identity route is still held for manual review.
+    """
+
+    def identity(self) -> sf.MovieIdentity:
+        return sf.MovieIdentity(title="Knowing", year=2009, normalized_title="knowing")
+
+    def candidate(self, file_id: int, release: str, **overrides: object) -> sf.Candidate:
+        base: dict[str, object] = {
+            "file_id": file_id,
+            "release": release,
+            "moviehash_match": True,
+            "downloads": 0,
+            "votes": 0,
+            "rating": 0.0,
+            "trusted": False,
+            "hearing_impaired": False,
+            "machine_translated": False,
+            "ai_translated": False,
+            "foreign_parts_only": False,
+            "language": "en",
+            "feature_title": "Knowing",
+            "feature_year": 2009,
+        }
+        base.update(overrides)
+        return sf.Candidate(**base)  # type: ignore[arg-type]
+
+    def test_bluray_keyword_requires_the_keyword(self) -> None:
+        for release in (
+            "Knowing.2009.1080p.BluRay.x264-GROUP",
+            "Knowing.2009.2160p.Blu-ray.x265",
+            "KNOWING.2009.BLURAY",
+            "Knowing.2009.1080p.blu ray.x264",
+            "Knowing 2009 Blu.Ray x264",
+        ):
+            with self.subTest(release=release):
+                self.assertTrue(sf.release_has_bluray_keyword(release))
+        for release in ("Knowing.2009.1080p.WEB.x264", "Knowing.2009.720p.HDTV",
+                        "Knowing.2009.BDRip.x264", "Knowing.2009.x264", ""):
+            with self.subTest(release=release):
+                self.assertFalse(sf.release_has_bluray_keyword(release))
+
+    def test_title_match_is_phrase_bounded(self) -> None:
+        self.assertTrue(sf.release_matches_movie_title("Knowing.2009.1080p.BluRay.x264", "Knowing"))
+        self.assertTrue(sf.release_matches_movie_title("dune.part.two.2024.2160p.bluray", "Dune: Part Two"))
+        self.assertFalse(sf.release_matches_movie_title("Aliens.1986.1080p.BluRay.x264", "Alien"))
+        self.assertFalse(sf.release_matches_movie_title("Alien.1979.1080p.BluRay.x264", "Aliens"))
+        self.assertFalse(sf.release_matches_movie_title("Inception.2010.1080p.BluRay.x264", "Knowing"))
+        self.assertFalse(sf.release_matches_movie_title("Knowing.2009.1080p.BluRay.x264", ""))
+
+    def test_most_downloads_wins_over_trusted_and_rating(self) -> None:
+        popular = self.candidate(1, "Knowing.2009.1080p.BluRay.ENG.srt", downloads=500, rating=6.5, votes=10)
+        elite = self.candidate(2, "Knowing.2009.2160p.BluRay.ENG.srt", downloads=300,
+                               rating=10.0, votes=100, trusted=True)
+        pick = sf.pick_candidate([elite, popular], sf.Config())
+        self.assertIsNotNone(pick)
+        assert pick is not None
+        self.assertEqual(pick.file_id, 1)
+
+    def test_non_bluray_release_is_never_selected(self) -> None:
+        web = self.candidate(1, "Knowing.2009.1080p.WEB.ENG.srt", downloads=10_000,
+                             rating=10.0, votes=100, trusted=True)
+        self.assertIsNone(sf.pick_candidate([web], sf.Config()))
+        self.assertIsNone(sf.pick_candidate([web], sf.Config(), identity=self.identity()))
+
+    def test_release_contains_year_is_standalone_number_bounded(self) -> None:
+        self.assertTrue(sf.release_contains_year("Knowing.2009.1080p.BluRay.x264", 2009))
+        self.assertTrue(sf.release_contains_year("Knowing (2009) 1080p BluRay", 2009))
+        self.assertFalse(sf.release_contains_year("Knowing.2010.1080p.BluRay.x264", 2009))
+        self.assertFalse(sf.release_contains_year("Knowing.1080p.BluRay.x264", 2009))
+        self.assertFalse(sf.release_contains_year("Knowing.20091.1080p.BluRay", 2009))
+        self.assertFalse(sf.release_contains_year("Knowing.20091.1080p.BluRay", 9))
+
+    def test_title_mismatch_is_never_selected(self) -> None:
+        other = self.candidate(1, "Inception.2010.1080p.BluRay.ENG.srt", downloads=10_000,
+                               rating=10.0, votes=100, trusted=True)
+        self.assertIsNone(sf.pick_candidate([other], sf.Config(), identity=self.identity()))
+        self.assertIsNotNone(sf.pick_candidate([other], sf.Config(),
+                                               identity=sf.MovieIdentity("Inception", 2010, "inception")))
+        # Without an identity the hash route still selects the Blu-ray release.
+        self.assertIsNotNone(sf.pick_candidate([other], sf.Config()))
+
+    def test_wrong_release_year_is_never_selected(self) -> None:
+        wrong_year = self.candidate(1, "Knowing.2010.1080p.BluRay.ENG.srt", downloads=10_000,
+                                    rating=10.0, votes=100, trusted=True)
+        self.assertIsNone(sf.pick_candidate([wrong_year], sf.Config(), identity=self.identity()))
+        pick, _reason = sf.pick_identity_candidate(
+            [self.candidate(2, "Knowing.2010.1080p.BluRay.ENG.srt", moviehash_match=False,
+                            downloads=10_000, rating=10.0, votes=100, trusted=True)],
+            self.identity(),
+        )
+        self.assertIsNone(pick)
+
+    def test_identity_pick_requires_bluray_and_picks_most_downloads(self) -> None:
+        identity = self.identity()
+        popular = self.candidate(1, "Knowing.2009.1080p.BluRay.ENG.srt", moviehash_match=False,
+                                 downloads=300, rating=8.5, votes=25)
+        elite = self.candidate(2, "Knowing.2009.2160p.BluRay.ENG.srt", moviehash_match=False,
+                               downloads=100, rating=10.0, votes=50, trusted=True)
+        # No quality floor: this fresh, unvoted upload wins purely on downloads.
+        fresh = self.candidate(3, "Knowing.2009.1080p.BluRay.OTHER-GROUP.srt", moviehash_match=False,
+                               downloads=500, rating=0.0, votes=0, trusted=False)
+        web = self.candidate(4, "Knowing.2009.1080p.WEB.ENG.srt", moviehash_match=False,
+                             downloads=9_999, rating=10.0, votes=100, trusted=True)
+        pick, reason = sf.pick_identity_candidate([elite, popular, fresh, web], identity)
+        self.assertIsNotNone(pick)
+        assert pick is not None
+        self.assertEqual(pick.file_id, 3)
+        self.assertIn("highest download count", reason)
+
+    def test_unvoted_popular_subtitle_is_auto_selected(self) -> None:
+        # Big-name movie, popular but no votes/rating/trusted yet: fetch it.
+        identity = self.identity()
+        fresh = self.candidate(1, "Knowing.2009.1080p.BluRay.ENG.srt", moviehash_match=False,
+                               downloads=120, rating=0.0, votes=0, trusted=False)
+        pick, reason = sf.pick_identity_candidate([fresh], identity)
+        self.assertIsNotNone(pick)
+        assert pick is not None
+        self.assertEqual(pick.file_id, 1)
+        self.assertIn("highest download count", reason)
+
+    def test_identity_pick_without_bluray_is_held(self) -> None:
+        identity = self.identity()
+        web = self.candidate(1, "Knowing.2009.1080p.WEB.ENG.srt", moviehash_match=False,
+                             downloads=9_999, rating=10.0, votes=100, trusted=True)
+        pick, reason = sf.pick_identity_candidate([web], identity)
+        self.assertIsNone(pick)
+        self.assertIn("Blu-ray", reason)
+
+    def test_identity_download_count_tie_still_requires_review(self) -> None:
+        identity = self.identity()
+        a = self.candidate(1, "Knowing.2009.1080p.BluRay.A-GROUP.srt", moviehash_match=False,
+                           downloads=300, rating=8.5, votes=25)
+        b = self.candidate(2, "Knowing.2009.1080p.BluRay.B-GROUP.srt", moviehash_match=False,
+                           downloads=300, rating=8.5, votes=25)
+        pick, reason = sf.pick_identity_candidate([a, b], identity)
+        self.assertIsNone(pick)
+        self.assertIn("review", reason)
+
+class EqualSourcePoolTests(unittest.TestCase):
+    """OpenSubtitles and SubDL are equal sources; the best release wins.
+
+    Both providers' release-identifying routes are consulted per movie and
+    the qualifying release with the most downloads is downloaded, whichever
+    provider it came from. When neither release route qualifies, both
+    providers' strict title/year routes are pooled the same way.
+    """
+
+    sample_srt = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+
+    def identity(self) -> sf.MovieIdentity:
+        return sf.MovieIdentity(title="Knowing", year=2009, normalized_title="knowing")
+
+    def candidate(self, file_id: object, release: str, **overrides: object) -> sf.Candidate:
+        base: dict[str, object] = {
+            "file_id": file_id,
+            "release": release,
+            "moviehash_match": False,
+            "downloads": 0,
+            "votes": 0,
+            "rating": 0.0,
+            "trusted": False,
+            "hearing_impaired": False,
+            "machine_translated": False,
+            "ai_translated": False,
+            "foreign_parts_only": False,
+            "language": "en",
+            "feature_title": "Knowing",
+            "feature_year": 2009,
+        }
+        base.update(overrides)
+        return sf.Candidate(**base)  # type: ignore[arg-type]
+
+    def entry(self, provider: str, method: str, candidate: sf.Candidate) -> tuple[sf.Candidate, str, str, str]:
+        return candidate, provider, method, f"{provider} {method} verdict"
+
+    def test_single_entry_stands_as_selected_by_its_provider(self) -> None:
+        candidate = self.candidate("subdl:one", "Knowing.2009.1080p.WEB", downloads=0)
+        pick, provider, method, reason = sf.pick_pooled_candidates(
+            [self.entry(sf.PROVIDER_SUBDL, "subdl-release", candidate)], self.identity(),
+        )
+        self.assertEqual(pick, candidate)
+        self.assertEqual(provider, sf.PROVIDER_SUBDL)
+        self.assertEqual(method, "subdl-release")
+        self.assertEqual(reason, f"{sf.PROVIDER_SUBDL} subdl-release verdict")
+
+    def test_empty_pool_selects_nothing(self) -> None:
+        self.assertEqual(sf.pick_pooled_candidates([], self.identity()), (None, "", "", ""))
+
+    def test_most_downloads_wins_regardless_of_provider(self) -> None:
+        os_cand = self.candidate(7, "Knowing.2009.1080p.BluRay.ENG.srt",
+                                 moviehash_match=True, downloads=500, rating=6.5, votes=10)
+        subdl_cand = self.candidate("subdl:high", "Knowing.2009.1080p.BluRay.x264-GROUP",
+                                    downloads=5000, rating=9.0, votes=100, subdl_match_score=0.92)
+        pick, provider, method, _reason = sf.pick_pooled_candidates(
+            [self.entry(sf.PROVIDER_SUBDL, "subdl-release", subdl_cand),
+             self.entry(sf.PROVIDER_OPENSUBTITLES, "hash", os_cand)],
+            self.identity(),
+        )
+        self.assertEqual(pick, subdl_cand)
+        self.assertEqual(provider, sf.PROVIDER_SUBDL)
+        self.assertEqual(method, "subdl-release")
+
+    def test_non_qualifying_release_loses_to_qualifying_ones(self) -> None:
+        os_cand = self.candidate(7, "Knowing.2009.1080p.BluRay.ENG.srt",
+                                 moviehash_match=True, downloads=500)
+        web_cand = self.candidate("subdl:web", "Knowing.2009.1080p.WEB.x264-GROUP",
+                                  downloads=5000, subdl_match_score=0.92)
+        wrong_year = self.candidate("subdl:year", "Knowing.2010.1080p.BluRay.x264-GROUP",
+                                    downloads=5000, subdl_match_score=0.92)
+        for rejector in (web_cand, wrong_year):
+            with self.subTest(rejector=rejector.release):
+                pick, provider, _method, reason = sf.pick_pooled_candidates(
+                    [self.entry(sf.PROVIDER_SUBDL, "subdl-release", rejector),
+                     self.entry(sf.PROVIDER_OPENSUBTITLES, "hash", os_cand)],
+                    self.identity(),
+                )
+                self.assertEqual(pick, os_cand)
+                self.assertEqual(provider, sf.PROVIDER_OPENSUBTITLES)
+                self.assertIn("did not meet the selection policy", reason)
+
+    def test_cross_provider_tie_is_held_for_review(self) -> None:
+        os_cand = self.candidate(7, "Knowing.2009.1080p.BluRay.ENG.srt",
+                                 moviehash_match=True, downloads=500, rating=6.5, votes=10)
+        subdl_cand = self.candidate("subdl:twin", "Knowing.2009.1080p.BluRay.x264-GROUP",
+                                    downloads=500, rating=6.5, votes=10, subdl_match_score=0.92)
+        pick, _provider, _method, reason = sf.pick_pooled_candidates(
+            [self.entry(sf.PROVIDER_OPENSUBTITLES, "hash", os_cand),
+             self.entry(sf.PROVIDER_SUBDL, "subdl-release", subdl_cand)],
+            self.identity(),
+        )
+        self.assertIsNone(pick)
+        self.assertIn("review", reason)
+
+    def _queue(self, root: Path) -> sf.QueueConfig:
+        library = root / "library"
+        movie = library / "Knowing (2009)"
+        movie.mkdir(parents=True)
+        (movie / "Knowing (2009).mkv").write_bytes(b"x" * sf.MIN_HASH_SIZE)
+        return sf.QueueConfig(
+            library=library, log_file=root / "subtitle_fetcher.log",
+            report_file=root / "report.txt", api_key="open-key",
+            subdl_api_key="subdl-key", daily_cap=3, subdl_daily_cap=3,
+            min_movie_size_mb=0,
+        )
+
+    def test_subdl_release_beats_open_hash_on_download_count(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cfg = self._queue(root)
+            open_cand = self.candidate(7, "Knowing.2009.1080p.BluRay.ENG.srt",
+                                       moviehash_match=True, downloads=500, rating=6.5, votes=10)
+            subdl_cand = self.candidate("subdl:high", "Knowing.2009.1080p.BluRay.x264-GROUP",
+                                        downloads=5000, rating=9.0, votes=100,
+                                        subdl_match_score=0.92)
+            download = sf.SubdlDownload(
+                n_id="subtitle-123", url="https://dl.subdl.com/subtitle/subtitle-123/file-456",
+            )
+
+            def write_subdl(_actual: sf.SubdlDownload, destination: Path, **_kwargs: object) -> None:
+                sf.atomic_write_text(destination, self.sample_srt, replace=False)
+
+            with (
+                mock.patch.object(sf.OpenSubtitlesClient, "search", return_value=[open_cand]),
+                mock.patch.object(
+                    sf.OpenSubtitlesClient, "search_identity",
+                    side_effect=AssertionError("a qualifying release pool must not spend a title lookup"),
+                ),
+                mock.patch.object(
+                    sf.SubdlClient, "search_filename",
+                    return_value=([subdl_cand], {str(subdl_cand.file_id): download}),
+                ),
+                mock.patch.object(sf.SubdlClient, "download_srt", side_effect=write_subdl),
+            ):
+                results, summary = sf.queue_run(cfg)
+
+            self.assertEqual([result.status for result in results], ["download"])
+            self.assertIn("provider=SubDL", results[0].detail)
+            self.assertIn("method=subdl-release", results[0].detail)
+            self.assertEqual(summary["subdl_download_requests_reserved"], 1)
+            self.assertEqual(summary["subdl_successful_downloads"], 1)
+            self.assertEqual(summary["opensubtitles_download_requests_reserved"], 0)
+
+    def test_open_hash_beats_subdl_release_on_download_count(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cfg = self._queue(root)
+            open_cand = self.candidate(7, "Knowing.2009.1080p.BluRay.ENG.srt",
+                                       moviehash_match=True, downloads=5000, rating=6.5, votes=10)
+            subdl_cand = self.candidate("subdl:low", "Knowing.2009.1080p.BluRay.x264-GROUP",
+                                        downloads=500, rating=9.0, votes=100,
+                                        subdl_match_score=0.92)
+
+            def write_open(_file_id: int, destination: Path, **_kwargs: object) -> None:
+                sf.atomic_write_text(destination, self.sample_srt, replace=False)
+
+            with (
+                mock.patch.object(sf.OpenSubtitlesClient, "search", return_value=[open_cand]),
+                mock.patch.object(
+                    sf.SubdlClient, "search_filename",
+                    return_value=([subdl_cand], {str(subdl_cand.file_id): sf.SubdlDownload(n_id="subtitle-123")}),
+                ),
+                mock.patch.object(
+                    sf.SubdlClient, "download_srt",
+                    side_effect=AssertionError("the OpenSubtitles release had the most downloads"),
+                ),
+                mock.patch.object(sf.OpenSubtitlesClient, "download_srt", side_effect=write_open),
+            ):
+                results, summary = sf.queue_run(cfg)
+
+            self.assertEqual([result.status for result in results], ["download"])
+            self.assertIn("provider=OpenSubtitles", results[0].detail)
+            self.assertIn("method=hash", results[0].detail)
+            self.assertEqual(summary["opensubtitles_download_requests_reserved"], 1)
+            self.assertEqual(summary["subdl_download_requests_reserved"], 0)
+
+    def test_cross_provider_pool_never_selects_non_qualifying_release(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cfg = self._queue(root)
+            open_cand = self.candidate(7, "Knowing.2009.1080p.BluRay.ENG.srt",
+                                       moviehash_match=True, downloads=500, rating=6.5, votes=10)
+            web_cand = self.candidate("subdl:web", "Knowing.2009.1080p.WEB.x264-GROUP",
+                                      downloads=50000, rating=10.0, votes=100,
+                                      subdl_match_score=0.92)
+
+            def write_open(_file_id: int, destination: Path, **_kwargs: object) -> None:
+                sf.atomic_write_text(destination, self.sample_srt, replace=False)
+
+            with (
+                mock.patch.object(sf.OpenSubtitlesClient, "search", return_value=[open_cand]),
+                mock.patch.object(
+                    sf.SubdlClient, "search_filename",
+                    return_value=([web_cand], {str(web_cand.file_id): sf.SubdlDownload(n_id="subtitle-123")}),
+                ),
+                mock.patch.object(
+                    sf.SubdlClient, "download_srt",
+                    side_effect=AssertionError("a WEB release must not beat a qualifying release"),
+                ),
+                mock.patch.object(sf.OpenSubtitlesClient, "download_srt", side_effect=write_open),
+            ):
+                results, _summary = sf.queue_run(cfg)
+
+            self.assertEqual([result.status for result in results], ["download"])
+            self.assertIn("provider=OpenSubtitles", results[0].detail)
+            self.assertIn("did not meet the selection policy", results[0].detail)
+
+    def test_title_routes_are_pooled_across_providers(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cfg = self._queue(root)
+            open_cand = self.candidate(8, "Knowing.2009.1080p.BluRay.ENG.srt",
+                                       downloads=300, rating=8.5, votes=25)
+            subdl_cand = self.candidate("subdl:title", "Knowing.2009.1080p.BluRay.x264-GROUP",
+                                        downloads=900, rating=7.0, votes=30)
+            download = sf.SubdlDownload(
+                n_id="subtitle-123", url="https://dl.subdl.com/subtitle/subtitle-123/file-456",
+            )
+
+            def write_subdl(_actual: sf.SubdlDownload, destination: Path, **_kwargs: object) -> None:
+                sf.atomic_write_text(destination, self.sample_srt, replace=False)
+
+            with (
+                mock.patch.object(sf.OpenSubtitlesClient, "search", return_value=[]),
+                mock.patch.object(
+                    sf.OpenSubtitlesClient, "search_identity", return_value=[open_cand],
+                ),
+                mock.patch.object(
+                    sf.SubdlClient, "search_filename", return_value=([], {}),
+                ),
+                mock.patch.object(
+                    sf.SubdlClient, "search_identity",
+                    return_value=([subdl_cand], {str(subdl_cand.file_id): download}),
+                ),
+                mock.patch.object(sf.SubdlClient, "download_srt", side_effect=write_subdl),
+            ):
+                results, summary = sf.queue_run(cfg)
+
+            self.assertEqual([result.status for result in results], ["download"])
+            self.assertIn("provider=SubDL", results[0].detail)
+            self.assertIn("method=subdl-identity", results[0].detail)
+            self.assertEqual(summary["subdl_download_requests_reserved"], 1)
+            self.assertEqual(summary["opensubtitles_download_requests_reserved"], 0)
