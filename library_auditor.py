@@ -1142,7 +1142,7 @@ def build_report(audit: Audit, cfg: Config) -> str:
               types_for(item),
               item.detail or names_for(item)]
              for item in audit.folders],
-            aligns="<<<<" ,
+            aligns="<<<<",
         )
 
     report.section("DIRECT MOVIE FILE TYPES", intro="Container labels are file extensions only.")
