@@ -641,7 +641,7 @@ class SubdlIntegrationTests(unittest.TestCase):
         self.assertNotIn("C%3A", request.full_url)
         self.assertIn("languages=en", request.full_url)
         self.assertIn("type=movie", request.full_url)
-        self.assertIn("hi=0", request.full_url)
+        self.assertIn("hi=1", request.full_url)
         self.assertIn("subs_per_page=30", request.full_url)
         self.assertNotIn("secret-key", request.full_url)
         self.assertEqual(request.get_header("Authorization"), "Bearer secret-key")
@@ -793,7 +793,7 @@ class SubdlIntegrationTests(unittest.TestCase):
 
     def test_release_search_uses_the_unique_highest_confident_score(self) -> None:
         lower_scored_but_popular = sf.Candidate(
-            file_id="subdl:lower", release="Dune.Part.Two.2024.1080p.WEB",
+            file_id="subdl:lower", release="Dune.Part.Two.2024.720p.WEB",
             moviehash_match=False, downloads=10_000, votes=100, rating=10.0, trusted=True,
             hearing_impaired=False, machine_translated=False, ai_translated=False,
             foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
@@ -811,7 +811,7 @@ class SubdlIntegrationTests(unittest.TestCase):
 
     def test_tied_confident_release_scores_are_held_for_review(self) -> None:
         base = sf.Candidate(
-            file_id="subdl:one", release="Dune.Part.Two.2024.1080p.WEB",
+            file_id="subdl:one", release="Dune.Part.Two.2024.720p.WEB",
             moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
             hearing_impaired=False, machine_translated=False, ai_translated=False,
             foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
@@ -826,7 +826,7 @@ class SubdlIntegrationTests(unittest.TestCase):
 
     def test_unique_subdl_candidate_without_vote_metadata_is_usable(self) -> None:
         candidate = sf.Candidate(
-            file_id="subdl:one", release="Dune.Part.Two.2024.1080p.WEB",
+            file_id="subdl:one", release="Dune.Part.Two.2024.720p.WEB",
             moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
             hearing_impaired=False, machine_translated=False, ai_translated=False,
             foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
@@ -837,7 +837,7 @@ class SubdlIntegrationTests(unittest.TestCase):
 
     def test_multiple_subdl_candidates_without_quality_metadata_are_held(self) -> None:
         base = sf.Candidate(
-            file_id="subdl:one", release="Dune.Part.Two.2024.1080p.WEB",
+            file_id="subdl:one", release="Dune.Part.Two.2024.720p.WEB",
             moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
             hearing_impaired=False, machine_translated=False, ai_translated=False,
             foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
@@ -853,13 +853,15 @@ class SubdlIntegrationTests(unittest.TestCase):
             zf.writestr("Dune.Part.Two.eng.srt", self.sample_srt)
         self.assertEqual(sf.decode_subdl_srt_payload(archive.getvalue(), sf.MAX_SUBTITLE_BYTES), self.sample_srt)
 
-    def test_archive_with_multiple_srt_members_is_held_for_review(self) -> None:
+    def test_archive_with_multiple_srt_members_picks_the_best_one(self) -> None:
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("Dune.Part.Two.theatrical.srt", self.sample_srt)
-            zf.writestr("Dune.Part.Two.extended.srt", self.sample_srt)
-        with self.assertRaisesRegex(RuntimeError, "multiple usable .srt"):
-            sf.decode_subdl_srt_payload(archive.getvalue(), sf.MAX_SUBTITLE_BYTES)
+            zf.writestr("Dune.Part.Two.720p.srt", "1\n00:00:01,000 --> 00:00:02,000\n720\n")
+            zf.writestr("Dune.Part.Two.1080p.qXR.srt", self.sample_srt)
+        self.assertEqual(
+            sf.decode_subdl_srt_payload(archive.getvalue(), sf.MAX_SUBTITLE_BYTES),
+            self.sample_srt,
+        )
 
     def test_n_id_download_uses_v2_endpoint_and_snapshot_guard(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -915,7 +917,7 @@ class SubdlIntegrationTests(unittest.TestCase):
                 subdl_api_key="subdl-test-key", min_movie_size_mb=0, subdl_daily_cap=3,
             )
             low_score = sf.Candidate(
-                file_id="subdl:low", release="Dune.Part.Two.2024.1080p.WEB",
+                file_id="subdl:low", release="Dune.Part.Two.2024.720p.WEB",
                 moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
                 hearing_impaired=False, machine_translated=False, ai_translated=False,
                 foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
@@ -1005,7 +1007,7 @@ class SubdlIntegrationTests(unittest.TestCase):
                 subdl_api_key="subdl-test-key", min_movie_size_mb=0, subdl_daily_cap=3,
             )
             candidate = sf.Candidate(
-                file_id="subdl:subtitle-123:file-456", release="Dune.Part.Two.2024.1080p.WEB",
+                file_id="subdl:subtitle-123:file-456", release="Dune.Part.Two.2024.720p.WEB",
                 moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
                 hearing_impaired=False, machine_translated=False, ai_translated=False,
                 foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
@@ -1056,7 +1058,7 @@ class SubdlIntegrationTests(unittest.TestCase):
                 subdl_daily_cap=3, min_movie_size_mb=0,
             )
             candidate = sf.Candidate(
-                file_id="subdl:subtitle-123:file-456", release="Dune.Part.Two.2024.1080p.WEB",
+                file_id="subdl:subtitle-123:file-456", release="Dune.Part.Two.2024.720p.WEB",
                 moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
                 hearing_impaired=False, machine_translated=False, ai_translated=False,
                 foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
@@ -1096,7 +1098,7 @@ class SubdlIntegrationTests(unittest.TestCase):
                 api_key="open-key", subdl_api_key="subdl-key", min_movie_size_mb=0,
             )
             candidate = sf.Candidate(
-                file_id="subdl:subtitle-123", release="Dune.Part.Two.2024.1080p.WEB",
+                file_id="subdl:subtitle-123", release="Dune.Part.Two.2024.720p.WEB",
                 moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
                 hearing_impaired=False, machine_translated=False, ai_translated=False,
                 foreign_parts_only=False, language="en", feature_title="Dune: Part Two", feature_year=2024,
@@ -1179,6 +1181,17 @@ class SelectionPolicyTests(unittest.TestCase):
         base.update(overrides)
         return sf.Candidate(**base)  # type: ignore[arg-type]
 
+    def test_library_source_keywords_include_1080p_qxr_tigole(self) -> None:
+        self.assertTrue(sf.release_has_library_source_keyword("Knowing.2009.1080p.WEB.x264"))
+        self.assertTrue(sf.release_has_library_source_keyword("Knowing.2009.2160p.Tigole"))
+        self.assertTrue(sf.release_has_library_source_keyword("Knowing.2009.qXR"))
+        self.assertTrue(sf.release_has_library_source_keyword("Knowing.2009.BluRay"))
+        self.assertTrue(sf.release_has_library_source_keyword("Knowing.2009.BDRip"))
+        self.assertTrue(sf.release_has_library_source_keyword("Knowing.2009.BD"))
+        self.assertFalse(sf.release_has_library_source_keyword("Knowing.2009.720p.WEB"))
+        self.assertFalse(sf.release_has_library_source_keyword("Knowing.2009.WebRip"))
+        self.assertFalse(sf.release_has_library_source_keyword("Knowing.2009.WebDL"))
+
     def test_bluray_keyword_requires_the_keyword(self) -> None:
         for release in (
             "Knowing.2009.1080p.BluRay.x264-GROUP",
@@ -1186,11 +1199,15 @@ class SelectionPolicyTests(unittest.TestCase):
             "KNOWING.2009.BLURAY",
             "Knowing.2009.1080p.blu ray.x264",
             "Knowing 2009 Blu.Ray x264",
+            "Knowing.2009.BD.x264",
+            "Knowing.2009.BDRip.x264",
+            "Knowing.2009.BRRip.x264",
+            "Knowing.2009.BDMV",
         ):
             with self.subTest(release=release):
                 self.assertTrue(sf.release_has_bluray_keyword(release))
         for release in ("Knowing.2009.1080p.WEB.x264", "Knowing.2009.720p.HDTV",
-                        "Knowing.2009.BDRip.x264", "Knowing.2009.x264", ""):
+                        "Knowing.2009.x264", ""):
             with self.subTest(release=release):
                 self.assertFalse(sf.release_has_bluray_keyword(release))
 
@@ -1212,7 +1229,7 @@ class SelectionPolicyTests(unittest.TestCase):
         self.assertEqual(pick.file_id, 1)
 
     def test_non_bluray_release_is_never_selected(self) -> None:
-        web = self.candidate(1, "Knowing.2009.1080p.WEB.ENG.srt", downloads=10_000,
+        web = self.candidate(1, "Knowing.2009.720p.WEB.ENG.srt", downloads=10_000,
                              rating=10.0, votes=100, trusted=True)
         self.assertIsNone(sf.pick_candidate([web], sf.Config()))
         self.assertIsNone(sf.pick_candidate([web], sf.Config(), identity=self.identity()))
@@ -1254,13 +1271,13 @@ class SelectionPolicyTests(unittest.TestCase):
         # No quality floor: this fresh, unvoted upload wins purely on downloads.
         fresh = self.candidate(3, "Knowing.2009.1080p.BluRay.OTHER-GROUP.srt", moviehash_match=False,
                                downloads=500, rating=0.0, votes=0, trusted=False)
-        web = self.candidate(4, "Knowing.2009.1080p.WEB.ENG.srt", moviehash_match=False,
+        web = self.candidate(4, "Knowing.2009.720p.WEB.ENG.srt", moviehash_match=False,
                              downloads=9_999, rating=10.0, votes=100, trusted=True)
         pick, reason = sf.pick_identity_candidate([elite, popular, fresh, web], identity)
         self.assertIsNotNone(pick)
         assert pick is not None
         self.assertEqual(pick.file_id, 3)
-        self.assertIn("highest download count", reason)
+        self.assertIn("1080p then qXR then Tigole then downloads", reason)
 
     def test_unvoted_popular_subtitle_is_auto_selected(self) -> None:
         # Big-name movie, popular but no votes/rating/trusted yet: fetch it.
@@ -1271,11 +1288,11 @@ class SelectionPolicyTests(unittest.TestCase):
         self.assertIsNotNone(pick)
         assert pick is not None
         self.assertEqual(pick.file_id, 1)
-        self.assertIn("highest download count", reason)
+        self.assertIn("1080p then qXR then Tigole then downloads", reason)
 
     def test_identity_pick_without_bluray_is_held(self) -> None:
         identity = self.identity()
-        web = self.candidate(1, "Knowing.2009.1080p.WEB.ENG.srt", moviehash_match=False,
+        web = self.candidate(1, "Knowing.2009.720p.WEB.ENG.srt", moviehash_match=False,
                              downloads=9_999, rating=10.0, votes=100, trusted=True)
         pick, reason = sf.pick_identity_candidate([web], identity)
         self.assertIsNone(pick)
@@ -1358,7 +1375,7 @@ class EqualSourcePoolTests(unittest.TestCase):
     def test_non_qualifying_release_loses_to_qualifying_ones(self) -> None:
         os_cand = self.candidate(7, "Knowing.2009.1080p.BluRay.ENG.srt",
                                  moviehash_match=True, downloads=500)
-        web_cand = self.candidate("subdl:web", "Knowing.2009.1080p.WEB.x264-GROUP",
+        web_cand = self.candidate("subdl:web", "Knowing.2009.720p.WEB.x264-GROUP",
                                   downloads=5000, subdl_match_score=0.92)
         wrong_year = self.candidate("subdl:year", "Knowing.2010.1080p.BluRay.x264-GROUP",
                                     downloads=5000, subdl_match_score=0.92)
@@ -1474,7 +1491,7 @@ class EqualSourcePoolTests(unittest.TestCase):
             cfg = self._queue(root)
             open_cand = self.candidate(7, "Knowing.2009.1080p.BluRay.ENG.srt",
                                        moviehash_match=True, downloads=500, rating=6.5, votes=10)
-            web_cand = self.candidate("subdl:web", "Knowing.2009.1080p.WEB.x264-GROUP",
+            web_cand = self.candidate("subdl:web", "Knowing.2009.720p.WEB.x264-GROUP",
                                       downloads=50000, rating=10.0, votes=100,
                                       subdl_match_score=0.92)
 
