@@ -928,6 +928,10 @@ FRAMERATE_EPSILON = 0.001
 DEFAULT_TIMEOUT_SECONDS = 1800.0  # a feature film's audio, with margin
 DEFAULT_LOCK_TIMEOUT_SECONDS = 60.0
 
+# When ffsubsync cannot trust the current sidecar, download a different
+# qualifying English SRT and retry. Cap keeps the daily provider quota finite.
+MAX_SYNC_REFETCHES = 5
+
 # Result statuses. Reading order in the report is urgency order:
 # review -> failed -> synced -> preview -> skipped -> in_sync.
 STATUS_REVIEW = "review"
@@ -1256,8 +1260,22 @@ def _remove_staging(staging: Path) -> None:
     except OSError:
         pass
 
+def _refetch_sidecar(video: Path, srt: Path, exclude_ids: list[str], log_file: Path | None) -> tuple[bool, str, str]:
+    """Download a different qualifying English SRT over ``srt``."""
+    try:
+        from subtitle_fetcher import refetch_english_srt
+    except ImportError as exc:
+        return False, "", f"subtitle_fetcher unavailable ({exc})"
+    return refetch_english_srt(video, srt, exclude_ids=exclude_ids, log_file=log_file)
+
+
 def sync_one(job: Job, cfg: "Config", binary: str, features: FfsubsyncFeatures) -> SyncResult:
-    """Sync one sidecar against its movie: validate, stage, run, decide, swap."""
+    """Sync one sidecar against its movie: validate, stage, run, decide, swap.
+
+    If ffsubsync cannot complete a trusted sync, fetch a different sidecar
+    (up to ``MAX_SYNC_REFETCHES`` extra downloads) and retry until one is
+    already in sync or can be synced.
+    """
     srt, video = job.srt, job.video
     started = time.monotonic()
 
@@ -1278,60 +1296,80 @@ def sync_one(job: Job, cfg: "Config", binary: str, features: FfsubsyncFeatures) 
         return SyncResult(srt=srt, video=video, status=STATUS_PREVIEW,
                           detail="would run ffsubsync and replace the sidecar only on a trusted sync")
 
-    staging = srt.with_name(f"{STAGING_PREFIX}{os.getpid()}.{uuid.uuid4().hex}.srt")
-    command = build_ffsubsync_command(binary, video, srt, staging, features)
-    try:
-        rc, _stdout, stderr = run_ffsubsync(cfg, command)
-    except subprocess.TimeoutExpired:
-        _remove_staging(staging)
-        return SyncResult(srt=srt, video=video, status=STATUS_FAILED,
-                          detail=f"ffsubsync timed out after {cfg.timeout_seconds:.0f}s",
-                          seconds=time.monotonic() - started,
-                          error_tail=error_tail_from("timeout"))
-    except OSError as exc:
-        _remove_staging(staging)
-        return SyncResult(srt=srt, video=video, status=STATUS_FAILED,
-                          detail=f"could not run ffsubsync ({exc})",
-                          seconds=time.monotonic() - started)
-
-    parsed = parse_ffsubsync_output(stderr)
-    if parsed.offset_seconds is not None:
-        log(
-            f"ffsubsync measured: offset {parsed.offset_seconds:+.3f}s, "
-            f"framerate x{parsed.scale_factor if parsed.scale_factor is not None else 0:.3f}, "
-            f"score {parsed.score if parsed.score is not None else 0:.1f}"
-        )
-    staged_valid, staged_reason = False, "no output file was written"
-    if staging.exists():
-        staged_valid, staged_reason = validate_srt_sidecar(staging)
-
-    status, detail = classify_outcome(rc, staging.exists(), staged_valid,
-                                      staged_reason, parsed, cfg)
-    error_tail = error_tail_from(stderr) if (rc != 0 or parsed.failed_marker) else ""
-
-    if status == STATUS_SYNCED:
-        new_sha = sha256_file(staging)
+    exclude_ids: list[str] = []
+    last: SyncResult | None = None
+    for attempt in range(MAX_SYNC_REFETCHES + 1):
+        staging = srt.with_name(f"{STAGING_PREFIX}{os.getpid()}.{uuid.uuid4().hex}.srt")
+        command = build_ffsubsync_command(binary, video, srt, staging, features)
         try:
-            os.replace(staging, srt)
-        except OSError as exc:
-            status, detail = STATUS_FAILED, f"could not replace sidecar ({exc})"
+            rc, _stdout, stderr = run_ffsubsync(cfg, command)
+        except subprocess.TimeoutExpired:
             _remove_staging(staging)
-        else:
-            detail = (
-                f"offset {parsed.offset_seconds:+.3f}s"
-                + (f", framerate x{parsed.scale_factor:.3f}" if parsed.scale_factor is not None else "")
-            )
-            return SyncResult(srt=srt, video=video, status=status, detail=detail,
-                              offset_seconds=parsed.offset_seconds,
-                              scale_factor=parsed.scale_factor, score=parsed.score,
+            last = SyncResult(srt=srt, video=video, status=STATUS_FAILED,
+                              detail=f"ffsubsync timed out after {cfg.timeout_seconds:.0f}s",
                               seconds=time.monotonic() - started,
-                              original_sha=original_sha, new_sha=new_sha)
-    _remove_staging(staging)
-    return SyncResult(srt=srt, video=video, status=status, detail=detail,
-                      offset_seconds=parsed.offset_seconds,
-                      scale_factor=parsed.scale_factor, score=parsed.score,
-                      seconds=time.monotonic() - started,
-                      original_sha=original_sha, error_tail=error_tail)
+                              error_tail=error_tail_from("timeout"))
+            break
+        except OSError as exc:
+            _remove_staging(staging)
+            last = SyncResult(srt=srt, video=video, status=STATUS_FAILED,
+                              detail=f"could not run ffsubsync ({exc})",
+                              seconds=time.monotonic() - started)
+            break
+
+        parsed = parse_ffsubsync_output(stderr)
+        if parsed.offset_seconds is not None:
+            log(
+                f"ffsubsync measured: offset {parsed.offset_seconds:+.3f}s, "
+                f"framerate x{parsed.scale_factor if parsed.scale_factor is not None else 0:.3f}, "
+                f"score {parsed.score if parsed.score is not None else 0:.1f}"
+            )
+        staged_valid, staged_reason = False, "no output file was written"
+        if staging.exists():
+            staged_valid, staged_reason = validate_srt_sidecar(staging)
+
+        status, detail = classify_outcome(rc, staging.exists(), staged_valid,
+                                          staged_reason, parsed, cfg)
+        error_tail = error_tail_from(stderr) if (rc != 0 or parsed.failed_marker) else ""
+
+        if status == STATUS_SYNCED:
+            new_sha = sha256_file(staging)
+            try:
+                os.replace(staging, srt)
+            except OSError as exc:
+                status, detail = STATUS_FAILED, f"could not replace sidecar ({exc})"
+                _remove_staging(staging)
+            else:
+                detail = (
+                    f"offset {parsed.offset_seconds:+.3f}s"
+                    + (f", framerate x{parsed.scale_factor:.3f}" if parsed.scale_factor is not None else "")
+                )
+                return SyncResult(srt=srt, video=video, status=status, detail=detail,
+                                  offset_seconds=parsed.offset_seconds,
+                                  scale_factor=parsed.scale_factor, score=parsed.score,
+                                  seconds=time.monotonic() - started,
+                                  original_sha=original_sha, new_sha=new_sha)
+
+        _remove_staging(staging)
+        last = SyncResult(srt=srt, video=video, status=status, detail=detail,
+                          offset_seconds=parsed.offset_seconds,
+                          scale_factor=parsed.scale_factor, score=parsed.score,
+                          seconds=time.monotonic() - started,
+                          original_sha=original_sha, error_tail=error_tail)
+        if status not in {STATUS_REVIEW, STATUS_FAILED}:
+            return last
+        if attempt >= MAX_SYNC_REFETCHES:
+            return last
+        ok, file_id, fetch_detail = _refetch_sidecar(video, srt, exclude_ids, cfg.log_file)
+        if file_id:
+            exclude_ids.append(str(file_id))
+        if not ok:
+            last.detail = f"{last.detail}; replacement fetch stopped: {fetch_detail}"
+            return last
+        log(f"fetched replacement subtitle id={file_id} ({fetch_detail}); retrying ffsubsync")
+        original_sha = sha256_file(srt)
+    assert last is not None
+    return last
 
 
 # =============================================================================

@@ -116,6 +116,11 @@ EXTERNAL_SRT_SUFFIX = f".{EXTERNAL_SRT_LANG}.srt"  # ".eng.srt"
 
 LEGACY_EXTERNAL_SRT_SUFFIX = ".en.srt"
 
+COVERING_ENGLISH_SRT_SUFFIXES: tuple[str, ...] = (
+    EXTERNAL_SRT_SUFFIX,
+    f".{EXTERNAL_SRT_LANG}.sdh.srt",
+)
+
 # The single agreed decode order. Every tool that turns subtitle bytes into
 # text uses this tuple and nothing else, so a tool cannot quietly accept an
 # encoding the others would reject. "utf-8-sig" first so a provider BOM does
@@ -1840,17 +1845,30 @@ def validate_exact_external_english_srt(mkv_path: Path) -> dict[str, Any]:
     unchanged.
     """
     promoted, promote_reason = promote_legacy_external_english_srt(mkv_path)
-    sidecar = exact_external_english_srt_path(mkv_path)
+    covering = [
+        mkv_path.with_name(f"{mkv_path.stem}{suffix}")
+        for suffix in COVERING_ENGLISH_SRT_SUFFIXES
+    ]
+    sidecar = covering[0]
     result: dict[str, Any] = {"mkv_path": str(mkv_path), "path": str(sidecar), "valid": False, "reason": ""}
     if promoted is None and promote_reason and "absent" not in promote_reason:
         # Dual-name / occupied-destination cases must not silently drop embeds.
         if "unusable" not in promote_reason:
             result["reason"] = f"legacy external SRT could not be promoted: {promote_reason}"
             return result
-    try:
-        file_stat = sidecar.stat(follow_symlinks=False)
-    except OSError as exc:
-        result["reason"] = "external SRT is absent" if not sidecar.exists() else f"could not stat external SRT: {exc}"
+    chosen: Path | None = None
+    last_stat_error = "external SRT is absent"
+    for candidate in covering:
+        try:
+            file_stat = candidate.stat(follow_symlinks=False)
+        except OSError as exc:
+            last_stat_error = "external SRT is absent" if not candidate.exists() else f"could not stat external SRT: {exc}"
+            continue
+        sidecar = candidate
+        chosen = candidate
+        break
+    if chosen is None:
+        result["reason"] = last_stat_error
         return result
     if sidecar.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
         result["reason"] = "external SRT is not a regular non-symlink file"

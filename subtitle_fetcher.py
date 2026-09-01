@@ -141,6 +141,12 @@ EXTERNAL_SRT_SUFFIX = f".{EXTERNAL_SRT_LANG}.srt"  # ".eng.srt"
 
 LEGACY_EXTERNAL_SRT_SUFFIX = ".en.srt"
 
+# Either exact name covers the movie for Jellyfin: plain English or SDH.
+COVERING_ENGLISH_SRT_SUFFIXES: tuple[str, ...] = (
+    EXTERNAL_SRT_SUFFIX,
+    f".{EXTERNAL_SRT_LANG}.sdh.srt",
+)
+
 # The single agreed decode order. Every tool that turns subtitle bytes into
 # text uses this tuple and nothing else, so a tool cannot quietly accept an
 # encoding the others would reject. "utf-8-sig" first so a provider BOM does
@@ -209,6 +215,19 @@ def validate_srt_sidecar(path: Path) -> tuple[bool, str]:
 def exact_external_english_srt_path(media_path: Path) -> Path:
     """Return the canonical ``<stem>.eng.srt`` path beside a movie file."""
     return media_path.with_name(f"{media_path.stem}{EXTERNAL_SRT_SUFFIX}")
+
+
+def covering_english_srt_paths(media_path: Path) -> tuple[Path, ...]:
+    """Return ``.eng.srt`` then ``.eng.sdh.srt`` beside a movie file."""
+    return tuple(
+        media_path.with_name(f"{media_path.stem}{suffix}")
+        for suffix in COVERING_ENGLISH_SRT_SUFFIXES
+    )
+
+
+def is_covering_english_sidecar(path: Path, media_path: Path) -> bool:
+    wanted = {candidate.name.casefold() for candidate in covering_english_srt_paths(media_path)}
+    return path.name.casefold() in wanted
 
 def legacy_external_english_srt_path(media_path: Path) -> Path:
     """Return the pre-cutover ``<stem>.en.srt`` path beside a movie file."""
@@ -2317,16 +2336,24 @@ EDITION_MARKERS = frozenset({
     "ultimate", "special edition", "collectors edition", "anniversary",
     "remastered", "redux", "final cut", "alternate cut",
 })
-# The library is Blu-ray material, so automatic selection requires an explicit
-# Blu-ray keyword in the release name. It confirms the source matches the MKV
-# and keeps WEBDVDRip-style uploads out of the automatic pick. The match is
-# case- and separator-insensitive: "BluRay", "Blu-ray", "BLU RAY", "blu.ray".
-BLURAY_RELEASE_RE = re.compile(r"blu[\s._-]*ray", re.IGNORECASE)
+# Automatic selection requires *any one* library keyword in the release
+# name: a Blu-ray spelling (BluRay / Blu-ray / BD / BDRip / ...), 1080p,
+# qXR, or Tigole. Candidates do not need to carry every keyword at once.
+# Bare WEB / WebRip / WebDL / HDTV without those tokens still fail the gate.
+BLURAY_TOKEN = r"(?:blu[\s._-]*ray|bd(?:[\s._-]*rip)?|br[\s._-]*rip|bdmv)"
+BLURAY_RELEASE_RE = re.compile(rf"(?<![a-z0-9]){BLURAY_TOKEN}(?![a-z0-9])", re.IGNORECASE)
+LIBRARY_1080P_RE = re.compile(r"(?<![0-9])1080p(?![0-9a-z])", re.IGNORECASE)
+LIBRARY_QXR_RE = re.compile(r"(?<![a-z0-9])qxr(?![a-z0-9])", re.IGNORECASE)
+LIBRARY_TIGOLE_RE = re.compile(r"(?<![a-z0-9])tigole(?![a-z0-9])", re.IGNORECASE)
+LIBRARY_SOURCE_RELEASE_RE = re.compile(
+    rf"(?<![a-z0-9]){BLURAY_TOKEN}(?![a-z0-9])|(?<![0-9])1080p(?![0-9a-z])|(?<![a-z0-9])qxr(?![a-z0-9])|(?<![a-z0-9])tigole(?![a-z0-9])",
+    re.IGNORECASE,
+)
 # One sentence for the banner and the report: what automatic selection does.
 SELECTION_POLICY_TEXT = (
     "auto-selects, across OpenSubtitles and SubDL as equal sources, "
-    "the release that names the movie and its release year, carries a "
-    "Blu-ray keyword, and has the most downloads"
+    "the release that names the movie and its release year and carries any one "
+    "of Blu-ray (any spelling, including BD), 1080p, qXR, or Tigole, preferring 1080p then qXR then Tigole"
 )
 # SubDL documents this as a confident release-level filename match. It applies
 # only to its /files/search endpoint; title-only fallback retains its separate
@@ -2628,7 +2655,6 @@ class OpenSubtitlesClient:
             "ai_translated": "exclude",
         }
         params["foreign_parts_only"] = "exclude"
-        params["hearing_impaired"] = "exclude"
         payload = self._request("GET", "/subtitles", params=params)
         return parse_candidates(payload)
 
@@ -2645,7 +2671,6 @@ class OpenSubtitlesClient:
             "machine_translated": "exclude",
             "ai_translated": "exclude",
             "foreign_parts_only": "exclude",
-            "hearing_impaired": "exclude",
         }
         payload = self._request("GET", "/subtitles", params=params)
         return parse_candidates(payload)
@@ -2987,11 +3012,15 @@ def decode_subdl_srt_payload(data: bytes, max_bytes: int) -> str:
                 ]
                 if not candidates:
                     raise RuntimeError("no usable .srt file found in SubDL zip archive")
-                # An unpacked file URL is selected before an archive reaches this
-                # branch. Without that per-file reference, choosing one of several
-                # SRTs would be a guess, so keep it for manual review instead.
-                if len(candidates) != 1:
-                    raise RuntimeError("SubDL zip archive contains multiple usable .srt files")
+                candidates.sort(
+                    key=lambda info: (
+                        0 if LIBRARY_1080P_RE.search(info.filename or "") else 1,
+                        0 if LIBRARY_QXR_RE.search(info.filename or "") else 1,
+                        0 if LIBRARY_TIGOLE_RE.search(info.filename or "") else 1,
+                        1 if re.search(r"(?i)sdh|hi\\b|hearing", info.filename or "") else 0,
+                        info.filename.casefold(),
+                    ),
+                )
                 selected = candidates[0]
                 with archive.open(selected, "r") as member:
                     raw_srt = member.read(max_bytes + 1)
@@ -3221,7 +3250,7 @@ class SubdlClient:
                 "filename": name,
                 "type": "movie",
                 "languages": "en",
-                "hi": "0",
+                "hi": "1",
                 "subs_per_page": "30",
             },
         )
@@ -3399,6 +3428,22 @@ def release_has_bluray_keyword(release: str) -> bool:
     """True when the release name carries an explicit Blu-ray keyword."""
     return bool(BLURAY_RELEASE_RE.search(release or ""))
 
+
+def release_has_library_source_keyword(release: str) -> bool:
+    """True when the release names Blu-ray, 1080p, qXR, or Tigole."""
+    return bool(LIBRARY_SOURCE_RELEASE_RE.search(release or ""))
+
+
+def library_release_rank_key(release: str) -> tuple:
+    """Prefer 1080p, then qXR, then Tigole, then non-SDH as a last tiebreak."""
+    name = release or ""
+    return (
+        0 if LIBRARY_1080P_RE.search(name) else 1,
+        0 if LIBRARY_QXR_RE.search(name) else 1,
+        0 if LIBRARY_TIGOLE_RE.search(name) else 1,
+        1 if re.search(r"(?i)(?:\bsd h\b|\bsdh\b|hearing.?impaired|\bhi\b)", name) else 0,
+    )
+
 def release_matches_movie_title(release: str, title: str) -> bool:
     """True when ``title`` appears as a whole phrase inside the release name.
 
@@ -3431,14 +3476,19 @@ def release_matches_movie_identity(release: str, identity: MovieIdentity) -> boo
     )
 
 def candidate_rank_key(candidate: Candidate) -> tuple:
-    """Downloads-first selection key shared by every automatic picker.
+    """Library-fit first: 1080p, then qXR, then downloads.
 
-    The candidate with the most downloads wins; the historical quality
-    signals (trusted flag, community rating, votes) remain as tiebreakers so
-    a download-count tie still resolves deterministically instead of by file
-    id.
+    Trusted/rating/votes remain only as later tiebreakers. Hearing-impaired
+    is a last-resort tiebreak so a non-SDH file of equal fit wins.
     """
-    return (-candidate.downloads, -int(candidate.trusted), -candidate.rating, -candidate.votes)
+    return (
+        *library_release_rank_key(candidate.release),
+        int(candidate.hearing_impaired),
+        -candidate.downloads,
+        -int(candidate.trusted),
+        -candidate.rating,
+        -candidate.votes,
+    )
 
 def parse_candidates(payload: dict[str, Any]) -> list[Candidate]:
     out: list[Candidate] = []
@@ -3481,11 +3531,11 @@ def _is_normal_english_human_candidate(candidate: Candidate) -> bool:
         normalize_language(candidate.language) in ENGLISH_LANGUAGE_TOKENS
         and not candidate.machine_translated
         and not candidate.ai_translated
-        and not candidate.hearing_impaired
         and not candidate.foreign_parts_only
     )
 def pick_candidate(
     cands: Sequence[Candidate], cfg: Config, *, identity: MovieIdentity | None = None,
+    exclude_ids: Iterable[int | str] = (),
 ) -> Candidate | None:
     """Return one strict best candidate for the requested English subtitle mode.
 
@@ -3499,8 +3549,9 @@ def pick_candidate(
         candidate for candidate in cands
         if candidate.moviehash_match
         and _is_normal_english_human_candidate(candidate)
-        and release_has_bluray_keyword(candidate.release)
+        and release_has_library_source_keyword(candidate.release)
         and (identity is None or release_matches_movie_identity(candidate.release, identity))
+        and str(candidate.file_id) not in {str(item) for item in exclude_ids}
     ]
     if not usable:
         return None
@@ -3512,7 +3563,9 @@ def pick_candidate(
     )
     return usable[0]
 
-def pick_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity) -> tuple[Candidate | None, str]:
+def pick_identity_candidate(
+    cands: Sequence[Candidate], identity: MovieIdentity, *, exclude_ids: Iterable[int | str] = (),
+) -> tuple[Candidate | None, str]:
     """Choose one non-hash candidate when identity and release name agree.
 
     Title/year must exactly match provider feature metadata, and the release
@@ -3530,11 +3583,12 @@ def pick_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity)
         and candidate.feature_year == identity.year
         and normalize_title(candidate.feature_title) == identity.normalized_title
         and not release_has_edition_marker(candidate.release)
-        and release_has_bluray_keyword(candidate.release)
+        and release_has_library_source_keyword(candidate.release)
         and release_matches_movie_identity(candidate.release, identity)
+        and str(candidate.file_id) not in {str(item) for item in exclude_ids}
     ]
     if not usable:
-        return None, "no title/year-exact Blu-ray release naming the movie and its release year"
+        return None, "no title/year-exact Blu-ray/1080p/qXR/Tigole release naming the movie and its release year"
     usable.sort(
         key=lambda candidate: (
             *candidate_rank_key(candidate),
@@ -3545,8 +3599,8 @@ def pick_identity_candidate(cands: Sequence[Candidate], identity: MovieIdentity)
     top_key = candidate_rank_key(top)
     tied = [candidate for candidate in usable if candidate_rank_key(candidate) == top_key]
     if len(tied) != 1:
-        return None, "multiple equally ranked title/year-exact Blu-ray SRT candidates require review"
-    return top, "title/year exact; Blu-ray release naming the movie and its release year; highest download count"
+        return None, "multiple equally ranked title/year-exact library-source SRT candidates require review"
+    return top, "title/year exact; Blu-ray/1080p/qXR/Tigole release naming the movie; 1080p then qXR then Tigole then downloads"
 
 def pick_pooled_candidates(
     entries: list[tuple[Candidate, str, str, str]],
@@ -3570,7 +3624,7 @@ def pick_pooled_candidates(
     conforming: list[tuple[Candidate, str, str, str]] = []
     rejected: list[str] = []
     for candidate, provider, method, reason in entries:
-        if release_has_bluray_keyword(candidate.release) and (
+        if release_has_library_source_keyword(candidate.release) and (
             identity is None or release_matches_movie_identity(candidate.release, identity)
         ):
             conforming.append((candidate, provider, method, reason))
@@ -3691,6 +3745,97 @@ def dest_for(video: Path, cfg: Config) -> Path:
     _ = cfg.sidecar_suffix
     return exact_external_english_srt_path(video)
 
+
+def refetch_english_srt(
+    video: Path,
+    dest: Path,
+    *,
+    exclude_ids: Sequence[int | str] = (),
+    log_file: Path | None = None,
+) -> tuple[bool, str, str]:
+    """Replace ``dest`` with the next qualifying English SRT from the APIs.
+
+    Used by ``sync_subtitles.py`` when ffsubsync cannot trust the current
+    sidecar. Tried ``file_id`` values in ``exclude_ids`` are skipped so a
+    retry does not re-download the same upload. Returns
+    ``(ok, file_id, detail)``.
+    """
+    api_key = (os.environ.get("OPENSUBTITLES_API_KEY") or OPENSUBTITLES_API_KEY).strip()
+    subdl_key = (os.environ.get("SUBDL_API_KEY") or SUBDL_API_KEY).strip()
+    if not api_key and not subdl_key:
+        return False, "", "no subtitle API key configured for a replacement fetch"
+    cfg = Config(
+        library=video.parent,
+        log_file=log_file,
+        report_file=video.parent / "unused-report.txt",
+        api_key=api_key,
+        subdl_api_key=subdl_key,
+        username=(os.environ.get("OPENSUBTITLES_USERNAME") or OPENSUBTITLES_USERNAME).strip(),
+        password=(os.environ.get("OPENSUBTITLES_PASSWORD") or OPENSUBTITLES_PASSWORD).strip(),
+        identity_fallback=True,
+    )
+    identity = movie_identity_from_video(video)
+    snapshot = video_snapshot(video)
+    excluded = {str(item) for item in exclude_ids}
+    pick: Candidate | None = None
+    subdl_downloads: dict[str, SubdlDownload] = {}
+    selected_provider = PROVIDER_OPENSUBTITLES
+    if api_key:
+        client = OpenSubtitlesClient(cfg)
+        try:
+            digest = moviehash(video)
+            cands = client.search(movie_hash=digest, query=video.stem)
+            pick = pick_candidate(cands, cfg, identity=identity, exclude_ids=excluded)
+        except (RuntimeError, ValueError, OSError) as exc:
+            log(f"replacement hash search failed: {exc}", log_file=log_file)
+        if pick is None and identity is not None:
+            try:
+                cands = client.search_identity(identity)
+                pick, _reason = pick_identity_candidate(cands, identity, exclude_ids=excluded)
+            except (RuntimeError, ValueError, OSError) as exc:
+                log(f"replacement identity search failed: {exc}", log_file=log_file)
+        if pick is not None:
+            selected_provider = PROVIDER_OPENSUBTITLES
+    if pick is None and subdl_key and identity is not None:
+        subdl = SubdlClient(subdl_key)
+        try:
+            cands, subdl_downloads = subdl.search_filename(video.name, identity)
+            pick, _reason = pick_subdl_identity_candidate(
+                cands, identity, require_release_match_score=True,
+            )
+            if pick is not None and str(pick.file_id) in excluded:
+                pick = None
+        except (RuntimeError, ValueError, OSError) as exc:
+            log(f"replacement SubDL search failed: {exc}", log_file=log_file)
+        if pick is None:
+            try:
+                cands, subdl_downloads = subdl.search_identity(identity)
+                pick, _reason = pick_identity_candidate(cands, identity, exclude_ids=excluded)
+            except (RuntimeError, ValueError, OSError) as exc:
+                log(f"replacement SubDL title search failed: {exc}", log_file=log_file)
+        if pick is not None:
+            selected_provider = PROVIDER_SUBDL
+    if pick is None:
+        return False, "", "no unused qualifying English SRT for a replacement fetch"
+    try:
+        if dest.exists() and not dest.is_symlink():
+            dest.unlink()
+    except OSError as exc:
+        return False, str(pick.file_id), f"could not remove unsyncable sidecar: {exc}"
+    try:
+        if selected_provider == PROVIDER_SUBDL:
+            download = subdl_downloads.get(str(pick.file_id))
+            if download is None:
+                return False, str(pick.file_id), "SubDL candidate download reference is missing"
+            SubdlClient(subdl_key).download_srt(download, dest, video=video, expected_video=snapshot)
+        else:
+            if not isinstance(pick.file_id, int):
+                return False, str(pick.file_id), "OpenSubtitles candidate has an invalid file identifier"
+            OpenSubtitlesClient(cfg).download_srt(pick.file_id, dest, video=video, expected_video=snapshot)
+    except (RuntimeError, ValueError, OSError, ConcurrentSidecarError) as exc:
+        return False, str(pick.file_id), str(exc)
+    return True, str(pick.file_id), pick.release or "unnamed release"
+
 def run_self_tests() -> int:
     errors: list[str] = []
 
@@ -3784,7 +3929,7 @@ def run_self_tests() -> int:
                 "machine_translated": False, "ai_translated": False,
                 "hearing_impaired": False, "foreign_parts_only": False,
                 "language": "en",
-                "files": [{"file_id": 10, "file_name": "Knowing.2009.1080p.WEB.ENG.srt"}],
+                "files": [{"file_id": 10, "file_name": "Knowing.2009.720p.WEB.ENG.srt"}],
             }},
             {"attributes": {
                 "moviehash_match": True, "download_count": 7000, "from_trusted": True,
@@ -3819,8 +3964,14 @@ def run_self_tests() -> int:
     wrong_year = next(candidate for candidate in cands if candidate.file_id == 11)
     check(pick_candidate([wrong_year], Config(), identity=hash_identity) is None,
           "wrong release year must not be picked")
-    check(pick_candidate([candidate for candidate in cands if candidate.hearing_impaired], Config()) is None,
-          "SDH candidates must be excluded")
+    hi_named = Candidate(
+        file_id=50, release="Knowing.2009.1080p.BluRay.SDH.srt",
+        moviehash_match=True, downloads=40, votes=0, rating=0.0, trusted=False,
+        hearing_impaired=True, machine_translated=False, ai_translated=False,
+        foreign_parts_only=False, language="en",
+    )
+    check(pick_candidate([hi_named], Config(), identity=hash_identity) is not None,
+          "SDH/HI candidates are allowed when the release otherwise qualifies")
     check(pick_candidate([candidate for candidate in cands if candidate.foreign_parts_only], Config()) is None,
           "forced/foreign-part candidates must be excluded")
     check(pick_candidate([candidate for candidate in cands if not candidate.moviehash_match], Config()) is None,
@@ -3889,7 +4040,7 @@ def run_self_tests() -> int:
 
     popular_id = ident_candidate(21, "Knowing.2009.1080p.BluRay.ENG.srt", 300, 8.5, 25, False)
     elite_id = ident_candidate(22, "Knowing.2009.2160p.BluRay.ENG.srt", 100, 10.0, 50, True)
-    web_id = ident_candidate(23, "Knowing.2009.1080p.WEB.ENG.srt", 9999, 10.0, 100, True)
+    web_id = ident_candidate(23, "Knowing.2009.720p.WEB.ENG.srt", 9999, 10.0, 100, True)
     twin_id = ident_candidate(24, "Knowing.2009.1080p.BluRay.OTHER-GROUP.srt", 300, 8.5, 25, False)
     identity_pick, identity_reason = pick_identity_candidate([elite_id, popular_id, web_id], subdl_identity)
     check(identity_pick is not None and identity_pick.file_id == 21,
@@ -3961,6 +4112,16 @@ def run_self_tests() -> int:
         check(status == "covered", f"legacy .en.srt promotes to covered: {status} {detail}")
         check(path is not None and path.name.endswith(EXTERNAL_SRT_SUFFIX), f"promoted path {path}")
         check(not (legacy_movie / "Legacy Film (2010).en.srt").exists(), "legacy .en.srt removed after promote")
+
+        sdh_movie = tmp / "Sdh Film (2011)"
+        sdh_movie.mkdir()
+        sdh_vid = sdh_movie / "Sdh Film (2011).mkv"
+        with sdh_vid.open("wb") as fh:
+            fh.truncate(400 * 1024 * 1024)
+        (sdh_movie / "Sdh Film (2011).eng.sdh.srt").write_text(sample, encoding="utf-8")
+        sdh_status, sdh_path, sdh_detail, _sdh_reason = inspect_existing_sidecars(sdh_vid)
+        check(sdh_status == "covered", f".eng.sdh.srt covers the movie: {sdh_status} {sdh_detail}")
+        check(sdh_path is not None and sdh_path.name.endswith(".eng.sdh.srt"), f"sdh covering path {sdh_path}")
 
         snapshot = video_snapshot(vid)
         with vid.open("ab") as fh:
@@ -4517,6 +4678,22 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str, str]:
         return "missing", None, "could not inspect sibling subtitles", ""
     if not candidates:
         return "missing", None, "no English SRT sidecar", ""
+    covering = covering_english_srt_paths(video)
+    covering_names = {item.name.casefold() for item in covering}
+    for path in covering:
+        if path not in candidates and not any(item.name.casefold() == path.name.casefold() for item in candidates):
+            continue
+        match = next((item for item in candidates if item.name.casefold() == path.name.casefold()), path)
+        try:
+            file_stat = match.stat(follow_symlinks=False)
+            if match.is_symlink() or not match.is_file() or file_stat.st_size <= 0 or file_stat.st_size > MAX_SUBTITLE_BYTES:
+                continue
+            text = normalize_srt_newlines(decode_subtitle_bytes(match.read_bytes()))
+            valid = looks_like_srt(text)
+        except (OSError, EOFError, ValueError):
+            valid = False
+        if valid:
+            return "covered", match, f"validated covering sidecar {match.name}", REASON_COVERED
     for path in candidates:
         try:
             file_stat = path.stat(follow_symlinks=False)
@@ -4526,12 +4703,10 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str, str]:
             valid = looks_like_srt(text)
         except (OSError, EOFError, ValueError):
             valid = False
-        if path == exact and valid:
-            return "covered", path, f"validated exact {EXTERNAL_SRT_SUFFIX}", REASON_COVERED
         if valid:
             return (
                 "review", path,
-                f"'{path.name}' is a valid English SRT but not the exact {EXTERNAL_SRT_SUFFIX} sidecar; "
+                f"'{path.name}' is a valid English SRT but not a covering .eng.srt or .eng.sdh.srt sidecar; "
                 "rename or remove it to let this movie be fetched",
                 REASON_SIDECAR_NAME,
             )

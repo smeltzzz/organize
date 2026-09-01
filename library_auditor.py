@@ -57,6 +57,11 @@ EXTERNAL_SRT_SUFFIX = f".{EXTERNAL_SRT_LANG}.srt"  # ".eng.srt"
 
 LEGACY_EXTERNAL_SRT_SUFFIX = ".en.srt"
 
+COVERING_ENGLISH_SRT_SUFFIXES: tuple[str, ...] = (
+    EXTERNAL_SRT_SUFFIX,
+    f".{EXTERNAL_SRT_LANG}.sdh.srt",
+)
+
 # The single agreed decode order. Every tool that turns subtitle bytes into
 # text uses this tuple and nothing else, so a tool cannot quietly accept an
 # encoding the others would reject. "utf-8-sig" first so a provider BOM does
@@ -910,6 +915,7 @@ def classify_folder(folder: Path) -> FolderAudit:
         return FolderAudit(folder, "MKV_STEM_MISMATCH", files, "expected exact folder-name MKV stem")
 
     expected_srt = f"{folder.name}{EXTERNAL_SRT_SUFFIX}"
+    covering_srts = {f"{folder.name}{suffix}" for suffix in COVERING_ENGLISH_SRT_SUFFIXES}
     legacy_srt = f"{folder.name}{LEGACY_EXTERNAL_SRT_SUFFIX}"
     # Promote a validated legacy .en.srt to the canonical .eng.srt before the
     # naming check so a library cut over from the previous convention is not
@@ -928,10 +934,11 @@ def classify_folder(folder: Path) -> FolderAudit:
         )
     except OSError as exc:
         return FolderAudit(folder, "INACCESSIBLE", files, str(exc))
-    unexpected_srt = [name for name in srt_names if name != expected_srt]
+    unexpected_srt = [name for name in srt_names if name not in covering_srts]
     if unexpected_srt:
         return FolderAudit(folder, "NONCANONICAL_SIDECAR", files, "; ".join(unexpected_srt))
-    if not srt_names:
+    covering_present = [name for name in srt_names if name in covering_srts]
+    if not covering_present:
         # Structurally fine, but no external English subtitle yet. This is the
         # kind of audit finding another tool can act on, so it is reported as
         # its own state instead of being folded into CANONICAL_MKV.
@@ -944,13 +951,13 @@ def classify_folder(folder: Path) -> FolderAudit:
     # filename-only audit, but it silently blocks every downstream tool: the
     # fetcher will not replace a file it thinks is already there and the
     # cleaner will not trust it. That dead end has to be visible here.
-    usable, reason = validate_srt_sidecar(folder / expected_srt)
-    if not usable:
-        return FolderAudit(
-            folder, "INVALID_SIDECAR", files,
-            f"{expected_srt} is unusable ({reason}); delete it and re-run subtitle_fetcher.py",
-        )
-    return FolderAudit(folder, "CANONICAL_MKV", files)
+    last_reason = ""
+    for name in covering_present:
+        usable, reason = validate_srt_sidecar(folder / name)
+        if usable:
+            return FolderAudit(folder, "CANONICAL_MKV", files)
+        last_reason = f"{name} is unusable ({reason}); delete it and re-run subtitle_fetcher.py"
+    return FolderAudit(folder, "INVALID_SIDECAR", files, last_reason)
 
 def audit_library(cfg: Config) -> Audit:
     try:
@@ -1298,6 +1305,9 @@ def run_self_tests() -> int:
         (library / "Sidecar Mismatch (2004)").mkdir()
         (library / "Sidecar Mismatch (2004)" / "Sidecar Mismatch (2004).mkv").write_bytes(b"mkv")
         (library / "Sidecar Mismatch (2004)" / "Sidecar Mismatch (2004).eng.forced.srt").write_text(valid_srt, encoding="utf-8")
+        (library / "Sdh Cover (2007)").mkdir()
+        (library / "Sdh Cover (2007)" / "Sdh Cover (2007).mkv").write_bytes(b"mkv")
+        (library / "Sdh Cover (2007)" / "Sdh Cover (2007).eng.sdh.srt").write_text(valid_srt, encoding="utf-8")
         # A correctly named sidecar whose contents are unusable is a real defect:
         # nothing downstream will replace a subtitle it believes is present.
         (library / "Broken Subs (2005)").mkdir()
@@ -1319,6 +1329,7 @@ def run_self_tests() -> int:
             "Sidecar Mismatch (2004)": "NONCANONICAL_SIDECAR",
             "Broken Subs (2005)": "INVALID_SIDECAR",
             "Legacy En (2006)": "CANONICAL_MKV",
+            "Sdh Cover (2007)": "CANONICAL_MKV",
         }, f"folder states {states}")
         check(
             (library / "Legacy En (2006)" / f"Legacy En (2006){EXTERNAL_SRT_SUFFIX}").is_file(),
