@@ -21,10 +21,14 @@ def scorecard(text: str) -> dict[str, int]:
     rules = [i for i, line in enumerate(lines) if line.strip() and set(line.strip()) == {LIGHT}]
     if len(rules) < 2:
         raise AssertionError(f"no scorecard in report:\n{text}")
-    counts: dict[str, int] = {}
+    counts: dict[str, int | str] = {}
     for line in lines[rules[0] + 1:rules[1]]:
         number, _, rest = line.strip().partition("   ")
-        counts[rest.split("   ")[0].strip()] = int(number)
+        try:
+            value: int | str = int(number)
+        except ValueError:
+            value = number  # e.g. the coverage row "17/18 (94.4%)"
+        counts[rest.split("   ")[0].strip()] = value
     return counts
 
 

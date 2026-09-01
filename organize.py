@@ -7,11 +7,12 @@ Python 3.11+ Jellyfin movie library toolkit.
 
 Commands:
     doctor       Diagnose environment, external binaries, paths, and hardlink capability
-    run          Run the automated maintenance pipeline (subtitles -> remux -> 10-bit -> audit)
+    run          Run the automated maintenance pipeline (subtitles -> remux -> 10-bit -> sync -> audit)
     standardize  Rename and hardlink completed downloads into Title (Year)/Title (Year).mkv
     subtitles    Fetch validated English human UTF-8 SRT sidecars (OpenSubtitles + SubDL)
     clean        Lossless remux: keep single best English audio, strip commentary/DVS
     10bit        ffprobe inspection: queue 8-bit SDR for HandBrake; protect HDR & 10-bit
+    sync         ffsubsync timing sync of every .srt sidecar against its movie (pre-audit)
     audit        Read-only health check of library layout, MKV naming, and subtitle sidecars
     test         Run the test suite across all tools
 
@@ -29,6 +30,7 @@ import argparse
 import importlib
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -42,7 +44,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-VERSION = "3.3.0"
+VERSION = "3.4.0"
 
 # ANSI styling helpers (with safe fallbacks)
 _SUPPORTS_COLOR = (
@@ -158,12 +160,13 @@ def print_dashboard() -> None:
     print(f"    {cyan('2. subtitles')}   {SYM_ARROW} OpenSubtitles + SubDL equal sources (SubDL release match scored ≥ 0.80): English UTF-8 SRT (pre-remux)")
     print(f"    {cyan('3. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps 1 audio, drops commentary & bloat")
     print(f"    {cyan('4. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect native HDR")
-    print(f"    {cyan('5. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
+    print(f"    {cyan('5. sync')}        {SYM_ARROW} ffsubsync subtitle-timing sync: trust window applies, bad syncs held for review")
+    print(f"    {cyan('6. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
     print()
 
     print(bold("  QUICK COMMANDS:"))
     print(f"    {green('python organize.py doctor')}             Run comprehensive environment & prerequisite diagnostics")
-    print(f"    {green('python organize.py run')}                Run manual maintenance pipeline (steps 2 -> 3 -> 4 -> 5)")
+    print(f"    {green('python organize.py run')}                Run manual maintenance pipeline (steps 2 -> 3 -> 4 -> 5 -> 6)")
     print(f"    {green('python organize.py run --dry-run')}      Preview pipeline commands without executing")
     print(f"    {green('python organize.py standardize [PATH]')} Standardize a specific torrent download or batch scan")
     print(f"    {green('python organize.py audit')}              Audit current library layout and subtitle coverage")
@@ -292,6 +295,55 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             message="Not found on PATH or standard install paths",
             detail="10-bit bit depth scanning and technical quality upgrades will be skipped",
             remedy=remedy_msg,
+        ))
+
+    # 4b. FFmpeg (ffmpeg) — needed by sync_subtitles.py (ffsubsync shells out to it)
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if ffmpeg_bin:
+        ffmpeg_ver = get_binary_version(ffmpeg_bin, "-version")
+        checks.append(DiagnosticCheck(
+            name="FFmpeg (ffmpeg)",
+            status="ok",
+            message=f"Found: {ffmpeg_ver or 'ffmpeg'}",
+            detail=ffmpeg_bin,
+        ))
+    else:
+        checks.append(DiagnosticCheck(
+            name="FFmpeg (ffmpeg)",
+            status="warn",
+            message="Not found on PATH",
+            detail="ffsubsync needs ffmpeg to extract audio; the subtitle-sync step will be skipped",
+            remedy=(
+                "Windows: winget install Gyan.FFmpeg\n"
+                "Debian/Ubuntu: sudo apt install -y ffmpeg\n"
+                "macOS: brew install ffmpeg"
+            ),
+        ))
+
+    # 4c. ffsubsync — needed by sync_subtitles.py (pip-installed program)
+    try:
+        import sync_subtitles as ss_sync
+        ffsubsync_bin = ss_sync.find_ffsubsync()
+    except Exception:
+        ffsubsync_bin = None
+    if ffsubsync_bin:
+        ffsubsync_ver = get_binary_version(ffsubsync_bin, "--version")
+        checks.append(DiagnosticCheck(
+            name="ffsubsync",
+            status="ok",
+            message=f"Found: {ffsubsync_ver or 'ffsubsync'}",
+            detail=ffsubsync_bin,
+        ))
+    else:
+        checks.append(DiagnosticCheck(
+            name="ffsubsync",
+            status="warn",
+            message="Not found on PATH",
+            detail="The subtitle-sync step is skipped until ffsubsync is installed",
+            remedy=(
+                "Install once:  pip install ffsubsync   (needs ffmpeg on the PATH)\n"
+                "Alternative:   pipx install ffsubsync"
+            ),
         ))
 
     # 5. Subtitle provider API configuration
@@ -477,6 +529,7 @@ def run_all_self_tests() -> int:
         ("movie_standardizer.py", ["--self-test"]),
         ("subtitle_fetcher.py", ["--self-test"]),
         ("mkv_track_cleaner.py", ["--self-test"]),
+        ("sync_subtitles.py", ["--self-test"]),
         ("pipeline.py", ["--self-test"]),
     ]
 
@@ -573,6 +626,9 @@ def build_parser() -> argparse.ArgumentParser:
     # 10bit
     subparsers.add_parser("10bit", aliases=["probe"], help="FFprobe 8-bit vs 10-bit & native HDR compliance check", add_help=False)
 
+    # sync
+    subparsers.add_parser("sync", aliases=["sync-subtitles"], help="ffsubsync subtitle-timing sync of every .srt sidecar (pre-audit)", add_help=False)
+
     # audit
     subparsers.add_parser("audit", help="Read-only audit of library layout, naming, and SRT sidecars", add_help=False)
 
@@ -651,6 +707,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     elif command in {"10bit", "probe"}:
         return delegate_to_script("10bit.py", sub_args)
+
+    elif command in {"sync", "sync-subtitles"}:
+        return delegate_to_script("sync_subtitles.py", sub_args)
 
     elif command in {"audit"}:
         return delegate_to_script("library_auditor.py", sub_args)

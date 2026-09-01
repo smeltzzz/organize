@@ -266,6 +266,7 @@ class SingleSourceContractTests(unittest.TestCase):
         import library_auditor  # noqa: F401  (imported so a break there is caught)
         import mkv_track_cleaner as tc
         import movie_standardizer as ms
+        import sync_subtitles as ss
 
         normalized = normalize_srt_newlines(text)
         return {
@@ -273,6 +274,7 @@ class SingleSourceContractTests(unittest.TestCase):
             "mkv_track_cleaner": tc.EXTERNAL_SRT_CUE_RE.search(normalized) is not None,
             "subtitle_fetcher": sf.looks_like_srt(normalized),
             "subtitle_fetcher (shared helper)": sf.srt_looks_valid(normalized),
+            "sync_subtitles": ss.srt_looks_valid(normalized),
         }
 
     def test_every_tool_agrees_on_a_plain_cue(self) -> None:
@@ -294,17 +296,21 @@ class SingleSourceContractTests(unittest.TestCase):
     def test_no_tool_keeps_a_divergent_size_limit(self) -> None:
         import mkv_track_cleaner as tc
         import movie_standardizer as ms
+        import sync_subtitles as ss
 
         self.assertEqual(ms.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
         self.assertEqual(tc.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
         self.assertEqual(sf.MAX_SUBTITLE_BYTES, EXTERNAL_SRT_MAX_BYTES)
+        self.assertEqual(ss.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
 
     def test_no_tool_keeps_a_divergent_cue_pattern(self) -> None:
         import mkv_track_cleaner as tc
         import movie_standardizer as ms
+        import sync_subtitles as ss
 
         self.assertEqual(ms.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
         self.assertEqual(tc.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
+        self.assertEqual(ss.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
 
     def test_no_tool_keeps_a_divergent_encoding_list(self) -> None:
         self.assertEqual(EXTERNAL_SRT_ENCODINGS, ("utf-8-sig", "utf-8", "cp1252"))
@@ -448,7 +454,7 @@ class ReportOrganizationTests(unittest.TestCase):
         needs = section(text, "MOVIES THAT NEED A SUBTITLE")
 
         for title in ("SIDECAR EXISTS BUT IS UNUSABLE", "LIBRARY LAYOUT MUST BE FIXED FIRST",
-                      "NO MATCHING SUBTITLE ON CONFIGURED PROVIDERS"):
+                      "NO MATCHING SUBTITLE ON ANY SOURCE"):
             self.assertIn(title, needs)
         for movie in ("Broken (2009)", "Heat (1995)", "Loose"):
             self.assertIn(movie, needs)
@@ -463,7 +469,7 @@ class ReportOrganizationTests(unittest.TestCase):
         text = self.report(results, self.summary(results))
         self.assertIn("Start here:", text)
         self.assertLess(text.index("SIDECAR EXISTS BUT IS UNUSABLE"),
-                        text.index("NO MATCHING SUBTITLE ON CONFIGURED PROVIDERS"))
+                        text.index("NO MATCHING SUBTITLE ON ANY SOURCE"))
 
     def test_movies_cut_off_by_the_quota_are_named_not_just_counted(self) -> None:
         results: list[sf.JobResult] = []
@@ -1134,7 +1140,9 @@ class SubdlIntegrationTests(unittest.TestCase):
             errors = sf.validate_compact_config(sf.QueueConfig(
                 library=library, log_file=root / "none.log", report_file=root / "none.txt",
             ))
-            self.assertIn("configure OPENSUBTITLES_API_KEY and/or SUBDL_API_KEY", errors)
+            self.assertTrue(
+                any(e.startswith("configure OPENSUBTITLES_API_KEY and/or SUBDL_API_KEY")
+                    for e in errors), errors)
 
 
 class SelectionPolicyTests(unittest.TestCase):
@@ -1527,3 +1535,255 @@ class EqualSourcePoolTests(unittest.TestCase):
             self.assertIn("method=subdl-identity", results[0].detail)
             self.assertEqual(summary["subdl_download_requests_reserved"], 1)
             self.assertEqual(summary["opensubtitles_download_requests_reserved"], 0)
+
+
+class ScrapeFallbackWiringTests(unittest.TestCase):
+    """The tier-3 scraping sources wired into the daily queue.
+
+    The transport is always a fake (no network in unit tests); the routes
+    decide which of the seven sources can deliver.
+    """
+
+    SAMPLE_SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello\n\n2\n00:00:04,000 --> 00:00:06,000\nWorld\n"
+
+    class FakeTransport(sf.ScrapeTransport):
+        def __init__(self, routes: dict[str, bytes]) -> None:
+            super().__init__(gap=0.0)
+            self.routes = routes
+
+        def _route(self, url: str) -> bytes:
+            best: tuple[int, bytes] | None = None
+            for prefix, payload in self.routes.items():
+                if url.startswith(prefix) and (best is None or len(prefix) > best[0]):
+                    best = (len(prefix), payload)
+            if best is None:
+                raise sf.ScrapeSourceError(f"unrouted {url}")
+            return best[1]
+
+        def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
+            return self._route(url)
+
+        def post(self, url: str, form: dict[str, str], *, headers: dict[str, str] | None = None) -> bytes:
+            try:
+                return self._route(url)
+            except sf.ScrapeSourceError as exc:
+                raise sf.ScrapeSourceError(f"unrouted POST {url}") from exc
+
+    def make_zip(self, name: str, data: bytes) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(name, data)
+        return buf.getvalue()
+
+    def subf2me_routes(self) -> dict[str, bytes]:
+        return {
+            "https://subf2m.co/subtitles/searchbytitle": (
+                b"<html><body><div class=\"search-result\"><h2 class=\"close\">close</h2>"
+                b"<ul><li><a href=\"/subtitles/222\">The Father (2020)</a></li></ul>"
+                b"</div></body></html>"
+            ),
+            "https://subf2m.co/subtitles/222/en": (
+                b"<html><body><ul><li class=\"item\"><li>playWEB</li>"
+                b"<a class=\"download icon-download\" href=\"/subtitles/222/en/999\"></a></li>"
+                b"</ul></body></html>"
+            ),
+            "https://subf2m.co/subtitles/222/en/999": (
+                b"<html><body><div class=\"download\"><a href=\"/dl/file.zip\">zip</a>"
+                b"</div></body></html>"
+            ),
+            "https://subf2m.co/dl/file.zip": self.make_zip(
+                "The.Father.2020.utf.srt", self.SAMPLE_SRT.encode("utf-8")),
+        }
+
+    def podnapisi_routes(self) -> dict[str, bytes]:
+        payload = (
+            b"{\"data\":[{\"id\":77,\"releases\":[\"The.Father.2020.1080p.BluRay.x264-GRP\"],"
+            b"\"custom_releases\":[],\"movie\":{\"title\":\"The Father\",\"year\":\"2020\"}}],"
+            b"\"page\":\"1\",\"all_pages\":\"1\"}"
+        )
+        return {
+            "https://www.podnapisi.net/subtitles/search/advanced": payload,
+            "https://www.podnapisi.net/subtitles/77/download": self.make_zip("77.srt", self.SAMPLE_SRT.encode("utf-8")),
+        }
+
+    def one_movie_library(self, root: Path) -> Path:
+        library = root / "library"
+        movie = library / "The Father (2020)"
+        movie.mkdir(parents=True)
+        (movie / "The Father (2020).mkv").write_bytes(b"v" * 64)
+        return library
+
+    def cfg(self, root: Path, **overrides: object) -> sf.QueueConfig:
+        base: dict[str, object] = {
+            "library": root / "library",
+            "log_file": root / "fetcher.log",
+            "report_file": root / "report.txt",
+            "scrape_daily_cap": 20,
+            "min_movie_size_mb": 0,
+        }
+        base.update(overrides)
+        return sf.QueueConfig(**base)  # type: ignore[arg-type]
+
+    def run_queue(self, routes: dict[str, bytes], root: Path,
+                  cfg: sf.QueueConfig | None = None) -> tuple[list, dict]:
+        with mock.patch.object(sf, "make_scrape_transport", return_value=self.FakeTransport(routes)):
+            return sf.queue_run(cfg or self.cfg(root))
+
+    def test_scrape_only_configuration_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "library").mkdir()
+            cfg = sf.QueueConfig(library=root / "library", log_file=None, report_file=root / "r.txt",
+                                 scrape_daily_cap=20)
+            self.assertEqual(sf.validate_compact_config(cfg), [])
+
+    def test_no_sources_at_all_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cfg = sf.QueueConfig(library=Path(td), log_file=None, report_file=Path(td) / "r.txt")
+            errors = sf.validate_compact_config(cfg)
+        self.assertTrue(any("scraping sources enabled" in e for e in errors), errors)
+
+    def test_cli_flags_flow_into_the_config(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            root.joinpath("library").mkdir()
+            args = mock.Mock(
+                source=root / "library", log=root / "log.txt", report=root / "report.txt",
+                auth_mode="development-anonymous", daily_cap=0, subdl_daily_cap=0,
+                subdl_search_daily_cap=0, scrape_daily_cap=None, skip_source=[],
+                allow_missing=False, min_size=0, lock_timeout=60.0, limit=0,
+                dry_run=False, retry_review=False, identity_fallback=True,
+            )
+            with mock.patch.dict("os.environ", {"OPENSUBTITLES_API_KEY": "", "SUBDL_API_KEY": ""}):
+                cfg = sf.compact_config_from_args(args)
+            self.assertEqual(cfg.scrape_daily_cap, sf.SCRAPE_DEFAULT_SEARCH_DAILY_CAP)
+            self.assertEqual(cfg.skip_sources, ())
+            self.assertFalse(cfg.allow_missing)
+            args.scrape_daily_cap = 0
+            args.skip_source = ["subf2me"]
+            args.allow_missing = True
+            with mock.patch.dict("os.environ", {"OPENSUBTITLES_API_KEY": "", "SUBDL_API_KEY": ""}):
+                cfg2 = sf.compact_config_from_args(args)
+            self.assertEqual(cfg2.scrape_daily_cap, 0)
+            self.assertEqual(cfg2.skip_sources, ("subf2me",))
+            self.assertTrue(cfg2.allow_missing)
+            self.assertEqual(sf.active_scrape_sources(cfg2), ())
+
+    def test_chain_failover_downloads_via_second_source(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.one_movie_library(root)
+            results, summary = self.run_queue(self.podnapisi_routes(), root)
+
+            self.assertEqual([result.status for result in results], ["download"])
+            self.assertIn("provider=Podnapisi.NET", results[0].detail)
+            self.assertIn("method=scrape", results[0].detail)
+            sidecar = root / "library" / "The Father (2020)" / "The Father (2020).eng.srt"
+            self.assertTrue(sidecar.exists())
+            self.assertEqual(summary["scrape_successful_downloads"]["podnapisi"], 1)
+            self.assertEqual(summary["scrape_successful_downloads"]["subf2me"], 0)
+            self.assertEqual(summary["coverage_covered"], 1)
+            self.assertEqual(summary["coverage_total"], 1)
+            # subf2me got one hard failure this run; the breaker needs three.
+            self.assertIn("searches used 1/20", summary["scrape_sources_status"]["subf2me"])
+
+    def test_uncoverable_movie_is_loud_and_retried_next_day(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self.one_movie_library(root)
+            results, _summary = self.run_queue({}, root)
+
+            self.assertEqual([result.status for result in results], ["review"])
+            for key in sf.SCRAPE_PROVIDER_ORDER:
+                self.assertIn(sf.scrape_provider_label(key), results[0].detail, key)
+
+            state = sf.load_state(root / "fetcher.log", root / "library")
+            self.assertTrue(
+                any(rec.get("scrape_failed") and str(rec.get("scrape_failed_utc_day") or "") == sf.utc_day()
+                    for rec in state["movies"].values()))
+
+            # Same UTC day, same ledger: the scraping tier is not re-spent.
+            results2, _summary2 = self.run_queue({}, root)
+            self.assertEqual([result.status for result in results2], ["skip"])
+            self.assertEqual(results2[0].reason, sf.REASON_QUOTA)
+            self.assertIn("already exhausted", results2[0].detail)
+
+    def test_legacy_held_movie_is_pulled_into_scraping_tier(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = self.one_movie_library(root)
+            video = library / "The Father (2020)" / "The Father (2020).mkv"
+            # A ledger from before the scraping tier existed: held for review,
+            # only the OpenSubtitles provider was ever checked.
+            snapshot = sf.video_snapshot(video)
+            key = sf.movie_key(video, snapshot)
+            state = sf.new_state(library)
+            record = sf.state_movie(state, key, video)
+            record.update({
+                "status": "manual_review",
+                "detail": "previous identity fallback was intentionally held for review",
+                "attempts": 1,
+                "providers_checked": ["opensubtitles"],
+            })
+            sf.persist_state(state, root / "fetcher.log")
+
+            results, _summary = self.run_queue(self.subf2me_routes(), root)
+
+            self.assertEqual([result.status for result in results], ["download"])
+            self.assertIn("provider=Subf2m.co", results[0].detail)
+
+    def test_all_scrape_caps_exhausted_defers_the_run(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = self.one_movie_library(root)
+            state = sf.new_state(library)
+            ledger = sf.day_ledger(state, sf.utc_day())
+            for key in sf.SCRAPE_PROVIDER_ORDER:
+                ledger[f"{key}_search_requests_reserved"] = 20
+            sf.persist_state(state, root / "fetcher.log")
+
+            results, summary = self.run_queue({}, root)
+
+            self.assertEqual(results, [])
+            self.assertTrue(summary["quota_reached"])
+            self.assertEqual(len(summary["deferred_videos"]), 1)
+
+    def test_main_exit_codes_track_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            library = root / "library"
+            (library / "Covered (2001)").mkdir(parents=True)
+            (library / "Covered (2001)" / "Covered (2001).mkv").write_bytes(b"v" * 64)
+            (library / "Covered (2001)" / "Covered (2001).eng.srt").write_text(self.SAMPLE_SRT, encoding="utf-8")
+            (library / "Uncovered (2002)").mkdir()
+            (library / "Uncovered (2002)" / "Uncovered (2002).mkv").write_bytes(b"v" * 64)
+            argv = [
+                "--source", str(library), "--log", str(root / "log.txt"),
+                "--report", str(root / "report.txt"), "--scrape-daily-cap", "20",
+                "--min-size", "0",
+            ]
+            env = {
+                "OPENSUBTITLES_API_KEY": "", "SUBDL_API_KEY": "",
+                "OPENSUBTITLES_USERNAME": "", "OPENSUBTITLES_PASSWORD": "",
+            }
+            with (
+                mock.patch.dict("os.environ", env),
+                mock.patch.object(sf, "OPENSUBTITLES_API_KEY", ""),
+                mock.patch.object(sf, "SUBDL_API_KEY", ""),
+                mock.patch.object(sf, "make_scrape_transport", return_value=self.FakeTransport({})),
+            ):
+                # One movie is covered, one is not: the gap must be loud.
+                self.assertEqual(sf.main(argv), 1)
+                self.assertEqual(sf.main(argv + ["--allow-missing"]), 0)
+
+            # Fully covered library: quiet success.
+            (library / "Uncovered (2002)" / "Uncovered (2002).mkv").unlink()
+            (library / "Uncovered (2002)").rmdir()
+            (library / "Covered (2001)" / "Covered (2001).eng.srt").write_text(self.SAMPLE_SRT, encoding="utf-8")
+            with (
+                mock.patch.dict("os.environ", env),
+                mock.patch.object(sf, "OPENSUBTITLES_API_KEY", ""),
+                mock.patch.object(sf, "SUBDL_API_KEY", ""),
+                mock.patch.object(sf, "make_scrape_transport", return_value=self.FakeTransport({})),
+            ):
+                self.assertEqual(sf.main(argv), 0)

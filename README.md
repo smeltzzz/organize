@@ -10,14 +10,14 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-274%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-356%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
 [Quickstart](#-quickstart) ·
 [What's in this repo](#-whats-in-this-repo) ·
 [Use only the tools you need](#-use-only-the-tools-you-need) ·
-[The five tools](#-the-five-tools) ·
+[The six tools](#-the-six-tools) ·
 [The pipeline](#-the-pipeline) ·
 [Safety invariants](#-safety-invariants) ·
 [Testing & development](#-testing--development)
@@ -28,8 +28,8 @@ lossless track cleanup.**
 
 ## 🧭 What is Organize?
 
-Five purpose-built Python 3.11+ tools that maintain a canonical movie library
-for Jellyfin / Plex:
+Six purpose-built Python 3.11+ tools that maintain a canonical movie
+library for Jellyfin / Plex:
 
 ```
 Title (Year)/
@@ -39,7 +39,8 @@ Title (Year)/
 
 Every tool is **100% standard-library Python**: no pip installs, no venv, no
 containers, no daemons. The only things some tools need are the usual media
-binaries (`mkvmerge`, `ffprobe`) and, for subtitle fetching, a free API key.
+binaries (`mkvmerge`, `ffprobe`, `ffsubsync`) and, for subtitle fetching, a
+free API key.
 
 | | |
 | :--- | :--- |
@@ -60,13 +61,14 @@ One file, one purpose. Nothing else.
 | File | What it is |
 | :--- | :--- |
 | `organize.py` | **The front door.** Unified CLI, system doctor, and test runner: `organize.py doctor`, `organize.py run`, `organize.py test`, plus one subcommand per tool. |
-| `subtitle_fetcher.py` | Tool 1 — fetch validated English `.eng.srt` sidecars (OpenSubtitles + SubDL). |
+| `subtitle_fetcher.py` | Tool 1 — fetch validated English `.eng.srt` sidecars (OpenSubtitles + SubDL + 7 scraping fallbacks). |
 | `mkv_track_cleaner.py` | Tool 2 — lossless remux: keep one best audio, strip commentary/dubs/embedded subs. |
 | `10bit.py` | Tool 3 — ffprobe sweep: queue 8-bit SDR for HandBrake, protect HDR. |
 | `library_auditor.py` | Tool 4 — read-only health check of layout, naming, and subtitles. |
 | `movie_standardizer.py` | Tool 5 — the torrent-completion hook: parse scene names, hardlink into `Title (Year)/`. |
-| `pipeline.py` | Runs the four maintenance tools (1→4) in the one correct order. |
-| `tests/` | Fully offline unit tests (274) + per-tool built-in self-tests. |
+| `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. |
+| `pipeline.py` | Runs the five maintenance tools (1→5) in the one correct order. |
+| `tests/` | Fully offline unit tests (356) + per-tool built-in self-tests. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. |
 
@@ -102,7 +104,7 @@ are reported with the exact fix, never a crash.
 
 ```bash
 python3 organize.py run --dry-run     # preview every command first
-python3 organize.py run               # subtitles -> remux -> 10-bit -> audit
+python3 organize.py run               # subtitles -> remux -> 10-bit -> sync -> audit
 python3 organize.py run --nice        # low priority: Jellyfin streaming is never starved
 ```
 
@@ -138,11 +140,12 @@ Prerequisites per tool:
 
 | Tool | External binary | API key |
 | :--- | :--- | :--- |
-| `subtitle_fetcher.py` | — | `OPENSUBTITLES_API_KEY` and/or `SUBDL_API_KEY` |
+| `subtitle_fetcher.py` | — | optional — the scraping sources work with no keys at all |
 | `mkv_track_cleaner.py` | `mkvmerge` (MKVToolNix) | — |
 | `10bit.py` | `ffprobe` (FFmpeg) | — |
 | `library_auditor.py` | — | — |
 | `movie_standardizer.py` | `ffprobe` (optional, for duplicate upgrades) | — |
+| `sync_subtitles.py` | `ffsubsync` (`pip install ffsubsync`) + `ffmpeg` (FFmpeg) | — |
 
 If you ever modify a vendored helper in one tool, keep the copies in the
 other tools byte-identical — the test suite compares them against each other
@@ -150,23 +153,45 @@ and fails if they drift.
 
 ---
 
-## 🧰 The five tools
+## 🧰 The six tools
 
 ### 1 · `subtitle_fetcher.py` — validated English subtitles
 
-Fetches one external `.eng.srt` per movie. OpenSubtitles and SubDL are
-treated as **equal sources**: both providers' release-identifying routes are
-consulted for every movie — the exact OpenSubtitles moviehash (while the MKV
-bytes are still pristine) and SubDL's release-aware filename match, whose
-automatic picks require a score ≥ 0.80 — and the qualifying release with the
-**most downloads** is fetched, whichever provider it came from. When neither
-release route yields a pick, both providers' strict title/year routes are
-pooled the same way. Every download is re-validated (regular file, size cap,
-decodable text, at least one well-formed cue) before it is written.
+Fetches one external `.eng.srt` per movie, and the goal is a subtitle beside
+**every** movie. Nine sources are consulted in tiers:
+
+1. **OpenSubtitles + SubDL as equal sources** (API keys, `subtitle_fetcher.py`
+   itself): both providers' release-identifying routes are consulted for
+   every movie — the exact OpenSubtitles moviehash (while the MKV bytes are
+   still pristine) and SubDL's release-aware filename match, whose automatic
+   picks require a score ≥ 0.80 — and the qualifying release with the
+   **most downloads** is fetched, whichever provider it came from. When
+   neither release route yields a pick, both providers' strict title/year
+   routes are pooled the same way.
+2. **Seven scraping fallbacks** (vendored in `subtitle_fetcher.py`,
+   no keys, no accounts), offered in failover order to any movie the API
+   tiers miss:
+   **Subf2m.co → Podnapisi.NET → Addic7ed.com → SubSource.net →
+   Subsunacs.net → YIFY Subtitles → Subs.sab.bz**. A scraped candidate wins
+   only when it names the movie, matches its release year, and decodes to a
+   valid English SRT. Each source has a per-run circuit breaker (3 hard or 3
+   parse failures disable it for the rest of the run) and a UTC daily search
+   cap (20 by source, `--scrape-daily-cap`), metered in the same durable
+   ledger as the API quotas.
+
+Every download — API or scraped — is re-validated (regular file, size cap,
+decodable text, at least one well-formed cue) before it is written. The
+report opens with a coverage scorecard (`17/18 (94.4%) · goal: 100%`) and
+names every uncovered movie with the verdict of **each** source; uncovered
+movies are re-offered to the scraping sources on every later UTC day. Until
+every movie is covered the process exits **1** (override with
+`--allow-missing`), so a gap is always loud. Works with zero API keys: with
+none configured, every movie goes straight to the scraping tier.
 
 ```bash
 python3 subtitle_fetcher.py --source /path/to/movies --dry-run   # preview
 python3 subtitle_fetcher.py --source /path/to/movies --limit 10  # first 10
+python3 subtitle_fetcher.py --source /path/to/movies --skip-source subf2me   # drop one site
 ```
 
 ### 2 · `mkv_track_cleaner.py` — lossless remux
@@ -215,6 +240,26 @@ and splits. Also finds duplicate folders of the same movie on request
 python3 movie_standardizer.py --source /path/to/downloads --target /path/to/movies --dry-run
 ```
 
+### 6 · `sync_subtitles.py` — subtitle-timing sync (ffsubsync)
+
+The pipeline's final content step, right before the audit. Walks the whole
+library, pairs every `.srt` sidecar with its movie, and measures the drift
+against the actual audio with [`ffsubsync`](https://github.com/smacke/ffsubsync)
+(install once: `pip install ffsubsync`; it needs `ffmpeg` on the PATH).
+Trustworthy drift is applied by atomically swapping in the corrected sidecar;
+sub-threshold drift (`--min-offset`, default 0.1 s) leaves the file
+byte-identical; anything untrustworthy — beyond the trust window
+(`--max-offset`, default 30 s), anti-correlated scores, ffsubsync's own
+quality-gate refusal, or a plain failure — is **held for review, never
+applied**. Movie bytes are never touched, so the OpenSubtitles moviehash is
+undisturbed and the audit that follows sees the finished sidecars.
+
+```bash
+python3 sync_subtitles.py --source /path/to/movies --dry-run    # preview
+python3 sync_subtitles.py --source /path/to/movies --limit 10   # first 10
+python3 sync_subtitles.py --source /path/to/movies --fail-on-review  # cron gating
+```
+
 ---
 
 ## 🔗 qBittorrent ingestion
@@ -248,10 +293,13 @@ python3 /opt/organize/pipeline.py --source /path/to/movies
 
 ## 🔄 The pipeline
 
-Four maintenance tools, one fixed order. The order between **subtitles** and
+Five maintenance tools, one fixed order. The order between **subtitles** and
 **remux** is load-bearing — a remux rewrites the container bytes that
 OpenSubtitles hashes, so fetching subtitles *after* cleaning permanently
-destroys the exact-match search. `pipeline.py` exists so you cannot get this
+destroys the exact-match search. Subtitle **sync** runs last of the content
+steps on purpose: it rewrites subtitle bytes only (never movie bytes), so the
+moviehash is undisturbed — but it must finish before the audit so the audit
+validates the finished sidecars. `pipeline.py` exists so you cannot get this
 wrong.
 
 ```
@@ -274,13 +322,17 @@ wrong.
 │ 4 · 10bit             │   REVIEW ambiguous metadata — never guess
 └───────────┬───────────┘
             ▼
+┌───────────────────────┐   ffsubsync timing sync of every .srt sidecar;
+│ 5 · sync              │   bad syncs held for review, originals never lost
+└───────────┬───────────┘
+            ▼
 ┌───────────────────────┐   100% read-only layout + subtitle health check
-│ 5 · audit             │   gating exit codes for cron / Task Scheduler
+│ 6 · audit             │   gating exit codes for cron / Task Scheduler
 └───────────────────────┘
 ```
 
 `1 · standardize` fires automatically from the qBittorrent hook; `organize.py
-run` (or `pipeline.py`) executes steps 2 → 5 in order. Every step skips
+run` (or `pipeline.py`) executes steps 2 → 6 in order. Every step skips
 cleanly (with the reason printed) when its prerequisite is missing.
 
 ```bash
@@ -323,6 +375,11 @@ Non-negotiable rules every tool obeys:
 6. **Unique data is never deleted** — declines are reported, duplicates
    default to `REPORT` mode, and destructive maintenance modes
    (`QUARANTINE`, `DELETE`) are strictly opt-in.
+7. **A bad subtitle sync is worse than none** — `sync_subtitles.py` applies a
+   drift only when it is measurable and inside the trust window; anything
+   untrustworthy (huge offsets, anti-correlated scores, ffsubsync's own
+   quality-gate refusal, or a plain failure) is held for review with the
+   original sidecar byte-identical.
 
 ---
 
@@ -353,7 +410,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 274 unit tests
+python3 -m unittest discover -s tests -p "test_*.py"   # 356 unit tests
 pip install -e .[dev] && pytest                   # same suite under pytest
 ```
 

@@ -3,9 +3,9 @@
 
 ``movie_standardizer.py`` is the qBittorrent completion hook and runs by itself
 the moment a download stops, so it is deliberately not part of this sweep. What
-is left — fetching subtitles, cleaning tracks, checking bit depth, auditing the
-library — is four separate commands, and the order between the first two is
-load-bearing:
+is left — fetching subtitles, cleaning tracks, checking bit depth, syncing
+subtitle timing, auditing the library — is five separate commands, and the
+order between the first two is load-bearing:
 
     subtitle_fetcher.py   MUST run before mkv_track_cleaner.py
 
@@ -13,7 +13,10 @@ load-bearing:
 size plus the sum of the first and last 64 KiB. It can then use SubDL's
 score-gated release-aware fallback. A remux rewrites those bytes, so any movie cleaned
 first can never reproduce its release hash and is silently demoted to the much
-weaker title/year search. Running the four scripts
+weaker title/year search. ``sync_subtitles.py`` runs last of the content
+steps, just before the audit: it rewrites subtitle bytes only (never movie
+bytes), so the moviehash is undisturbed - but the audit must see the finished
+sidecars. Running the five scripts
 by hand makes that easy to get wrong on a busy day; this script cannot get it
 wrong.
 
@@ -526,7 +529,7 @@ DEFAULT_LIBRARY = r"E:\torrents\final_organized"
 
 # The canonical order. Index order is the execution order; do not reorder
 # without re-reading the moviehash note in the module docstring.
-STEP_ORDER = ("fetcher", "cleaner", "10bit", "auditor")
+STEP_ORDER = ("fetcher", "cleaner", "10bit", "sync", "auditor")
 
 @dataclass(frozen=True)
 class Step:
@@ -550,6 +553,10 @@ STEPS: dict[str, Step] = {
     ),
     "10bit": Step(
         key="10bit", script="10bit.py", title="Check 8-bit vs 10-bit / HDR",
+        root_flag="--source",
+    ),
+    "sync": Step(
+        key="sync", script="sync_subtitles.py", title="Sync subtitle timing (ffsubsync)",
         root_flag="--source",
     ),
     "auditor": Step(
@@ -581,6 +588,12 @@ HINTS: dict[str, str] = {
     "fetcher": (
         "Runs before the cleaner on purpose: a remux rewrites the OpenSubtitles moviehash, "
         "so cleaning first would force the weaker title/year search."
+    ),
+    "sync": (
+        "Runs after every other tool on purpose: it rewrites subtitle bytes, never movie "
+        "bytes, so the moviehash is undisturbed - but it must finish before the audit so the "
+        "audit sees the finished sidecars. A bad sync is worse than none: untrusted alignments "
+        "are held for review, never applied."
     ),
 }
 
@@ -638,6 +651,17 @@ def _ffprobe_present() -> bool:
     except Exception:
         return shutil.which("ffprobe") is not None
 
+def _ffsubsync_present() -> bool:
+    """ffsubsync (any entry point) on PATH, plus the ffmpeg it shells out to."""
+    try:
+        import sync_subtitles as ss
+        if ss.find_ffsubsync() is None:
+            return False
+    except Exception:
+        if not any(shutil.which(name) for name in ("ffsubsync", "ffs", "subsync")):
+            return False
+    return shutil.which("ffmpeg") is not None
+
 PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
     "fetcher": (
         _api_key_present,
@@ -650,6 +674,11 @@ PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
     "10bit": (
         _ffprobe_present,
         "ffprobe (FFmpeg) not found on PATH or in the standard install locations",
+    ),
+    "sync": (
+        _ffsubsync_present,
+        "ffsubsync not found on PATH (install it with `pip install ffsubsync`) or ffmpeg "
+        "missing; ffsubsync needs both to sync subtitles",
     ),
 }
 
@@ -797,11 +826,13 @@ def resolve_library(cli_source: Path | None) -> Path:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=("Run the manual Jellyfin movie steps in the correct order: "
-                     "subtitles, then track cleaning, then bit depth, then audit."),
+                     "subtitles, then track cleaning, then bit depth, then subtitle sync, then audit."),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=("movie_standardizer.py is the qBittorrent completion hook and is not part of\n"
                 "this sweep. Subtitles are fetched before the remux because a remux rewrites\n"
-                "the OpenSubtitles moviehash and would force a weaker title/year search."),
+                "the OpenSubtitles moviehash and would force a weaker title/year search.\n"
+                "Subtitle sync (ffsubsync) runs just before the audit: it only rewrites\n"
+                "subtitle bytes, so the audit sees the finished sidecars."),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--source", type=Path, default=None,
@@ -876,9 +907,11 @@ def run_self_tests() -> int:
             errors.append(msg)
 
     # The ordering is the whole point of this script.
-    check(STEP_ORDER == ("fetcher", "cleaner", "10bit", "auditor"), "canonical step order")
+    check(STEP_ORDER == ("fetcher", "cleaner", "10bit", "sync", "auditor"), "canonical step order")
     check(STEP_ORDER.index("fetcher") < STEP_ORDER.index("cleaner"),
           "subtitles must be fetched before the remux invalidates the moviehash")
+    check(STEP_ORDER.index("sync") < STEP_ORDER.index("auditor"),
+          "subtitle sync must finish before the audit sees the sidecars")
 
     # Order is preserved no matter how the user types the flag.
     for requested in (["auditor", "fetcher"], ["10bit", "cleaner", "fetcher"],
@@ -912,6 +945,7 @@ def run_self_tests() -> int:
     check(STEPS["fetcher"].root_flag == "--source", "fetcher uses --source")
     check(STEPS["cleaner"].root_flag == "--dir", "cleaner uses --dir")
     check(STEPS["10bit"].root_flag == "--source", "10bit uses --source")
+    check(STEPS["sync"].root_flag == "--source", "sync uses --source")
     check(STEPS["auditor"].root_flag == "--source", "auditor uses --source")
 
     library = Path("/media/movies")
