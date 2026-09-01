@@ -10,6 +10,7 @@ sidecar byte-identical.
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import tempfile
 import unittest
@@ -360,11 +361,22 @@ class EndToEndTests(unittest.TestCase):
         self._td.cleanup()
 
     def _run(self, fake: FakeFfsubsync, *extra: str) -> int:
+        # Hermetic: pretend ffmpeg is on PATH regardless of the host image
+        # (CI's macos runner ships without it). Every other lookup keeps
+        # its real answer.
+        real_which = shutil.which
+
+        def which(name: str) -> str | None:
+            if name == "ffmpeg":
+                return "/usr/bin/ffmpeg"
+            return real_which(name)
+
         with mock.patch.object(ss, "run_ffsubsync", fake), \
                 mock.patch.object(ss, "find_ffsubsync", lambda explicit=None: "fake-ffsubsync"), \
                 mock.patch.object(ss, "ffsubsync_version", lambda binary: "ffsubsync 9.9.9"), \
                 mock.patch.object(ss, "detect_ffsubsync_features",
-                                  lambda binary: ss.FfsubsyncFeatures(True, True, True)):
+                                  lambda binary: ss.FfsubsyncFeatures(True, True, True)), \
+                mock.patch("shutil.which", side_effect=which):
             return ss.main([
                 "--source", str(self.lib),
                 "--log", str(self.log),
