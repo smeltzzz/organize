@@ -893,11 +893,7 @@ def report_banner(
 import html as _html  # used by the vendored section below
 
 
-
-from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
-
-__version__ = "1.0.0"
+__version__ = "1.0.0"  # overridden below to the real version
 
 # ---------------------------------------------------------------------------
 # Provider registry
