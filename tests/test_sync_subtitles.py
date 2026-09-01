@@ -346,7 +346,10 @@ class EndToEndTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory(prefix="sync_e2e_")
-        self.tmp = Path(self._td.name)
+        # Canonical form: main() resolves the library path (macOS:
+        # /var/folders -> /private/var/folders; Windows: 8.3 temp dirs),
+        # so path-equality assertions need the resolved form here too.
+        self.tmp = Path(self._td.name).resolve()
         self.lib = self.tmp / "lib"
         self.movie_dir = self.lib / "Film (2000)"
         self.movie_dir.mkdir(parents=True)
@@ -535,7 +538,7 @@ class EndToEndTests(unittest.TestCase):
     def test_unreadable_video_is_a_failure(self) -> None:
         # chmod 000 makes the video unreadable to ffsubsync's permission check.
         # Skip on platforms where the test user can still read it (e.g. root).
-        if os.geteuid() == 0:  # type: ignore[attr-defined]
+        if getattr(os, "geteuid", lambda: 1)() == 0:
             self.skipTest("running as root; permission bits do not apply")
         self.mkv.chmod(0)
         try:
