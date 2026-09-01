@@ -2514,6 +2514,10 @@ def probe_media(path: Path, ffprobe: str) -> tuple[MediaTechnicalInfo | None, st
             command,
             capture_output=True,
             text=True,
+            # ffprobe speaks ASCII, but decode explicitly anyway: the locale
+            # encoding (cp1252 on Windows) is never what we want here.
+            encoding="utf-8",
+            errors="replace",
             timeout=FFPROBE_TIMEOUT_SECONDS,
             check=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
@@ -3613,10 +3617,13 @@ def run_canonical_self_tests() -> int:
     dst.mkdir()
     errors: list[str] = []
     try:
+        # report_file=None on purpose: the default is a Windows path that
+        # would materialize as a literal "E:\..." file in the CWD on POSIX.
         CFG = Config(
             source_dir=src,
             target_dir=dst,
             log_file=None,
+            report_file=None,
             min_movie_size_mb=0,
             copy_extras=False,
             copy_artwork=False,

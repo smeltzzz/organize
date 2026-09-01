@@ -27,6 +27,9 @@ Thumbs.db
 *_report.txt
 *_probe_cache.json
 *probe_cache*.json
+transcript_*.err
+# jellyfin_one_shot.py's default log dir (per-run logs + per-pass auditor reports)
+logs/
 
 # Accidental desktop / OS dumps
 Screenshot*.png

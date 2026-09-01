@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-356%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-400%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -67,8 +67,9 @@ One file, one purpose. Nothing else.
 | `library_auditor.py` | Tool 4 — read-only health check of layout, naming, and subtitles. |
 | `movie_standardizer.py` | Tool 5 — the torrent-completion hook: parse scene names, hardlink into `Title (Year)/`. |
 | `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. |
-| `pipeline.py` | Runs the five maintenance tools (1→5) in the one correct order. |
-| `tests/` | Fully offline unit tests (356) + per-tool built-in self-tests. |
+| `pipeline.py` | Runs the maintenance tools in the one correct order. |
+| `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
+| `tests/` | Fully offline unit tests (400) + per-tool built-in self-tests. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. |
 
@@ -108,7 +109,28 @@ python3 organize.py run               # subtitles -> remux -> 10-bit -> sync -> 
 python3 organize.py run --nice        # low priority: Jellyfin streaming is never starved
 ```
 
-### 3 · Point Jellyfin at the organized folder
+### 3 · Let the one-shot completer get the library to 100%
+
+The one-shot completer runs the entire toolchain pass after pass — fetch
+subtitles, clean tracks, inspect bit depth, sync timing, audit — until the
+auditor reports **100% canonical**. It handles API quota exhaustion (waits
+for the UTC day rollover), retries transient failures every pass, and paces
+itself: two passes with no progress means it sleeps until the daily caps
+reset instead of hot-looping. It fails fast with the exact fix when
+misconfigured (empty library, log dir inside the library) instead of
+looping, and every step is idempotent, so an interrupted run resumes where
+it left off.
+
+```bash
+python3 jellyfin_one_shot.py --source /path/to/movies --dry-run  # one-pass preview
+python3 jellyfin_one_shot.py --source /path/to/movies            # run to 100%
+python3 organize.py one-shot --source /path/to/movies --nice     # same, lower priority
+```
+
+All logs, per-tool reports, and full output transcripts land in one place
+(`--log-dir`, default `./logs`, which must be outside the library).
+
+### 4 · Point Jellyfin at the organized folder
 
 Done — every movie is canonically named, subtitle-complete, and direct-play
 safe. For the fully automatic flow (torrent finishes → standardized →
@@ -146,6 +168,7 @@ Prerequisites per tool:
 | `library_auditor.py` | — | — |
 | `movie_standardizer.py` | `ffprobe` (optional, for duplicate upgrades) | — |
 | `sync_subtitles.py` | `ffsubsync` (`pip install ffsubsync`) + `ffmpeg` (FFmpeg) | — |
+| `jellyfin_one_shot.py` | whatever the tools it runs need (missing binaries are skipped, not fatal) | optional |
 
 If you ever modify a vendored helper in one tool, keep the copies in the
 other tools byte-identical — the test suite compares them against each other
@@ -258,6 +281,34 @@ undisturbed and the audit that follows sees the finished sidecars.
 python3 sync_subtitles.py --source /path/to/movies --dry-run    # preview
 python3 sync_subtitles.py --source /path/to/movies --limit 10   # first 10
 python3 sync_subtitles.py --source /path/to/movies --fail-on-review  # cron gating
+```
+
+### 7 · `jellyfin_one_shot.py` — the "never stop" completer
+
+The orchestrator that gets a library to the end result no matter what: it
+loops the pipeline (fetch → clean → 10bit → sync → audit) until the auditor
+reports 100% canonical, then exits 0. What makes it safe to leave running for
+days:
+
+- **Quota-aware pacing** — a stuck library (all sources out of daily cap)
+  sleeps until the next UTC midnight, when the caps reset and the scraping
+  tier re-offers held movies, instead of burning full passes for nothing.
+- **Guaranteed finish** — an empty library (no movie folders) exits 2 with
+  the canonical-layout reminder; a log dir inside the library is rejected up
+  front (the tools refuse to write inside the media tree, and the auditor
+  would count a log folder as a movie folder); three passes in a row without
+  a usable audit report exits 1 with the transcript paths to debug.
+- **Full forensics** — every tool's complete stdout/stderr is kept in a
+  bounded rolling transcript under `--log-dir`, so a failure on day three is
+  debuggable on day four.
+- **Honest reporting** — if `mkvmerge`/`ffprobe`/`ffsubsync` are missing the
+  affected steps are skipped and the completion banner says exactly which
+  guarantees were not checked.
+
+```bash
+python3 jellyfin_one_shot.py --source /path/to/movies --dry-run    # one-pass preview
+python3 jellyfin_one_shot.py --source /path/to/movies              # run until 100%
+python3 jellyfin_one_shot.py --source /path/to/movies --max-passes 5   # bound a run
 ```
 
 ---
@@ -410,7 +461,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 356 unit tests
+python3 -m unittest discover -s tests -p "test_*.py"   # 400 unit tests
 pip install -e .[dev] && pytest                   # same suite under pytest
 ```
 
