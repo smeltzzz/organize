@@ -14,6 +14,7 @@ Commands:
     10bit        ffprobe inspection: queue 8-bit SDR for HandBrake; protect HDR & 10-bit
     sync         ffsubsync timing sync of every .srt sidecar against its movie (pre-audit)
     audit        Read-only health check of library layout, MKV naming, and subtitle sidecars
+    one-shot     Run the whole toolchain until the auditor reports 100% canonical
     test         Run the test suite across all tools
 
 Quickstart:
@@ -170,6 +171,7 @@ def print_dashboard() -> None:
     print(f"    {green('python organize.py run --dry-run')}      Preview pipeline commands without executing")
     print(f"    {green('python organize.py standardize [PATH]')} Standardize a specific torrent download or batch scan")
     print(f"    {green('python organize.py audit')}              Audit current library layout and subtitle coverage")
+    print(f"    {green('python organize.py one-shot')}           Run every tool until the library is 100% canonical")
     print(f"    {green('python organize.py test')}               Run built-in test suite (all self-tests + unit tests)")
     print()
 
@@ -531,6 +533,7 @@ def run_all_self_tests() -> int:
         ("mkv_track_cleaner.py", ["--self-test"]),
         ("sync_subtitles.py", ["--self-test"]),
         ("pipeline.py", ["--self-test"]),
+        ("jellyfin_one_shot.py", ["--self-test"]),
     ]
 
     failed = 0
@@ -632,6 +635,10 @@ def build_parser() -> argparse.ArgumentParser:
     # audit
     subparsers.add_parser("audit", help="Read-only audit of library layout, naming, and SRT sidecars", add_help=False)
 
+    # one-shot
+    subparsers.add_parser("one-shot", aliases=["oneshot", "complete"],
+                          help="Run the whole toolchain until the auditor reports 100%% canonical", add_help=False)
+
     # test
     p_test = subparsers.add_parser("test", aliases=["tests"], help="Run test suite (self-tests and/or unit tests)")
     p_test.add_argument("--unit", action="store_true", help="Run unit tests in addition to self-tests")
@@ -713,6 +720,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     elif command in {"audit"}:
         return delegate_to_script("library_auditor.py", sub_args)
+
+    elif command in {"one-shot", "oneshot", "complete"}:
+        return delegate_to_script("jellyfin_one_shot.py", sub_args)
 
     elif command in {"test", "tests"}:
         code = run_all_self_tests()

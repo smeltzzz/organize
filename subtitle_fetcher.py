@@ -2266,6 +2266,16 @@ LOG_FILE = r"E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher.
 REPORT_FILE = r"E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher_report.txt"
 # The append-only log is the durable quota ledger; no state/cache file is created.
 LEDGER_EVENT = "SUBTITLE_LEDGER"
+# OpenSubtitles free-tier download allowance (24 hours; the provider resets
+# download counters at midnight UTC, which is why the local ledger is keyed by
+# UTC day): a plain signed-up user gets 20/day (VIP ranks go up to 1000), and
+# an API consumer flagged "Under Development" may download up to 100/day
+# without user authentication. Verified against the official OpenSubtitles API
+# documentation (opensubtitles.stoplight.io, "Getting started" > Authentication)
+# on 2026-09-01. NOTE: a consumer that is NOT "Under Development" may only
+# download 5 subtitles per IP per 24 hours without a user, so the default
+# development-anonymous mode requires the consumer to have Under Development
+# and Allow anonymous enabled at opensubtitles.com/consumers.
 USER_DAILY_CAP = 20
 DEVELOPMENT_ANONYMOUS_DAILY_CAP = 100
 AUTH_MODE_DEVELOPMENT_ANONYMOUS = "development-anonymous"
@@ -2285,6 +2295,9 @@ SUBDL_DOWNLOAD_HOST = "dl.subdl.com"
 # both; users on a paid plan can explicitly raise either cap with the matching
 # --subdl-*-daily-cap flag.
 SUBDL_DEFAULT_SEARCH_DAILY_CAP = 2_000
+# Scrape-chain searches: the scraped sources publish no official API quota, so
+# this is a courtesy self-limit (requests per source per UTC day), not a
+# provider-published allowance.
 SCRAPE_DEFAULT_SEARCH_DAILY_CAP = DEFAULT_SEARCH_DAILY_CAP
 
 SUBDL_DEFAULT_DAILY_CAP = 50
