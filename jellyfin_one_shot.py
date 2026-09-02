@@ -747,6 +747,9 @@ def run_one_shot(
                 "--source", str(library),
                 "--report", str(log_dir / "sync_subtitles_report.txt"),
                 "--log", str(log_dir / "sync_subtitles.log"),
+                # Remembered verdicts live with the rest of the run's state,
+                # so a one-shot run is self-contained under --log-dir.
+                "--sync-ledger", str(log_dir / "sync_state.json"),
             ]
             if dry_run:
                 args.append("--dry-run")

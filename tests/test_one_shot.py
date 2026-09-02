@@ -247,6 +247,7 @@ class RunOneShotTests(unittest.TestCase):
         self._td.cleanup()
 
     def _run(self, fake: FakeToolRunner, **kwargs: object) -> int:
+        tools = kwargs.pop("tools", self.tools)
         with mock.patch.object(js, "run_tool", fake), \
                 mock.patch.object(js.time, "sleep", lambda _s: None), \
                 mock.patch.object(js, "wait_for_utc_midnight", lambda _log: None):
@@ -255,7 +256,7 @@ class RunOneShotTests(unittest.TestCase):
                 script_dir=Path(js.__file__).parent,
                 runtime_log=self.runtime_log,
                 log_dir=self.log_dir,
-                tools=self.tools,
+                tools=tools,
                 **kwargs,
             )
 
@@ -321,6 +322,15 @@ class RunOneShotTests(unittest.TestCase):
         self.assertIn("--dry-run", fetch_calls[0])
         # The auditor is read-only; it takes no --dry-run flag.
         self.assertNotIn("--dry-run", audit_calls[0])
+
+    def test_sync_step_pins_its_ledger_under_the_log_dir(self) -> None:
+        # Every artifact of a run lives under --log-dir, so the remembered
+        # sync verdicts do too.
+        fake = FakeToolRunner(report=PARTIAL_REPORT)
+        self._run(fake, dry_run=True, tools={"ffsubsync": True, "ffmpeg": True})
+        _name, args = next((n, a) for n, a in fake.calls if n == "sync_subtitles.py")
+        self.assertIn(str(self.log_dir / "sync_state.json"),
+                      args[args.index("--sync-ledger") + 1:])
 
     def test_dry_run_pins_log_report_and_transcript_paths(self) -> None:
         fake = FakeToolRunner(report=PARTIAL_REPORT)
