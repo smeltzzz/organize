@@ -940,6 +940,7 @@ STATUS_SYNCED = "synced"
 STATUS_PREVIEW = "preview"
 STATUS_SKIPPED = "skipped"
 STATUS_IN_SYNC = "in_sync"
+STATUS_EXTRACTED = "extracted"
 
 # ffsubsync writes its diagnostics to stderr (stdout is reserved for subtitle
 # output, so piping stays clean). Every version logs the three measurements
@@ -1269,6 +1270,26 @@ def _refetch_sidecar(video: Path, srt: Path, exclude_ids: list[str], log_file: P
     return refetch_english_srt(video, srt, exclude_ids=exclude_ids, log_file=log_file)
 
 
+def _extracted_sidecar_record(srt: Path, sha256: str) -> dict[str, Any] | None:
+    """subtitle_fetcher's extraction record for this sidecar, when it has one.
+
+    A sidecar extracted from the movie's own embedded track carries the
+    container's own timestamps, so it is already frame-accurate for this exact
+    file. Import is lazy and failure-tolerant: without subtitle_fetcher.py
+    beside this script (or with a damaged record) every sidecar is simply
+    measured like before.
+    """
+    try:
+        from subtitle_fetcher import find_extracted_record
+    except ImportError:
+        return None
+    try:
+        record = find_extracted_record(srt, sha256)
+    except Exception:
+        return None
+    return record if isinstance(record, dict) else None
+
+
 def sync_one(job: Job, cfg: "Config", binary: str, features: FfsubsyncFeatures) -> SyncResult:
     """Sync one sidecar against its movie: validate, stage, run, decide, swap.
 
@@ -1292,6 +1313,23 @@ def sync_one(job: Job, cfg: "Config", binary: str, features: FfsubsyncFeatures) 
                           detail=f"could not stat movie file ({exc})")
 
     original_sha = sha256_file(srt)
+
+    # Extracted, not downloaded: the cues came out of this movie's own
+    # container timeline, so there is no drift to correct. Measuring it would
+    # spend an ffsubsync run (audio decode + alignment) to prove a known zero.
+    record = _extracted_sidecar_record(srt, original_sha)
+    if record is not None:
+        track = record.get("track_id") or "?"
+        codec = record.get("codec_id") or "embedded"
+        return SyncResult(
+            srt=srt, video=video, status=STATUS_EXTRACTED,
+            detail=(f"extracted from this movie's own {codec} track {track} - "
+                    "frame-accurate by construction, no sync needed"),
+            seconds=time.monotonic() - started,
+            original_sha=original_sha,
+            new_sha=original_sha,
+        )
+
     if cfg.dry_run:
         return SyncResult(srt=srt, video=video, status=STATUS_PREVIEW,
                           detail="would run ffsubsync and replace the sidecar only on a trusted sync")
@@ -1460,10 +1498,12 @@ def build_report(
     preview = [r for r in results if r.status == STATUS_PREVIEW]
     skipped = [r for r in results if r.status == STATUS_SKIPPED]
     in_sync = [r for r in results if r.status == STATUS_IN_SYNC]
+    extracted = [r for r in results if r.status == STATUS_EXTRACTED]
 
     report.scorecard([
         (len(synced), "Synced", "timing corrected, sidecar replaced atomically"),
         (len(in_sync), "In sync", "already aligned, file untouched"),
+        (len(extracted), "Extracted (not synced)", "built from the movie's own track; no drift exists"),
         (len(review), "Held for review", "untrustworthy sync, original kept"),
         (len(failed), "Failed", "ffsubsync error, original kept"),
         (len(skipped), "Skipped", "nothing to sync (no video / unusable sidecar)"),
@@ -1543,6 +1583,15 @@ def build_report(
                 ("Offset", _fmt_offset(res.offset_seconds)),
                 ("Took", f"{res.seconds:.1f}s"),
             ])
+
+    if extracted:
+        report.section("EXTRACTED FROM THE MOVIE (SYNC NOT NEEDED)", count=len(extracted),
+                       intro="subtitle_fetcher.py built these sidecars from the movie's own embedded "
+                             "subtitle track. The cues carry that container's timestamps, so they are "
+                             "already aligned to this exact file; ffsubsync was deliberately not run. "
+                             "A sidecar that is later replaced by a download is measured normally again.")
+        for res in extracted:
+            report.entry(str(res.srt), detail=res.detail, fields=[("Video", res.video or "-")])
 
     if not results:
         report.section("NOTHING FOUND")
@@ -1686,6 +1735,7 @@ def run(cfg: Config) -> int:
     log("SYNC COMPLETE")
     log(f"  Synced (replaced)  : {synced}")
     log(f"  Already in sync    : {in_sync}")
+    log(f"  Extracted (skipped): {sum(1 for r in results if r.status == STATUS_EXTRACTED)}")
     log(f"  Held for review    : {review}")
     log(f"  Failed             : {failed}")
     log(f"  Skipped            : {sum(1 for r in results if r.status == STATUS_SKIPPED)}")

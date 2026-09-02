@@ -1670,12 +1670,17 @@ class ScrapeFallbackWiringTests(unittest.TestCase):
                 subdl_search_daily_cap=0, scrape_daily_cap=None, skip_source=[],
                 allow_missing=False, min_size=0, lock_timeout=60.0, limit=0,
                 dry_run=False, retry_review=False, identity_fallback=True,
+                extract_embedded=True, extract_min_cues=sf.DEFAULT_EXTRACT_MIN_CUES,
+                ocr_backend=sf.OCR_BACKEND_AUTO, ocr_bin="", ocr_args="",
+                ocr_timeout=sf.DEFAULT_OCR_TIMEOUT_SEC, ocr_limit=0,
             )
             with mock.patch.dict("os.environ", {"OPENSUBTITLES_API_KEY": "", "SUBDL_API_KEY": ""}):
                 cfg = sf.compact_config_from_args(args)
             self.assertEqual(cfg.scrape_daily_cap, sf.SCRAPE_DEFAULT_SEARCH_DAILY_CAP)
             self.assertEqual(cfg.skip_sources, ())
             self.assertFalse(cfg.allow_missing)
+            self.assertTrue(cfg.extract_embedded, "embedded extraction is on by default")
+            self.assertEqual(cfg.ocr_backend, sf.OCR_BACKEND_AUTO)
             args.scrape_daily_cap = 0
             args.skip_source = ["subf2me"]
             args.allow_missing = True

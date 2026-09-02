@@ -7,6 +7,20 @@ canonical movie library and create at most one validated external English SRT
 sidecar per MKV. This single script owns its persistent UTC request ledger;
 there is no separate queue script or launcher to run.
 
+The first thing it tries for any uncovered movie is the movie itself. Most
+Jellyfin MKVs already carry an English subtitle as an embedded track, and that
+track is exact for this release: it costs no provider request, it cannot be the
+wrong cut, and its cues come from the container's own timeline, so the sidecar
+needs no timing correction. Text tracks (SRT/SSA/ASS/WebVTT) are extracted with
+mkvextract and converted in-process; image tracks (PGS/SUP, VobSub, DVB) are
+OCR'd by an external backend (sup2srt + Tesseract, Subtitle Edit, or PgsToSrt)
+when one is installed, and are skipped with the exact fix printed when none is.
+Forced/signs-only, commentary, non-English, and too-short tracks are refused, so
+a movie is never left with a partial "subtitle"; those movies simply fall
+through to the providers as before. Extraction is recorded outside the library,
+and sync_subtitles.py reads that record so an extracted sidecar - already
+frame-accurate - is never handed to ffsubsync. Disable it with --no-extract.
+
 OpenSubtitles and SubDL are treated as equal sources. Both providers'
 release-identifying routes are consulted for every movie - the exact
 OpenSubtitles moviehash and SubDL's score-gated release-aware filename
@@ -79,9 +93,11 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -961,6 +977,7 @@ SCRAPE_REQUEST_GAP_SEC = 1.0
 SCRAPE_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 SCRAPE_MAX_CANDIDATES_PER_SOURCE = 3
 
+
 SCRAPE_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -1491,7 +1508,7 @@ class Addic7edSource(BaseSource):
 
 
 class SubSourceSource(BaseSource):
-    """SubSource.net (the Subscene-successor catalog).
+    """SubSource.net (a community subtitle catalog).
 
     Deterministic slugs (``/subtitles/<slug>-<year>``) are tried first,
     falling back to the public search page (``/search?q=<title>``). The
@@ -2303,7 +2320,7 @@ SCRAPE_DEFAULT_SEARCH_DAILY_CAP = DEFAULT_SEARCH_DAILY_CAP
 SUBDL_DEFAULT_DAILY_CAP = 50
 SUBDL_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
-__version__ = "2.10.0"
+__version__ = "2.11.0"
 APP_USER_AGENT = "JellyfinMovieSubtitleFetcher v2.9"
 API_BASE = "https://api.opensubtitles.com/api/v1"
 
@@ -2452,6 +2469,7 @@ class MovieIdentity:
 # that grouping back out of a prose sentence.
 REASON_COVERED = "covered"
 REASON_DOWNLOADED = "downloaded"
+REASON_EXTRACTED = "extracted"
 REASON_DRY_RUN = "dry_run"
 REASON_NO_MATCH = "no_match"
 REASON_SIDECAR_UNUSABLE = "sidecar_unusable"
@@ -3849,6 +3867,308 @@ def refetch_english_srt(
         return False, str(pick.file_id), str(exc)
     return True, str(pick.file_id), pick.release or "unnamed release"
 
+def run_extract_self_tests(errors: list[str]) -> None:
+    """Offline self-tests for embedded-subtitle extraction.
+
+    Everything here is local: the external binaries are replaced with a fake
+    ``subprocess.run`` that serves a canned ``mkvmerge -J`` payload and writes
+    a canned ASS track, so no MKVToolNix, no Tesseract, and no media file is
+    needed.
+    """
+
+    def check(cond: bool, msg: str) -> None:
+        if not cond:
+            errors.append(msg)
+
+    this_module = sys.modules[__name__]
+
+    def fake_binaries(_name: str, explicit: str | None = None) -> str:
+        return f"fake-{_name}"
+
+    saved_ledger = os.environ.get(EXTRACTED_LEDGER_ENV)
+    with tempfile.TemporaryDirectory(prefix="extract_selftest_") as tmpdir:
+        tmp = Path(tmpdir)
+        os.environ[EXTRACTED_LEDGER_ENV] = str(tmp / "extracted.json")
+        try:
+            # ---- 1. ASS/SSA and WebVTT conversion --------------------------
+            ass = (
+                "[Script Info]\nTitle: demo\n\n[V4+ Styles]\n"
+                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+                "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+                "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+                "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,"
+                "100,0,0,1,2,2,2,10,10,10,1\n\n"
+                "[Events]\n"
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                "Dialogue: 0,0:00:01.50,0:00:03.00,Default,,0,0,0,,{\\i1}Hello there\\NGeneral Kenobi\n"
+                "Dialogue: 0,0:00:05.00,0:00:06.25,Default,,0,0,0,,Second line\n"
+                "Comment: 0,0:00:09.00,0:00:10.00,Default,,0,0,0,,not shown\n"
+            )
+            converted = ass_to_srt(ass)
+            check("00:00:01,500 --> 00:00:03,000" in converted, f"ASS timing converted: {converted!r}")
+            check("Hello there\nGeneral Kenobi" in converted,
+                  f"ASS override block and \\N line break handled: {converted!r}")
+            check("Second line" in converted, "ASS second cue kept")
+            check("not shown" not in converted, "ASS Comment lines never become cues")
+            check(converted.index("Hello there") < converted.index("Second line"),
+                  "ASS cues stay in time order")
+            check(converted.startswith("1\n"), "ASS output is renumbered from 1")
+
+            ssa = (
+                "[Script Info]\n\n[V4 Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, "
+                "SecondaryColour, TertiaryColour, BackColour, Bold, Italic, BorderStyle, Outline, "
+                "Shadow, Alignment, MarginL, MarginR, MarginV, AlphaLevel, Encoding\n"
+                "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,1,2,2,2,"
+                "10,10,10,0,1\n\n"
+                "[Events]\nFormat: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                "Dialogue: Marked=0,0:00:02.00,0:00:04.00,Default,,0,0,0,,SSA cue\n"
+            )
+            check("SSA cue" in ass_to_srt(ssa), "SSA v4 column order parsed (no Layer column)")
+
+            vtt = ("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello VTT\n\n"
+                   "00:00:04.000 --> 00:00:05.500 align:start\nSecond VTT\n")
+            vtt_text = vtt_to_srt(vtt)
+            check("00:00:01,000 --> 00:00:03,000" in vtt_text and "Hello VTT" in vtt_text,
+                  f"WebVTT converted: {vtt_text!r}")
+
+            messy = ("5\r\n00:00:01,000 --> 00:00:02,000\r\nfirst\r\n\r\n"
+                     "9\r\n00:00:03,000 --> 00:00:04,000\r\nsecond\r\n")
+            fixed = normalize_extracted_srt(messy)
+            check(fixed.startswith("1\n00:00:01,000 --> 00:00:02,000\nfirst\n\n2\n"),
+                  f"cues renumbered: {fixed!r}")
+            check("\r" not in fixed, "CRLF normalized away")
+
+            # ---- 2. quality gate -------------------------------------------
+            good = render_srt_cues([
+                (f"00:00:{index:02d},000", f"00:00:{index:02d},900", "This is a line of English dialogue")
+                for index in range(1, 31)
+            ])
+            ok, reason = extracted_subtitle_quality(good)
+            check(ok, f"a complete English track passes ({reason})")
+
+            short = render_srt_cues([("00:00:01,000", "00:00:02,000", "Only line")])
+            ok, reason = extracted_subtitle_quality(short)
+            check(not ok and "signs/songs-only" in reason, f"a one-cue track is refused ({reason})")
+
+            foreign = render_srt_cues([
+                ("00:00:01,000", "00:00:02,000", "Это предложение на русском языке")
+                for _ in range(30)
+            ])
+            ok, reason = extracted_subtitle_quality(foreign)
+            check(not ok and "not Latin-script" in reason, f"a Cyrillic track is refused ({reason})")
+
+            noise = render_srt_cues([
+                ("00:00:01,000", "00:00:02,000", "||| ~~~ ### ||| ~~~") for _ in range(30)
+            ])
+            ok, reason = extracted_subtitle_quality(noise, method="ocr")
+            check(not ok and "noise" in reason, f"OCR noise is refused ({reason})")
+
+            salad = render_srt_cues([
+                ("00:00:01,000", "00:00:02,000", "Qwx zp vfg blrt mnk jklqwerty") for _ in range(30)
+            ])
+            ok, reason = extracted_subtitle_quality(salad)
+            check(not ok and "does not read as English" in reason,
+                  f"word salad is refused ({reason})")
+
+            # ---- 3. track classification -----------------------------------
+            tracks: list[dict[str, Any]] = [
+                {"id": 2, "type": "subtitles",
+                 "properties": {"codec_id": "S_HDMV/PGS", "language": "eng", "track_name": "English"}},
+                {"id": 3, "type": "subtitles",
+                 "properties": {"codec_id": "S_TEXT/ASS", "language": "eng",
+                                "track_name": "English (SDH)", "flag_hearing_impaired": True}},
+                {"id": 4, "type": "subtitles",
+                 "properties": {"codec_id": "S_TEXT/UTF8", "language": "fre", "track_name": "French"}},
+                {"id": 5, "type": "subtitles",
+                 "properties": {"codec_id": "S_TEXT/UTF8", "language": "eng",
+                                "track_name": "English forced", "flag_forced": True}},
+                {"id": 6, "type": "subtitles",
+                 "properties": {"codec_id": "S_TEXT/UTF8", "language": "eng", "track_name": "Commentary"}},
+                {"id": 7, "type": "audio", "properties": {"codec_id": "A_AC3", "language": "eng"}},
+                {"id": 8, "type": "subtitles",
+                 "properties": {"codec_id": "S_VOBSUB", "language": "und", "track_name": "English"}},
+                {"id": 9, "type": "subtitles",
+                 "properties": {"codec_id": "S_KATE", "language": "eng"}},
+            ]
+            picked = classify_embedded_subtitle_tracks(tracks)
+            check([item.track_id for item in picked] == [3, 2, 8],
+                  f"text first, then PGS then VobSub; forced/commentary/foreign dropped: "
+                  f"{[item.track_id for item in picked]}")
+            check(picked[0].sdh, "the SDH flag is carried through")
+            check(picked[0].kind == "text" and picked[1].kind == "image", "text outranks image")
+            check(classify_embedded_subtitle_tracks([]) == [], "no tracks yields no candidates")
+
+            # ---- 4. OCR backends -------------------------------------------
+            pgsrip_backend = OcrBackend(OCR_BACKEND_PGSRIP, "pgsrip + Tesseract", ("pgsrip",),
+                                        frozenset({"PGS"}), output_mode="sibling")
+            check(pgsrip_backend.build_command(Path("/tmp/4.sup"), Path("/tmp/4.srt"),
+                                               track_id=4, language="eng")
+                  == ["pgsrip", "-l", "en", str(Path("/tmp/4.sup"))],
+                  "pgsrip argv is built correctly (language filter, no output flag)")
+            check(OCR_BACKEND_AUTO_ORDER[0] == OCR_BACKEND_PGSRIP,
+                  "pgsrip is the first backend auto-detection tries")
+
+            sup_backend = OcrBackend(OCR_BACKEND_SUP2SRT, "sup2srt + Tesseract", ("sup2srt",),
+                                     frozenset({"PGS"}))
+            check(sup_backend.build_command(Path("/tmp/3.sup"), Path("/tmp/3.srt"),
+                                            track_id=3, language="eng")
+                  == ["sup2srt", "-l", "eng", "-o",
+                      str(Path("/tmp/3.srt")), str(Path("/tmp/3.sup"))],
+                  "sup2srt argv is built correctly")
+            se_backend = OcrBackend(OCR_BACKEND_SUBTITLEEDIT, "Subtitle Edit", ("SubtitleEdit",),
+                                    frozenset({"PGS", "VOBSUB"}), output_mode="sibling")
+            se_argv = se_backend.build_command(Path("/tmp/3.sup"), Path("/tmp/out.srt"),
+                                               track_id=3, language="eng")
+            check(se_argv[:4] == ["SubtitleEdit", "/convert", str(Path("/tmp/3.sup")), "srt"],
+                  f"Subtitle Edit argv: {se_argv}")
+            check(se_backend.result_path(Path("/tmp/3.sup"), Path("/tmp/out.srt")) == Path("/tmp/3.srt"),
+                  "Subtitle Edit writes beside its input")
+            pg_backend = OcrBackend(OCR_BACKEND_PGSTOSRT, "PgsToSrt",
+                                    ("dotnet", "/opt/PgsToSrt.dll"), frozenset({"PGS"}))
+            check("--tesseractlanguage" in pg_backend.build_command(
+                Path("/tmp/3.sup"), Path("/tmp/o.srt"), track_id=3, language="en"),
+                "PgsToSrt is given a Tesseract language")
+            custom_backend = OcrBackend(OCR_BACKEND_CUSTOM, "custom", ("/opt/ocr.sh",),
+                                        frozenset({"PGS"}), arg_template=("{input}", "{output}"))
+            check(custom_backend.build_command(Path("/tmp/3.sup"), Path("/tmp/o.srt"),
+                                               track_id=3, language="en")
+                  == ["/opt/ocr.sh", str(Path("/tmp/3.sup")), str(Path("/tmp/o.srt"))],
+                  "custom template is expanded")
+            check(not sup_backend.supports_track(picked[2]),
+                  "sup2srt refuses a VobSub track it cannot read")
+            with tempfile.TemporaryDirectory() as ocr_dir:
+                ocr_root = Path(ocr_dir)
+                src = ocr_root / "track4.sup"
+                src.write_bytes(b"pgs")
+                expected = ocr_root / "track4.srt"
+                check(find_sibling_srt(src, expected) is None,
+                      "no output file means the OCR pass produced nothing")
+                (ocr_root / "track4.eng.srt").write_text(
+                    "1\n00:00:01,000 --> 00:00:02,000\nHi\n", encoding="utf-8")
+                check(find_sibling_srt(src, expected) is not None,
+                      "a backend that renames its output is still found")
+                expected.write_text("1\n00:00:01,000 --> 00:00:02,000\nHi\n", encoding="utf-8")
+                check(find_sibling_srt(src, expected) == expected,
+                      "the documented output name always wins")
+
+            backend, note = detect_ocr_backend(OCR_BACKEND_NONE)
+            check(backend is None and "disabled" in note, "--ocr-backend none disables OCR")
+            backend, note = detect_ocr_backend(OCR_BACKEND_CUSTOM, explicit_bin="",
+                                               arg_template="{input} {output}")
+            check(backend is None and "--ocr-bin" in note,
+                  "a custom backend without a binary explains itself")
+
+            # ---- 5. extraction record (read by sync_subtitles.py) ----------
+            video = tmp / "Movie (2020)" / "Movie (2020).mkv"
+            video.parent.mkdir(parents=True, exist_ok=True)
+            video.write_bytes(b"movie-bytes")
+            sidecar = tmp / "Movie (2020)" / "Movie (2020).eng.srt"
+            sidecar.write_text(good, encoding="utf-8")
+            track = EmbeddedSubtitleTrack(track_id=3, codec_id="S_TEXT/ASS", language="eng",
+                                          name="English", kind="text", extension=".ass")
+            check(record_extracted_sidecar(video, sidecar, track=track, method="text",
+                                           cue_count=30, sha256=sha256_text(good)),
+                  "an extraction is recorded durably")
+            found = find_extracted_record(sidecar, sha256_text(good))
+            check(found is not None and found["track_id"] == 3 and found["method"] == "text",
+                  "the record reads back")
+            check(find_extracted_record(sidecar, "stale-hash") is None,
+                  "a sidecar replaced since extraction is no longer trusted")
+            check(find_extracted_record(tmp / "Other (2021)" / "Other (2021).eng.srt") is None,
+                  "an unknown sidecar has no record")
+
+            # ---- 6. one movie, end to end, with faked binaries -------------
+            movie_dir = tmp / "library" / "Fake (2021)"
+            movie_dir.mkdir(parents=True)
+            movie = movie_dir / "Fake (2021).mkv"
+            movie.write_bytes(b"mkv-bytes")
+            dest = movie.with_name("Fake (2021).eng.srt")
+            probe_payload = json.dumps({"tracks": [
+                {"id": 0, "type": "video", "properties": {"codec_id": "V_MPEGH/ISO/HEVC"}},
+                {"id": 1, "type": "audio",
+                 "properties": {"codec_id": "A_TRUEHD", "language": "eng"}},
+                {"id": 2, "type": "subtitles",
+                 "properties": {"codec_id": "S_TEXT/ASS", "language": "eng", "track_name": "English"}},
+            ]})
+
+            def fake_run(command: Sequence[str], **_kwargs: Any) -> Any:
+                argv = [str(part) for part in command]
+                if "-J" in argv:
+                    return subprocess.CompletedProcess(argv, 0, probe_payload.encode("utf-8"), b"")
+                if len(argv) > 1 and argv[1] == "tracks":
+                    target = argv[-1].split(":", 1)[1]
+                    Path(target).write_text(ass, encoding="utf-8")
+                    return subprocess.CompletedProcess(argv, 0, b"", b"")
+                return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+            with mock.patch.object(subprocess, "run", fake_run), \
+                    mock.patch.object(this_module, "find_mkvtoolnix_binary", fake_binaries):
+                outcome = extract_embedded_english_srt(movie, dest, ExtractOptions(min_cues=2))
+            check(outcome.ok, f"a text track is extracted end to end ({outcome.detail})")
+            check(outcome.method == "text" and outcome.cue_count == 2,
+                  f"end-to-end outcome reports the method and cue count ({outcome.cue_count})")
+            check(dest.is_file() and dest.read_text(encoding="utf-8") == ass_to_srt(ass),
+                  "the sidecar is written from the embedded track")
+            check(find_extracted_record(dest, sha256_text(ass_to_srt(ass))) is not None,
+                  "the end-to-end extraction is recorded for the sync step")
+
+            dest.unlink()
+            with mock.patch.object(subprocess, "run", fake_run), \
+                    mock.patch.object(this_module, "find_mkvtoolnix_binary", fake_binaries):
+                dry = extract_embedded_english_srt(movie, dest,
+                                                   ExtractOptions(min_cues=2, dry_run=True))
+            check(dry.ok and not dest.exists(),
+                  "a dry run previews the extraction without writing anything")
+
+            image_payload = json.dumps({"tracks": [
+                {"id": 4, "type": "subtitles",
+                 "properties": {"codec_id": "S_HDMV/PGS", "language": "eng"}},
+            ]})
+
+            def fake_run_image(command: Sequence[str], **_kwargs: Any) -> Any:
+                argv = [str(part) for part in command]
+                if "-J" in argv:
+                    return subprocess.CompletedProcess(argv, 0, image_payload.encode("utf-8"), b"")
+                return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+            with mock.patch.object(subprocess, "run", fake_run_image), \
+                    mock.patch.object(this_module, "find_mkvtoolnix_binary", fake_binaries):
+                image_only = extract_embedded_english_srt(
+                    movie, dest, ExtractOptions(min_cues=2, ocr_backend=OCR_BACKEND_NONE))
+            check(not image_only.ok and not dest.exists(),
+                  "an image-only movie with OCR disabled does not create a sidecar")
+            check("OCR is disabled" in (image_only.unavailable_reason + image_only.detail),
+                  f"the image-only fall-through names the reason "
+                  f"({image_only.unavailable_reason or image_only.detail})")
+
+            missing_payload = json.dumps({"tracks": [
+                {"id": 1, "type": "audio", "properties": {"codec_id": "A_AC3", "language": "eng"}},
+            ]})
+
+            def fake_run_none(command: Sequence[str], **_kwargs: Any) -> Any:
+                argv = [str(part) for part in command]
+                if "-J" in argv:
+                    return subprocess.CompletedProcess(argv, 0, missing_payload.encode("utf-8"), b"")
+                return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+            with mock.patch.object(subprocess, "run", fake_run_none), \
+                    mock.patch.object(this_module, "find_mkvtoolnix_binary", fake_binaries):
+                no_track = extract_embedded_english_srt(movie, dest, ExtractOptions(min_cues=2))
+            check(not no_track.ok and "no English subtitle track" in no_track.unavailable_reason,
+                  f"a movie with no English track falls through to the providers "
+                  f"({no_track.unavailable_reason})")
+
+            with mock.patch.object(this_module, "find_mkvtoolnix_binary", lambda *_a, **_k: None):
+                no_tools = extract_embedded_english_srt(movie, dest, ExtractOptions(min_cues=2))
+            check(not no_tools.ok and "MKVToolNix" in no_tools.unavailable_reason,
+                  "a machine without MKVToolNix reports the install, not a crash")
+        finally:
+            if saved_ledger is None:
+                os.environ.pop(EXTRACTED_LEDGER_ENV, None)
+            else:
+                os.environ[EXTRACTED_LEDGER_ENV] = saved_ledger
+
+
 def run_self_tests() -> int:
     errors: list[str] = []
 
@@ -4314,14 +4634,1298 @@ def run_self_tests() -> int:
           "a movie exhausted today is not offered to the scraping tier twice")
     shutil.rmtree(tmp2, ignore_errors=True)
 
+    run_extract_self_tests(errors)
+
     if errors:
         print("SELF-TEST FAILED:")
         for e in errors:
             print("  -", e)
         return 1
     print("SELF-TEST PASSED (hash + OpenSubtitles/SubDL picks + SRT safety + discovery + "
-          "transaction guards + scraping fallback tier)")
+          "transaction guards + scraping fallback tier + embedded extraction)")
     return 0
+
+# =============================================================================
+# EMBEDDED SUBTITLE EXTRACTION
+#
+# Before spending a provider request, look inside the movie. A Jellyfin MKV
+# very often already carries the English subtitle as an embedded track, and
+# that track is byte-exact for this release, needs no timing correction, and
+# cannot be the wrong cut. Extracting it into the canonical external sidecar
+# is therefore strictly better than downloading anything:
+#
+#   * no provider request is spent, so the UTC caps are untouched;
+#   * the cues carry the container's own timestamps, so the sidecar is
+#     frame-accurate for this exact file and must NOT be re-synced;
+#   * mkv_track_cleaner.py still strips every embedded subtitle afterwards,
+#     so the external sidecar remains the sole subtitle option.
+#
+# Text tracks (SRT/SSA/ASS/WebVTT) are converted to SRT in-process with the
+# standard library. Image tracks (PGS/SUP, VobSub, DVB) need OCR, which a
+# stdlib-only script cannot vendor: they are handed to an external OCR
+# backend (sup2srt + Tesseract, Subtitle Edit, or PgsToSrt) when one is
+# installed, and are skipped with the exact fix printed when none is.
+#
+# Extraction never rewrites or deletes the movie: mkvextract reads it and
+# writes temporary files outside the library, and the moviehash (size plus
+# the first and last 64 KiB) is untouched.
+# =============================================================================
+
+# Embedded subtitle codecs this tool can turn into an external SRT. The value
+# is the extension mkvextract must write; PGS becomes a .sup stream, VobSub
+# becomes the .idx/.sub pair Subtitle Edit reads.
+EXTRACT_TEXT_CODECS: dict[str, str] = {
+    "S_TEXT/UTF8": ".srt",
+    "S_TEXT/ASCII": ".srt",
+    "S_TEXT/SSA": ".ssa",
+    "S_TEXT/ASS": ".ass",
+    "S_TEXT/WEBVTT": ".vtt",
+    "S_TEXT/USF": ".usf",
+}
+
+EXTRACT_IMAGE_CODECS: dict[str, str] = {
+    "S_HDMV/PGS": ".sup",
+    "S_VOBSUB": ".idx",
+    "S_DVBSUB": ".sub",
+}
+
+# Preference inside each class: an already-tagged plain SRT needs no
+# conversion; ASS/SSA keep styling that is dropped on the way to SRT; WebVTT
+# and USF are rare and converted best-effort. PGS beats DVD-era VobSub.
+TEXT_CODEC_RANK: dict[str, int] = {
+    "S_TEXT/UTF8": 0,
+    "S_TEXT/ASCII": 0,
+    "S_TEXT/ASS": 1,
+    "S_TEXT/SSA": 2,
+    "S_TEXT/WEBVTT": 3,
+    "S_TEXT/USF": 4,
+}
+
+IMAGE_CODEC_RANK: dict[str, int] = {
+    "S_HDMV/PGS": 0,
+    "S_VOBSUB": 1,
+    "S_DVBSUB": 2,
+}
+
+USF_XML_TEXT_RE = re.compile(r"<text[^>]*>(.*?)</text>", re.IGNORECASE | re.DOTALL)
+USF_TAG_RE = re.compile(r"<[^>]+>")
+
+# A full movie track carries hundreds of cues. A handful means the track is
+# signs/songs-only or a foreign-language-forced stream, and writing it as the
+# movie's English subtitle would be a silent downgrade.
+DEFAULT_EXTRACT_MIN_CUES = 10
+# How many candidates to try per movie before giving up and letting the
+# provider tiers run. Text extraction is cheap; OCR is not, so each class is
+# capped separately and the whole run can cap OCR jobs (--ocr-limit).
+DEFAULT_EXTRACT_TEXT_CANDIDATE_LIMIT = 3
+DEFAULT_EXTRACT_IMAGE_CANDIDATE_LIMIT = 2
+DEFAULT_MKVEXTRACT_TIMEOUT_SEC = 900.0
+DEFAULT_OCR_TIMEOUT_SEC = 1_800.0
+
+# Durable, outside-the-library record of which sidecars this tool created from
+# the movie's own tracks. sync_subtitles.py reads it so it never spends an
+# ffsubsync run "correcting" a subtitle that is frame-accurate by
+# construction. It lives beside the other ReportsAndLogs artefacts.
+EXTRACTED_LEDGER_NAME = "subtitle_fetcher_extracted.json"
+EXTRACTED_LEDGER_ENV = "SUBTITLE_EXTRACTED_LEDGER"
+EXTRACTED_LEDGER_VERSION = 1
+
+OCR_BACKEND_AUTO = "auto"
+OCR_BACKEND_NONE = "none"
+OCR_BACKEND_CUSTOM = "custom"
+OCR_BACKEND_PGSRIP = "pgsrip"
+OCR_BACKEND_SUP2SRT = "sup2srt"
+OCR_BACKEND_SUBTITLEEDIT = "subtitleedit"
+OCR_BACKEND_PGSTOSRT = "pgstosrt"
+OCR_BACKEND_CHOICES: tuple[str, ...] = (
+    OCR_BACKEND_AUTO,
+    OCR_BACKEND_PGSRIP,
+    OCR_BACKEND_SUP2SRT,
+    OCR_BACKEND_SUBTITLEEDIT,
+    OCR_BACKEND_PGSTOSRT,
+    OCR_BACKEND_CUSTOM,
+    OCR_BACKEND_NONE,
+)
+# Auto-detection order. pgsrip comes first: it is the actively maintained
+# option, it filters by language itself, and it reads both a .sup stream and
+# an .mkv, so it needs the least help from us.
+OCR_BACKEND_AUTO_ORDER: tuple[str, ...] = (
+    OCR_BACKEND_PGSRIP,
+    OCR_BACKEND_SUP2SRT,
+    OCR_BACKEND_SUBTITLEEDIT,
+    OCR_BACKEND_PGSTOSRT,
+)
+
+# Tesseract language codes are ISO 639-2/T (``eng``), while PgsToSrt is
+# usually called with the same three-letter codes; Subtitle Edit and sup2srt
+# accept either. Keep one place that normalizes what the tools are given.
+OCR_TESSERACT_LANGUAGES: dict[str, str] = {"en": "eng", "eng": "eng", "english": "eng"}
+
+# pgsrip parses languages with babelfish, which wants ISO 639-1/2B tags
+# (``en``, ``pt-BR``); the container gives us ISO 639-2/T (``eng``).
+OCR_PGSRIP_LANGUAGES: dict[str, str] = {"eng": "en", "en": "en", "english": "en"}
+
+# Very common English function words. Their share of a real dialogue track is
+# far above this floor; OCR noise and wrong-language tracks fall below it.
+ENGLISH_STOPWORDS = frozenset({
+    "the", "a", "an", "and", "or", "but", "if", "of", "to", "in", "on", "at",
+    "is", "was", "are", "were", "be", "been", "it", "its", "you", "your",
+    "i", "me", "my", "we", "us", "he", "she", "they", "them", "his", "her",
+    "that", "this", "these", "those", "for", "with", "as", "so", "not", "no",
+    "do", "did", "does", "have", "has", "had", "what", "when", "where", "who",
+    "how", "why", "all", "just", "get", "got", "go", "going", "know", "think",
+    "will", "can", "cant", "dont", "im", "thats", "there", "here", "up", "out",
+})
+
+# Characters that dominate when an OCR pass mis-reads a bitmap subtitle.
+OCR_NOISE_CHARS = "|~^@#"
+
+
+# ---------------------------------------------------------------------------
+# External binaries (MKVToolNix)
+# ---------------------------------------------------------------------------
+_MKVTOOLNIX_PATHS: dict[str, tuple[str, ...]] = {
+    "mkvmerge": (
+        r"C:\Program Files\MKVToolNix\mkvmerge.exe",
+        r"C:\Program Files (x86)\MKVToolNix\mkvmerge.exe",
+        "/usr/bin/mkvmerge",
+        "/usr/local/bin/mkvmerge",
+        "/opt/homebrew/bin/mkvmerge",
+    ),
+    "mkvextract": (
+        r"C:\Program Files\MKVToolNix\mkvextract.exe",
+        r"C:\Program Files (x86)\MKVToolNix\mkvextract.exe",
+        "/usr/bin/mkvextract",
+        "/usr/local/bin/mkvextract",
+        "/opt/homebrew/bin/mkvextract",
+    ),
+}
+
+MKVTOOLNIX_INSTALL_HINT = (
+    "install MKVToolNix (https://mkvtoolnix.download/) so mkvmerge and "
+    "mkvextract are on the PATH"
+)
+
+
+def find_mkvtoolnix_binary(name: str, explicit: str | None = None) -> str | None:
+    """Locate ``mkvmerge``/``mkvextract`` on the PATH or in a known install dir."""
+    if explicit:
+        candidate = Path(explicit)
+        if candidate.is_file():
+            return str(candidate)
+        found = shutil.which(explicit)
+        return found
+    found = shutil.which(name)
+    if found:
+        return found
+    for candidate in _MKVTOOLNIX_PATHS.get(name, ()):
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
+
+def _decode_stream(data: bytes | None) -> str:
+    if not data:
+        return ""
+    return data.decode("utf-8", errors="replace")
+
+
+def run_external_command(
+    command: Sequence[str], *, timeout: float = 0.0
+) -> tuple[int, str, str]:
+    """Run one external binary, never raising on timeout or a missing program.
+
+    Every binary this tool shells out to is optional. A missing program, a
+    non-zero exit, or a timeout all come back as a plain ``(rc, out, err)`` so
+    the caller can report the fix and fall through to the next strategy.
+    """
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    try:
+        completed = subprocess.run(
+            [str(part) for part in command],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout if timeout and timeout > 0 else None,
+            creationflags=creationflags,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timed out after {timeout:.0f}s"
+    except OSError as exc:
+        return 127, "", f"could not run {command[0] if command else 'command'}: {exc}"
+    return completed.returncode, _decode_stream(completed.stdout), _decode_stream(completed.stderr)
+
+
+def _command_tail(text: str, max_lines: int = 3) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return "no output"
+    return " | ".join(lines[-max_lines:])
+
+
+# ---------------------------------------------------------------------------
+# Track discovery and classification
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class EmbeddedSubtitleTrack:
+    """One embedded subtitle stream worth trying to extract."""
+
+    track_id: int
+    codec_id: str
+    language: str
+    name: str
+    kind: str  # "text" or "image"
+    extension: str
+    default: bool = False
+    forced: bool = False
+    sdh: bool = False
+    rank: int = 0
+
+    @property
+    def label(self) -> str:
+        parts = [f"track {self.track_id}", self.codec_id]
+        if self.name:
+            parts.append(self.name)
+        if self.sdh:
+            parts.append("SDH")
+        return ", ".join(parts)
+
+
+def _track_properties(track: dict[str, Any]) -> dict[str, Any]:
+    props = track.get("properties")
+    return props if isinstance(props, dict) else {}
+
+
+def _track_flag(props: dict[str, Any], *names: str) -> bool:
+    """Read a Matroska flag under either its modern or legacy JSON name."""
+    for name in names:
+        value = props.get(name)
+        if isinstance(value, str):
+            if value.strip().lower() in {"1", "true", "yes"}:
+                return True
+        elif value:
+            return True
+    return False
+
+
+def subtitle_track_languages(track: dict[str, Any]) -> set[str]:
+    props = _track_properties(track)
+    codes = {
+        str(props.get("language") or "").strip().lower(),
+        str(props.get("language_ietf") or "").strip().lower(),
+        str(props.get("tag_language") or "").strip().lower(),
+    }
+    return {re.split(r"[-_.]", code)[0] for code in codes if code}
+
+
+def subtitle_track_is_english(track: dict[str, Any]) -> bool:
+    """English either by tag or by an explicit English track name.
+
+    A bare ``und`` stream is only English when its own name says so; the
+    cleaner follows the identical rule, so the two tools cannot disagree about
+    which stream is the movie's English subtitle.
+    """
+    languages = subtitle_track_languages(track)
+    if languages & ENGLISH_LANGUAGE_TOKENS:
+        return True
+    if languages and not (languages <= {"und", ""}):
+        return False
+    return bool(re.search(r"\b(english|eng)\b", str(_track_properties(track).get("track_name") or "").lower()))
+
+
+SUBTITLE_FORCED_NAME_RE = re.compile(r"\b(forced|foreign only|foreign parts only|signs?/?songs?)\b")
+SUBTITLE_COMMENTARY_NAME_RE = re.compile(r"\b(commentary|riff|rifftrax)\b")
+
+
+def subtitle_track_is_forced(track: dict[str, Any]) -> bool:
+    """True for a signs/songs or foreign-parts-only track.
+
+    Those tracks are deliberately incomplete: they carry only the lines a
+    viewer cannot already understand. Publishing one as the movie's English
+    subtitle would look like success while leaving the dialogue missing, so
+    they never become a sidecar here.
+    """
+    props = _track_properties(track)
+    if _track_flag(props, "flag_forced", "forced_track"):
+        return True
+    return bool(SUBTITLE_FORCED_NAME_RE.search(str(props.get("track_name") or "").lower()))
+
+
+def subtitle_track_is_commentary(track: dict[str, Any]) -> bool:
+    props = _track_properties(track)
+    if _track_flag(props, "flag_commentary"):
+        return True
+    return bool(SUBTITLE_COMMENTARY_NAME_RE.search(str(props.get("track_name") or "").lower()))
+
+
+def subtitle_track_is_sdh(track: dict[str, Any]) -> bool:
+    props = _track_properties(track)
+    if _track_flag(props, "flag_hearing_impaired"):
+        return True
+    return bool(re.search(r"\b(sdh|hearing[ -]impaired)\b", str(props.get("track_name") or "").lower()))
+
+
+def classify_embedded_subtitle_tracks(
+    tracks: Sequence[dict[str, Any]],
+) -> list[EmbeddedSubtitleTrack]:
+    """Pick the English subtitle streams worth extracting, best first.
+
+    Non-English, forced, and commentary streams are dropped outright. Text
+    streams outrank image streams (a conversion is free, OCR is minutes), and
+    inside each class the container's default track wins before codec
+    preference and track order.
+    """
+    candidates: list[EmbeddedSubtitleTrack] = []
+    for track in tracks:
+        if str(track.get("type") or "").strip().lower() != "subtitles":
+            continue
+        props = _track_properties(track)
+        codec_id = str(props.get("codec_id") or "").strip().upper()
+        if codec_id in EXTRACT_TEXT_CODECS:
+            kind = "text"
+            extension = EXTRACT_TEXT_CODECS[codec_id]
+            rank = TEXT_CODEC_RANK.get(codec_id, 9)
+        elif codec_id in EXTRACT_IMAGE_CODECS:
+            kind = "image"
+            extension = EXTRACT_IMAGE_CODECS[codec_id]
+            rank = IMAGE_CODEC_RANK.get(codec_id, 9)
+        else:
+            continue
+        if not subtitle_track_is_english(track):
+            continue
+        if subtitle_track_is_forced(track) or subtitle_track_is_commentary(track):
+            continue
+        try:
+            track_id = int(track.get("id"))
+        except (TypeError, ValueError):
+            continue
+        candidates.append(
+            EmbeddedSubtitleTrack(
+                track_id=track_id,
+                codec_id=codec_id,
+                language=str(props.get("language") or props.get("language_ietf") or "und"),
+                name=str(props.get("track_name") or ""),
+                kind=kind,
+                extension=extension,
+                default=_track_flag(props, "flag_default", "default_track"),
+                sdh=subtitle_track_is_sdh(track),
+                rank=rank,
+            )
+        )
+    candidates.sort(key=lambda item: (0 if item.kind == "text" else 1, item.rank,
+                                      0 if item.default else 1, item.track_id))
+    return candidates
+
+
+def probe_embedded_subtitle_tracks(
+    video: Path, mkvmerge_bin: str, *, timeout: float = 300.0
+) -> tuple[list[dict[str, Any]] | None, str]:
+    """Return the movie's subtitle tracks, or ``(None, reason)`` it could not."""
+    rc, out, err = run_external_command([mkvmerge_bin, "-J", str(video)], timeout=timeout)
+    if rc != 0:
+        return None, f"mkvmerge could not read the movie (exit {rc}): {_command_tail(err or out)}"
+    try:
+        payload = json.loads(out)
+    except (ValueError, TypeError):
+        return None, "mkvmerge produced unreadable track information"
+    tracks = payload.get("tracks")
+    if not isinstance(tracks, list):
+        return None, "mkvmerge reported no tracks"
+    return [track for track in tracks if isinstance(track, dict)], ""
+
+
+# ---------------------------------------------------------------------------
+# SRT rendering, ASS/SSA and WebVTT conversion
+# ---------------------------------------------------------------------------
+SRT_TIMING_RE = re.compile(
+    r"(\d{1,3}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,3}:\d{2}:\d{2}[,.]\d{1,3})"
+)
+ASS_TIMESTAMP_RE = re.compile(r"^(\d+):(\d{1,2}):(\d{1,2})[.,](\d{1,3})$")
+ASS_OVERRIDE_RE = re.compile(r"\{[^}]*\}")
+
+
+def parse_srt_cues(text: str) -> list[tuple[str, str, str]]:
+    """Parse ``text`` into ``[(start, end, body), ...]`` with SRT timestamps.
+
+    Used to renumber and re-render anything this tool writes, so an extracted
+    track can never carry a broken cue index, a stray BOM, or CRLF endings.
+    """
+    cues: list[tuple[str, str, str]] = []
+    for block in re.split(r"\n\s*\n", normalize_srt_newlines(text).strip()):
+        lines = block.split("\n")
+        timing_index = next((i for i, line in enumerate(lines) if "-->" in line), None)
+        if timing_index is None:
+            continue
+        match = SRT_TIMING_RE.search(lines[timing_index])
+        if not match:
+            continue
+        body = "\n".join(lines[timing_index + 1:]).strip()
+        if not body:
+            continue
+        start = _pad_srt_timestamp(match.group(1))
+        end = _pad_srt_timestamp(match.group(2))
+        if start is None or end is None:
+            continue
+        cues.append((start, end, body))
+    return cues
+
+
+def _pad_srt_timestamp(value: str) -> str | None:
+    value = value.strip().replace(".", ",")
+    clock, _, millis = value.rpartition(",")
+    if not clock:
+        return None
+    parts = clock.split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        hours, minutes, seconds = (int(part) for part in parts)
+    except ValueError:
+        return None
+    millis = (millis + "000")[:3]
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis}"
+
+
+def render_srt_cues(cues: Sequence[tuple[str, str, str]]) -> str:
+    """Render cues as a canonical, renumbered, UTF-8 SRT document."""
+    chunks: list[str] = []
+    for index, (start, end, body) in enumerate(cues, start=1):
+        chunks.append(f"{index}\n{start} --> {end}\n{body}\n")
+    return "\n".join(chunks)
+
+
+def normalize_extracted_srt(text: str) -> str:
+    """Re-render any SRT text into the canonical form this tool writes."""
+    return render_srt_cues(parse_srt_cues(text))
+
+
+def _ass_timestamp_to_srt(token: str) -> str | None:
+    match = ASS_TIMESTAMP_RE.match(token.strip())
+    if not match:
+        return None
+    hours, minutes, seconds, fraction = match.groups()
+    return f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d},{(fraction + '000')[:3]}"
+
+
+def _ass_plain_text(raw: str) -> str:
+    """Strip ASS/SSA styling so the cue survives the trip into an SRT file.
+
+    Override blocks (``{\\i1}``) carry styling SRT cannot express; ``\\N`` and
+    ``\\n`` are the format's line breaks and ``\\h`` its non-breaking space.
+    Everything else is literal text a player is expected to show.
+    """
+    text = ASS_OVERRIDE_RE.sub("", raw)
+    text = text.replace("\\N", "\n").replace("\\n", "\n").replace("\\h", " ")
+    cleaned_lines = [line.strip() for line in text.split("\n")]
+    return "\n".join(line for line in cleaned_lines if line).strip()
+
+
+def ass_to_srt(text: str) -> str:
+    """Convert an ASS/SSA subtitle document to canonical SRT text.
+
+    Only ``Dialogue`` lines become cues; ``Comment`` lines are the format's
+    non-displaying notes and are dropped. The event column order differs
+    between SSA (v4) and ASS (v4+), so the ``Format:`` line is what selects
+    the Start/End/Text columns rather than a fixed index.
+    """
+    body = normalize_srt_newlines(text)
+    section = ""
+    columns: list[str] = []
+    parsed: list[tuple[str, str, str]] = []
+    for line in body.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1].strip().lower()
+            continue
+        if section != "events":
+            continue
+        lowered = stripped.lower()
+        if lowered.startswith("format:"):
+            columns = [part.strip().lower() for part in stripped[len("format:"):].split(",")]
+            continue
+        if lowered.startswith("dialogue:"):
+            payload = stripped[len("dialogue:"):]
+        elif lowered.startswith("comment:"):
+            continue
+        else:
+            continue
+        if not columns:
+            continue
+        parts = payload.split(",", len(columns) - 1)
+        if len(parts) != len(columns):
+            continue
+        row = dict(zip(columns, parts))
+        start = _ass_timestamp_to_srt(row.get("start", ""))
+        end = _ass_timestamp_to_srt(row.get("end", ""))
+        if not start or not end:
+            continue
+        cue = _ass_plain_text(row.get("text", ""))
+        if not cue:
+            continue
+        parsed.append((start, end, cue))
+    parsed.sort(key=lambda cue: cue[0])
+    return render_srt_cues(parsed)
+
+
+def vtt_to_srt(text: str) -> str:
+    """Convert a WebVTT document to canonical SRT text (best effort)."""
+    body = normalize_srt_newlines(text)
+    if body.startswith("\ufeff"):
+        body = body[1:]
+    parsed: list[tuple[str, str, str]] = []
+    for block in re.split(r"\n\s*\n", body.strip()):
+        lines = [line for line in block.split("\n") if line.strip()]
+        if not lines or lines[0].strip().upper().startswith(("WEBVTT", "NOTE", "STYLE", "REGION")):
+            continue
+        timing_index = next((i for i, line in enumerate(lines) if "-->" in line), None)
+        if timing_index is None:
+            continue
+        timing_line = lines[timing_index]
+        # WebVTT allows cue settings after the end timestamp; the regex takes
+        # the two timestamps and ignores the rest.
+        match = SRT_TIMING_RE.search(timing_line)
+        if not match:
+            continue
+        start = _pad_srt_timestamp(match.group(1))
+        end = _pad_srt_timestamp(match.group(2))
+        if not start or not end:
+            continue
+        body_text = "\n".join(
+            USF_TAG_RE.sub("", line) for line in lines[timing_index + 1:]
+        ).strip()
+        if not body_text:
+            continue
+        parsed.append((start, end, body_text))
+    return render_srt_cues(parsed)
+
+
+def usf_to_srt(text: str) -> str:
+    """Convert the rare USF (XML) subtitle track to SRT text, best effort."""
+    parsed: list[tuple[str, str, str]] = []
+    for match in re.finditer(
+        r"<subtitle[^>]*start=\"(?P<start>[^\"]+)\"[^>]*end=\"(?P<end>[^\"]+)\"[^>]*>(?P<body>.*?)</subtitle>",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        start = _pad_srt_timestamp(match.group("start").replace(".", ","))
+        end = _pad_srt_timestamp(match.group("end").replace(".", ","))
+        if not start or not end:
+            continue
+        fragments = USF_XML_TEXT_RE.findall(match.group("body"))
+        cue = "\n".join(
+            _html.unescape(USF_TAG_RE.sub("", fragment)).strip() for fragment in fragments
+        ).strip()
+        if not cue:
+            continue
+        parsed.append((start, end, cue))
+    return render_srt_cues(parsed)
+
+
+# ---------------------------------------------------------------------------
+# Quality gate: is the extracted text a real English subtitle?
+# ---------------------------------------------------------------------------
+def non_latin_ratio(text: str) -> float:
+    """Share of alphabetic characters outside the Latin blocks.
+
+    A Cyrillic, Greek, CJK, or Arabic embedded track is not an English
+    subtitle however good the extraction was.
+    """
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return 0.0
+    non_latin = sum(1 for char in letters if ord(char) > 0x024F)
+    return non_latin / len(letters)
+
+
+def extracted_subtitle_quality(
+    text: str, *, min_cues: int = DEFAULT_EXTRACT_MIN_CUES, method: str = "text"
+) -> tuple[bool, str]:
+    """Decide whether extracted text may become the movie's English sidecar.
+
+    A subtitle taken from the movie's own track is authoritative about timing
+    but not about content: a mis-tagged foreign track or a failed OCR pass
+    would both produce a file that looks like success. Every extracted track
+    therefore passes the same conservative gate a download passes, plus two
+    checks that only matter for extraction (cue count and OCR noise).
+    """
+    if not text.strip():
+        return False, "the extracted track contained no subtitle text"
+    if len(text.encode("utf-8", errors="replace")) > MAX_SUBTITLE_BYTES:
+        return False, f"the extracted subtitle exceeds the {MAX_SUBTITLE_BYTES // (1024 * 1024)} MiB safety limit"
+    if not looks_like_srt(text):
+        return False, "the extracted track did not convert to valid SRT cues"
+    cues = parse_srt_cues(text)
+    if len(cues) < min_cues:
+        return (
+            False,
+            f"only {len(cues)} cue(s) extracted; a complete movie track needs "
+            f"at least {min_cues} (this track is probably signs/songs-only)",
+        )
+    sample = " ".join(cue[2] for cue in cues)
+    if non_latin_ratio(sample) > 0.40:
+        return False, "the extracted text is not Latin-script (this track is not English)"
+    words = re.findall(r"[A-Za-z']+", sample)
+    if len(words) >= 100:
+        hits = sum(1 for word in words if word.lower() in ENGLISH_STOPWORDS)
+        if hits / len(words) < 0.04:
+            return False, "the extracted text does not read as English (OCR noise or a foreign track)"
+    if method == "ocr":
+        noise = sum(sample.count(char) for char in OCR_NOISE_CHARS)
+        if noise and noise / max(1, len(sample)) > 0.02:
+            return False, "the OCR output looks like noise rather than dialogue"
+    return True, ""
+
+
+# ---------------------------------------------------------------------------
+# OCR backends for image-based subtitles (PGS/SUP, VobSub, DVB)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class OcrBackend:
+    """An external program that turns a bitmap subtitle stream into text."""
+
+    key: str
+    label: str
+    program: tuple[str, ...]
+    supports: frozenset[str]
+    # "output": writes the path we pass. "sibling": writes next to the input.
+    output_mode: str = "output"
+    arg_template: tuple[str, ...] = ()
+
+    def build_command(self, source: Path, output: Path, *, track_id: int, language: str) -> list[str]:
+        if self.key == OCR_BACKEND_CUSTOM:
+            mapping = {
+                "{input}": str(source),
+                "{output}": str(output),
+                "{track}": str(track_id),
+                "{lang}": OCR_TESSERACT_LANGUAGES.get(language.lower(), language),
+            }
+            return [*self.program, *(mapping.get(token, token) for token in self.arg_template)]
+        if self.key == OCR_BACKEND_PGSRIP:
+            # pgsrip writes its .srt beside the input; there is no output flag.
+            return [
+                *self.program,
+                "-l", OCR_PGSRIP_LANGUAGES.get(language.lower(), language),
+                str(source),
+            ]
+        if self.key == OCR_BACKEND_SUP2SRT:
+            return [
+                *self.program,
+                "-l", OCR_TESSERACT_LANGUAGES.get(language.lower(), language),
+                "-o", str(output),
+                str(source),
+            ]
+        if self.key == OCR_BACKEND_SUBTITLEEDIT:
+            # Subtitle Edit OCRs an image-based input and writes <input>.srt
+            # beside it; there is no output-path flag in its CLI.
+            return [*self.program, "/convert", str(source), "srt", "/encoding:utf-8"]
+        if self.key == OCR_BACKEND_PGSTOSRT:
+            return [
+                *self.program,
+                "--input", str(source),
+                "--output", str(output),
+                "--tesseractlanguage", OCR_TESSERACT_LANGUAGES.get(language.lower(), language),
+            ]
+        raise ValueError(f"unknown OCR backend: {self.key}")
+
+    def result_path(self, source: Path, output: Path) -> Path:
+        if self.output_mode == "sibling":
+            return source.with_suffix(".srt")
+        return output
+
+    def supports_track(self, track: "EmbeddedSubtitleTrack") -> bool:
+        family = {
+            "S_HDMV/PGS": "PGS",
+            "S_VOBSUB": "VOBSUB",
+            "S_DVBSUB": "DVBSUB",
+        }.get(track.codec_id.upper(), "PGS")
+        return family in self.supports
+
+
+def _resolve_program(explicit: str, name: str, *search_paths: str) -> str | None:
+    if explicit:
+        candidate = Path(explicit)
+        if candidate.is_file():
+            return str(candidate)
+        found = shutil.which(explicit)
+        if found:
+            return found
+    found = shutil.which(name)
+    if found:
+        return found
+    for candidate in search_paths:
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
+
+def _subtitleedit_program(explicit: str = "") -> tuple[str, ...] | None:
+    """Subtitle Edit is a Windows GUI app; ``mono`` runs it elsewhere."""
+    known = (
+        r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe",
+        r"C:\Program Files (x86)\Subtitle Edit\SubtitleEdit.exe",
+        "/usr/lib/subtitleedit/SubtitleEdit.exe",
+        "/opt/subtitleedit/SubtitleEdit.exe",
+    )
+    program = _resolve_program(explicit, "SubtitleEdit", *known)
+    if program:
+        return (program,)
+    mono = shutil.which("mono")
+    if mono:
+        for candidate in known[2:]:
+            if Path(candidate).is_file():
+                return (mono, candidate)
+        if explicit and explicit.lower().endswith(".exe") and Path(explicit).is_file():
+            return (mono, explicit)
+    return None
+
+
+def _pgstosrt_program(explicit: str = "") -> tuple[str, ...] | None:
+    """PgsToSrt ships as a .NET dll, so it needs dotnet plus a dll path."""
+    dll = explicit or os.environ.get("PGSTOSRT_DLL", "").strip()
+    if not dll or not Path(dll).is_file():
+        return None
+    dotnet = shutil.which("dotnet")
+    if not dotnet:
+        return None
+    return (dotnet, dll)
+
+
+OCR_BACKEND_BUILDERS: dict[str, Callable[[str], "OcrBackend | None"]] = {}
+
+
+def build_ocr_backend(key: str, explicit_bin: str = "") -> OcrBackend | None:
+    if key == OCR_BACKEND_PGSRIP:
+        program = _resolve_program(explicit_bin, "pgsrip")
+        if not program:
+            return None
+        # pgsrip reads a .sup stream or an .mkv/.mks and OCRs the PGS tracks
+        # of the languages named with -l; everything else is filtered out.
+        return OcrBackend(key, "pgsrip + Tesseract", (program,), frozenset({"PGS"}),
+                          output_mode="sibling")
+    if key == OCR_BACKEND_SUP2SRT:
+        program = _resolve_program(explicit_bin, "sup2srt")
+        if not program:
+            return None
+        return OcrBackend(key, "sup2srt + Tesseract", (program,), frozenset({"PGS"}))
+    if key == OCR_BACKEND_SUBTITLEEDIT:
+        program = _subtitleedit_program(explicit_bin)
+        if not program:
+            return None
+        # Subtitle Edit reads both PGS (.sup) and VobSub (.idx/.sub) inputs.
+        return OcrBackend(key, "Subtitle Edit", program,
+                          frozenset({"PGS", "VOBSUB", "DVBSUB"}), output_mode="sibling")
+    if key == OCR_BACKEND_PGSTOSRT:
+        program = _pgstosrt_program(explicit_bin)
+        if not program:
+            return None
+        return OcrBackend(key, "PgsToSrt", program, frozenset({"PGS"}))
+    return None
+
+
+OCR_INSTALL_HINT = (
+    "install one image-subtitle OCR backend to extract PGS/VobSub tracks: "
+    "pgsrip (pip install pgsrip, needs MKVToolNix + tesseract + tessdata), "
+    "sup2srt + Tesseract (https://github.com/retrontology/sup2srt), Subtitle Edit "
+    "(https://www.nikse.dk/subtitleedit), or PgsToSrt with PGSTOSRT_DLL set; "
+    "text subtitle tracks are extracted without any of them"
+)
+
+
+def detect_ocr_backend(
+    preferred: str = OCR_BACKEND_AUTO, *, explicit_bin: str = "", arg_template: str = ""
+) -> tuple[OcrBackend | None, str]:
+    """Return the OCR backend to use and a note saying what was (not) found.
+
+    ``auto`` tries sup2srt, then Subtitle Edit, then PgsToSrt. Nothing here is
+    fatal: an image-only movie simply falls through to the provider tiers, and
+    the note is what the report and the log show as the reason.
+    """
+    if preferred == OCR_BACKEND_NONE:
+        return None, "image-subtitle OCR is disabled (--ocr-backend none)"
+    if preferred == OCR_BACKEND_CUSTOM or (arg_template.strip() and explicit_bin.strip()):
+        program = _resolve_program(explicit_bin, "")
+        if not program:
+            return None, f"--ocr-backend custom needs --ocr-bin (not found: {explicit_bin or '(unset)'})"
+        try:
+            tokens = tuple(shlex.split(arg_template))
+        except ValueError as exc:
+            return None, f"--ocr-args could not be parsed ({exc})"
+        if not any(token in {"{input}", "{output}"} or "{input}" in token or "{output}" in token
+                   for token in tokens):
+            return None, "--ocr-args must name both {input} and {output}"
+        return OcrBackend(OCR_BACKEND_CUSTOM, "custom OCR command", (program,),
+                          frozenset({"PGS", "VOBSUB", "DVBSUB"}), arg_template=tokens), ""
+    if preferred in {OCR_BACKEND_AUTO, ""}:
+        order = OCR_BACKEND_AUTO_ORDER
+    elif preferred in OCR_BACKEND_CHOICES:
+        order = (preferred,)
+    else:
+        return None, f"unknown --ocr-backend '{preferred}'"
+    tried: list[str] = []
+    for key in order:
+        backend = build_ocr_backend(key, explicit_bin if preferred != OCR_BACKEND_AUTO else "")
+        if backend is not None:
+            return backend, ""
+        tried.append(key)
+    if preferred == OCR_BACKEND_AUTO:
+        return None, f"no image-subtitle OCR backend found; {OCR_INSTALL_HINT}"
+    return None, f"--ocr-backend {preferred} was not found; {OCR_INSTALL_HINT}"
+
+
+def find_sibling_srt(source: Path, expected: Path) -> Path | None:
+    """Locate the .srt a "writes beside its input" backend produced.
+
+    Subtitle Edit and pgsrip both choose the output name themselves, and the
+    rule differs by version (``movie.sup`` -> ``movie.srt`` vs ``movie.srt``
+    vs a language-tagged name). Accept the documented name first, then fall
+    back to the newest .srt that appeared next to the input, so a renamer
+    change costs nothing here.
+    """
+    if expected.is_file() and expected.stat().st_size > 0:
+        return expected
+    try:
+        siblings = sorted(
+            (path for path in source.parent.glob("*.srt")
+             if path.is_file() and path.stat().st_size > 0),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
+    except OSError:
+        return None
+    return siblings[0] if siblings else None
+
+
+def run_ocr(
+    backend: OcrBackend,
+    source: Path,
+    output: Path,
+    *,
+    track_id: int = 0,
+    language: str = "eng",
+    timeout: float = DEFAULT_OCR_TIMEOUT_SEC,
+) -> tuple[bool, str]:
+    """OCR one extracted bitmap subtitle stream into ``output``."""
+    command = backend.build_command(source, output, track_id=track_id, language=language)
+    rc, out, err = run_external_command(command, timeout=timeout)
+    produced = find_sibling_srt(source, backend.result_path(source, output)) \
+        if backend.output_mode == "sibling" else backend.result_path(source, output)
+    if rc == 0 and produced.is_file() and produced.stat().st_size > 0:
+        if produced != output:
+            try:
+                shutil.move(str(produced), str(output))
+            except OSError as exc:
+                return False, f"could not collect the OCR output ({exc})"
+        return True, ""
+    detail = _command_tail(err or out)
+    return False, f"{backend.label} could not OCR this track (exit {rc}): {detail}"
+
+
+# ---------------------------------------------------------------------------
+# Durable record of extracted sidecars (read by sync_subtitles.py)
+# ---------------------------------------------------------------------------
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def extracted_ledger_path() -> Path:
+    """Where the extraction record lives: outside the library, every time.
+
+    It sits beside the other ReportsAndLogs artefacts next to this script, so
+    every tool in the chain finds the same file regardless of which ``--log``
+    path it was given. Override with ``SUBTITLE_EXTRACTED_LEDGER``.
+    """
+    override = os.environ.get(EXTRACTED_LEDGER_ENV, "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path(__file__).resolve().parent / "ReportsAndLogs" / EXTRACTED_LEDGER_NAME
+
+
+def load_extracted_ledger(path: Path | None = None) -> dict[str, Any]:
+    """Read the extraction record; a missing or damaged file is an empty one."""
+    target = path or extracted_ledger_path()
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"version": EXTRACTED_LEDGER_VERSION, "sidecars": {}}
+    if not isinstance(payload, dict) or not isinstance(payload.get("sidecars"), dict):
+        return {"version": EXTRACTED_LEDGER_VERSION, "sidecars": {}}
+    return payload
+
+
+def record_extracted_sidecar(
+    video: Path,
+    sidecar: Path,
+    *,
+    track: EmbeddedSubtitleTrack,
+    method: str,
+    cue_count: int,
+    sha256: str,
+    ocr_backend: str = "",
+    path: Path | None = None,
+) -> bool:
+    """Remember that ``sidecar`` came from the movie's own embedded track.
+
+    Best effort by design: a read-only installation loses only the sync-tool
+    shortcut, never the subtitle itself.
+    """
+    payload = load_extracted_ledger(path)
+    payload["version"] = EXTRACTED_LEDGER_VERSION
+    try:
+        stat_result = video.stat(follow_symlinks=False)
+        movie_size, movie_mtime = int(stat_result.st_size), int(stat_result.st_mtime_ns)
+    except OSError:
+        movie_size, movie_mtime = 0, 0
+    payload["sidecars"][path_norm(sidecar)] = {
+        "movie": str(video),
+        "sidecar": str(sidecar),
+        "movie_size": movie_size,
+        "movie_mtime_ns": movie_mtime,
+        "sha256": sha256,
+        "track_id": track.track_id,
+        "codec_id": track.codec_id,
+        "track_name": track.name,
+        "language": track.language,
+        "method": method,
+        "ocr_backend": ocr_backend,
+        "cue_count": cue_count,
+        "extracted_utc": utc_timestamp(),
+    }
+    try:
+        atomic_write_json(path or extracted_ledger_path(), payload)
+    except OSError:
+        return False
+    return True
+
+
+def find_extracted_record(
+    sidecar: Path, sha256: str | None = None, *, path: Path | None = None
+) -> dict[str, Any] | None:
+    """The extraction record for ``sidecar``, if the file is still the original.
+
+    ``sha256`` is compared when given: a sidecar that was replaced by a
+    download or edited by hand is no longer the extracted copy, so it is
+    synced like any other subtitle.
+    """
+    payload = load_extracted_ledger(path)
+    record = payload.get("sidecars", {}).get(path_norm(sidecar))
+    if not isinstance(record, dict):
+        return None
+    if sha256 and str(record.get("sha256") or "") != sha256:
+        return None
+    return record
+
+
+# ---------------------------------------------------------------------------
+# One movie, end to end
+# ---------------------------------------------------------------------------
+@dataclass
+class ExtractOptions:
+    """Knobs for one extraction attempt (mirrors the fetcher's CLI flags)."""
+
+    enabled: bool = True
+    mkvmerge_bin: str | None = None
+    mkvextract_bin: str | None = None
+    ocr_backend: str = OCR_BACKEND_AUTO
+    ocr_bin: str = ""
+    ocr_args: str = ""
+    ocr_timeout_seconds: float = DEFAULT_OCR_TIMEOUT_SEC
+    ocr_allowed: bool = True
+    extract_timeout_seconds: float = DEFAULT_MKVEXTRACT_TIMEOUT_SEC
+    min_cues: int = DEFAULT_EXTRACT_MIN_CUES
+    text_candidate_limit: int = DEFAULT_EXTRACT_TEXT_CANDIDATE_LIMIT
+    image_candidate_limit: int = DEFAULT_EXTRACT_IMAGE_CANDIDATE_LIMIT
+    dry_run: bool = False
+
+    def resolved_backend(self) -> tuple[OcrBackend | None, str]:
+        return detect_ocr_backend(self.ocr_backend, explicit_bin=self.ocr_bin,
+                                  arg_template=self.ocr_args)
+
+
+@dataclass
+class ExtractionOutcome:
+    """What one extraction attempt produced, and why if it produced nothing."""
+
+    ok: bool = False
+    detail: str = ""
+    unavailable_reason: str = ""
+    track: EmbeddedSubtitleTrack | None = None
+    method: str = ""  # "text" or "ocr"
+    ocr_backend: str = ""
+    cue_count: int = 0
+    dest: Path | None = None
+    text: str = ""
+    attempted: int = 0
+    rejected: tuple[str, ...] = ()
+
+    @property
+    def available(self) -> bool:
+        """True when extraction was possible at all for this movie."""
+        return not self.unavailable_reason
+
+
+def extract_embedded_english_srt(
+    video: Path,
+    dest: Path,
+    options: ExtractOptions | None = None,
+    *,
+    log_file: Path | None = None,
+) -> ExtractionOutcome:
+    """Create ``dest`` from the movie's own English subtitle track.
+
+    Returns an :class:`ExtractionOutcome`. ``ok`` means ``dest`` holds a
+    validated external English SRT (or, in a dry run, that it would) and no
+    provider request is needed for this movie. ``unavailable_reason`` means
+    extraction could not even be attempted here (no MKVToolNix, no usable
+    English track, no OCR backend for an image-only movie) and names the fix.
+    """
+    opts = options or ExtractOptions()
+    if not opts.enabled:
+        return ExtractionOutcome(unavailable_reason="embedded extraction is disabled")
+    if dest.exists():
+        # Another actor (a manual copy, a concurrent run) already covered it.
+        return ExtractionOutcome(unavailable_reason=f"{dest.name} already exists")
+
+    mkvmerge_bin = find_mkvtoolnix_binary("mkvmerge", opts.mkvmerge_bin)
+    mkvextract_bin = find_mkvtoolnix_binary("mkvextract", opts.mkvextract_bin)
+    if not mkvmerge_bin or not mkvextract_bin:
+        return ExtractionOutcome(
+            unavailable_reason=f"MKVToolNix is not installed; {MKVTOOLNIX_INSTALL_HINT}"
+        )
+
+    tracks, probe_error = probe_embedded_subtitle_tracks(
+        video, mkvmerge_bin, timeout=opts.extract_timeout_seconds
+    )
+    if tracks is None:
+        return ExtractionOutcome(unavailable_reason=f"could not read the movie's tracks: {probe_error}")
+    candidates = classify_embedded_subtitle_tracks(tracks)
+    if not candidates:
+        has_any_english = any(
+            subtitle_track_is_english(track)
+            for track in tracks
+            if str(track.get("type") or "") == "subtitles"
+        )
+        reason = (
+            "no complete English subtitle track (only forced/signs-only or commentary streams)"
+            if has_any_english
+            else "the movie has no English subtitle track"
+        )
+        return ExtractionOutcome(unavailable_reason=reason)
+
+    backend, backend_note = opts.resolved_backend() if opts.ocr_allowed else (None, "")
+    if not opts.ocr_allowed and any(item.kind == "image" for item in candidates):
+        backend_note = f"the per-run OCR limit was reached; {OCR_INSTALL_HINT}"
+
+    attempts: list[str] = []
+    attempted = 0
+    text_candidates = [item for item in candidates if item.kind == "text"][: max(0, opts.text_candidate_limit)]
+    image_candidates = [item for item in candidates if item.kind == "image"][: max(0, opts.image_candidate_limit)]
+
+    with tempfile.TemporaryDirectory(prefix="subtitle_extract_") as tmpdir:
+        tmp = Path(tmpdir)
+        for track in text_candidates:
+            attempted += 1
+            outcome = _extract_one_track(
+                video, dest, track, tmp, opts, backend=None, log_file=log_file
+            )
+            if outcome.ok:
+                return ExtractionOutcome(
+                    ok=True,
+                    detail=(f"would extract the embedded {track.label} -> {dest.name}"
+                            if opts.dry_run else outcome.detail),
+                    track=outcome.track,
+                    method=outcome.method,
+                    ocr_backend=outcome.ocr_backend,
+                    cue_count=outcome.cue_count,
+                    dest=dest,
+                    text=outcome.text,
+                    attempted=attempted,
+                )
+            attempts.append(f"{track.label}: {outcome.detail}")
+        for track in image_candidates:
+            if backend is None:
+                attempts.append(f"{track.label}: {backend_note or 'no OCR backend available'}")
+                continue
+            if not backend.supports_track(track):
+                attempts.append(f"{track.label}: {backend.label} cannot OCR {track.codec_id}")
+                continue
+            if opts.dry_run:
+                attempted += 1
+                # OCR takes minutes; a preview must not spend them.
+                return ExtractionOutcome(
+                    ok=True,
+                    method="ocr",
+                    track=track,
+                    ocr_backend=backend.label,
+                    dest=dest,
+                    attempted=attempted,
+                    detail=(f"would OCR the embedded {track.label} with {backend.label} "
+                            f"-> {dest.name}"),
+                )
+            attempted += 1
+            outcome = _extract_one_track(
+                video, dest, track, tmp, opts, backend=backend, log_file=log_file
+            )
+            if outcome.ok:
+                return ExtractionOutcome(
+                    ok=True,
+                    detail=outcome.detail,
+                    track=outcome.track,
+                    method=outcome.method,
+                    ocr_backend=outcome.ocr_backend,
+                    cue_count=outcome.cue_count,
+                    dest=outcome.dest,
+                    text=outcome.text,
+                    attempted=attempted,
+                )
+            attempts.append(f"{track.label}: {outcome.detail}")
+
+    detail = "; ".join(attempts) if attempts else "no embedded English track could be converted"
+    return ExtractionOutcome(
+        ok=False,
+        detail=detail,
+        attempted=attempted,
+        rejected=tuple(attempts),
+        unavailable_reason="" if attempted else (backend_note or detail),
+    )
+
+
+def _extract_one_track(
+    video: Path,
+    dest: Path,
+    track: EmbeddedSubtitleTrack,
+    tmp: Path,
+    opts: ExtractOptions,
+    *,
+    backend: OcrBackend | None,
+    log_file: Path | None = None,
+) -> ExtractionOutcome:
+    """Extract one track, convert it, validate it, and publish it as ``dest``."""
+    mkvextract_bin = find_mkvtoolnix_binary("mkvextract", opts.mkvextract_bin)
+    if not mkvextract_bin:
+        return ExtractionOutcome(detail="mkvextract is not installed")
+    staged = tmp / f"track{track.track_id}{track.extension}"
+    rc, _out, err = run_external_command(
+        [mkvextract_bin, "tracks", str(video), f"{track.track_id}:{staged}"],
+        timeout=opts.extract_timeout_seconds,
+    )
+    if rc != 0:
+        return ExtractionOutcome(detail=f"mkvextract failed (exit {rc}): {_command_tail(err)}")
+
+    method = "text" if track.kind == "text" else "ocr"
+    ocr_label = backend.label if backend is not None else ""
+    produced_text = ""
+    if track.kind == "text":
+        try:
+            raw = staged.read_bytes()
+        except OSError as exc:
+            return ExtractionOutcome(detail=f"could not read the extracted track ({exc})")
+        try:
+            decoded = decode_subtitle_bytes(raw)
+        except (ValueError, OSError) as exc:
+            return ExtractionOutcome(detail=f"the extracted track is not readable text ({exc})")
+        decoded = normalize_srt_newlines(decoded)
+        if decoded.startswith("\ufeff"):
+            decoded = decoded[1:]
+        if track.extension in {".ass", ".ssa"}:
+            produced_text = ass_to_srt(decoded)
+        elif track.extension == ".vtt":
+            produced_text = vtt_to_srt(decoded)
+        elif track.extension == ".usf":
+            produced_text = usf_to_srt(decoded)
+        else:
+            produced_text = normalize_extracted_srt(decoded)
+        if not produced_text.strip():
+            return ExtractionOutcome(detail="the track converted to no subtitle cues")
+    else:
+        if backend is None:
+            return ExtractionOutcome(detail="no OCR backend is available for this image track")
+        ocr_output = tmp / f"track{track.track_id}.ocr.srt"
+        ok, ocr_error = run_ocr(
+            backend,
+            staged,
+            ocr_output,
+            track_id=track.track_id,
+            language=track.language or "eng",
+            timeout=opts.ocr_timeout_seconds,
+        )
+        if not ok:
+            return ExtractionOutcome(detail=ocr_error)
+        try:
+            produced_text = normalize_extracted_srt(
+                normalize_srt_newlines(ocr_output.read_text(encoding="utf-8", errors="replace"))
+            )
+        except OSError as exc:
+            return ExtractionOutcome(detail=f"could not read the OCR output ({exc})")
+
+    good, reason = extracted_subtitle_quality(produced_text, min_cues=opts.min_cues, method=method)
+    if not good:
+        return ExtractionOutcome(detail=reason, track=track, method=method)
+
+    cue_count = len(parse_srt_cues(produced_text))
+    if opts.dry_run:
+        return ExtractionOutcome(
+            ok=True,
+            detail=f"embedded {track.label} converts to {cue_count} cues",
+            track=track,
+            method=method,
+            ocr_backend=ocr_label,
+            cue_count=cue_count,
+            dest=dest,
+            text=produced_text,
+        )
+
+    try:
+        # Create-only, exactly like a downloaded sidecar: a subtitle that
+        # appears while this movie is being processed is preserved, never
+        # silently overwritten.
+        atomic_write_text(dest, produced_text, replace=False)
+    except FileExistsError:
+        return ExtractionOutcome(
+            ok=True,
+            detail=f"{dest.name} appeared during extraction; the existing sidecar was kept",
+            track=track,
+            method=method,
+            cue_count=cue_count,
+            dest=dest,
+            text=produced_text,
+        )
+    except OSError as exc:
+        return ExtractionOutcome(detail=f"could not write the extracted sidecar ({exc})", track=track)
+
+    record_extracted_sidecar(
+        video,
+        dest,
+        track=track,
+        method=method,
+        cue_count=cue_count,
+        sha256=sha256_text(produced_text),
+        ocr_backend=ocr_label,
+    )
+    log(
+        f"Extracted {cue_count} cue(s) from the embedded {track.label} -> {dest.name}",
+        log_file=log_file,
+    )
+    return ExtractionOutcome(
+        ok=True,
+        detail=(f"extracted {cue_count} cue(s) from the embedded {track.label}"
+                + (f" via {ocr_label}" if method == "ocr" else "")),
+        track=track,
+        method=method,
+        ocr_backend=ocr_label,
+        cue_count=cue_count,
+        dest=dest,
+        text=produced_text,
+    )
+
 
 @dataclass
 class QueueConfig:
@@ -4353,6 +5957,28 @@ class QueueConfig:
     skip_sources: tuple[str, ...] = ()
     # Exit 0 even when movies finish the run without a validated SRT.
     allow_missing: bool = False
+    # Embedded-subtitle extraction: the movie's own English track beats any
+    # download (exact for this release, no quota, no timing correction).
+    extract_embedded: bool = True
+    extract_min_cues: int = DEFAULT_EXTRACT_MIN_CUES
+    ocr_backend: str = OCR_BACKEND_AUTO
+    ocr_bin: str = ""
+    ocr_args: str = ""
+    ocr_timeout_seconds: float = DEFAULT_OCR_TIMEOUT_SEC
+    # 0 = no per-run cap on OCR jobs (they are local work, not provider quota)
+    ocr_limit: int = 0
+
+    def extract_options(self, *, ocr_allowed: bool = True, dry_run: bool = False) -> "ExtractOptions":
+        return ExtractOptions(
+            enabled=self.extract_embedded,
+            ocr_backend=self.ocr_backend,
+            ocr_bin=self.ocr_bin,
+            ocr_args=self.ocr_args,
+            ocr_timeout_seconds=self.ocr_timeout_seconds,
+            ocr_allowed=ocr_allowed,
+            min_cues=self.extract_min_cues,
+            dry_run=dry_run,
+        )
 
     @property
     def min_bytes(self) -> int:
@@ -4480,6 +6106,7 @@ def day_ledger(state: dict[str, Any], day: str) -> dict[str, int]:
         "identity_review": 0,
         "errors": 0,
         "already_have": 0,
+        "extracted": 0,
     }
     for field_name, default in defaults.items():
         try:
@@ -4816,6 +6443,10 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     scrape_chain = build_scrape_chain(cfg, ledger, state) if not cfg.dry_run else None
     deferred_remaining = 0
     deferred_videos: list[Path] = []
+    # Embedded extraction: OCR jobs are minutes of local CPU, so the run can
+    # cap them (--ocr-limit) independently of every provider quota.
+    ocr_jobs = 0
+    extract_notes: set[str] = set()
 
     videos = discover_videos(cfg.library, cfg.min_bytes)
     if cfg.limit > 0:
@@ -4883,6 +6514,47 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             continue
         record = state_movie(state, key, video)
         old_status = str(record.get("status") or "pending")
+
+        # Embedded-subtitle extraction. A movie's own English track is exact
+        # for this release, costs no provider request, and needs no timing
+        # correction, so it beats any download - and it is attempted before
+        # every ledger short-circuit below, because a movie a provider held
+        # for review can still be covered by its own track for free.
+        if cfg.extract_embedded:
+            extract_dest = dest_for(video, fetcher_cfg)
+            outcome = extract_embedded_english_srt(
+                video,
+                extract_dest,
+                cfg.extract_options(
+                    ocr_allowed=cfg.ocr_limit <= 0 or ocr_jobs < cfg.ocr_limit,
+                    dry_run=cfg.dry_run,
+                ),
+                log_file=cfg.log_file,
+            )
+            if outcome.ok:
+                if outcome.method == "ocr":
+                    ocr_jobs += 1
+                if cfg.dry_run:
+                    result = JobResult(video, "dry-run", outcome.detail, extract_dest,
+                                       reason=REASON_DRY_RUN)
+                    results.append(result)
+                    emit(index, "DRYRUN", video, outcome.detail)
+                    continue
+                set_movie_status(record, "extracted", outcome.detail, sidecar=str(extract_dest))
+                persist_state(state, cfg.log_file)
+                ledger["extracted"] += 1
+                result = JobResult(video, "extracted", outcome.detail, extract_dest,
+                                   reason=REASON_EXTRACTED)
+                results.append(result)
+                emit(index, "EXTRACT", video, outcome.detail)
+                continue
+            if outcome.unavailable_reason and outcome.unavailable_reason not in extract_notes:
+                # A missing toolchain is worth one line per run; "this movie
+                # has no English track" is the common case and stays silent.
+                extract_notes.add(outcome.unavailable_reason)
+                if "not installed" in outcome.unavailable_reason or "OCR" in outcome.unavailable_reason:
+                    log(outcome.unavailable_reason, level="WARNING", log_file=cfg.log_file)
+
         # Scraping retry economy: a movie the scraping tier already exhausted
         # today is not offered to it twice, and a movie that exhausted it on
         # an earlier day goes straight back to the scraping tier (the API
@@ -5453,7 +7125,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     ]
     covered_count = sum(
         1 for result in results
-        if result.reason in (REASON_COVERED, REASON_DOWNLOADED)
+        if result.reason in (REASON_COVERED, REASON_DOWNLOADED, REASON_EXTRACTED)
         or (cfg.dry_run and result.reason == REASON_DRY_RUN)
     )
     summary = {
@@ -5482,6 +7154,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         },
         "quota_reached": not available_after_run,
         "deferred_remaining": deferred_remaining,
+        "extracted_from_embedded": int(ledger.get("extracted", 0) or 0),
         "ledger_log": str(cfg.log_file),
         "movies_discovered": total,
         # Coverage is the product promise: every movie ends the run with a
@@ -5584,8 +7257,9 @@ def movie_label(video: Path, library: Path) -> str:
 
 def group_results(
     results: Sequence[JobResult], summary: dict[str, Any]
-) -> tuple[dict[str, list[tuple[Path, str]]], list[JobResult], list[JobResult], list[JobResult]]:
-    """Split one run into (needs buckets, covered, downloaded, dry-run).
+) -> tuple[dict[str, list[tuple[Path, str]]], list[JobResult], list[JobResult], list[JobResult],
+           list[JobResult]]:
+    """Split one run into (needs buckets, covered, downloaded, dry-run, extracted).
 
     Movies the quota cut off before they were scanned join the quota bucket so
     the report names them instead of only reporting a count.
@@ -5594,11 +7268,14 @@ def group_results(
     covered: list[JobResult] = []
     downloaded: list[JobResult] = []
     dry_run: list[JobResult] = []
+    extracted: list[JobResult] = []
     for result in results:
         if result.reason == REASON_COVERED:
             covered.append(result)
         elif result.reason == REASON_DOWNLOADED:
             downloaded.append(result)
+        elif result.reason == REASON_EXTRACTED:
+            extracted.append(result)
         elif result.reason == REASON_DRY_RUN:
             dry_run.append(result)
         elif result.reason in buckets:
@@ -5612,7 +7289,8 @@ def group_results(
     covered.sort(key=lambda item: str(item.video).casefold())
     downloaded.sort(key=lambda item: str(item.video).casefold())
     dry_run.sort(key=lambda item: str(item.video).casefold())
-    return buckets, covered, downloaded, dry_run
+    extracted.sort(key=lambda item: str(item.video).casefold())
+    return buckets, covered, downloaded, dry_run, extracted
 
 def report_provider_quota_text(cfg: QueueConfig, summary: dict[str, Any]) -> str:
     """Format provider reservations for the report, including old summaries."""
@@ -5666,6 +7344,26 @@ def report_download_text(cfg: QueueConfig, summary: dict[str, Any]) -> str:
         parts.append(f"scraping {scrape_total} ({detail})")
     return f"{total} successful this run" + (f" ({' · '.join(parts)})" if parts else "")
 
+def extract_banner_text(cfg: QueueConfig) -> str:
+    """One banner line saying what embedded extraction can do on this machine.
+
+    Every binary behind this feature is optional, so the run has to say up
+    front whether the movie's own tracks are usable here - otherwise an
+    image-only library looks like a provider problem when it is really a
+    missing OCR tool.
+    """
+    if not cfg.extract_embedded:
+        return "disabled (--no-extract): every uncovered movie goes to the provider sources"
+    if not find_mkvtoolnix_binary("mkvmerge") or not find_mkvtoolnix_binary("mkvextract"):
+        return f"unavailable: {MKVTOOLNIX_INSTALL_HINT}"
+    backend, note = detect_ocr_backend(cfg.ocr_backend, explicit_bin=cfg.ocr_bin,
+                                       arg_template=cfg.ocr_args)
+    text_part = f"text tracks (SRT/SSA/ASS) with mkvextract (>= {cfg.extract_min_cues} cues)"
+    image_part = (f"image tracks (PGS/VobSub) with {backend.label}"
+                  if backend is not None else f"image tracks (PGS/VobSub) skipped: {note}")
+    return f"extracted before any download — {text_part}; {image_part}"
+
+
 def build_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[str, Any]) -> str:
     """Render the whole run as one report a human can act on in ten seconds.
 
@@ -5673,7 +7371,7 @@ def build_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[s
     which movies still need a subtitle, and which already have their external
     ``.eng.srt``.
     """
-    buckets, covered, downloaded, dry_run = group_results(results, summary)
+    buckets, covered, downloaded, dry_run, extracted = group_results(results, summary)
     needs = sum(len(items) for items in buckets.values())
     total = int(summary.get("movies_discovered") or len(results))
     covered_count = int(summary.get("coverage_covered", len(covered) + len(downloaded)
@@ -5717,6 +7415,7 @@ def build_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[s
          "COVERAGE: movies with a validated English SRT" + (" (would be covered)" if cfg.dry_run else ""),
          "the goal: 100% - every uncovered movie is named below"),
         (len(covered), "Already have .eng.srt", "validated sidecar beside the movie"),
+        (len(extracted), "Extracted from the movie", "sidecar built from its own embedded track"),
         (len(downloaded), "Downloaded this run", f"written as <movie>{EXTERNAL_SRT_SUFFIX}"),
     ]
     if dry_run or cfg.dry_run:
@@ -5779,6 +7478,25 @@ def build_report(results: Sequence[JobResult], cfg: QueueConfig, summary: dict[s
              for result in downloaded],
             detail_column=48,
         )
+    if extracted:
+        report.section(
+            "EXTRACTED FROM THE MOVIE'S OWN EMBEDDED TRACK",
+            count=len(extracted),
+            total=total,
+            intro=(
+                "These movies already carried an English subtitle track. It was extracted to the "
+                f"canonical <movie>{EXTERNAL_SRT_SUFFIX} instead of downloading anything: it is exact "
+                "for this release, it costs no provider request, and its cues come from the "
+                "container's own timeline, so it needs no timing correction. "
+                "mkv_track_cleaner.py still strips every embedded subtitle, leaving this sidecar "
+                "as the sole subtitle option."
+            ),
+        )
+        report.entries(
+            [{"text": movie_label(result.video, cfg.library), "detail": result.detail}
+             for result in extracted],
+        )
+
     if dry_run:
         report.section(
             "DRY-RUN CANDIDATES (NOTHING WAS WRITTEN)",
@@ -5888,6 +7606,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.set_defaults(identity_fallback=True)
     parser.add_argument("--retry-review", action="store_true",
                         help="Reconsider movies previously held for manual identity review")
+    parser.add_argument("--no-extract", dest="extract_embedded", action="store_false",
+                        help="Never build a sidecar from the movie's own embedded subtitle track "
+                             "(default: extract before downloading anything)")
+    parser.set_defaults(extract_embedded=True)
+    parser.add_argument("--extract-min-cues", type=int, default=DEFAULT_EXTRACT_MIN_CUES, metavar="N",
+                        help="Reject an embedded track with fewer than N cues as signs/songs-only")
+    parser.add_argument("--ocr-backend", default=OCR_BACKEND_AUTO, choices=list(OCR_BACKEND_CHOICES),
+                        help="OCR program for image-based tracks (PGS/VobSub): auto picks the first "
+                             "one installed; none disables image tracks entirely")
+    parser.add_argument("--ocr-bin", default="", metavar="PATH",
+                        help="Path to the OCR program or .NET dll (PgsToSrt) instead of searching PATH")
+    parser.add_argument("--ocr-args", default="", metavar="ARGS",
+                        help="Argument template for --ocr-backend custom, e.g. \"{input}\" \"{output}\" "
+                             "(placeholders: {input} {output} {track} {lang})")
+    parser.add_argument("--ocr-timeout", type=float, default=DEFAULT_OCR_TIMEOUT_SEC, metavar="SEC",
+                        help="Per-movie OCR time limit (0 disables the limit)")
+    parser.add_argument("--ocr-limit", type=int, default=0, metavar="N",
+                        help="OCR at most N movies per run (0 means no cap; OCR is minutes of local CPU)")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -5951,6 +7687,13 @@ def compact_config_from_args(args: argparse.Namespace) -> QueueConfig:
         scrape_daily_cap=resolve_scrape_daily_cap(args.scrape_daily_cap),
         skip_sources=tuple(args.skip_source),
         allow_missing=bool(args.allow_missing),
+        extract_embedded=bool(args.extract_embedded),
+        extract_min_cues=max(1, int(args.extract_min_cues)),
+        ocr_backend=str(args.ocr_backend),
+        ocr_bin=str(args.ocr_bin),
+        ocr_args=str(args.ocr_args),
+        ocr_timeout_seconds=max(0.0, float(args.ocr_timeout)),
+        ocr_limit=max(0, int(args.ocr_limit)),
         min_movie_size_mb=float(args.min_size),
         lock_timeout_seconds=max(0.0, float(args.lock_timeout)),
         retry_no_match=bool(args.retry_review),
@@ -5981,6 +7724,14 @@ def validate_compact_config(cfg: QueueConfig) -> list[str]:
         errors.append("--auth-mode user requires an OpenSubtitles username and password")
     if cfg.subdl_api_key.strip() and not cfg.api_key.strip() and not cfg.identity_fallback:
         errors.append("SubDL-only mode requires fallback matching; omit --no-identity-fallback")
+    if cfg.ocr_backend not in OCR_BACKEND_CHOICES:
+        errors.append(f"--ocr-backend must be one of: {', '.join(OCR_BACKEND_CHOICES)}")
+    if cfg.extract_min_cues < 1:
+        errors.append("--extract-min-cues must be at least 1")
+    if cfg.ocr_timeout_seconds < 0:
+        errors.append("--ocr-timeout must be zero (no limit) or greater")
+    if cfg.ocr_limit < 0:
+        errors.append("--ocr-limit must be zero (no cap) or greater")
     if cfg.min_movie_size_mb < 0 or cfg.lock_timeout_seconds < 0 or cfg.limit < 0:
         errors.append("--min-size, --lock-timeout, and --limit must be non-negative")
     if cfg.report_file == cfg.library or cfg.report_file.is_relative_to(cfg.library):
@@ -6012,6 +7763,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ("Sources", provider_configuration_text(cfg) + " (UTC caps)"),
                 ("Ledger", cfg.log_file),
                 ("Report", cfg.report_file),
+                ("Embedded tracks", extract_banner_text(cfg)),
             ],
         ))
         with CoordinationLock(cfg.library, timeout_seconds=cfg.lock_timeout_seconds):
