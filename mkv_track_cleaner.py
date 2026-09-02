@@ -985,7 +985,7 @@ class Report:
         # Trailing spaces are invisible in a terminal and noisy in a diff.
         return "\n".join(line.rstrip() for line in lines).rstrip() + "\n"
 
-VERSION = "2.6.0"
+VERSION = "2.6.1"
 
 # ==================== DEFAULT CONFIGURATION ====================
 TARGET_DIR = r"E:\torrents\final_organized"
@@ -3171,7 +3171,19 @@ def process_mkv(
         safe_delete(journal_path)
         restore_file_times(mkv_path, orig_stat)
 
-        size_after = mkv_path.stat().st_size
+        final_stat = mkv_path.stat()
+        # Re-key the metadata cache onto the file that now exists. The entry
+        # written above describes the *source*: a remux preserves the mtime but
+        # changes the size, so that entry can never match the file it describes
+        # and the next run would re-scan every movie this run just cleaned.
+        # ``output_info`` is the verification probe of exactly these bytes, so
+        # storing it under the new stat is the answer mkvmerge would give.
+        if probe_cache is not None and output_info is not None:
+            probe_cache.put(
+                mkv_path, final_stat.st_size, final_stat.st_mtime_ns, output_info
+            )
+
+        size_after = final_stat.st_size
         saved_bytes = max(0, size_before - size_after)
         stats["total_space_saved_bytes"] += saved_bytes
         result = (

@@ -797,7 +797,7 @@ SKIP_DIR_NAMES = frozenset({
 # CONSTANTS
 # =============================================================================
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 # This inspector never changes media. It writes one append-only log, one
 # replaceable report, and (unless --no-cache) one reusable probe cache; all
 # three live outside the media library.
@@ -809,6 +809,20 @@ LOCK_NAME = ".jellyfin_10bit_inspector.lock"
 HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67", "hlg"})
 # Primaries/matrix alone are wide color, not HDR.
 WCG_PRIMARIES = frozenset({"bt2020", "bt2020nc", "bt2020-10", "bt2020-12"})
+
+# Dolby Vision base-layer compatibility, from dv_bl_signal_compatibility_id.
+# "Dolby Vision" on its own does not answer the practical question - whether a
+# client that cannot decode Dolby Vision can still play the file.
+DOVI_BASE_LAYER = {
+    0: "no SDR/HDR10 fallback",
+    1: "HDR10 base",
+    2: "SDR base",
+    3: "base layer not specified",
+    4: "HLG base",
+}
+# Sample-entry names that mean Dolby Vision by definition, used when a file
+# carries no DV configuration record to read.
+DV_CODEC_NAMES = frozenset({"dvh1", "dvhe", "dvav", "dva1", "dv1e", "dvh1e", "dva1e"})
 
 # Explicit 8-bit names (no trailing bit count in the token).
 PIX_FMT_BITS: dict[str, int] = {
@@ -879,6 +893,7 @@ class ProbeResult:
     hdr: bool = False
     hdr_flavors: list[str] = field(default_factory=list)
     hdr_evidence: list[str] = field(default_factory=list)
+    dv_profile: str = ""
     codec: str = ""
     pix_fmt: str = ""
     width: int = 0
@@ -1070,6 +1085,55 @@ def resolve_bit_depth(stream: dict[str, Any]) -> tuple[int | None, str]:
         return from_prof, f"codec profile {profile}"
     return None, "no reliable raw-sample, pixel-format, or profile bit-depth metadata"
 
+def dolby_vision_detail(stream: dict[str, Any]) -> str:
+    """Describe a Dolby Vision stream's profile, or ``""`` if it is not reported.
+
+    ffprobe surfaces the configuration record carried in the bitstream or the
+    container, and ``dv_profile`` plus ``dv_bl_signal_compatibility_id``
+    together say what the plain label cannot: which profile it is, and whether
+    there is a base layer for a client that has no Dolby Vision support.
+    Older ffprobe builds report Dolby Vision without the profile; that is
+    simply left undescribed rather than guessed at.
+    """
+    for sd in _iter_side_data(stream):
+        kind = str(sd.get("side_data_type") or "").lower()
+        if not ("dovi" in kind or "dolby vision" in kind or "dvcc" in kind or "dvvc" in kind):
+            continue
+        prof = _as_int(sd.get("dv_profile"))
+        compat = _as_int(sd.get("dv_bl_signal_compatibility_id"))
+        if prof is None:
+            return ""
+        # Profile 8 with a base-layer id is what the industry calls 8.1 / 8.2 /
+        # 8.4 - spell it the way anyone looking it up would search for it.
+        if prof == 8 and compat in (1, 2, 4):
+            parts = [f"profile 8.{compat}"]
+        else:
+            parts = [f"profile {prof}"]
+        if compat is not None:
+            parts.append(DOVI_BASE_LAYER.get(compat, f"base-layer id {compat}"))
+        if _as_int(sd.get("el_present_flag")) == 1:
+            parts.append("dual layer (enhancement layer present)")
+        return " \u00b7 ".join(parts)
+    return ""
+
+
+def bit_depth_conflict(stream: dict[str, Any]) -> tuple[int, int] | None:
+    """Return ``(raw-sample bits, pixel-format bits)`` when the two disagree.
+
+    Two independent fields claim a bit depth and they can contradict each
+    other - a 10-bit pixel format behind an 8-bit raw-sample count, most
+    often. Neither wins here: the caller turns a disagreement into a review,
+    because acting on half a label means deciding whether to re-encode.
+    """
+    raw = _as_int(stream.get("bits_per_raw_sample")) or _as_int(stream.get("bits_per_component"))
+    if not raw or not (8 <= raw <= 16):
+        return None
+    from_fmt = bit_depth_from_pix_fmt(str(stream.get("pix_fmt") or ""))
+    if from_fmt is None or from_fmt == raw:
+        return None
+    return raw, from_fmt
+
+
 def _iter_side_data(stream: dict[str, Any]) -> list[dict[str, Any]]:
     raw = stream.get("side_data_list") or []
     return [sd for sd in raw if isinstance(sd, dict)]
@@ -1107,6 +1171,13 @@ def classify_hdr(stream: dict[str, Any], fmt: dict[str, Any] | None = None) -> t
         if "Dolby Vision" not in flavors:
             flavors.append("Dolby Vision")
         evidence.append("stream/container tag: Dolby Vision signature")
+    # A stream whose codec *is* a Dolby Vision sample entry is Dolby Vision
+    # even when the file carries no configuration record to read.
+    dv_codec = str(stream.get("codec_name") or "").lower().strip()
+    if dv_codec in DV_CODEC_NAMES:
+        if "Dolby Vision" not in flavors:
+            flavors.append("Dolby Vision")
+        evidence.append(f"codec name: {dv_codec} (Dolby Vision)")
     if "hdr10+" in tags or "hdr10plus" in tags or "smpte2094" in tags.replace(" ", ""):
         if "HDR10+" not in flavors:
             flavors.append("HDR10+")
@@ -1161,8 +1232,14 @@ def pick_video_stream(payload: dict[str, Any]) -> dict[str, Any] | None:
     ]
     if not real:
         return None
+    # The container's own "this is the main feature" mark outranks picture
+    # size: a scope main feature (1920x816) is shorter than a full-frame bonus
+    # featurette (1920x1080), and reading the featurette would report the
+    # wrong movie's bit depth and HDR. Size decides only between streams the
+    # file does not distinguish.
     real.sort(
         key=lambda s: (
+            int((s.get("disposition") or {}).get("default") or 0),
             (_as_int(s.get("width")) or 0) * (_as_int(s.get("height")) or 0),
             _as_int(s.get("bit_rate")) or 0,
             int((s.get("disposition") or {}).get("default") or 0),
@@ -1202,8 +1279,19 @@ def result_from_probe(
 
     fmt = payload.get("format") if isinstance(payload.get("format"), dict) else {}
     bit_depth, bit_depth_evidence = resolve_bit_depth(stream)
+    conflict = bit_depth_conflict(stream)
     is_hdr, flavors, hdr_evidence = classify_hdr(stream, fmt)
     status = categorize(bit_depth, is_hdr)
+    if conflict is not None:
+        # Two independent fields disagree, so the bit depth is not known -
+        # only claimed twice, differently. A queue is a re-encode, so the
+        # file waits for a human instead of being decided on half a label.
+        raw_bits, fmt_bits = conflict
+        status = STATUS_REVIEW_UNKNOWN_DEPTH
+        bit_depth_evidence = (
+            f"conflicting metadata: raw sample says {raw_bits}-bit but pixel "
+            f"format {stream.get('pix_fmt')} says {fmt_bits}-bit - not queued"
+        )
 
     codec = str(stream.get("codec_name") or "unknown").upper()
     profile = str(stream.get("profile") or "").strip()
@@ -1217,7 +1305,13 @@ def result_from_probe(
     wcg = primaries.lower() in WCG_PRIMARIES and not is_hdr
 
     bits_label = f"{bit_depth}-bit" if bit_depth is not None else "unknown-bit"
-    hdr_label = "/".join(flavors) if flavors else ("HDR" if is_hdr else "SDR")
+    if conflict is not None:
+        bits_label += "?"
+    # "Dolby Vision" alone does not say whether anything else can play it.
+    dv_detail = dolby_vision_detail(stream)
+    shown = [f"{name} ({dv_detail})" if name == "Dolby Vision" and dv_detail else name
+             for name in flavors]
+    hdr_label = "/".join(shown) if shown else ("HDR" if is_hdr else "SDR")
     if wcg:
         hdr_label = "SDR WCG (BT.2020 primaries, not HDR)"
     prof = f" {profile}" if profile else ""
@@ -1236,6 +1330,7 @@ def result_from_probe(
         hdr=is_hdr,
         hdr_flavors=flavors,
         hdr_evidence=hdr_evidence,
+        dv_profile=dv_detail,
         codec=codec,
         pix_fmt=pix_fmt,
         width=width,
@@ -1508,6 +1603,8 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
             ]
             if item.hdr_flavors:
                 fields.append(("HDR", ", ".join(item.hdr_flavors)))
+            if item.dv_profile:
+                fields.append(("Dolby Vision", item.dv_profile))
             if item.hdr_evidence:
                 fields.append(("HDR evidence", "; ".join(item.hdr_evidence)))
             if item.bit_depth_evidence:
@@ -1521,6 +1618,8 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
         "SKIP = already 10-bit or better SDR. Re-encoding only loses quality.",
         "KEEP = HDR10 / HDR10+ / Dolby Vision / HLG. HandBrake tone-maps or strips "
         "dynamic metadata.",
+        "A Dolby Vision profile ending in 'no fallback' needs a Dolby Vision "
+        "client; one listing a base layer still plays as HDR10, HLG or SDR.",
         "REVIEW = HDR-tagged 8-bit, or metadata too uncertain to trust. Never queued "
         "automatically.",
         "BT.2020 primaries without PQ or HLG is wide-gamut SDR, not HDR.",

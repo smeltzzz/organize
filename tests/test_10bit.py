@@ -56,6 +56,140 @@ class HdrTests(unittest.TestCase):
         self.assertIn("HDR10", flavors)
 
 
+class StreamChoiceTests(unittest.TestCase):
+    """Which video inside a container gets inspected.
+
+    Reading the wrong one reports the wrong movie's bit depth, and a wrong
+    "8-bit" is a re-encode of a file that was already fine.
+    """
+
+    def _stream(self, *, index: int, width: int, height: int, **kw: Any) -> dict[str, Any]:
+        stream = {
+            "index": index, "codec_type": "video", "codec_name": "hevc",
+            "width": width, "height": height, "pix_fmt": "yuv420p10le",
+            "profile": "Main 10", "bits_per_raw_sample": "10",
+        }
+        stream.update(kw)
+        return stream
+
+    def _payload(self, streams: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"streams": streams, "format": {}}
+
+    def test_the_default_stream_beats_a_bigger_bonus_feature(self) -> None:
+        """A scope main feature is shorter than a full-frame featurette."""
+        main = self._stream(index=0, width=1920, height=816,
+                            disposition={"default": 1}, bit_rate="8000000")
+        bonus = self._stream(index=1, width=1920, height=1080, pix_fmt="yuv420p",
+                             bits_per_raw_sample="8", disposition={"default": 0},
+                             bit_rate="3000000")
+        for order in ([main, bonus], [bonus, main]):
+            stream = tb.pick_video_stream(self._payload(order))
+            self.assertEqual(stream["height"], 816, "the featurette must not win")
+
+    def test_size_still_decides_when_the_container_marks_nothing(self) -> None:
+        small = self._stream(index=0, width=1280, height=720, pix_fmt="yuv420p",
+                             bits_per_raw_sample="8")
+        big = self._stream(index=1, width=3840, height=2160)
+        stream = tb.pick_video_stream(self._payload([small, big]))
+        self.assertEqual(stream["height"], 2160)
+
+    def test_cover_art_is_never_inspected(self) -> None:
+        art = {"index": 0, "codec_type": "video", "codec_name": "mjpeg",
+               "disposition": {"attached_pic": 1}, "width": 100, "height": 100}
+        movie = self._stream(index=1, width=1920, height=1080)
+        stream = tb.pick_video_stream(self._payload([art, movie]))
+        self.assertEqual(stream["index"], 1)
+
+
+class BitDepthConflictTests(unittest.TestCase):
+    """Two fields can claim different bit depths. Neither is trusted."""
+
+    def _probe(self, **stream: Any) -> Any:
+        payload = {"streams": [dict({
+            "index": 0, "codec_type": "video", "codec_name": "hevc",
+            "pix_fmt": "yuv420p10le", "profile": "Main 10",
+        }, **stream)], "format": {}}
+        return tb.result_from_probe("/m/Movie.mkv", payload)
+
+    def test_agreeing_metadata_is_not_a_conflict(self) -> None:
+        self.assertIsNone(tb.bit_depth_conflict({"bits_per_raw_sample": "10",
+                                                 "pix_fmt": "yuv420p10le"}))
+
+    def test_a_10bit_pixel_format_behind_an_8bit_raw_sample_is_reviewed(self) -> None:
+        result = self._probe(bits_per_raw_sample="8")
+        self.assertEqual(result.status, tb.STATUS_REVIEW_UNKNOWN_DEPTH)
+        self.assertIn("not queued", result.bit_depth_evidence)
+        self.assertIn("8", result.bit_depth_evidence)
+        self.assertIn("10", result.bit_depth_evidence)
+        self.assertIn("?", result.info)  # the depth is claimed, not known
+
+    def test_the_reverse_disagreement_is_also_reviewed(self) -> None:
+        result = self._probe(bits_per_raw_sample="10", pix_fmt="yuv420p")
+        self.assertEqual(result.status, tb.STATUS_REVIEW_UNKNOWN_DEPTH)
+
+    def test_a_conflict_is_never_queued_for_re_encoding(self) -> None:
+        result = self._probe(bits_per_raw_sample="8")
+        self.assertNotEqual(result.status, tb.STATUS_QUEUE)
+
+
+class DolbyVisionTests(unittest.TestCase):
+    """Dolby Vision is more than one thing: the profile says what plays it."""
+
+    HDR = {"color_transfer": "smpte2084", "color_primaries": "bt2020"}
+
+    def _probe(self, side_data: dict[str, Any] | None = None, **stream: Any) -> Any:
+        base = {"index": 0, "codec_type": "video", "codec_name": "hevc",
+                "pix_fmt": "yuv420p10le", "profile": "Main 10",
+                "bits_per_raw_sample": "10"}
+        base.update(self.HDR)
+        base.update(stream)
+        if side_data is not None:
+            base["side_data_list"] = [side_data]
+        return tb.result_from_probe("/m/Movie.mkv", {"streams": [base], "format": {}})
+
+    @staticmethod
+    def _dovi(profile: int, compat: int, el: int = 0) -> dict[str, Any]:
+        return {"side_data_type": "DOVI configuration record", "dv_profile": profile,
+                "dv_bl_signal_compatibility_id": compat, "el_present_flag": el,
+                "bl_present_flag": 1}
+
+    def test_profile_81_reports_its_hdr10_base(self) -> None:
+        result = self._probe(self._dovi(8, 1))
+        self.assertIn("Dolby Vision", result.hdr_flavors)
+        self.assertEqual(result.status, tb.STATUS_SKIP_HDR)
+        self.assertIn("profile 8.1", result.dv_profile)
+        self.assertIn("HDR10 base", result.dv_profile)
+
+    def test_profile_5_reports_that_it_has_no_fallback(self) -> None:
+        result = self._probe(self._dovi(5, 0))
+        self.assertIn("no SDR/HDR10 fallback", result.dv_profile)
+
+    def test_a_dual_layer_profile_says_so(self) -> None:
+        result = self._probe(self._dovi(7, 1, el=1))
+        self.assertIn("dual layer", result.dv_profile)
+
+    def test_an_hlg_base_layer_is_named(self) -> None:
+        result = self._probe(self._dovi(8, 4))
+        self.assertIn("profile 8.4", result.dv_profile)
+
+    def test_a_record_without_a_profile_leaves_it_undescribed(self) -> None:
+        result = self._probe({"side_data_type": "DOVI configuration record"})
+        self.assertIn("Dolby Vision", result.hdr_flavors)
+        self.assertEqual(result.dv_profile, "")
+
+    def test_a_dolby_vision_codec_name_is_dolby_vision(self) -> None:
+        # Rare, but it means DV by definition even with no record to read.
+        result = self._probe(None, codec_name="dvh1", **{"color_transfer": "bt709",
+                                                         "color_primaries": "bt709"})
+        self.assertIn("Dolby Vision", result.hdr_flavors)
+        self.assertTrue(result.hdr)
+
+    def test_a_plain_hevc_file_is_not_dolby_vision(self) -> None:
+        result = self._probe(None, **{"color_transfer": "bt709", "color_primaries": "bt709"})
+        self.assertNotIn("Dolby Vision", result.hdr_flavors)
+        self.assertEqual(result.dv_profile, "")
+
+
 class ProbeCacheWiringTests(unittest.TestCase):
     """inspect_movie must actually consult the cache, not just accept one."""
 
