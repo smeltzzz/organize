@@ -324,6 +324,15 @@ python3 sync_subtitles.py --source /path/to/movies --limit 10   # first 10
 python3 sync_subtitles.py --source /path/to/movies --fail-on-review  # cron gating
 ```
 
+**Re-running costs nothing.** A sidecar measured "in sync", or corrected and
+swapped in, is recorded outside the library (`sync_state.json`, override with
+`--sync-ledger` or `SUBTITLE_SYNC_LEDGER`) with the subtitle's SHA-256 and the
+movie's size and mtime. The record is honoured only while **both** still
+match: re-download, re-extract, hand-edit or replace the subtitle, or remux
+the movie, and it is measured again. Held-for-review and failed syncs are
+never recorded — those still need another look. Delete the file to
+re-measure everything.
+
 ### 7 · `jellyfin_one_shot.py` — the "never stop" completer
 
 The orchestrator that gets a library to the end result no matter what: it
@@ -345,12 +354,21 @@ days:
 - **Honest reporting** — if `mkvmerge`/`ffprobe`/`ffsubsync` are missing the
   affected steps are skipped and the completion banner says exactly which
   guarantees were not checked.
+- **A finished library is left alone** — the auditor runs *first*, and a
+  library that already reports 100% canonical exits 0 without a fetch, remux,
+  inspection or sync sweep. Every step is idempotent, so re-running a finished
+  library used to cost a full pass for nothing. Use `--force-pass` to sweep
+  anyway: the auditor's verdict is the library contract (canonical folder
+  layout plus a validated `.eng.srt` sidecar) and never inspects the MKV's own
+  tracks, so a movie still carrying extra audio or embedded subtitles audits
+  as canonical.
 
 ```bash
 python3 jellyfin_one_shot.py                                          # default library
 python3 jellyfin_one_shot.py --source /path/to/movies --dry-run    # one-pass preview
 python3 jellyfin_one_shot.py --source /path/to/movies              # run until 100%
 python3 jellyfin_one_shot.py --source /path/to/movies --max-passes 5   # bound a run
+python3 jellyfin_one_shot.py --source /path/to/movies --force-pass     # sweep anyway
 ```
 
 `--source` is the Jellyfin movie-library root. Like every other tool in the

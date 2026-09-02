@@ -262,11 +262,53 @@ class RunOneShotTests(unittest.TestCase):
     def _steps_called(self, fake: FakeToolRunner) -> list[str]:
         return [name for name, _args in fake.calls]
 
-    def test_complete_library_exits_0_on_first_pass(self) -> None:
+    def test_complete_library_is_left_alone_by_the_preflight_audit(self) -> None:
+        # The auditor is the verdict this runner chases and the cheapest step
+        # by far, so a finished library is audited and then left alone.
         fake = FakeToolRunner(report=COMPLETE_REPORT)
         code = self._run(fake, dry_run=False)
         self.assertEqual(code, 0)
+        self.assertEqual(self._steps_called(fake), ["library_auditor.py"])
+        text = self.runtime_log.read_text(encoding="utf-8")
+        self.assertIn("LIBRARY ALREADY COMPLETE", text)
+        self.assertIn("--force-pass", text)
+
+    def test_force_pass_runs_the_sweep_even_when_complete(self) -> None:
+        fake = FakeToolRunner(report=COMPLETE_REPORT)
+        code = self._run(fake, dry_run=False, force_pass=True)
+        self.assertEqual(code, 0)
         self.assertEqual(self._steps_called(fake), ["subtitle_fetcher.py", "library_auditor.py"])
+
+    def test_preflight_does_not_shorten_a_dry_run(self) -> None:
+        # A dry run previews exactly one pass; skipping it would preview nothing.
+        fake = FakeToolRunner(report=COMPLETE_REPORT)
+        code = self._run(fake, dry_run=True, force_pass=False)
+        self.assertEqual(code, 0)
+        self.assertEqual(self._steps_called(fake), ["subtitle_fetcher.py", "library_auditor.py"])
+
+    def test_partial_library_still_runs_a_full_pass(self) -> None:
+        fake = FakeToolRunner(report=PARTIAL_REPORT)
+        code = self._run(fake, dry_run=False, max_passes=1)
+        self.assertEqual(code, 1)
+        fetch_calls = [n for n, _a in fake.calls if n == "subtitle_fetcher.py"]
+        self.assertEqual(len(fetch_calls), 1, "an incomplete library is never left alone")
+        text = self.runtime_log.read_text(encoding="utf-8")
+        self.assertIn("Pre-flight coverage: 1/2", text)
+
+    def test_preflight_empty_library_exits_2_without_a_sweep(self) -> None:
+        fake = FakeToolRunner(report=EMPTY_REPORT)
+        code = self._run(fake, dry_run=False, max_passes=5)
+        self.assertEqual(code, 2)
+        self.assertEqual(self._steps_called(fake), ["library_auditor.py"])
+
+    def test_unusable_preflight_falls_through_to_a_full_pass(self) -> None:
+        # A blocked or broken audit is not a verdict: the pass loop's own
+        # retry and bad-audit accounting applies.
+        fake = FakeToolRunner(report="", auditor_rc=2, write_report=False)
+        code = self._run(fake, dry_run=False, max_passes=1)
+        self.assertEqual(code, 1)
+        fetch_calls = [n for n, _a in fake.calls if n == "subtitle_fetcher.py"]
+        self.assertEqual(len(fetch_calls), 1, "no verdict means the sweep still runs")
 
     def test_dry_run_is_exactly_one_pass_and_exits_0(self) -> None:
         fake = FakeToolRunner(report=PARTIAL_REPORT)
@@ -293,17 +335,17 @@ class RunOneShotTests(unittest.TestCase):
         fake = FakeToolRunner(report=PARTIAL_REPORT)
         code = self._run(fake, dry_run=False, max_passes=2)
         self.assertEqual(code, 1)
-        # Two passes plus the final audit.
+        # Pre-flight, then two passes, then the final audit.
         audit_calls = [args for name, args in fake.calls if name == "library_auditor.py"]
-        self.assertEqual(len(audit_calls), 3)
+        self.assertEqual(len(audit_calls), 4)
         self.assertTrue(any("--fail-on-findings" in args for args in audit_calls),
                         "the final audit uses the fail gate")
-        self.assertFalse(any("--fail-on-findings" in args for args in audit_calls[:2]),
-                         "per-pass audits do not use the fail gate")
+        self.assertFalse(any("--fail-on-findings" in args for args in audit_calls[:3]),
+                         "the pre-flight and per-pass audits do not use the fail gate")
 
     def test_empty_library_exits_2_with_no_loop(self) -> None:
         fake = FakeToolRunner(report=EMPTY_REPORT)
-        code = self._run(fake, dry_run=False, max_passes=5)
+        code = self._run(fake, dry_run=False, max_passes=5, force_pass=True)
         self.assertEqual(code, 2)
         # The empty verdict comes from the first pass; no further passes.
         self.assertEqual(len([n for n, _a in fake.calls if n == "subtitle_fetcher.py"]), 1)
@@ -314,8 +356,10 @@ class RunOneShotTests(unittest.TestCase):
         fake = FakeToolRunner(report="", auditor_rc=2, write_report=False)
         code = self._run(fake, dry_run=False, max_passes=10)
         self.assertEqual(code, 1)
+        # One pre-flight attempt (which cannot produce a verdict) plus three
+        # bad passes, each of AUDIT_ATTEMPTS_PER_PASS tries.
         self.assertEqual(len([n for n, _a in fake.calls if n == "library_auditor.py"]),
-                         js.AUDIT_ATTEMPTS_PER_PASS * js.MAX_CONSECUTIVE_BAD_AUDITS)
+                         1 + js.AUDIT_ATTEMPTS_PER_PASS * js.MAX_CONSECUTIVE_BAD_AUDITS)
 
     def test_auditor_lock_contention_is_retried_within_the_pass(self) -> None:
         # The auditor is blocked (rc 3, another process holds the lock) for

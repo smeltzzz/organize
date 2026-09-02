@@ -17,6 +17,8 @@ what" runner. It handles:
   - Partial runs (every step is idempotent, so re-running resumes
     from where it left off)
   - Dry-run mode for preview (exactly one pass, nothing is written)
+  - An already-complete library (audited first, so a re-run of a finished
+    library costs one audit instead of a full sweep; --force-pass overrides)
 
 Guaranteed-finish behaviour (no silent infinite loops):
   - empty library (no movie folders)           -> exit 2, with the fix
@@ -49,7 +51,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # The canonical Jellyfin movie-library root — the same default every sibling
 # tool hardcodes (subtitle_fetcher.py's LIBRARY_DIR, mkv_track_cleaner.py's
@@ -383,6 +385,23 @@ def is_library_complete(covered: int | None, total: int | None) -> bool:
     return total > 0 and covered == total
 
 
+def log_empty_library(runtime_log: Path) -> None:
+    """The one misconfiguration that can look like success: 0/0 coverage.
+
+    An empty library (or a --source that points above the movie folders)
+    satisfies "covered == total", so it has to be named as a failure with the
+    layout this toolchain expects.
+    """
+    log_error(runtime_log, "=" * 60)
+    log_error(runtime_log, "STOPPING: no movie folders found under --source.")
+    log_error(runtime_log, "The canonical Jellyfin layout is one folder per movie:")
+    log_error(runtime_log, "    Title (Year)/Title (Year).mkv")
+    log_error(runtime_log, "If this directory is genuinely empty there is nothing to "
+                           "complete; otherwise check that --source points at the "
+                           "library that holds the movie folders.")
+    log_error(runtime_log, "=" * 60)
+
+
 # ---------------------------------------------------------------------------
 # UTC day rollover wait
 # ---------------------------------------------------------------------------
@@ -429,6 +448,7 @@ def run_one_shot(
     max_passes: int = 0,
     tools: dict[str, bool] | None = None,
     timeout_scale: float = 1.0,
+    force_pass: bool = False,
 ) -> int:
     """
     Run the one-shot completion loop.
@@ -444,6 +464,11 @@ def run_one_shot(
         max_passes: Maximum number of passes (0 = unlimited, live runs only).
         tools: Dictionary of available tools from check_prerequisites().
         timeout_scale: Multiplier for the per-step timeouts (0 = no timeout).
+        force_pass: Run at least one full pipeline pass even when the library
+            already audits 100% canonical. The auditor's verdict is the
+            library contract (layout + a validated English sidecar); it never
+            inspects the MKV's own tracks, so this is the way to ask for a
+            sweep that also drops extra audio and embedded subtitles.
 
     Returns:
         Exit code: 0 if library is complete (or dry-run preview finished),
@@ -478,6 +503,7 @@ def run_one_shot(
     log_info(runtime_log, f"Library: {library}")
     log_info(runtime_log, f"Nice mode: {nice}")
     log_info(runtime_log, f"Dry run: {dry_run}")
+    log_info(runtime_log, f"Force pass: {force_pass}")
     log_info(runtime_log, f"Max passes: {max_passes_text}")
     log_info(runtime_log, f"Script directory: {script_dir}")
     log_info(runtime_log, f"Log directory: {log_dir}")
@@ -499,6 +525,61 @@ def run_one_shot(
         log_warning(runtime_log, f"  Could not discover movies: {e}")
 
     log_info(runtime_log, "")
+
+    # -----------------------------------------------------------------------
+    # Pre-flight: is the library already complete?
+    # -----------------------------------------------------------------------
+    # The auditor is the verdict this runner chases, and it is by far the
+    # cheapest step - it reads folder layout and the subtitle sidecar and
+    # never opens the container. Asking before the first pass turns a re-run
+    # of a finished library into one audit instead of a five-tool sweep:
+    # seconds instead of hours. --force-pass skips the question, because the
+    # verdict deliberately does not cover the MKV's own tracks.
+    if not dry_run and not force_pass:
+        log_info(runtime_log, "PRE-FLIGHT: auditing the library before doing any work...")
+
+        preflight_report = log_dir / "auditor-preflight.txt"
+        preflight_code, _stdout, _stderr = run_tool(
+            runtime_log,
+            script_dir / "library_auditor.py",
+            [
+                "--source", str(library),
+                "--report", str(preflight_report),
+                "--log", str(log_dir / "library_auditor.log"),
+            ],
+            "library_auditor (pre-flight)",
+            timeout=scaled(600),
+            transcript=log_dir / "transcript_library_auditor.log",
+        )
+
+        covered, total = parse_auditor_coverage(runtime_log, preflight_report)
+        if covered is not None and total is not None:
+            if total == 0:
+                log_empty_library(runtime_log)
+                return 2
+            if is_library_complete(covered, total):
+                log_info(runtime_log, "")
+                log_info(runtime_log, "=" * 60)
+                log_info(runtime_log, "LIBRARY ALREADY COMPLETE - NOTHING TO DO")
+                log_info(runtime_log, f"The auditor reports {covered}/{total} canonical movie "
+                                      "folders, so no fetch, remux, inspection or sync was run.")
+                log_info(runtime_log, "Every step is idempotent: none of them can improve on a")
+                log_info(runtime_log, "library that already meets the contract.")
+                log_info(runtime_log, "")
+                log_info(runtime_log, "Caveat - what the verdict covers: a canonical folder layout")
+                log_info(runtime_log, "and a validated .eng.srt sidecar. It does not inspect the")
+                log_info(runtime_log, "MKV's own tracks, so a movie that still carries extra audio")
+                log_info(runtime_log, "or embedded subtitles audits as canonical.")
+                log_info(runtime_log, "Run again with --force-pass to sweep the library anyway.")
+                log_info(runtime_log, "=" * 60)
+                return 0
+            log_info(runtime_log, f"  Pre-flight coverage: {covered}/{total} - running a full pass.")
+        else:
+            # A blocked or broken audit is not a verdict: fall through and let
+            # the pass loop apply its own retries and bad-audit accounting.
+            log_warning(runtime_log, f"  Pre-flight audit produced no usable coverage "
+                                     f"(exit code {preflight_code}); running a full pass.")
+        log_info(runtime_log, "")
 
     # Main pass loop
     while True:
@@ -756,14 +837,7 @@ def run_one_shot(
             # total > 0 - fail fast with the actual problem instead of
             # looping forever.
             if total == 0:
-                log_error(runtime_log, "=" * 60)
-                log_error(runtime_log, "STOPPING: no movie folders found under --source.")
-                log_error(runtime_log, "The canonical Jellyfin layout is one folder per movie:")
-                log_error(runtime_log, '    Title (Year)/Title (Year).mkv')
-                log_error(runtime_log, "If this directory is genuinely empty there is nothing to "
-                                       "complete; otherwise check that --source points at the "
-                                       "library that holds the movie folders.")
-                log_error(runtime_log, "=" * 60)
+                log_empty_library(runtime_log)
                 return 2
 
             if is_library_complete(covered, total):
@@ -936,6 +1010,16 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     parser.add_argument(
+        "--force-pass",
+        action="store_true",
+        help="Run at least one full pipeline pass even when the library already "
+             "audits 100%% canonical. By default the library is audited first and "
+             "a complete library is left alone; the auditor's verdict covers the "
+             "folder layout and the subtitle sidecar, but never the MKV's own "
+             "tracks, so this is the way to ask for a real sweep.",
+    )
+
+    parser.add_argument(
         "--max-passes",
         type=int,
         default=0,
@@ -1054,6 +1138,7 @@ def main(argv: list[str] | None = None) -> int:
             max_passes=args.max_passes,
             tools=tools,
             timeout_scale=args.timeout_scale,
+            force_pass=args.force_pass,
         )
         return exit_code
     except KeyboardInterrupt:
