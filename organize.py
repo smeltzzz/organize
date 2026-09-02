@@ -382,8 +382,8 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
     try:
         import subtitle_fetcher as sf_ocr
         ocr_backend, ocr_note = sf_ocr.detect_ocr_backend(sf_ocr.OCR_BACKEND_AUTO)
-    except Exception:
-        ocr_backend, ocr_note = None, "subtitle_fetcher is unavailable"
+    except Exception as exc:
+        ocr_backend, ocr_note = None, f"subtitle_fetcher is unavailable ({exc})"
     if ocr_backend is not None:
         checks.append(DiagnosticCheck(
             name="OCR (image subtitles)",
@@ -396,8 +396,11 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             name="OCR (image subtitles)",
             status="warn",
             message="No OCR backend found",
-            detail="Text tracks (SRT/SSA/ASS) are still extracted; image-only movies fall "
-                   "through to the download sources",
+            detail=(
+                (f"{ocr_note}. " if ocr_note else "")
+                + "Text tracks (SRT/SSA/ASS) are still extracted; image-only movies fall "
+                  "through to the download sources"
+            ),
             remedy=(
                 "pgsrip: pip install pgsrip  (needs MKVToolNix, tesseract and tessdata)\n"
                 "sup2srt + Tesseract: https://github.com/retrontology/sup2srt\n"

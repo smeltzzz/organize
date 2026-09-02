@@ -99,7 +99,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers (vendored inline)
 #
@@ -634,7 +633,7 @@ class Report:
         detail: str = "",
         ordinal: int | None = None,
         marker: str = "",
-        fields: Iterable[tuple[str, str]] = (),
+        fields: Iterable[tuple[str, object]] = (),
         detail_column: int = 0,
         indent: int = 4,
     ) -> Report:
@@ -1058,7 +1057,7 @@ def pick_video_for(srt_name: str, names: Sequence[str]) -> str | None:
     candidates.sort(key=lambda name: (VIDEO_PRIORITY.index(Path(name).suffix.casefold()), name))
     return candidates[0]
 
-def discover_jobs(library: Path) -> tuple[list[Job], list["SyncResult"], int]:
+def discover_jobs(library: Path) -> tuple[list[Job], list[SyncResult], int]:
     """Walk the library and pair every non-junk .srt with its movie file.
 
     Returns ``(jobs, skipped_results, video_file_count)``. A sidecar without
@@ -1129,7 +1128,7 @@ def classify_outcome(
     staged_valid: bool,
     staged_reason: str,
     parsed: ParsedSync,
-    cfg: "Config",
+    cfg: Config,
 ) -> tuple[str, str]:
     """The decision table for one ffsubsync invocation (pure, unit-tested).
 
@@ -1265,7 +1264,7 @@ def _decode(data: bytes) -> str:
     # with the locale encoding.
     return data.decode("utf-8", errors="replace")
 
-def run_ffsubsync(cfg: "Config", command: Sequence[str]) -> tuple[int, str, str]:
+def run_ffsubsync(cfg: Config, command: Sequence[str]) -> tuple[int, str, str]:
     """Launch one ffsubsync invocation.
 
     Kept as a single module-level function so tests can substitute a
@@ -1423,7 +1422,7 @@ def _remembered_offset(record: dict[str, Any]) -> float | None:
 
 def sync_one(
     job: Job,
-    cfg: "Config",
+    cfg: Config,
     binary: str,
     features: FfsubsyncFeatures,
     state: dict[str, Any] | None = None,

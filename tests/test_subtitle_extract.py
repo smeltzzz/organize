@@ -23,8 +23,6 @@ from unittest import mock
 import subtitle_fetcher as sf
 import sync_subtitles as ss
 
-
-
 ASS_TRACK = (
     "[Script Info]\nTitle: demo\n\n[V4+ Styles]\n"
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "

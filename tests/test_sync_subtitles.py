@@ -321,7 +321,7 @@ class FakeFfsubsync:
         self.failed_marker = failed_marker
         self.calls: list[list[str]] = []
 
-    def __call__(self, cfg: ss.Config, command: "os.PathLike[str] | str | list[str]") -> tuple[int, str, str]:
+    def __call__(self, cfg: ss.Config, command: os.PathLike[str] | str | list[str]) -> tuple[int, str, str]:
         self.calls.append(list(map(str, command)))
         lines: list[str] = []
         if self.leaving_unmodified:

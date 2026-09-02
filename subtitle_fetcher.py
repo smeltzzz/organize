@@ -89,6 +89,7 @@ import argparse
 import errno
 import gzip
 import hashlib
+import html as _html
 import io
 import json
 import os
@@ -925,9 +926,6 @@ def report_banner(
 # breakers, the durable UTC search caps (reserve_cb), and failover.
 # =============================================================================
 
-import html as _html  # used by the vendored section below
-
-
 __version__ = "1.0.0"  # overridden below to the real version
 
 # ---------------------------------------------------------------------------
@@ -1553,7 +1551,7 @@ class SubSourceSource(BaseSource):
         text = search_page.decode("utf-8", errors="replace")
         slugs = set(re.findall(r'href="(/subtitles/[a-z0-9\-]+)"', text))
         wanted = f"/subtitles/{slug}-{identity.year}"
-        cands: list[ScrapeCandidate] = []
+        cands = []
         if wanted in slugs:
             cands.extend(self._movie_page_candidates(t.get(f"{self.BASE}{wanted}"), identity))
         for other in sorted(s for s in slugs if s.endswith(f"-{identity.year}")):
@@ -2140,7 +2138,7 @@ def run_scrape_self_tests(errors: list[str]) -> None:
     subsunacs_page_en = (
         "<html><h1>The Father (2020)</h1>Език: Английски"
         "<a href=\"https://subsunacs.net/getentry.php?id=9001&amp;ei=0\">srt</a></html>"
-    ).encode("utf-8")
+    ).encode()
     t = FakeT({
         "https://subsunacs.net/search.php": subsunacs_search,
         "https://subsunacs.net/subtitles/The_Father-9001/": subsunacs_page_en,
@@ -2153,7 +2151,7 @@ def run_scrape_self_tests(errors: list[str]) -> None:
         "https://subsunacs.net/search.php": subsunacs_search,
         "https://subsunacs.net/subtitles/The_Father-9001/": (
             "<html><h1>The Father (2020)</h1>Език: Български</html>"
-        ).encode("utf-8"),
+        ).encode(),
     })
     try:
         SubsunacsSource().fetch(cands[0], t2)
@@ -2204,7 +2202,7 @@ def run_scrape_self_tests(errors: list[str]) -> None:
         b"<td><a href=\"http://subs.sab.bz/index.php?s=x&amp;act=download&amp;attach_id=4242\">The Father (2020)</a></td>"
         b"</tr></table></body></html>"
     )
-    cyrillic = "1\n00:00:01,000 --> 00:00:03,000\nздравей свят\n\n".encode("utf-8")
+    cyrillic = "1\n00:00:01,000 --> 00:00:03,000\nздравей свят\n\n".encode()
     t = FakeT({
         "http://subs.sab.bz/index.php?act=download": SRT,
         "http://subs.sab.bz/index.php?": subsab_search,
@@ -2320,7 +2318,7 @@ SCRAPE_DEFAULT_SEARCH_DAILY_CAP = DEFAULT_SEARCH_DAILY_CAP
 SUBDL_DEFAULT_DAILY_CAP = 50
 SUBDL_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
-__version__ = "2.11.0"
+__version__ = "2.11.1"
 APP_USER_AGENT = "JellyfinMovieSubtitleFetcher v2.9"
 API_BASE = "https://api.opensubtitles.com/api/v1"
 
@@ -4546,8 +4544,8 @@ def run_self_tests() -> int:
                 raise ScrapeSourceError(f"unrouted POST {url}") from exc
 
     sample_srt = "1\n00:00:01,000 --> 00:00:03,000\nhello\n\n2\n00:00:04,000 --> 00:00:06,000\nworld\n"
-    import zipfile as _zf
     import io as _io
+    import zipfile as _zf
     _buf = _io.BytesIO()
     with _zf.ZipFile(_buf, "w", _zf.ZIP_DEFLATED) as _z:
         _z.writestr("The.Father.2020.utf.srt", sample_srt.encode("utf-8"))
@@ -4810,17 +4808,16 @@ MKVTOOLNIX_INSTALL_HINT = (
 def find_mkvtoolnix_binary(name: str, explicit: str | None = None) -> str | None:
     """Locate ``mkvmerge``/``mkvextract`` on the PATH or in a known install dir."""
     if explicit:
-        candidate = Path(explicit)
-        if candidate.is_file():
-            return str(candidate)
-        found = shutil.which(explicit)
-        return found
+        explicit_path = Path(explicit)
+        if explicit_path.is_file():
+            return str(explicit_path)
+        return shutil.which(explicit)
     found = shutil.which(name)
     if found:
         return found
-    for candidate in _MKVTOOLNIX_PATHS.get(name, ()):
-        if Path(candidate).is_file():
-            return candidate
+    for install_path in _MKVTOOLNIX_PATHS.get(name, ()):
+        if Path(install_path).is_file():
+            return install_path
     return None
 
 
@@ -4843,8 +4840,7 @@ def run_external_command(
     try:
         completed = subprocess.run(
             [str(part) for part in command],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=timeout if timeout and timeout > 0 else None,
             creationflags=creationflags,
         )
@@ -5155,7 +5151,7 @@ def ass_to_srt(text: str) -> str:
         parts = payload.split(",", len(columns) - 1)
         if len(parts) != len(columns):
             continue
-        row = dict(zip(columns, parts))
+        row = dict(zip(columns, parts, strict=True))
         start = _ass_timestamp_to_srt(row.get("start", ""))
         end = _ass_timestamp_to_srt(row.get("end", ""))
         if not start or not end:
@@ -5333,7 +5329,7 @@ class OcrBackend:
             return source.with_suffix(".srt")
         return output
 
-    def supports_track(self, track: "EmbeddedSubtitleTrack") -> bool:
+    def supports_track(self, track: EmbeddedSubtitleTrack) -> bool:
         family = {
             "S_HDMV/PGS": "PGS",
             "S_VOBSUB": "VOBSUB",
@@ -5344,18 +5340,18 @@ class OcrBackend:
 
 def _resolve_program(explicit: str, name: str, *search_paths: str) -> str | None:
     if explicit:
-        candidate = Path(explicit)
-        if candidate.is_file():
-            return str(candidate)
+        explicit_path = Path(explicit)
+        if explicit_path.is_file():
+            return str(explicit_path)
         found = shutil.which(explicit)
         if found:
             return found
     found = shutil.which(name)
     if found:
         return found
-    for candidate in search_paths:
-        if Path(candidate).is_file():
-            return candidate
+    for search_path in search_paths:
+        if Path(search_path).is_file():
+            return search_path
     return None
 
 
@@ -5391,7 +5387,7 @@ def _pgstosrt_program(explicit: str = "") -> tuple[str, ...] | None:
     return (dotnet, dll)
 
 
-OCR_BACKEND_BUILDERS: dict[str, Callable[[str], "OcrBackend | None"]] = {}
+OCR_BACKEND_BUILDERS: dict[str, Callable[[str], OcrBackend | None]] = {}
 
 
 def build_ocr_backend(key: str, explicit_bin: str = "") -> OcrBackend | None:
@@ -5409,17 +5405,17 @@ def build_ocr_backend(key: str, explicit_bin: str = "") -> OcrBackend | None:
             return None
         return OcrBackend(key, "sup2srt + Tesseract", (program,), frozenset({"PGS"}))
     if key == OCR_BACKEND_SUBTITLEEDIT:
-        program = _subtitleedit_program(explicit_bin)
-        if not program:
+        se_program = _subtitleedit_program(explicit_bin)
+        if not se_program:
             return None
         # Subtitle Edit reads both PGS (.sup) and VobSub (.idx/.sub) inputs.
-        return OcrBackend(key, "Subtitle Edit", program,
+        return OcrBackend(key, "Subtitle Edit", se_program,
                           frozenset({"PGS", "VOBSUB", "DVBSUB"}), output_mode="sibling")
     if key == OCR_BACKEND_PGSTOSRT:
-        program = _pgstosrt_program(explicit_bin)
-        if not program:
+        pgstosrt_program = _pgstosrt_program(explicit_bin)
+        if not pgstosrt_program:
             return None
-        return OcrBackend(key, "PgsToSrt", program, frozenset({"PGS"}))
+        return OcrBackend(key, "PgsToSrt", pgstosrt_program, frozenset({"PGS"}))
     return None
 
 
@@ -5508,9 +5504,11 @@ def run_ocr(
     """OCR one extracted bitmap subtitle stream into ``output``."""
     command = backend.build_command(source, output, track_id=track_id, language=language)
     rc, out, err = run_external_command(command, timeout=timeout)
-    produced = find_sibling_srt(source, backend.result_path(source, output)) \
+    produced: Path | None = (
+        find_sibling_srt(source, backend.result_path(source, output))
         if backend.output_mode == "sibling" else backend.result_path(source, output)
-    if rc == 0 and produced.is_file() and produced.stat().st_size > 0:
+    )
+    if rc == 0 and produced is not None and produced.is_file() and produced.stat().st_size > 0:
         if produced != output:
             try:
                 shutil.move(str(produced), str(output))
@@ -5968,7 +5966,7 @@ class QueueConfig:
     # 0 = no per-run cap on OCR jobs (they are local work, not provider quota)
     ocr_limit: int = 0
 
-    def extract_options(self, *, ocr_allowed: bool = True, dry_run: bool = False) -> "ExtractOptions":
+    def extract_options(self, *, ocr_allowed: bool = True, dry_run: bool = False) -> ExtractOptions:
         return ExtractOptions(
             enabled=self.extract_embedded,
             ocr_backend=self.ocr_backend,
@@ -6319,7 +6317,6 @@ def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str, str]:
     if not candidates:
         return "missing", None, "no English SRT sidecar", ""
     covering = covering_english_srt_paths(video)
-    covering_names = {item.name.casefold() for item in covering}
     for path in covering:
         if path not in candidates and not any(item.name.casefold() == path.name.casefold() for item in candidates):
             continue
@@ -6956,7 +6953,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                             identity.title, identity.year, identity.normalized_title),
                         keys=tuple(scrape_keys),
                         chain=scrape_chain,
-                        on_reason=lambda key, why: pool_reasons.append(
+                        on_reason=lambda key, why, _reasons=pool_reasons: _reasons.append(
                             f"{scrape_provider_label(key)}: {why}"),
                     )
                 except Exception as exc:  # a scraping-tier bug must not kill the run
