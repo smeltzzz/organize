@@ -45,7 +45,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-VERSION = "3.4.0"
+VERSION = "3.5.0"
 
 # ANSI styling helpers (with safe fallbacks)
 _SUPPORTS_COLOR = (
@@ -345,6 +345,66 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             remedy=(
                 "Install once:  pip install ffsubsync   (needs ffmpeg on the PATH)\n"
                 "Alternative:   pipx install ffsubsync"
+            ),
+        ))
+
+    # 4d. mkvextract — needed to extract the movie's own embedded subtitle tracks
+    #     (mkvmerge is already reported above for the track cleaner)
+    try:
+        import subtitle_fetcher as sf_extract
+        mkvmerge_bin = sf_extract.find_mkvtoolnix_binary("mkvmerge")
+        mkvextract_bin = sf_extract.find_mkvtoolnix_binary("mkvextract")
+    except Exception:
+        mkvmerge_bin = None
+        mkvextract_bin = None
+    if mkvmerge_bin and mkvextract_bin:
+        checks.append(DiagnosticCheck(
+            name="mkvextract (embedded subs)",
+            status="ok",
+            message=f"Found: {get_binary_version(mkvextract_bin, '--version') or 'mkvextract'}",
+            detail=f"{mkvextract_bin} · mkvmerge {mkvmerge_bin}",
+        ))
+    else:
+        checks.append(DiagnosticCheck(
+            name="mkvextract (embedded subs)",
+            status="warn",
+            message="Not found on PATH",
+            detail="subtitle_fetcher.py cannot read the movie's own embedded subtitle tracks, "
+                   "so those movies are downloaded from the provider sources instead",
+            remedy=(
+                "Windows: winget install MoritzBunkus.MKVToolNix\n"
+                "Debian/Ubuntu: sudo apt install -y mkvtoolnix\n"
+                "macOS: brew install mkvtoolnix"
+            ),
+        ))
+
+    # 4e. Image-subtitle OCR — optional, only for PGS/VobSub embedded tracks
+    try:
+        import subtitle_fetcher as sf_ocr
+        ocr_backend, ocr_note = sf_ocr.detect_ocr_backend(sf_ocr.OCR_BACKEND_AUTO)
+    except Exception:
+        ocr_backend, ocr_note = None, "subtitle_fetcher is unavailable"
+    if ocr_backend is not None:
+        checks.append(DiagnosticCheck(
+            name="OCR (image subtitles)",
+            status="ok",
+            message=f"Found: {ocr_backend.label}",
+            detail="Embedded PGS/VobSub image tracks can be converted to SRT",
+        ))
+    else:
+        checks.append(DiagnosticCheck(
+            name="OCR (image subtitles)",
+            status="warn",
+            message="No OCR backend found",
+            detail="Text tracks (SRT/SSA/ASS) are still extracted; image-only movies fall "
+                   "through to the download sources",
+            remedy=(
+                "pgsrip: pip install pgsrip  (needs MKVToolNix, tesseract and tessdata)\n"
+                "sup2srt + Tesseract: https://github.com/retrontology/sup2srt\n"
+                "Subtitle Edit: https://www.nikse.dk/subtitleedit\n"
+                "PgsToSrt: set PGSTOSRT_DLL to the dll path (needs dotnet)\n"
+                "Or point subtitle_fetcher.py at your own tool: --ocr-backend custom "
+                "--ocr-bin <program> --ocr-args \"{input}\" \"{output}\""
             ),
         ))
 

@@ -11,6 +11,9 @@ library) may loop forever.
 
 from __future__ import annotations
 
+import contextlib
+import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -405,7 +408,12 @@ class MainValidationTests(unittest.TestCase):
         return Path(js.__file__).resolve().parent
 
     def test_missing_source_flag(self) -> None:
-        self.assertEqual(js.main([]), 2)
+        # There is no "missing" source any more: the library root resolves
+        # like every sibling tool (default, then MOVIE_STD_TARGET). Pin the
+        # default to an absent path so the run still refuses with exit 2.
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(js, "DEFAULT_LIBRARY", str(self.tmp / "absent")):
+            self.assertEqual(js.main([]), 2)
 
     def test_nonexistent_source(self) -> None:
         self.assertEqual(js.main(["--source", str(self.tmp / "nope")]), 2)
@@ -452,6 +460,55 @@ class MainValidationTests(unittest.TestCase):
 
     def test_self_test_passes(self) -> None:
         self.assertEqual(js.main(["--self-test"]), 0)
+
+
+# ---------------------------------------------------------------------------
+# Library root resolution
+# ---------------------------------------------------------------------------
+class LibraryResolutionTests(unittest.TestCase):
+    """The one-shot resolves its library root exactly like the sibling tools:
+    flag first, then MOVIE_STD_TARGET, then the documented default — so a bare
+    run finishes the same library everything else maintains."""
+
+    def setUp(self) -> None:
+        self._saved = os.environ.pop("MOVIE_STD_TARGET", None)
+
+    def tearDown(self) -> None:
+        if self._saved is not None:
+            os.environ["MOVIE_STD_TARGET"] = self._saved
+        else:
+            os.environ.pop("MOVIE_STD_TARGET", None)
+
+    def test_no_flag_no_env_uses_documented_default(self) -> None:
+        self.assertEqual(js.resolve_library(None), Path(js.DEFAULT_LIBRARY))
+        self.assertEqual(js.DEFAULT_LIBRARY, r"E:\torrents\final_organized",
+                         "the default must stay identical to the sibling tools")
+
+    def test_env_var_is_honored_without_a_flag(self) -> None:
+        os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
+        self.assertEqual(js.resolve_library(None), Path("/media/torrents/final_organized"))
+
+    def test_explicit_flag_beats_env_var(self) -> None:
+        os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
+        self.assertEqual(js.resolve_library(Path("/srv/movies")), Path("/srv/movies"))
+
+    def test_origin_is_reported_for_every_source(self) -> None:
+        self.assertEqual(
+            js.describe_library_origin(None),
+            f"the default library root ({js.DEFAULT_LIBRARY})",
+        )
+        os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
+        self.assertEqual(js.describe_library_origin(None), "MOVIE_STD_TARGET")
+        self.assertEqual(js.describe_library_origin(Path("/srv/movies")), "--source")
+
+    def test_bare_run_rejects_a_default_library_that_is_not_there(self) -> None:
+        """A bare run on a machine without the default path must still fail
+        loudly (exit 2) and say where the path came from."""
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(js, "DEFAULT_LIBRARY", "/nonexistent/library"), \
+                mock.patch("sys.stderr", new=io.StringIO()) as err:
+            self.assertEqual(js.main([]), 2)
+        self.assertIn("resolved from the default library root", err.getvalue())
 
 
 if __name__ == "__main__":

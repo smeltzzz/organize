@@ -26,8 +26,12 @@ Guaranteed-finish behaviour (no silent infinite loops):
     (the daily caps reset and the scraping tier re-offers) and continue
 
 Usage:
+    python3 jellyfin_one_shot.py                                 # default library
     python3 jellyfin_one_shot.py --source /path/to/library [--nice]
                                    [--dry-run] [--max-passes N]
+
+With no --source the library root resolves exactly like every sibling tool:
+E:\\torrents\\final_organized, or MOVIE_STD_TARGET when it is set.
 """
 
 from __future__ import annotations
@@ -45,7 +49,15 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+
+# The canonical Jellyfin movie-library root — the same default every sibling
+# tool hardcodes (subtitle_fetcher.py's LIBRARY_DIR, mkv_track_cleaner.py's
+# TARGET_DIR, 10bit.py's SOURCE_DIR, sync_subtitles.py's DEFAULT_LIBRARY,
+# library_auditor.py's SOURCE_DIR and pipeline.py's DEFAULT_LIBRARY). Keeping
+# the value identical means a bare run finishes the same library the other
+# scripts maintain. MOVIE_STD_TARGET overrides it; an explicit --source wins.
+DEFAULT_LIBRARY = r"E:\torrents\final_organized"
 
 DEFAULT_LOG_DIR = Path(__file__).parent / "logs"
 SCRAPING_DAILY_CAP = 20  # per source, matches subtitle_fetcher.py default
@@ -260,6 +272,35 @@ def log_dir_inside_source(log_dir: Path, source: Path) -> bool:
         return True
     except (OSError, ValueError):
         return False
+
+
+# ---------------------------------------------------------------------------
+# Library root resolution
+# ---------------------------------------------------------------------------
+def resolve_library(explicit: Path | None = None) -> Path:
+    """Resolve the movie-library root: --source, then MOVIE_STD_TARGET, then default.
+
+    Every sibling tool defaults its library root to ``DEFAULT_LIBRARY``
+    (``E:\\torrents\\final_organized``) and several honour ``MOVIE_STD_TARGET``,
+    so the one-shot does the same: run bare and it finishes the library the
+    rest of the toolchain already maintains. An explicit flag always wins.
+    """
+    if explicit is not None:
+        return Path(explicit).expanduser()
+    return Path(os.environ.get("MOVIE_STD_TARGET") or DEFAULT_LIBRARY).expanduser()
+
+
+def describe_library_origin(explicit: Path | None = None) -> str:
+    """Human-readable provenance of a resolved library root, for error messages.
+
+    "Which folder did it actually point at, and why?" is the whole content of
+    most misconfiguration reports, so name the source of the value.
+    """
+    if explicit is not None:
+        return "--source"
+    if (os.environ.get("MOVIE_STD_TARGET") or "").strip():
+        return "MOVIE_STD_TARGET"
+    return f"the default library root ({DEFAULT_LIBRARY})"
 
 
 # ---------------------------------------------------------------------------
@@ -858,10 +899,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {VERSION}",
     )
+    default_source = resolve_library()
     parser.add_argument(
         "--source",
         type=Path,
-        help="Path to the Jellyfin movie library",
+        default=default_source,
+        help="Path to the Jellyfin movie library (defaults to "
+             f"{DEFAULT_LIBRARY}, or MOVIE_STD_TARGET when set)",
     )
 
     parser.add_argument(
@@ -920,17 +964,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         return run_self_tests()
 
+    # Where the library root came from: an explicit flag, MOVIE_STD_TARGET, or
+    # the documented default. Reported on every failure below so a bare run
+    # that lands on the wrong folder says why instead of just "does not exist".
+    source_origin = (
+        "--source" if args.source != default_source else describe_library_origin(None)
+    )
+
     # Validate inputs
     if not args.source:
-        print("ERROR: --source is required", file=sys.stderr)
+        print("ERROR: --source is required (or set MOVIE_STD_TARGET)", file=sys.stderr)
         return 2
 
     if not args.source.exists():
         print(f"ERROR: Library directory does not exist: {args.source}", file=sys.stderr)
+        print(f"       resolved from {source_origin}", file=sys.stderr)
+        print("       pass --source <library>, or set MOVIE_STD_TARGET, to point at "
+              "the Jellyfin movie library", file=sys.stderr)
         return 2
 
     if not args.source.is_dir():
         print(f"ERROR: Source is not a directory: {args.source}", file=sys.stderr)
+        print(f"       resolved from {source_origin}", file=sys.stderr)
         return 2
 
     if log_dir_inside_source(args.log_dir, args.source):
@@ -984,6 +1039,8 @@ def main(argv: list[str] | None = None) -> int:
     log_info(runtime_log, "=" * 60)
     log_info(runtime_log, "STARTING ONE-SHOT COMPLETION")
     log_info(runtime_log, "=" * 60)
+    log_info(runtime_log, f"Library: {args.source}")
+    log_info(runtime_log, f"  resolved from {source_origin}")
     log_info(runtime_log, "")
 
     try:
@@ -1109,13 +1166,38 @@ def run_self_tests() -> int:
         # We don't actually wait in tests
         check(callable(wait_for_utc_midnight), "UTC wait function exists and is callable")
 
+        # Test 12: Library root resolution — flag > MOVIE_STD_TARGET > default,
+        # the same ladder every sibling tool walks.
+        saved_target = os.environ.pop("MOVIE_STD_TARGET", None)
+        try:
+            check(resolve_library(None) == Path(DEFAULT_LIBRARY),
+                  "library falls back to the documented default")
+            check(describe_library_origin(None) == f"the default library root ({DEFAULT_LIBRARY})",
+                  "default provenance is reported")
+
+            os.environ["MOVIE_STD_TARGET"] = str(tmp_path / "env_library")
+            check(resolve_library(None) == tmp_path / "env_library",
+                  "MOVIE_STD_TARGET overrides the default")
+            check(describe_library_origin(None) == "MOVIE_STD_TARGET",
+                  "MOVIE_STD_TARGET provenance is reported")
+
+            check(resolve_library(Path("/explicit/library")) == Path("/explicit/library"),
+                  "--source beats MOVIE_STD_TARGET")
+            check(describe_library_origin(Path("/explicit/library")) == "--source",
+                  "--source provenance is reported")
+        finally:
+            if saved_target is not None:
+                os.environ["MOVIE_STD_TARGET"] = saved_target
+            else:
+                os.environ.pop("MOVIE_STD_TARGET", None)
+
     if errors:
         print("SELF-TEST FAILED:")
         for error in errors:
             print(f"  - {error}")
         return 1
 
-    print("SELF-TEST PASSED (coverage parsing, completeness check, validation)")
+    print("SELF-TEST PASSED (coverage parsing, completeness check, validation, library resolution)")
     return 0
 
 

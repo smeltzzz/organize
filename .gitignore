@@ -30,6 +30,9 @@ Thumbs.db
 transcript_*.err
 # jellyfin_one_shot.py's default log dir (per-run logs + per-pass auditor reports)
 logs/
+# subtitle_fetcher.py's extraction record defaults to
+# <dir holding the scripts>/ReportsAndLogs/subtitle_fetcher_extracted.json
+ReportsAndLogs/
 
 # Accidental desktop / OS dumps
 Screenshot*.png
