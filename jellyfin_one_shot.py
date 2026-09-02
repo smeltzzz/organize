@@ -89,11 +89,12 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import IO
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 # The canonical Jellyfin movie-library root — the same default every sibling
 # tool hardcodes (subtitle_fetcher.py's LIBRARY_DIR, mkv_track_cleaner.py's
@@ -415,9 +416,11 @@ def run_tool(
     guard = threading.Lock()
     activity = {"last_line": time.monotonic(), "count": 0}
 
-    def reader(stream: object, kind: str) -> None:
+    def reader(stream: IO[str] | None, kind: str) -> None:
+        if stream is None:
+            return
         try:
-            for raw_line in stream:  # type: ignore[union-attr]
+            for raw_line in stream:
                 line = raw_line.rstrip("\r\n")
                 with guard:
                     captured[kind].append(line)
@@ -429,7 +432,7 @@ def run_tool(
             pass  # the stream closed under us: the process is gone
         finally:
             try:
-                stream.close()  # type: ignore[union-attr]
+                stream.close()
             except Exception:
                 pass
 
@@ -690,11 +693,11 @@ def wait_for_utc_midnight(runtime_log: Path) -> None:
     # Sleep in 1-hour chunks so we can log progress and be interruptible
     while wait_seconds > 0:
         if wait_seconds > 3600:
-            sleep_time = 3600
+            sleep_time = 3600.0
             wait_seconds -= sleep_time
         else:
             sleep_time = wait_seconds
-            wait_seconds = 0
+            wait_seconds = 0.0
 
         log_info(runtime_log, f"  Sleeping {sleep_time}s... (Ctrl+C to interrupt)")
         try:

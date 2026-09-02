@@ -914,7 +914,6 @@ def classify_folder(folder: Path) -> FolderAudit:
     if feature.name != f"{folder.name}.mkv":
         return FolderAudit(folder, "MKV_STEM_MISMATCH", files, "expected exact folder-name MKV stem")
 
-    expected_srt = f"{folder.name}{EXTERNAL_SRT_SUFFIX}"
     covering_srts = {f"{folder.name}{suffix}" for suffix in COVERING_ENGLISH_SRT_SUFFIXES}
     legacy_srt = f"{folder.name}{LEGACY_EXTERNAL_SRT_SUFFIX}"
     # Promote a validated legacy .en.srt to the canonical .eng.srt before the
