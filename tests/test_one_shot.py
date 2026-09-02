@@ -207,6 +207,9 @@ class FakeToolRunner:
         self.fetcher_rc = fetcher_rc
         self.write_report = write_report
         self.calls: list[tuple[str, list[str]]] = []
+        self.streaming: list[bool] = []
+        self.tags: list[str] = []
+        self.transcripts: list[Path] = []
 
     def __call__(
         self,
@@ -216,8 +219,15 @@ class FakeToolRunner:
         tool_name: str,
         timeout: float | None = None,
         transcript: Path | None = None,
+        **kwargs: object,
     ) -> tuple[int, str, str]:
+        # The real runner streams the child's output and tags it; the fake
+        # records how it was asked to behave so tests can assert on it.
         self.calls.append((script_path.name, list(args)))
+        self.streaming.append(bool(kwargs.get("echo", True)))
+        self.tags.append(str(kwargs.get("console_tag", "")))
+        if transcript is not None:
+            self.transcripts.append(Path(str(transcript)))
         if script_path.name == "subtitle_fetcher.py":
             return self.fetcher_rc, "fetcher ok\n", ""
         if script_path.name == "library_auditor.py":
@@ -231,6 +241,108 @@ class FakeToolRunner:
                 rc = 1 if ("--fail-on-findings" in args and not complete) else 0
             return rc, "", ""
         return 0, "", ""
+
+
+class StreamingToolTests(unittest.TestCase):
+    """``run_tool`` drives the whole "is it even working?" experience: it must
+    stream a tool's output as it happens, capture it for the decisions the
+    runner makes (quota markers), and keep talking when a tool goes quiet.
+
+    These run a real subprocess - a two-line script in a temp dir - because
+    the behaviour under test is the pipe, the threads and the timing.
+    """
+
+    SCRIPT = (
+        "import sys, time\n"
+        "print('first line', flush=True)\n"
+        "for i in range(3):\n"
+        "    time.sleep(0.05)\n"
+        "    print(f'line {i}', flush=True)\n"
+        "if len(sys.argv) > 1 and sys.argv[1] == 'fail':\n"
+        "    print('complaint', file=sys.stderr, flush=True)\n"
+        "    sys.exit(3)\n"
+        "if len(sys.argv) > 1 and sys.argv[1] == 'sleep':\n"
+        "    time.sleep(30)\n"
+    )
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="one_shot_stream_")
+        self.tmp = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.script = self.tmp / "tool.py"
+        self.script.write_text(self.SCRIPT, encoding="utf-8")
+        self.runtime_log = self.tmp / "run.log"
+        self.runtime_log.touch()
+
+    def _run(self, *script_args: str, **kwargs: object) -> tuple[int, str, str]:
+        return js.run_tool(
+            self.runtime_log, self.script, list(script_args), "demo tool",
+            transcript=kwargs.pop("transcript", None),
+            console_tag=kwargs.pop("console_tag", "demo"),
+            echo=kwargs.pop("echo", False),
+            heartbeat_seconds=kwargs.pop("heartbeat_seconds", 0.0),
+            timeout=kwargs.pop("timeout", None),
+        )
+
+    def test_output_is_captured_and_the_exit_code_is_returned(self) -> None:
+        code, out, err = self._run()
+        self.assertEqual(code, 0)
+        self.assertEqual(out.splitlines(), ["first line", "line 0", "line 1", "line 2"])
+        self.assertEqual(err, "")
+
+    def test_stderr_is_captured_separately(self) -> None:
+        code, out, err = self._run("fail")
+        self.assertEqual(code, 3)
+        self.assertIn("complaint", err)
+
+    def test_console_lines_are_tagged_with_the_step(self) -> None:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self._run(echo=True)
+        # The runner's own log lines are on the console too; the tagged ones
+        # are the child's, streamed line by line.
+        printed = [line for line in buffer.getvalue().splitlines()
+                   if line.startswith("[demo] ")]
+        self.assertEqual(len(printed), 4, printed)
+        self.assertIn("line 2", printed[-1])
+
+    def test_quiet_prints_nothing_from_the_tool(self) -> None:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self._run(echo=False)
+        self.assertEqual([line for line in buffer.getvalue().splitlines()
+                          if line.startswith("[demo] ")], [])
+
+    def test_the_transcript_is_bounded(self) -> None:
+        transcript = self.tmp / "demo.console.log"
+        self._run(transcript=transcript)
+        self.assertTrue(transcript.is_file())
+        self.assertIn("line 2", transcript.read_text(encoding="utf-8"))
+
+    def test_a_silent_tool_is_reported_as_still_working(self) -> None:
+        with mock.patch.object(js.time, "sleep", lambda _s: None):
+            self._run("sleep", heartbeat_seconds=0.01, timeout=0.2)
+        text = self.runtime_log.read_text(encoding="utf-8")
+        self.assertIn("still working", text)
+
+    def test_a_timeout_kills_the_tool_and_reports_minus_one(self) -> None:
+        with mock.patch.object(js.time, "sleep", lambda _s: None):
+            code, out, err = self._run("sleep", timeout=0.2)
+        self.assertEqual(code, -1)
+        self.assertIn("timed out", self.runtime_log.read_text(encoding="utf-8"))
+
+    def test_the_tool_is_unbuffered_so_output_arrives_live(self) -> None:
+        # A pipe makes a child's stdout block-buffered; without
+        # PYTHONUNBUFFERED the console would arrive in 8 KiB lumps.
+        seen: dict[str, object] = {}
+
+        def fake_popen(cmd, **kwargs):
+            seen["env"] = kwargs.get("env", {})
+            return js.subprocess.Popen(cmd, **kwargs)
+
+        with mock.patch.object(js.subprocess, "Popen", fake_popen):
+            self._run()
+        self.assertEqual(seen["env"].get("PYTHONUNBUFFERED"), "1")
 
 
 class RunOneShotTests(unittest.TestCase):
@@ -332,14 +444,80 @@ class RunOneShotTests(unittest.TestCase):
         self.assertIn(str(self.log_dir / "sync_state.json"),
                       args[args.index("--sync-ledger") + 1:])
 
-    def test_dry_run_pins_log_report_and_transcript_paths(self) -> None:
+    def test_dry_run_pins_staged_reports_and_the_shared_log(self) -> None:
         fake = FakeToolRunner(report=PARTIAL_REPORT)
-        self._run(fake, dry_run=True)
+        self._run(fake, dry_run=True, tools={"mkvmerge": True, "ffprobe": True,
+                                             "ffsubsync": True, "ffmpeg": True})
+        # Every tool's report is staged so it can be folded into the one
+        # report file, and every tool writes into the one log file.
+        for name, args in fake.calls:
+            report = args[args.index("--report") + 1]
+            self.assertTrue(report.startswith(str(self.log_dir / ".one_shot_stage")),
+                            f"{name} must stage its report, got {report}")
+            if name == "subtitle_fetcher.py":
+                # Its --log is its durable quota ledger, not a run log.
+                self.assertEqual(args[args.index("--log") + 1],
+                                 str(self.log_dir / "subtitle_fetcher_ledger.log"))
+            else:
+                self.assertEqual(args[args.index("--log") + 1], str(self.runtime_log))
+
         _name, fetch_args = next((n, a) for n, a in fake.calls if n == "subtitle_fetcher.py")
-        self.assertIn(str(self.log_dir / "subtitle_fetcher_report.txt"), fetch_args)
-        self.assertIn(str(self.log_dir / "subtitle_fetcher.log"), fetch_args)
         self.assertIn("--allow-missing", fetch_args)
         self.assertIn("--scrape-daily-cap", fetch_args)
+
+    def test_a_run_leaves_one_report_and_one_log(self) -> None:
+        """The point of the staging folder: nothing per-tool survives."""
+        fake = FakeToolRunner(report=PARTIAL_REPORT)
+        self._run(fake, dry_run=False, max_passes=1)
+        report = self.log_dir / "jellyfin_one_shot_report.txt"
+        self.assertTrue(report.is_file(), "the single report must exist")
+        self.assertTrue(self.runtime_log.is_file(), "the single log must exist")
+        self.assertFalse((self.log_dir / ".one_shot_stage").exists(),
+                         "the staging folder must be cleaned up")
+        leftovers = [path.name for path in self.log_dir.iterdir()
+                     if "report" in path.name or "transcript" in path.name]
+        self.assertEqual(leftovers, [report.name],
+                         "no per-tool report or transcript may survive a run")
+
+    def test_each_tools_report_is_folded_into_the_single_report(self) -> None:
+        fake = FakeToolRunner(report=PARTIAL_REPORT)
+        self._run(fake, dry_run=False, max_passes=1)
+        text = (self.log_dir / "jellyfin_one_shot_report.txt").read_text(encoding="utf-8")
+        self.assertIn("AUDIT SUMMARY: canonical=1; total=2", text)
+        for script in js.TOOL_SCRIPTS:
+            if script == "subtitle_fetcher.py":
+                continue  # its report is the staged one the fake wrote
+            self.assertIn(script, text)
+        self.assertIn("PASS HISTORY", text)
+
+    def test_console_tags_identify_the_running_step(self) -> None:
+        fake = FakeToolRunner(report=PARTIAL_REPORT)
+        self._run(fake, dry_run=False, max_passes=1,
+                  tools={"mkvmerge": True, "ffprobe": True, "ffsubsync": True, "ffmpeg": True})
+        # Pre-flight audit first, then the pass, then the final fail-gated audit.
+        self.assertEqual(fake.tags, ["audit", "fetch", "clean", "10bit", "sync",
+                                     "audit", "final audit"])
+
+    def test_quiet_stops_streaming_but_not_the_run(self) -> None:
+        fake = FakeToolRunner(report=COMPLETE_REPORT)
+        code = self._run(fake, dry_run=False, force_pass=True, quiet=True)
+        self.assertEqual(code, 0)
+        self.assertTrue(fake.streaming, "steps must still run")
+        self.assertFalse(any(fake.streaming), "quiet must switch off console streaming")
+        # The banner, the decision and where to look are still printed.
+        text = self.runtime_log.read_text(encoding="utf-8")
+        self.assertIn("PLAN FOR THIS RUN", text)
+        self.assertIn("LIBRARY COMPLETE", text)
+
+    def test_the_run_explains_each_step_before_running_it(self) -> None:
+        fake = FakeToolRunner(report=PARTIAL_REPORT)
+        self._run(fake, dry_run=False, max_passes=1)
+        text = self.runtime_log.read_text(encoding="utf-8")
+        for title in ("FETCH SUBTITLES", "CLEAN TRACKS", "INSPECT 10-BIT / HDR",
+                      "SYNC SUBTITLE TIMING", "AUDIT THE LIBRARY"):
+            self.assertIn(title, text)
+        self.assertIn("What it does", text)
+        self.assertIn("Why here", text)
 
     def test_partial_library_respects_max_passes_and_exits_1(self) -> None:
         fake = FakeToolRunner(report=PARTIAL_REPORT)

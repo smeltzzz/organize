@@ -20,6 +20,45 @@ what" runner. It handles:
   - An already-complete library (audited first, so a re-run of a finished
     library costs one audit instead of a full sweep; --force-pass overrides)
 
+What it shows you while it runs
+-------------------------------
+A long pass can be an hour of silence, so the console is the primary
+surface, not an afterthought:
+
+  * Before the first pass it prints the plan: which of the five steps
+    will run, which are skipped and why.
+  * Every step announces itself - what it does, why it runs in this
+    position, and what it will skip as already done.
+  * Each tool's output streams to the console as it happens, prefixed by
+    the step it came from, e.g. ``[clean] remuxed Movie (2020).mkv``.
+    Nothing is held back until the end.
+  * A tool that goes quiet is not a tool that has died: every
+    ``--heartbeat`` seconds the runner reports how long it has been
+    running and how long since its last line.
+  * ``--quiet`` turns the streaming off (banners, decisions, heartbeats
+    and every summary still print).
+
+Two files, and only two
+-----------------------
+Everything is consolidated, so there is no pile of per-run artifacts to
+sift through:
+
+  <log-dir>/jellyfin_one_shot.log
+      One fixed name, appended to by every run and by all five tools.
+      Each run starts with a banner. This is the only log.
+  <log-dir>/jellyfin_one_shot_report.txt
+      One fixed name, rewritten after every step, so it is always the
+      current state of the current run even if it is still going or was
+      killed. It holds the full detail of the current pass plus a
+      one-line history of every pass before it, with every tool's own
+      report folded in verbatim.
+
+Per-tool report files are written to a hidden staging folder, folded
+into that single report, and deleted: a run leaves the log, the report,
+and the durable caches that make the next run cheap. The one exception
+is subtitle_fetcher.py, whose log file *is* its durable daily-quota
+ledger (it parses it back), so it keeps its own file.
+
 Guaranteed-finish behaviour (no silent infinite loops):
   - empty library (no movie folders)           -> exit 2, with the fix
   - log dir inside the library                 -> exit 2, with the fix
@@ -31,6 +70,7 @@ Usage:
     python3 jellyfin_one_shot.py                                 # default library
     python3 jellyfin_one_shot.py --source /path/to/library [--nice]
                                    [--dry-run] [--max-passes N]
+                                   [--force-pass] [--quiet] [--heartbeat N]
 
 With no --source the library root resolves exactly like every sibling tool:
 E:\\torrents\\final_organized, or MOVIE_STD_TARGET when it is set.
@@ -44,14 +84,16 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 # The canonical Jellyfin movie-library root — the same default every sibling
 # tool hardcodes (subtitle_fetcher.py's LIBRARY_DIR, mkv_track_cleaner.py's
@@ -93,6 +135,85 @@ TOOL_SCRIPTS = (
     "library_auditor.py",
 )
 
+# A run produces exactly two artifacts. Every tool's --log points at the same
+# file, so the whole run tells one continuous story in one place, and every
+# tool's --report is written to the staging folder, folded into the single
+# master report, and then deleted.
+RUN_LOG_NAME = "jellyfin_one_shot.log"
+RUN_REPORT_NAME = "jellyfin_one_shot_report.txt"
+STAGE_DIR_NAME = ".one_shot_stage"
+
+# subtitle_fetcher.py reads its own log back: the append-only log *is* its
+# durable quota/retry ledger, so it cannot share a file with anything else -
+# another tool's lines would be parsed as quota reservations. It therefore
+# keeps one dedicated file. It is durable state, like the probe caches below,
+# not a second run log: nothing is written to it that the run log lacks.
+FETCHER_LEDGER_NAME = "subtitle_fetcher_ledger.log"
+
+# Live feedback. A tool's output is streamed to the console as it happens; when
+# a tool goes quiet (a long remux prints nothing between movies) the runner
+# says so every DEFAULT_HEARTBEAT_SECONDS, so a silent console still reads as
+# "working" instead of "hung".
+DEFAULT_HEARTBEAT_SECONDS = 60.0
+
+# Step keys, in pipeline order. One entry per tool the runner can call.
+STEP_ORDER = ("fetcher", "cleaner", "10bit", "sync", "auditor")
+
+
+@dataclass(frozen=True)
+class StepPlan:
+    """One toolchain step, described for the person watching the terminal.
+
+    The narratives are the point of this class: a five-tool run that lasts
+    hours has to explain itself while it runs, not only in the report it
+    leaves behind.
+    """
+
+    script: str
+    title: str
+    purpose: str
+    why_here: str
+    idle: str
+
+
+STEP_PLANS: dict[str, StepPlan] = {
+    "fetcher": StepPlan(
+        script="subtitle_fetcher.py",
+        title="Fetch subtitles",
+        purpose="Put a validated English <movie>.eng.srt beside every movie that does not have one.",
+        why_here="First, on purpose: it searches by the release's exact OpenSubtitles moviehash, and any remux would destroy that hash forever.",
+        idle="Movies that already have a validated sidecar are counted and skipped without spending a provider request.",
+    ),
+    "cleaner": StepPlan(
+        script="mkv_track_cleaner.py",
+        title="Clean tracks (lossless remux)",
+        purpose="Rebuild MKVs that still carry extra audio tracks or embedded subtitles: one best English audio, no embedded subs.",
+        why_here="After fetching, because a remux rewrites the bytes the subtitle moviehash is computed from.",
+        idle="Already-clean movies are answered from the metadata cache and skipped without re-reading the file.",
+    ),
+    "10bit": StepPlan(
+        script="10bit.py",
+        title="Inspect 10-bit / HDR",
+        purpose="Record whether each movie is 8-bit, 10-bit or HDR, so a client that cannot play it is flagged in advance.",
+        why_here="After the remux, so it inspects the bytes Jellyfin will actually serve.",
+        idle="Movies whose size and mtime are unchanged are answered from the probe cache.",
+    ),
+    "sync": StepPlan(
+        script="sync_subtitles.py",
+        title="Sync subtitle timing (ffsubsync)",
+        purpose="Measure every sidecar against the movie's real audio and correct the timing when the drift is real and trustworthy.",
+        why_here="Last of the content steps: it rewrites subtitle bytes only, so the audit that follows validates finished sidecars.",
+        idle="Sidecars measured in sync on an earlier run are skipped while the subtitle and the movie are unchanged.",
+    ),
+    "auditor": StepPlan(
+        script="library_auditor.py",
+        title="Audit the library",
+        purpose="Decide whether every movie folder is canonical: right layout, right file name, a validated English sidecar.",
+        why_here="Last, because its verdict is the only thing that decides whether another pass is needed.",
+        idle="Nothing to do - the audit is a read-only walk of the library.",
+    ),
+}
+
 
 # ---------------------------------------------------------------------------
 # Console encoding
@@ -120,9 +241,23 @@ def enable_utf8_stdio() -> None:
 # Logging
 # ---------------------------------------------------------------------------
 def setup_logging(log_dir: Path) -> Path:
-    """Create log directory and return the runtime log path."""
+    """Create the log directory and return the one log file the run writes.
+
+    The name is stable on purpose: every run appends to the same file, so the
+    log is the complete history of the library rather than one file per run.
+    A separator marks where each run starts.
+    """
     log_dir.mkdir(parents=True, exist_ok=True)
-    runtime_log = log_dir / f"one_shot_{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+    runtime_log = log_dir / RUN_LOG_NAME
+    try:
+        with runtime_log.open("a", encoding="utf-8", errors="replace") as handle:
+            handle.write(
+                "\n" + "=" * 78 + "\n"
+                f"RUN STARTED {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"  (jellyfin_one_shot.py {VERSION})\n" + "=" * 78 + "\n"
+            )
+    except OSError:
+        pass
     return runtime_log
 
 
@@ -131,6 +266,18 @@ def log(runtime_log: Path, level: str, message: str) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] [{level}] {message}"
     print(line, flush=True)
+    try:
+        runtime_log.parent.mkdir(parents=True, exist_ok=True)
+        with runtime_log.open("a", encoding="utf-8", errors="replace") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def log_to_file(runtime_log: Path, level: str, message: str) -> None:
+    """Write a log line the console has already shown (or should not show)."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] [{level}] {message}"
     try:
         runtime_log.parent.mkdir(parents=True, exist_ok=True)
         with runtime_log.open("a", encoding="utf-8", errors="replace") as f:
@@ -165,6 +312,34 @@ def tail_to_file(path: Path, text: str, max_lines: int = TOOL_TRANSCRIPT_MAX_LIN
 # ---------------------------------------------------------------------------
 # Tool execution
 # ---------------------------------------------------------------------------
+# The console is a single stream shared by several reader threads, so printing
+# is serialised: two tools' lines must never interleave mid-line.
+_PRINT_LOCK = threading.Lock()
+
+
+def _echo_line(line: str, kind: str, tag: str) -> None:
+    """Print one line of a child tool's output, tagged with the step it came from."""
+    prefix = f"[{tag}] " if tag else "  "
+    suffix = "  (stderr)" if kind == "err" else ""
+    with _PRINT_LOCK:
+        try:
+            print(f"{prefix}{line}{suffix}", flush=True)
+        except UnicodeEncodeError:  # a console that cannot encode the line
+            print(f"{prefix}{line.encode('ascii', 'replace').decode()}{suffix}", flush=True)
+
+
+def format_duration(seconds: float) -> str:
+    """Human-readable elapsed time, the unit a multi-hour run is read in."""
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{secs:02d}s"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
+
+
 def run_tool(
     runtime_log: Path,
     script_path: Path,
@@ -172,9 +347,23 @@ def run_tool(
     tool_name: str,
     timeout: float | None = None,
     transcript: Path | None = None,
+    *,
+    console_tag: str = "",
+    echo: bool = True,
+    heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
 ) -> tuple[int, str, str]:
     """
-    Run a Python tool script and return (returncode, stdout, stderr).
+    Run a Python tool script and return ``(returncode, stdout, stderr)``.
+
+    The child's output is streamed to the console as it is produced, so a run
+    that takes hours explains itself the whole way through instead of going
+    quiet between steps. Each line is tagged with ``console_tag`` (the step it
+    belongs to) so interleaved output stays readable.
+
+    Everything the child prints is still captured: the caller scans it for the
+    markers that drive decisions (``QUOTA REACHED`` and friends), and a bounded
+    copy lands in the transcript. The child also writes the shared run log
+    itself, because ``--log`` points at it.
 
     Args:
         runtime_log: Path to the runtime log file.
@@ -183,7 +372,11 @@ def run_tool(
         tool_name: Human-readable name for logging.
         timeout: Optional timeout in seconds. None = no timeout.
         transcript: Optional path for a bounded rolling copy of the tool's
-            full output (for post-mortem debugging of long runs).
+            full output (folded into the run report, then deleted).
+        console_tag: Short tag prefixed to every streamed console line.
+        echo: Stream the child's output to the console (False for --quiet).
+        heartbeat_seconds: How often to report that a silent tool is still
+            working. 0 disables the heartbeat.
 
     Returns:
         Tuple of (returncode, stdout_text, stderr_text).
@@ -191,23 +384,26 @@ def run_tool(
     cmd = [sys.executable, str(script_path)] + args
     log_info(runtime_log, f"Running: {' '.join(cmd)}")
 
+    # The children are Python, and a pipe makes their stdout block-buffered:
+    # without this, a "live" console would arrive in 8 KiB lumps, minutes late.
+    child_env = dict(os.environ)
+    child_env["PYTHONUNBUFFERED"] = "1"
+
     try:
         # The tool scripts pin their own stdio to UTF-8 (reports are full of
         # box-drawing characters), so decode explicitly instead of with the
         # locale encoding - cp1252 on Windows would raise UnicodeDecodeError
         # on the very first report line.
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout,
             cwd=script_path.parent,
+            env=child_env,
         )
-    except subprocess.TimeoutExpired as e:
-        log_error(runtime_log, f"{tool_name} timed out after {timeout}s")
-        return -1, "", str(e)
     except FileNotFoundError:
         log_error(runtime_log, f"Script not found: {script_path}")
         return -1, "", f"Script not found: {script_path}"
@@ -215,27 +411,102 @@ def run_tool(
         log_error(runtime_log, f"Failed to run {tool_name}: {e}")
         return -1, "", str(e)
 
-    log_info(runtime_log, f"{tool_name} exited with code {result.returncode}")
+    captured: dict[str, list[str]] = {"out": [], "err": []}
+    guard = threading.Lock()
+    activity = {"last_line": time.monotonic(), "count": 0}
+
+    def reader(stream: object, kind: str) -> None:
+        try:
+            for raw_line in stream:  # type: ignore[union-attr]
+                line = raw_line.rstrip("\r\n")
+                with guard:
+                    captured[kind].append(line)
+                    activity["last_line"] = time.monotonic()
+                    activity["count"] += 1
+                if echo:
+                    _echo_line(line, kind, console_tag)
+        except (ValueError, OSError):
+            pass  # the stream closed under us: the process is gone
+        finally:
+            try:
+                stream.close()  # type: ignore[union-attr]
+            except Exception:
+                pass
+
+    threads = [
+        threading.Thread(target=reader, args=(proc.stdout, "out"), daemon=True),
+        threading.Thread(target=reader, args=(proc.stderr, "err"), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+
+    started = time.monotonic()
+    last_beat = started
+    timed_out = False
+    try:
+        while proc.poll() is None:
+            now = time.monotonic()
+            if timeout is not None and now - started > timeout:
+                timed_out = True
+                break
+            if heartbeat_seconds > 0 and now - last_beat >= heartbeat_seconds:
+                with guard:
+                    silence = now - activity["last_line"]
+                    seen = activity["count"]
+                if silence >= heartbeat_seconds:
+                    log_info(
+                        runtime_log,
+                        f"  ...still working: {tool_name} has run {format_duration(now - started)} "
+                        f"({format_duration(silence)} since its last line, {seen} line(s) so far)",
+                    )
+                    last_beat = now
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        proc.kill()
+        for thread in threads:
+            thread.join(timeout=5)
+        raise
+
+    if timed_out:
+        log_error(runtime_log, f"{tool_name} timed out after {timeout}s; stopping it")
+        proc.kill()
+    returncode = proc.wait()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    elapsed = time.monotonic() - started
+    stdout_text = "\n".join(captured["out"])
+    stderr_text = "\n".join(captured["err"])
+    with guard:
+        seen = activity["count"]
+    log_info(runtime_log, f"{tool_name} exited with code {returncode} "
+                          f"in {format_duration(elapsed)} ({seen} line(s) of output)")
 
     if transcript is not None:
-        tail_to_file(transcript, result.stdout or "")
-        tail_to_file(transcript.with_name(transcript.stem + ".err"), result.stderr or "")
+        tail_to_file(transcript, stdout_text)
+        tail_to_file(transcript.with_name(transcript.stem + ".err"), stderr_text)
 
-    # Log last 20 lines of output for debugging
-    stdout_lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
-    stderr_lines = result.stderr.strip().split("\n") if result.stderr.strip() else []
+    # A short echo in the run log keeps the single file readable on its own:
+    # the whole conversation, not just the orchestrator's side of it.
+    # Log-only: on the console these lines were streamed as they happened, so
+    # repeating them would double every short tool's output.
+    stdout_tail = [line for line in captured["out"] if line.strip()][-100:]
+    if stdout_tail:
+        log_to_file(runtime_log, "INFO",
+                    f"{tool_name} console (last {len(stdout_tail)} lines):")
+        for line in stdout_tail:
+            log_to_file(runtime_log, "INFO", f"  {line}")
 
-    if stdout_lines:
-        log_info(runtime_log, f"{tool_name} stdout (last 20 lines):")
-        for line in stdout_lines[-20:]:
-            log(runtime_log, "INFO", f"  {line}")
+    stderr_tail = [line for line in captured["err"] if line.strip()][-100:]
+    if stderr_tail:
+        log_to_file(runtime_log, "WARNING",
+                    f"{tool_name} stderr (last {len(stderr_tail)} lines):")
+        for line in stderr_tail:
+            log_to_file(runtime_log, "WARNING", f"  {line}")
 
-    if stderr_lines:
-        log_warning(runtime_log, f"{tool_name} stderr (last 20 lines):")
-        for line in stderr_lines[-20:]:
-            log(runtime_log, "WARNING", f"  {line}")
-
-    return result.returncode, result.stdout, result.stderr
+    if timed_out:
+        return -1, stdout_text, stderr_text or f"{tool_name} timed out after {timeout}s"
+    return returncode, stdout_text, stderr_text
 
 
 def check_prerequisites(runtime_log: Path) -> dict[str, bool]:
@@ -436,8 +707,305 @@ def wait_for_utc_midnight(runtime_log: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Run report: one file, everything in it
+# ---------------------------------------------------------------------------
+REPORT_WIDTH = 100
+
+
+# The pre-flight is the auditor run *before* the sweep, so it borrows the
+# auditor's plan but not its narrative: it is here to save a pointless pass,
+# not to decide whether another one is needed.
+PREFLIGHT_PURPOSE = ("Read the library's current state: is every movie folder canonical "
+                     "(right layout, right file name, validated English sidecar)?")
+PREFLIGHT_WHY_HERE = ("First, so a library that is already finished costs one audit instead "
+                      "of a full five-step sweep. --force-pass sweeps anyway.")
+PREFLIGHT_IDLE = "Nothing to do - the audit is a read-only walk of the library."
+
+
+def _step_text(step: StepRecord, field: str) -> str:
+    """A step's narrative text, with the pre-flight's own wording."""
+    if step.number == 0:
+        return {"purpose": PREFLIGHT_PURPOSE, "why": PREFLIGHT_WHY_HERE,
+                "idle": PREFLIGHT_IDLE}[field]
+    return {"purpose": step.plan.purpose, "why": step.plan.why_here,
+            "idle": step.plan.idle}[field]
+
+
+@dataclass
+class StepRecord:
+    """What one toolchain step did, for the console narrative and the report."""
+
+    number: int
+    key: str
+    plan: StepPlan
+    label: str = ""  # overrides the plan's title for one-off steps
+    status: str = "running"  # running | done | failed | skipped | timed out
+    returncode: int | None = None
+    started: datetime = field(default_factory=datetime.now)
+    elapsed: float = 0.0
+    command: str = ""
+    report_text: str = ""
+    console_tail: str = ""
+    note: str = ""
+
+    @property
+    def outcome(self) -> str:
+        if self.status == "skipped":
+            return f"SKIPPED ({self.note})" if self.note else "SKIPPED"
+        if self.returncode is None:
+            return self.status
+        verdict = "ok" if self.returncode == 0 else f"exit code {self.returncode}"
+        return f"{self.status} - {verdict} in {format_duration(self.elapsed)}"
+
+
+@dataclass
+class PassRecord:
+    """One trip through the whole toolchain."""
+
+    number: int
+    started: datetime = field(default_factory=datetime.now)
+    elapsed: float = 0.0
+    coverage_before: str = "-"
+    coverage_after: str = "-"
+    notes: list[str] = field(default_factory=list)
+    steps: list[StepRecord] = field(default_factory=list)
+
+
+@dataclass
+class RunState:
+    """Everything the single report is rendered from."""
+
+    library: Path
+    library_origin: str
+    log_dir: Path
+    runtime_log: Path
+    report_path: Path
+    started: datetime = field(default_factory=datetime.now)
+    dry_run: bool = False
+    force_pass: bool = False
+    nice: bool = False
+    max_passes: int = 0
+    tools: dict[str, bool] = field(default_factory=dict)
+    coverage: str = "not audited yet"
+    verdict: str = "in progress"
+    notes: list[str] = field(default_factory=list)
+    passes: list[PassRecord] = field(default_factory=list)
+
+
+def _rule(char: str = "-", width: int = REPORT_WIDTH) -> str:
+    return char * width
+
+
+def _block(title: str, body: list[str], width: int = REPORT_WIDTH) -> list[str]:
+    """One titled section of the report, in the flat style of the run log."""
+    lines = ["", _rule("=", width), title, _rule("=", width)]
+    lines.extend(body)
+    return lines
+
+
+def render_run_report(state: RunState) -> str:
+    """Render the one report file: at a glance, history, then every detail.
+
+    Each tool writes its own report during the run; those are folded in here
+    verbatim and then deleted, so this file is the complete story - the
+    orchestrator's decisions plus every tool's own findings, in order.
+    """
+    now = datetime.now()
+    lines: list[str] = []
+    lines.extend(_block(
+        f"JELLYFIN LIBRARY ONE-SHOT — RUN REPORT (jellyfin_one_shot.py {VERSION})",
+        [
+            f"Library     : {state.library}",
+            f"  resolved from: {state.library_origin}",
+            f"Started     : {state.started.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Updated     : {now.strftime('%Y-%m-%d %H:%M:%S')}  (rewritten after every step)",
+            f"Elapsed     : {format_duration((now - state.started).total_seconds())}",
+            f"Mode        : {'DRY RUN (one pass, nothing written)' if state.dry_run else 'LIVE'}",
+            # Sweeps only: the pre-flight is a pass-0 record of its own.
+            f"Passes      : {sum(1 for r in state.passes if r.number > 0)}"
+            + (f" of {state.max_passes}" if state.max_passes else " (unlimited until complete)"),
+            f"Force pass  : {'yes' if state.force_pass else 'no'}",
+            f"Nice mode   : {'yes' if state.nice else 'no'}",
+            f"Coverage    : {state.coverage}",
+            f"Verdict     : {state.verdict}",
+            "",
+            f"Log file    : {state.runtime_log}   (every run appends; the run's only log)",
+            f"Report file : {state.report_path}   (this file; rewritten in place)",
+            "",
+            "Durable state kept beside them (not logs or reports - these make "
+            "re-runs cheap and keep the provider quotas honest):",
+            f"  fetcher quota ledger: {state.log_dir / FETCHER_LEDGER_NAME}",
+            "  probe caches        : mkv_track_cleaner_probe_cache.json, "
+            "10bit_probe_cache.json",
+            "  sync memory         : sync_state.json",
+        ],
+    ))
+
+    lines.extend(_block("PASS HISTORY", _render_history(state)))
+
+    for record in state.passes:
+        if record.number == 0:
+            title = (f"PRE-FLIGHT AUDIT — before pass 1 — "
+                     f"started {record.started.strftime('%Y-%m-%d %H:%M:%S')}")
+        else:
+            title = (f"PASS {record.number} — started "
+                     f"{record.started.strftime('%Y-%m-%d %H:%M:%S')}"
+                     f" — {format_duration(record.elapsed)}")
+        lines.extend(_block(title, _render_pass(record)))
+
+    if state.notes:
+        lines.extend(_block("NOTES FOR THIS RUN", [f"  - {note}" for note in state.notes]))
+
+    lines.extend([
+        "",
+        _rule("=", REPORT_WIDTH),
+        "Every tool's own report is folded into the pass it ran in, above, and its",
+        "console output is streamed into the single log file. Nothing is kept anywhere",
+        "else: this report and that log are the only two files a run leaves behind",
+        "(besides the reusable probe caches that make re-runs cheap).",
+        _rule("=", REPORT_WIDTH),
+        "",
+    ])
+    return "\n".join(lines) + "\n"
+
+
+def _render_history(state: RunState) -> list[str]:
+    if not state.passes:
+        return ["  No pass has finished yet."]
+    rows = [f"  {'#':>3}  {'started':<8}  {'elapsed':>9}  {'coverage':>10}  {'change':>8}  notes"]
+    for record in state.passes:
+        before, after = record.coverage_before, record.coverage_after
+        change = ""
+        if before not in {"-", after}:
+            change = f"{before} -> {after}"
+        note = "; ".join(record.notes) if record.notes else ""
+        label = "pre" if record.number == 0 else str(record.number)
+        rows.append(
+            f"  {label:>3}  {record.started.strftime('%H:%M:%S'):<8}  "
+            f"{format_duration(record.elapsed):>9}  {after:>10}  {change:>8}  {note}"
+        )
+    return rows
+
+
+def _render_pass(record: PassRecord) -> list[str]:
+    lines: list[str] = []
+    for step in record.steps:
+        where = "PRE-FLIGHT" if step.number == 0 else f"STEP {step.number}/5"
+        lines.extend([
+            "",
+            _rule("-", REPORT_WIDTH),
+            f"{where} — {(step.label or step.plan.title).upper()}  ({step.plan.script})",
+            _rule("-", REPORT_WIDTH),
+            f"  Outcome : {step.outcome}",
+            f"  Does    : {_step_text(step, 'purpose')}",
+            f"  Why here: {_step_text(step, 'why')}",
+            f"  Idle    : {_step_text(step, 'idle')}",
+        ])
+        if step.command:
+            lines.append(f"  Command : {step.command}")
+        if step.note:
+            lines.append(f"  Note    : {step.note}")
+        if step.report_text.strip():
+            lines.extend(["", f"----- {step.plan.script} report (verbatim) -----"])
+            lines.extend(step.report_text.rstrip().splitlines())
+            lines.append(f"----- end of {step.plan.script} report -----")
+        if step.console_tail.strip():
+            lines.extend(["", f"----- {step.plan.script} console tail (last lines) -----"])
+            lines.extend(step.console_tail.rstrip().splitlines())
+    return lines or ["  (no step has run yet)"]
+
+
+def write_run_report(state: RunState) -> None:
+    """Publish the single report. Cheap enough to redo after every step, so
+    the file is always current - even if the run is killed mid-pass."""
+    try:
+        state.report_path.parent.mkdir(parents=True, exist_ok=True)
+        state.report_path.write_text(render_run_report(state), encoding="utf-8", errors="replace")
+    except OSError:
+        pass  # the log still has everything; never fail a run over the report
+
+
+def log_step_banner(runtime_log: Path, step: StepRecord, total: int) -> None:
+    """Announce a step in plain language before it runs."""
+    where = "PRE-FLIGHT" if step.number == 0 else f"STEP {step.number}/{total}"
+    log_info(runtime_log, "")
+    log_info(runtime_log, _rule("-", 68))
+    log_info(runtime_log, f"{where} — {(step.label or step.plan.title).upper()} "
+                          f"({step.plan.script})")
+    if step.number == 0:
+        purpose, why_here, idle = PREFLIGHT_PURPOSE, PREFLIGHT_WHY_HERE, PREFLIGHT_IDLE
+    else:
+        purpose, why_here, idle = step.plan.purpose, step.plan.why_here, step.plan.idle
+    log_info(runtime_log, f"  What it does : {purpose}")
+    log_info(runtime_log, f"  Why here     : {why_here}")
+    log_info(runtime_log, f"  Nothing to do: {idle}")
+    log_info(runtime_log, _rule("-", 68))
+
+
+def step_skip_reason(key: str, tools: dict[str, bool]) -> str | None:
+    """Why a step cannot run here, or None when it can.
+
+    Mirrors the checks in the pass loop so the startup plan and the run agree.
+    """
+    if key == "cleaner" and not tools.get("mkvmerge", False):
+        return "mkvmerge is not installed"
+    if key == "10bit" and not tools.get("ffprobe", False):
+        return "ffprobe is not installed"
+    if key == "sync":
+        missing = [name for name in ("ffsubsync", "ffmpeg") if not tools.get(name, False)]
+        if missing:
+            return f"{' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} not installed"
+    return None
+
+
+def log_run_plan(runtime_log: Path, state: RunState) -> None:
+    """Print the plan before the first step: what will run, what will not."""
+    log_info(runtime_log, "PLAN FOR THIS RUN")
+    for index, key in enumerate(STEP_ORDER, start=1):
+        plan = STEP_PLANS[key]
+        reason = step_skip_reason(key, state.tools)
+        if reason is None:
+            log_info(runtime_log, f"  {index}. RUN  {plan.title} ({plan.script})")
+        else:
+            log_info(runtime_log, f"  {index}. SKIP {plan.title} ({plan.script}) — {reason}")
+    log_info(runtime_log, f"  Report: {state.report_path}")
+    log_info(runtime_log, f"  Log   : {state.runtime_log}  (every step writes here)")
+
+
+# ---------------------------------------------------------------------------
 # One-shot orchestrator
 # ---------------------------------------------------------------------------
+def _stage_dir(log_dir: Path) -> Path:
+    """Where a tool's own report and console transcript live until they are
+    folded into the single run report. Hidden, and emptied at the end of a run."""
+    return log_dir / STAGE_DIR_NAME
+
+
+def _fold_artifact(path: Path) -> str:
+    """Read a staged artifact and delete it: it belongs to the report now."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    finally:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _discard_dir(path: Path) -> None:
+    """Remove a staging folder and anything left in it from an earlier run."""
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def _step_command(script_dir: Path, script: str, args: list[str]) -> str:
+    return " ".join([sys.executable, str(script_dir / script), *args])
+
+
 def run_one_shot(
     library: Path,
     script_dir: Path,
@@ -449,6 +1017,9 @@ def run_one_shot(
     tools: dict[str, bool] | None = None,
     timeout_scale: float = 1.0,
     force_pass: bool = False,
+    quiet: bool = False,
+    heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
+    library_origin: str = "--source",
 ) -> int:
     """
     Run the one-shot completion loop.
@@ -456,8 +1027,9 @@ def run_one_shot(
     Args:
         library: Path to the Jellyfin movie library.
         script_dir: Directory containing the Organize tool scripts.
-        runtime_log: Path to the runtime log.
-        log_dir: Directory for per-tool logs, reports, and transcripts.
+        runtime_log: Path to the runtime log (the run's only log file).
+        log_dir: Directory for the run report, the reusable caches, and the
+            hidden staging folder the per-tool reports pass through.
         nice: If True, add --nice flag to tools that support it.
         dry_run: If True, preview only (no changes written). A dry run makes
             no changes by definition, so exactly one pass runs.
@@ -469,6 +1041,12 @@ def run_one_shot(
             library contract (layout + a validated English sidecar); it never
             inspects the MKV's own tracks, so this is the way to ask for a
             sweep that also drops extra audio and embedded subtitles.
+        quiet: Do not stream each tool's output to the console. Step banners,
+            heartbeats, summaries and every decision are still printed; the
+            full output still lands in the log and the report.
+        heartbeat_seconds: How often to say "still working" while a tool is
+            silent. 0 disables it.
+        library_origin: Where the library path came from, for the report.
 
     Returns:
         Exit code: 0 if library is complete (or dry-run preview finished),
@@ -482,12 +1060,30 @@ def run_one_shot(
             return None
         return seconds * timeout_scale
 
+    stage = _stage_dir(log_dir)
+    _discard_dir(stage)
+    try:
+        stage.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
+    state = RunState(
+        library=library,
+        library_origin=library_origin,
+        log_dir=log_dir,
+        runtime_log=runtime_log,
+        report_path=log_dir / RUN_REPORT_NAME,
+        dry_run=dry_run,
+        force_pass=force_pass,
+        nice=nice,
+        max_passes=max_passes,
+        tools=dict(tools),
+    )
+
     pass_number = 0
     previous_coverage: str | None = None
     no_improvement_streak = 0
     consecutive_bad_audits = 0
-    skipped_steps: list[str] = []
-    last_audit_report: Path | None = None
 
     log_info(runtime_log, "=" * 60)
     log_info(runtime_log, "JELLYFIN LIBRARY ONE-SHOT COMPLETER")
@@ -504,10 +1100,15 @@ def run_one_shot(
     log_info(runtime_log, f"Nice mode: {nice}")
     log_info(runtime_log, f"Dry run: {dry_run}")
     log_info(runtime_log, f"Force pass: {force_pass}")
+    log_info(runtime_log, f"Console: {'quiet (banners, heartbeats and summaries only)' if quiet else 'live (every tool line is streamed)'}")
+    log_info(runtime_log, f"Heartbeat: {'off' if heartbeat_seconds <= 0 else f'{heartbeat_seconds:g}s'}")
     log_info(runtime_log, f"Max passes: {max_passes_text}")
     log_info(runtime_log, f"Script directory: {script_dir}")
     log_info(runtime_log, f"Log directory: {log_dir}")
     log_info(runtime_log, f"Runtime log: {runtime_log}")
+    log_info(runtime_log, "")
+
+    log_run_plan(runtime_log, state)
     log_info(runtime_log, "")
 
     # Discover movies in the library (for tracking purposes)
@@ -526,6 +1127,10 @@ def run_one_shot(
 
     log_info(runtime_log, "")
 
+    def shared_log_args() -> list[str]:
+        """Every tool writes into the one log, so the run reads as one story."""
+        return ["--log", str(runtime_log)]
+
     # -----------------------------------------------------------------------
     # Pre-flight: is the library already complete?
     # -----------------------------------------------------------------------
@@ -536,28 +1141,49 @@ def run_one_shot(
     # seconds instead of hours. --force-pass skips the question, because the
     # verdict deliberately does not cover the MKV's own tracks.
     if not dry_run and not force_pass:
-        log_info(runtime_log, "PRE-FLIGHT: auditing the library before doing any work...")
+        plan = STEP_PLANS["auditor"]
+        step = StepRecord(number=0, key="auditor", plan=plan)
+        preflight = PassRecord(number=0)
+        preflight.steps.append(step)
+        state.passes.append(preflight)
+        log_step_banner(runtime_log, step, 5)
 
-        preflight_report = log_dir / "auditor-preflight.txt"
+        preflight_report = stage / "auditor-preflight.txt"
         preflight_code, _stdout, _stderr = run_tool(
             runtime_log,
-            script_dir / "library_auditor.py",
-            [
-                "--source", str(library),
-                "--report", str(preflight_report),
-                "--log", str(log_dir / "library_auditor.log"),
-            ],
+            script_dir / plan.script,
+            ["--source", str(library),
+             "--report", str(preflight_report),
+             *shared_log_args()],
             "library_auditor (pre-flight)",
             timeout=scaled(600),
-            transcript=log_dir / "transcript_library_auditor.log",
+            transcript=stage / "auditor-preflight.console.log",
+            console_tag="audit",
+            echo=not quiet,
+            heartbeat_seconds=heartbeat_seconds,
         )
-
+        # The verdict is read before the report is folded: folding deletes the
+        # staged file, and coverage is the one thing the runner decides on.
         covered, total = parse_auditor_coverage(runtime_log, preflight_report)
+        step.returncode = preflight_code
+        step.status = "done" if preflight_code == 0 else "failed"
+        step.report_text = _fold_artifact(preflight_report)
+        step.console_tail = _fold_artifact(stage / "auditor-preflight.console.log")
+        step.elapsed = (datetime.now() - step.started).total_seconds()
+
         if covered is not None and total is not None:
+            state.coverage = f"{covered}/{total}"
             if total == 0:
+                step.note = "no movie folders found: nothing to complete"
                 log_empty_library(runtime_log)
+                state.verdict = "STOPPED - no movie folders found under the library root"
+                preflight.notes.append("no movie folders found")
+                write_run_report(state)
                 return 2
             if is_library_complete(covered, total):
+                verdict = f"COMPLETE - {covered}/{total} canonical, nothing to do"
+                state.verdict = verdict
+                step.note = "already canonical: no fetch, remux, inspection or sync was run"
                 log_info(runtime_log, "")
                 log_info(runtime_log, "=" * 60)
                 log_info(runtime_log, "LIBRARY ALREADY COMPLETE - NOTHING TO DO")
@@ -572,14 +1198,37 @@ def run_one_shot(
                 log_info(runtime_log, "or embedded subtitles audits as canonical.")
                 log_info(runtime_log, "Run again with --force-pass to sweep the library anyway.")
                 log_info(runtime_log, "=" * 60)
+                write_run_report(state)
                 return 0
+            step.note = f"{covered}/{total} canonical - a full pass is needed"
             log_info(runtime_log, f"  Pre-flight coverage: {covered}/{total} - running a full pass.")
         else:
             # A blocked or broken audit is not a verdict: fall through and let
             # the pass loop apply its own retries and bad-audit accounting.
+            step.note = "no usable coverage: falling through to a full pass"
             log_warning(runtime_log, f"  Pre-flight audit produced no usable coverage "
                                      f"(exit code {preflight_code}); running a full pass.")
+        preflight.elapsed = (datetime.now() - preflight.started).total_seconds()
+        write_run_report(state)
         log_info(runtime_log, "")
+
+    def begin_step(key: str, number: int, target: PassRecord, note: str = "") -> StepRecord:
+        step = StepRecord(number=number, key=key, plan=STEP_PLANS[key], note=note)
+        target.steps.append(step)
+        log_step_banner(runtime_log, step, 5)
+        return step
+
+    def finish_step(step: StepRecord, code: int, report_path: Path) -> None:
+        """Fold the tool's report in, log the outcome, refresh the run report."""
+        step.returncode = code
+        step.status = "done" if code == 0 else "failed"
+        step.elapsed = (datetime.now() - step.started).total_seconds()
+        step.report_text = _fold_artifact(report_path)
+        step.console_tail = _fold_artifact(stage / f"{step.key}.console.log")
+        log_info(runtime_log, f"  STEP {step.number}/5 {step.label or step.plan.title}: {step.outcome}")
+        if step.report_text.strip():
+            log_info(runtime_log, f"  Full detail folded into {state.report_path.name}")
+        write_run_report(state)
 
     # Main pass loop
     while True:
@@ -592,26 +1241,33 @@ def run_one_shot(
             log_warning(runtime_log, f"Reached max passes ({max_passes}). Stopping.")
             break
 
+        record = PassRecord(number=pass_number, coverage_before=previous_coverage or "-")
+        state.passes.append(record)
         log_info(runtime_log, "=" * 60)
-        log_info(runtime_log, f"PASS {pass_number}")
+        log_info(runtime_log, f"PASS {pass_number}"
+                              + (f" of {max_passes}" if max_passes else ""))
         log_info(runtime_log, "=" * 60)
         log_info(runtime_log, "")
+        write_run_report(state)
 
         # -------------------------------------------------------------------
         # Step 1: Fetch subtitles (with quota handling)
         # -------------------------------------------------------------------
-        log_info(runtime_log, "STEP 1: Fetching subtitles...")
+        step = begin_step("fetcher", 1, record)
 
         fetch_success = False
         fetch_retries = 0
+        last_fetch_code = -1
 
         while not fetch_success and fetch_retries < MAX_FETCH_RETRIES:
             log_info(runtime_log, f"  Subtitle fetch attempt {fetch_retries + 1}/{MAX_FETCH_RETRIES}")
 
             args = [
                 "--source", str(library),
-                "--report", str(log_dir / "subtitle_fetcher_report.txt"),
-                "--log", str(log_dir / "subtitle_fetcher.log"),
+                "--report", str(stage / "fetcher.report.txt"),
+                # Not the shared log: this file is the fetcher's durable quota
+                # ledger, which it parses back to meter the daily caps.
+                "--log", str(log_dir / FETCHER_LEDGER_NAME),
                 "--scrape-daily-cap", str(SCRAPING_DAILY_CAP),
                 "--allow-missing",  # Don't fail the whole run if some movies miss
             ]
@@ -631,12 +1287,16 @@ def run_one_shot(
 
             returncode, stdout, stderr = run_tool(
                 runtime_log,
-                script_dir / "subtitle_fetcher.py",
+                script_dir / step.plan.script,
                 args,
                 "subtitle_fetcher",
                 timeout=scaled(3600),  # 1 hour per fetch attempt
-                transcript=log_dir / "transcript_subtitle_fetcher.log",
+                transcript=stage / "fetcher.console.log",
+                console_tag="fetch",
+                echo=not quiet,
+                heartbeat_seconds=heartbeat_seconds,
             )
+            last_fetch_code = returncode
 
             if returncode == 0:
                 fetch_success = True
@@ -655,6 +1315,7 @@ def run_one_shot(
                 combined_output = stdout + stderr
                 if "QUOTA REACHED" in combined_output or "daily cap exhausted" in combined_output.lower():
                     log_info(runtime_log, "  Quota exhausted — waiting for UTC day rollover...")
+                    record.notes.append("waited for the UTC day rollover")
                     wait_for_utc_midnight(runtime_log)
                     fetch_retries = 0  # Reset retry counter after waiting
                 elif fetch_retries >= 3:
@@ -665,18 +1326,18 @@ def run_one_shot(
                     # Wait a bit before retrying
                     time.sleep(5)
 
+        finish_step(step, last_fetch_code, stage / "fetcher.report.txt")
         log_info(runtime_log, "")
 
         # -------------------------------------------------------------------
         # Step 2: Track cleaning (lossless remux)
         # -------------------------------------------------------------------
-        log_info(runtime_log, "STEP 2: Track cleaning (lossless remux)...")
-
+        step = begin_step("cleaner", 2, record)
         if tools.get("mkvmerge", False):
             args = [
                 "--dir", str(library),
-                "--log", str(log_dir / "mkv_track_cleaner.log"),
-                "--report", str(log_dir / "mkv_track_cleaner_report.txt"),
+                *shared_log_args(),
+                "--report", str(stage / "cleaner.report.txt"),
                 "--cache", str(log_dir / "mkv_track_cleaner_probe_cache.json"),
             ]
             if dry_run:
@@ -684,69 +1345,79 @@ def run_one_shot(
             if nice:
                 args.append("--nice")
 
-            returncode, stdout, stderr = run_tool(
+            returncode, _stdout, _stderr = run_tool(
                 runtime_log,
-                script_dir / "mkv_track_cleaner.py",
+                script_dir / step.plan.script,
                 args,
                 "mkv_track_cleaner",
                 timeout=scaled(7200),  # 2 hours per pass
-                transcript=log_dir / "transcript_mkv_track_cleaner.log",
+                transcript=stage / "cleaner.console.log",
+                console_tag="clean",
+                echo=not quiet,
+                heartbeat_seconds=heartbeat_seconds,
             )
-
             if returncode != 0:
                 log_warning(runtime_log, f"  Track cleaner exited with code {returncode}")
             else:
                 log_info(runtime_log, "  Track cleaning completed.")
+            finish_step(step, returncode, stage / "cleaner.report.txt")
         else:
-            skipped_steps.append("track cleaning (mkvmerge not found)")
-            log_warning(runtime_log, "  mkvmerge not available — skipping track cleaning")
+            reason = step_skip_reason("cleaner", tools) or "mkvmerge not available"
+            step.status, step.note = "skipped", reason
+            state.notes.append(f"track cleaning skipped: {reason}")
+            log_warning(runtime_log, f"  {reason} — skipping track cleaning")
+            write_run_report(state)
 
         log_info(runtime_log, "")
 
         # -------------------------------------------------------------------
         # Step 3: 10-bit inspection
         # -------------------------------------------------------------------
-        log_info(runtime_log, "STEP 3: 10-bit / HDR inspection...")
-
+        step = begin_step("10bit", 3, record)
         if tools.get("ffprobe", False):
             args = [
                 "--source", str(library),
-                "--log", str(log_dir / "10bit.log"),
-                "--report", str(log_dir / "10bit_report.txt"),
+                *shared_log_args(),
+                "--report", str(stage / "10bit.report.txt"),
                 "--cache", str(log_dir / "10bit_probe_cache.json"),
             ]
             if dry_run:
                 args.append("--dry-run")
 
-            returncode, stdout, stderr = run_tool(
+            returncode, _stdout, _stderr = run_tool(
                 runtime_log,
-                script_dir / "10bit.py",
+                script_dir / step.plan.script,
                 args,
                 "10bit",
                 timeout=scaled(3600),
-                transcript=log_dir / "transcript_10bit.log",
+                transcript=stage / "10bit.console.log",
+                console_tag="10bit",
+                echo=not quiet,
+                heartbeat_seconds=heartbeat_seconds,
             )
-
             if returncode != 0:
                 log_warning(runtime_log, f"  10-bit inspector exited with code {returncode}")
             else:
                 log_info(runtime_log, "  10-bit inspection completed.")
+            finish_step(step, returncode, stage / "10bit.report.txt")
         else:
-            skipped_steps.append("10-bit inspection (ffprobe not found)")
-            log_warning(runtime_log, "  ffprobe not available — skipping 10-bit inspection")
+            reason = step_skip_reason("10bit", tools) or "ffprobe not available"
+            step.status, step.note = "skipped", reason
+            state.notes.append(f"10-bit inspection skipped: {reason}")
+            log_warning(runtime_log, f"  {reason} — skipping 10-bit inspection")
+            write_run_report(state)
 
         log_info(runtime_log, "")
 
         # -------------------------------------------------------------------
         # Step 4: Subtitle sync (ffsubsync)
         # -------------------------------------------------------------------
-        log_info(runtime_log, "STEP 4: Subtitle timing sync...")
-
+        step = begin_step("sync", 4, record)
         if tools.get("ffsubsync", False) and tools.get("ffmpeg", False):
             args = [
                 "--source", str(library),
-                "--report", str(log_dir / "sync_subtitles_report.txt"),
-                "--log", str(log_dir / "sync_subtitles.log"),
+                "--report", str(stage / "sync.report.txt"),
+                *shared_log_args(),
                 # Remembered verdicts live with the rest of the run's state,
                 # so a one-shot run is self-contained under --log-dir.
                 "--sync-ledger", str(log_dir / "sync_state.json"),
@@ -754,49 +1425,53 @@ def run_one_shot(
             if dry_run:
                 args.append("--dry-run")
 
-            returncode, stdout, stderr = run_tool(
+            returncode, _stdout, _stderr = run_tool(
                 runtime_log,
-                script_dir / "sync_subtitles.py",
+                script_dir / step.plan.script,
                 args,
                 "sync_subtitles",
                 timeout=scaled(7200),
-                transcript=log_dir / "transcript_sync_subtitles.log",
+                transcript=stage / "sync.console.log",
+                console_tag="sync",
+                echo=not quiet,
+                heartbeat_seconds=heartbeat_seconds,
             )
-
             if returncode != 0:
                 log_warning(runtime_log, f"  Subtitle sync exited with code {returncode}")
             else:
                 log_info(runtime_log, "  Subtitle sync completed.")
+            finish_step(step, returncode, stage / "sync.report.txt")
         else:
-            if not tools.get("ffsubsync", False):
-                skipped_steps.append("subtitle sync (ffsubsync not found)")
-                log_warning(runtime_log, "  ffsubsync not available — skipping subtitle sync")
-            if not tools.get("ffmpeg", False):
-                skipped_steps.append("subtitle sync (ffmpeg not found)")
-                log_warning(runtime_log, "  ffmpeg not available — ffsubsync cannot extract audio")
+            reason = step_skip_reason("sync", tools) or "ffsubsync/ffmpeg not available"
+            step.status, step.note = "skipped", reason
+            state.notes.append(f"subtitle sync skipped: {reason}")
+            log_warning(runtime_log, f"  {reason} — skipping subtitle sync")
+            write_run_report(state)
 
         log_info(runtime_log, "")
 
         # -------------------------------------------------------------------
         # Step 5: Library audit (with retries - the only step that decides)
         # -------------------------------------------------------------------
-        log_info(runtime_log, "STEP 5: Library audit...")
-
-        audit_report = log_dir / f"auditor-pass-{pass_number}.txt"
+        step = begin_step("auditor", 5, record)
+        audit_report = stage / "auditor.report.txt"
         returncode = -1
         for attempt in range(1, AUDIT_ATTEMPTS_PER_PASS + 1):
             args = [
                 "--source", str(library),
                 "--report", str(audit_report),
-                "--log", str(log_dir / "library_auditor.log"),
+                *shared_log_args(),
             ]
             returncode, stdout, stderr = run_tool(
                 runtime_log,
-                script_dir / "library_auditor.py",
+                script_dir / step.plan.script,
                 args,
                 f"library_auditor (attempt {attempt}/{AUDIT_ATTEMPTS_PER_PASS})",
                 timeout=scaled(600),
-                transcript=log_dir / "transcript_library_auditor.log",
+                transcript=stage / "auditor.console.log",
+                console_tag="audit",
+                echo=not quiet,
+                heartbeat_seconds=heartbeat_seconds,
             )
             if returncode == 0:
                 break
@@ -808,11 +1483,9 @@ def run_one_shot(
                 backoff = AUDIT_BACKOFF_SECONDS[attempt - 1]
                 log_info(runtime_log, f"  Retrying audit in {backoff}s...")
                 time.sleep(backoff)
-
-        last_audit_report = audit_report
-
-        # Parse coverage
+        # Parse coverage before folding the report away (folding deletes it).
         covered, total = parse_auditor_coverage(runtime_log, audit_report)
+        finish_step(step, returncode, audit_report)
 
         # A pass with no usable audit report is a bad audit: retry on the
         # next pass, but three in a row means something is genuinely wrong.
@@ -824,16 +1497,22 @@ def run_one_shot(
             if consecutive_bad_audits >= MAX_CONSECUTIVE_BAD_AUDITS:
                 log_error(runtime_log, "=" * 60)
                 log_error(runtime_log, "STOPPING: the library audit keeps failing.")
-                log_error(runtime_log, f"Last audit report: {audit_report}")
-                log_error(runtime_log, f"Last auditor transcript: {log_dir / 'transcript_library_auditor.log'}")
+                log_error(runtime_log, f"Last audit report: folded into {state.report_path}")
+                log_error(runtime_log, f"Full log: {runtime_log}")
                 log_error(runtime_log, "Fix the underlying problem (permissions, disk, another "
                                        "process holding the audit lock) and re-run - every step "
                                        "is idempotent, so nothing is lost.")
                 log_error(runtime_log, "=" * 60)
+                state.verdict = "STOPPED - the library audit kept failing"
+                record.notes.append("audit kept failing")
+                record.elapsed = (datetime.now() - record.started).total_seconds()
+                write_run_report(state)
                 return 1
         else:
             consecutive_bad_audits = 0
             coverage_str = f"{covered}/{total}"
+            state.coverage = coverage_str
+            record.coverage_after = coverage_str
             log_info(runtime_log, f"  Auditor coverage: {coverage_str}")
 
             # An empty library can never reach "covered == total" with
@@ -841,6 +1520,10 @@ def run_one_shot(
             # looping forever.
             if total == 0:
                 log_empty_library(runtime_log)
+                state.verdict = "STOPPED - no movie folders found under the library root"
+                record.notes.append("no movie folders found")
+                record.elapsed = (datetime.now() - record.started).total_seconds()
+                write_run_report(state)
                 return 2
 
             if is_library_complete(covered, total):
@@ -849,13 +1532,18 @@ def run_one_shot(
                 log_info(runtime_log, "LIBRARY COMPLETE!")
                 log_info(runtime_log, f"All {total} movies have validated, synced subtitles")
                 log_info(runtime_log, "and clean tracks.")
-                if skipped_steps:
+                if state.notes:
                     log_warning(runtime_log, "Note: these steps were skipped because the binary "
                                              "is not installed - the auditor verdict covers layout "
                                              "and subtitles only:")
-                    for step in sorted(set(skipped_steps)):
-                        log_warning(runtime_log, f"  - {step}")
+                    for note in sorted(set(state.notes)):
+                        log_warning(runtime_log, f"  - {note}")
                 log_info(runtime_log, "=" * 60)
+                state.verdict = f"COMPLETE - {covered}/{total} canonical"
+                record.notes.append("library complete")
+                record.elapsed = (datetime.now() - record.started).total_seconds()
+                write_run_report(state)
+                _discard_dir(stage)
                 return 0
 
             # Pacing: two passes with zero progress means the only thing
@@ -868,6 +1556,7 @@ def run_one_shot(
                     log_warning(runtime_log, "  Provider daily caps reset at UTC midnight and the "
                                              "scraping tier re-offers held movies - waiting for "
                                              "the rollover before the next pass.")
+                    record.notes.append("waited for the UTC day rollover")
                     wait_for_utc_midnight(runtime_log)
                     no_improvement_streak = 0
             else:
@@ -876,18 +1565,17 @@ def run_one_shot(
                     log_info(runtime_log, f"  Progress: {previous_coverage} -> {coverage_str}")
 
             previous_coverage = coverage_str
+            record.coverage_before = previous_coverage
             log_info(runtime_log, "")
+
+        record.elapsed = (datetime.now() - record.started).total_seconds()
+        write_run_report(state)
 
     # -----------------------------------------------------------------------
     # Dry run: exactly one pass, by definition nothing changed
     # -----------------------------------------------------------------------
     if dry_run:
-        covered, total = (
-            parse_auditor_coverage(runtime_log, last_audit_report)
-            if last_audit_report is not None
-            else (None, None)
-        )
-        coverage_str = f"{covered}/{total}" if covered is not None and total is not None else "unknown"
+        coverage_str = state.coverage
         log_info(runtime_log, "")
         log_info(runtime_log, "=" * 60)
         log_info(runtime_log, "DRY-RUN PREVIEW COMPLETE")
@@ -895,6 +1583,9 @@ def run_one_shot(
         log_info(runtime_log, "Nothing was written. A live run repeats the same passes")
         log_info(runtime_log, "until the auditor reports 100%.")
         log_info(runtime_log, "=" * 60)
+        state.verdict = f"DRY RUN - {coverage_str} canonical after one pass"
+        write_run_report(state)
+        _discard_dir(stage)
         return 0
 
     # -----------------------------------------------------------------------
@@ -904,22 +1595,32 @@ def run_one_shot(
     log_info(runtime_log, "FINAL AUDIT")
     log_info(runtime_log, "=" * 60)
 
-    final_report = log_dir / "auditor-final.txt"
+    final_report = stage / "auditor-final.report.txt"
+    step = StepRecord(number=5, key="auditor", plan=STEP_PLANS["auditor"],
+                      label="Audit the library (final verdict)",
+                      note="final audit with the fail gate")
+    if state.passes:
+        state.passes[-1].steps.append(step)
+    else:  # no pass ran at all (only possible with --max-passes 0 semantics)
+        state.passes.append(PassRecord(number=1, steps=[step]))
     returncode = -1
     for attempt in range(1, AUDIT_ATTEMPTS_PER_PASS + 1):
         args = [
             "--source", str(library),
             "--report", str(final_report),
-            "--log", str(log_dir / "library_auditor.log"),
+            *shared_log_args(),
             "--fail-on-findings",
         ]
         returncode, stdout, stderr = run_tool(
             runtime_log,
-            script_dir / "library_auditor.py",
+            script_dir / step.plan.script,
             args,
             f"library_auditor (final, attempt {attempt}/{AUDIT_ATTEMPTS_PER_PASS})",
             timeout=scaled(600),
-            transcript=log_dir / "transcript_library_auditor.log",
+            transcript=stage / "auditor.console.log",
+            console_tag="final audit",
+            echo=not quiet,
+            heartbeat_seconds=heartbeat_seconds,
         )
         if returncode == 0 or returncode == 1:
             # 1 = findings with --fail-on-findings: the report is still valid.
@@ -928,9 +1629,10 @@ def run_one_shot(
             backoff = AUDIT_BACKOFF_SECONDS[attempt - 1]
             log_info(runtime_log, f"  Final audit failed (code {returncode}); retrying in {backoff}s...")
             time.sleep(backoff)
-
     covered, total = parse_auditor_coverage(runtime_log, final_report)
+    finish_step(step, returncode, final_report)
     coverage_str = f"{covered}/{total}" if covered is not None and total is not None else "unknown"
+    state.coverage = coverage_str
     log_info(runtime_log, f"Final coverage: {coverage_str}")
 
     if is_library_complete(covered, total):
@@ -938,16 +1640,19 @@ def run_one_shot(
         log_info(runtime_log, "=" * 60)
         log_info(runtime_log, "SUCCESS: Library is 100% complete.")
         log_info(runtime_log, "")
-        log_info(runtime_log, "  ✓ Every movie has a synced .eng.srt or .eng.sdh.srt")
-        log_info(runtime_log, "  ✓ Every MKV has exactly 1 best English audio track")
-        log_info(runtime_log, "  ✓ No embedded subtitles remain")
-        log_info(runtime_log, "  ✓ All movies audited and 10-bit inspected")
-        if skipped_steps:
+        log_info(runtime_log, "  OK  Every movie has a synced .eng.srt or .eng.sdh.srt")
+        log_info(runtime_log, "  OK  Every MKV has exactly 1 best English audio track")
+        log_info(runtime_log, "  OK  No embedded subtitles remain")
+        log_info(runtime_log, "  OK  All movies audited and 10-bit inspected")
+        if state.notes:
             log_info(runtime_log, "")
             log_warning(runtime_log, "  Caveat - steps skipped this run (missing binaries):")
-            for step in sorted(set(skipped_steps)):
-                log_warning(runtime_log, f"    - {step}")
+            for note in sorted(set(state.notes)):
+                log_warning(runtime_log, f"    - {note}")
         log_info(runtime_log, "=" * 60)
+        state.verdict = f"COMPLETE - {covered}/{total} canonical"
+        write_run_report(state)
+        _discard_dir(stage)
         return 0
     else:
         log_warning(runtime_log, "")
@@ -956,9 +1661,12 @@ def run_one_shot(
         if covered is not None and total is not None:
             log_warning(runtime_log, f"  {covered}/{total} movies complete.")
         log_warning(runtime_log, "")
-        log_warning(runtime_log, "Review the final audit report:")
-        log_warning(runtime_log, f"  {final_report}")
+        log_warning(runtime_log, "Review the run report:")
+        log_warning(runtime_log, f"  {state.report_path}")
         log_warning(runtime_log, "=" * 60)
+        state.verdict = f"PARTIAL - {coverage_str} canonical"
+        write_run_report(state)
+        _discard_dir(stage)
         return 1
 
 
@@ -1020,6 +1728,23 @@ def main(argv: list[str] | None = None) -> int:
              "a complete library is left alone; the auditor's verdict covers the "
              "folder layout and the subtitle sidecar, but never the MKV's own "
              "tracks, so this is the way to ask for a real sweep.",
+    )
+
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Do not stream each tool's output to the console. Step banners, "
+             "'still working' heartbeats, step summaries and every decision are "
+             "still printed; the full output still goes to the log and the report.",
+    )
+
+    parser.add_argument(
+        "--heartbeat",
+        type=float,
+        default=DEFAULT_HEARTBEAT_SECONDS,
+        metavar="SECONDS",
+        help="How often to report that a silent tool is still working "
+             "(0 disables the heartbeat)",
     )
 
     parser.add_argument(
@@ -1142,6 +1867,9 @@ def main(argv: list[str] | None = None) -> int:
             tools=tools,
             timeout_scale=args.timeout_scale,
             force_pass=args.force_pass,
+            quiet=args.quiet,
+            heartbeat_seconds=args.heartbeat,
+            library_origin=source_origin,
         )
         return exit_code
     except KeyboardInterrupt:

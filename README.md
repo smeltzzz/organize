@@ -348,9 +348,25 @@ days:
   front (the tools refuse to write inside the media tree, and the auditor
   would count a log folder as a movie folder); three passes in a row without
   a usable audit report exits 1 with the transcript paths to debug.
-- **Full forensics** — every tool's complete stdout/stderr is kept in a
-  bounded rolling transcript under `--log-dir`, so a failure on day three is
-  debuggable on day four.
+- **It narrates itself** — before the first pass it prints the plan (which
+  steps will run, which are skipped and why), every step announces what it
+  does and why it runs in that position, and each tool's output streams to
+  the console as it happens, tagged with the step it came from
+  (`[clean] remuxed Movie (2020).mkv`). A tool that goes quiet is not a tool
+  that has died: every `--heartbeat` seconds (60 by default) the runner
+  reports how long it has been running and how long since its last line.
+  `--quiet` turns the streaming off and keeps the banners, decisions,
+  heartbeats and summaries.
+- **Two files, and only two** — a run writes one log and one report, both
+  under `--log-dir`, both with a fixed name:
+  `jellyfin_one_shot.log` (appended by every run and by all five tools, each
+  run starting with a banner) and `jellyfin_one_shot_report.txt` (rewritten
+  after *every step*, so it is always the current state of the run even
+  while it is still going or if it is killed). The report holds the full
+  detail of the current pass plus a one-line history of every pass before
+  it, with every tool's own report folded in verbatim. Per-tool report files
+  are staged in a hidden folder, folded in, and deleted — so there is never a
+  pile of per-run artifacts to sift through.
 - **Honest reporting** — if `mkvmerge`/`ffprobe`/`ffsubsync` are missing the
   affected steps are skipped and the completion banner says exactly which
   guarantees were not checked.
@@ -369,7 +385,15 @@ python3 jellyfin_one_shot.py --source /path/to/movies --dry-run    # one-pass pr
 python3 jellyfin_one_shot.py --source /path/to/movies              # run until 100%
 python3 jellyfin_one_shot.py --source /path/to/movies --max-passes 5   # bound a run
 python3 jellyfin_one_shot.py --source /path/to/movies --force-pass     # sweep anyway
+python3 jellyfin_one_shot.py --source /path/to/movies --quiet          # no live streaming
 ```
+
+> [!NOTE]
+> The two files are the only *artifacts*. A run also maintains durable state
+> beside them, which is what makes the next run cheap and keeps the provider
+> quotas honest: `subtitle_fetcher_ledger.log` (the fetcher's daily-quota
+> ledger — that tool parses its own log back, so it cannot share a file with
+> anything else), the two probe caches, and `sync_state.json`.
 
 `--source` is the Jellyfin movie-library root. Like every other tool in the
 repo it defaults to `E:\torrents\final_organized`, or to `MOVIE_STD_TARGET`
