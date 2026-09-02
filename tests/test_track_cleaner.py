@@ -6,6 +6,7 @@ import contextlib
 import datetime
 import io
 import json
+import os
 import pathlib
 import tempfile
 import unittest
@@ -527,6 +528,125 @@ class RemuxVerificationGuardsTests(unittest.TestCase):
         ok_info["container"]["properties"]["duration"] = 9_500_000_000
         ok, reason = self._check(ok_info, int(self.SOURCE_SIZE * 0.98))
         self.assertTrue(ok, reason)
+
+
+class ProbeCacheAfterRemuxTests(unittest.TestCase):
+    """A remux preserves the mtime but changes the size.
+
+    The probe cache is keyed on ``(size, mtime)``, so the entry written from
+    the pre-remux stat can never match the file that replaced it: without
+    re-keying, the next run re-scans every movie the previous run just
+    cleaned, which is the whole cost of a "nothing to do" maintenance pass.
+    """
+
+    SOURCE = {
+        "container": {"recognized": True, "supported": True,
+                      "properties": {"duration": 6_000_000_000_000}},
+        "tracks": [
+            {"id": 0, "type": "video", "codec": "AVC/H.264/MPEG-4p10", "properties": {
+                "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
+                "display_dimensions": "1920x1080", "tag_number_of_frames": "144000",
+                "flag_default": True}},
+            {"id": 1, "type": "audio", "codec": "TrueHD", "properties": {
+                "codec_id": "A_TRUEHD", "language": "eng", "language_ietf": "en",
+                "track_name": "English TrueHD 7.1", "audio_channels": 8,
+                "audio_sampling_frequency": 48000, "flag_default": True}},
+            {"id": 2, "type": "audio", "codec": "AC-3", "properties": {
+                "codec_id": "A_AC3", "language": "eng", "language_ietf": "en",
+                "track_name": "Director Commentary", "audio_channels": 2,
+                "audio_sampling_frequency": 48000, "flag_commentary": True}},
+        ],
+        "attachments": [], "chapters": [],
+    }
+    # What mkvmerge -J reports for the remuxed output: one audio track, the
+    # retained one, carrying the default flag the remux sets.
+    OUTPUT = {
+        "container": {"recognized": True, "supported": True,
+                      "properties": {"duration": 6_000_000_000_000}},
+        "tracks": [
+            {"id": 0, "type": "video", "codec": "AVC/H.264/MPEG-4p10", "properties": {
+                "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
+                "display_dimensions": "1920x1080", "tag_number_of_frames": "144000",
+                "flag_default": True}},
+            {"id": 1, "type": "audio", "codec": "TrueHD", "properties": {
+                "codec_id": "A_TRUEHD", "language": "eng", "language_ietf": "en",
+                "track_name": "English TrueHD 7.1", "audio_channels": 8,
+                "audio_sampling_frequency": 48000, "flag_default": True}},
+        ],
+        "attachments": [], "chapters": [],
+    }
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="tc_remux_cache_")
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.movie = self.root / "Film (2020).mkv"
+        self.movie.write_bytes(b"x" * 4096)
+        stamp = 1_600_000_000
+        os.utime(self.movie, (stamp, stamp))
+        self.calls: list[str] = []
+        self.cache = MediaProbeCache(self.root / "cache.json",
+                                     tool="mkv_track_cleaner")
+
+        def fake_mkvmerge(cmd, on_progress=None):
+            self.calls.append(" ".join(str(part) for part in cmd))
+            if "-J" in cmd:
+                target = pathlib.Path(cmd[cmd.index("-J") + 1])
+                # The transacted temp holds the finished output; the movie
+                # itself still holds the dirty source until it is swapped in.
+                info = self.OUTPUT if target.name.startswith(tc.TEMP_PREFIX) else self.SOURCE
+                return 0, json.dumps(info), ""
+            out = pathlib.Path(cmd[cmd.index("-o") + 1])
+            # A remux rewrites the container: the result is a different size.
+            out.write_bytes(b"z" * 3000)
+            return 0, "", ""
+
+        self._real = tc._run_mkvmerge
+        self._real_root = tc._target_root
+        tc._run_mkvmerge = fake_mkvmerge
+        tc._target_root = None  # skip the canonical-layout gate in this unit test
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        tc._run_mkvmerge = self._real
+        tc._target_root = self._real_root
+
+    def _run(self) -> dict:
+        stats = {"cleaned": [], "already_clean": [], "skipped_no_english": [],
+                 "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
+                 "remux_without_srt": [], "total_scanned": 0,
+                 "total_space_saved_bytes": 0}
+        with contextlib.redirect_stdout(io.StringIO()):
+            tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=False,
+                           log_file_path=None, probe_cache=self.cache)
+        return stats
+
+    def test_remux_is_reported_and_the_file_is_replaced(self) -> None:
+        stats = self._run()
+        self.assertEqual([item["name"] for item in stats["cleaned"]], ["Film (2020).mkv"])
+        self.assertEqual(stats["errors"], [])
+        self.assertEqual(self.movie.stat().st_size, 3000)
+
+    def test_next_run_reuses_the_cache_instead_of_rescanning(self) -> None:
+        """The pass after the remux is the one that has to be cheap."""
+        first = self._run()
+        self.assertEqual(len(first["cleaned"]), 1, "the first pass must do the work")
+        calls_after_remux = len(self.calls)
+        misses_after_remux = self.cache.misses
+
+        second = self._run()
+        self.assertEqual(len(self.calls), calls_after_remux,
+                         "an unchanged, already-clean movie must not respawn mkvmerge")
+        self.assertEqual(self.cache.misses, misses_after_remux, "the re-keyed entry must hit")
+        self.assertEqual(second["already_clean"], ["Film (2020).mkv"])
+        self.assertEqual(second["cleaned"], [], "nothing left to clean")
+
+    def test_cache_holds_the_post_remux_size(self) -> None:
+        self._run()
+        key = tc.path_norm(self.movie)
+        entry = self.cache._entries[key]
+        self.assertEqual(entry["size"], 3000)
+        self.assertEqual(entry["mtime_ns"], self.movie.stat().st_mtime_ns)
 
 
 if __name__ == "__main__":

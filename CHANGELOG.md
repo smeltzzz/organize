@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **`jellyfin_one_shot.py` dry-run and empty-library infinite loops** (see Added above): a `--dry-run` without `--max-passes` previously looped forever because nothing it does can move the auditor's verdict, and an empty (or wrong) `--source` looped on 0/0 coverage.
 - **`jellyfin_one_shot.py` hot loop when the audit keeps failing** — a broken or lock-blocked auditor left the runner on "unknown" coverage with no backoff; per-pass audit retries (5/15/45 s) plus a three-pass hard stop make the failure mode visible and bounded.
+- **`mkv_track_cleaner.py` no longer re-scans every movie on the run right after it cleaned them.** The probe cache stores `mkvmerge -J` output keyed on `(size, mtime)`, but the entry was written from the *pre-remux* stat, while a remux deliberately restores the source mtime and changes the size. That entry could therefore never match the file it described, so the next run re-ran a full container scan of every movie the previous run had just cleaned — the whole cost of a "nothing left to do" maintenance pass, for a library that had not changed. The cache is now re-keyed onto the file that actually exists, using the verification probe of the finished output (the same bytes `mkvmerge -J` would return). Measured on a simulated 10-movie library: the pass after the remux went from 10 container scans to 0, and it stays at 0 on later passes. Version 2.6.1.
 
 ## [3.3.0] - 2026-08-30
 
