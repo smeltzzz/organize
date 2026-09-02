@@ -277,6 +277,15 @@ HandBrake queue, native HDR10 / HDR10+ / Dolby Vision is protected, ambiguous
 metadata is flagged for review. Nothing is ever re-encoded by this tool — it
 only tells you what is worth re-encoding.
 
+It reads the technical label each file declares about itself (bit depth,
+transfer function, HDR metadata) rather than decoding the picture, so a file
+whose labels are consistent but untrue reads as what it claims. What it never
+does is guess: a conflicting label, a missing one, or an 8-bit file carrying
+HDR metadata all land in REVIEW instead of a queue. Dolby Vision is reported
+by profile — `profile 8.1 · HDR10 base` falls back to HDR10 on a client without
+Dolby Vision, while `profile 5 · no SDR/HDR10 fallback` does not play correctly
+on one.
+
 ```bash
 python3 10bit.py --source /path/to/movies
 python3 10bit.py --source /path/to/movies --fail-if-queue   # for schedulers
