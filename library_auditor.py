@@ -219,22 +219,40 @@ def try_file_lock(handle: Any, *, strict_non_contention: bool = False) -> bool:
             return False
         raise
 
-def atomic_write_text(path: Path, text: str) -> None:
-    r"""Publish ``text`` to ``path`` atomically.
+def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
+    r"""Publish ``text`` to ``dest`` atomically and durably.
 
-    Writes through a unique sibling file then ``os.replace``\ s it into place, so
-    a crash never leaves a truncated report and a read in progress always sees
-    either the previous file or the complete new one.  On failure the staged
-    file is removed and the prior report is retained.
+    Writes through a unique sibling file, ``fsync``\ s it, then publishes it
+    with a single atomic operation, so a crash never leaves a truncated file
+    and a reader always sees either the previous contents or the complete new
+    ones. On failure the staged file is removed and the prior file is kept.
+
+    The ``fsync`` is what makes this survive power loss rather than only a
+    process crash: without it the rename can land while the bytes it points at
+    are still only in the page cache, publishing an empty or partial file.
+    ``newline="\n"`` keeps output byte-identical across platforms instead of
+    silently gaining CRLFs on Windows.
+
+    With ``replace=False`` the publish uses ``os.link``, an atomic
+    create-if-absent, so an existing file is never clobbered. The subtitle
+    fetcher needs this: a concurrent or hand-placed English sidecar must win
+    over a download rather than be silently overwritten.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    staged = path.with_name(f".{path.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    stage = dest.with_name(f".{dest.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp")
     try:
-        staged.write_text(text, encoding="utf-8")
-        os.replace(str(staged), str(path))
+        with stage.open("x", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if replace:
+            os.replace(str(stage), str(dest))
+        else:
+            os.link(str(stage), str(dest))
+            stage.unlink()
     except OSError:
         try:
-            staged.unlink(missing_ok=True)
+            stage.unlink(missing_ok=True)
         except OSError:
             pass
         raise
@@ -574,7 +592,7 @@ class Report:
         detail: str = "",
         ordinal: int | None = None,
         marker: str = "",
-        fields: Iterable[tuple[str, str]] = (),
+        fields: Iterable[tuple[str, object]] = (),
         detail_column: int = 0,
         indent: int = 4,
     ) -> Report:

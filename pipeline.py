@@ -380,7 +380,7 @@ class Report:
         detail: str = "",
         ordinal: int | None = None,
         marker: str = "",
-        fields: Iterable[tuple[str, str]] = (),
+        fields: Iterable[tuple[str, object]] = (),
         detail_column: int = 0,
         indent: int = 4,
     ) -> Report:

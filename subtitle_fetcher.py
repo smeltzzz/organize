@@ -757,7 +757,7 @@ class Report:
         detail: str = "",
         ordinal: int | None = None,
         marker: str = "",
-        fields: Iterable[tuple[str, str]] = (),
+        fields: Iterable[tuple[str, object]] = (),
         detail_column: int = 0,
         indent: int = 4,
     ) -> Report:
@@ -3370,9 +3370,26 @@ def download_subdl_srt(
     )
 
 def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
-    """Publish verified UTF-8 text atomically, optionally refusing replacement."""
+    r"""Publish ``text`` to ``dest`` atomically and durably.
+
+    Writes through a unique sibling file, ``fsync``\ s it, then publishes it
+    with a single atomic operation, so a crash never leaves a truncated file
+    and a reader always sees either the previous contents or the complete new
+    ones. On failure the staged file is removed and the prior file is kept.
+
+    The ``fsync`` is what makes this survive power loss rather than only a
+    process crash: without it the rename can land while the bytes it points at
+    are still only in the page cache, publishing an empty or partial file.
+    ``newline="\n"`` keeps output byte-identical across platforms instead of
+    silently gaining CRLFs on Windows.
+
+    With ``replace=False`` the publish uses ``os.link``, an atomic
+    create-if-absent, so an existing file is never clobbered. The subtitle
+    fetcher needs this: a concurrent or hand-placed English sidecar must win
+    over a download rather than be silently overwritten.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
-    stage = dest.with_name(f".{dest.name}.partial.{os.getpid()}.{uuid.uuid4().hex}")
+    stage = dest.with_name(f".{dest.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp")
     try:
         with stage.open("x", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
@@ -3381,8 +3398,6 @@ def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
         if replace:
             os.replace(str(stage), str(dest))
         else:
-            # ``link`` is an atomic create-if-absent operation. It prevents a
-            # concurrent/manual English sidecar from being silently replaced.
             os.link(str(stage), str(dest))
             stage.unlink()
     except OSError:
