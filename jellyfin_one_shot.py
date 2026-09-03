@@ -1657,20 +1657,19 @@ def run_one_shot(
         write_run_report(state)
         _discard_dir(stage)
         return 0
-    else:
-        log_warning(runtime_log, "")
-        log_warning(runtime_log, "=" * 60)
-        log_warning(runtime_log, "PARTIAL COMPLETION")
-        if covered is not None and total is not None:
-            log_warning(runtime_log, f"  {covered}/{total} movies complete.")
-        log_warning(runtime_log, "")
-        log_warning(runtime_log, "Review the run report:")
-        log_warning(runtime_log, f"  {state.report_path}")
-        log_warning(runtime_log, "=" * 60)
-        state.verdict = f"PARTIAL - {coverage_str} canonical"
-        write_run_report(state)
-        _discard_dir(stage)
-        return 1
+    log_warning(runtime_log, "")
+    log_warning(runtime_log, "=" * 60)
+    log_warning(runtime_log, "PARTIAL COMPLETION")
+    if covered is not None and total is not None:
+        log_warning(runtime_log, f"  {covered}/{total} movies complete.")
+    log_warning(runtime_log, "")
+    log_warning(runtime_log, "Review the run report:")
+    log_warning(runtime_log, f"  {state.report_path}")
+    log_warning(runtime_log, "=" * 60)
+    state.verdict = f"PARTIAL - {coverage_str} canonical"
+    write_run_report(state)
+    _discard_dir(stage)
+    return 1
 
 
 # ---------------------------------------------------------------------------
@@ -1859,7 +1858,7 @@ def main(argv: list[str] | None = None) -> int:
     log_info(runtime_log, "")
 
     try:
-        exit_code = run_one_shot(
+        return run_one_shot(
             library=args.source,
             script_dir=args.script_dir,
             runtime_log=runtime_log,
@@ -1874,7 +1873,6 @@ def main(argv: list[str] | None = None) -> int:
             heartbeat_seconds=args.heartbeat,
             library_origin=source_origin,
         )
-        return exit_code
     except KeyboardInterrupt:
         log_warning(runtime_log, "Interrupted by user. Partial results may be available.")
         return 130

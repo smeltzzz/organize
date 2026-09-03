@@ -77,5 +77,41 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "B", "I", "UP"]
-ignore = ["E501"]
+select = ["E", "F", "W", "B", "I", "UP", "BLE", "SIM", "RET", "C4", "PIE"]
+ignore = [
+    "E501",     # long lines: the report-rendering code is full of aligned literals
+    # `os.replace` is the atomic-publish primitive this codebase is built on and
+    # `Path.replace` is not a drop-in for it in the str-path call sites here.
+    # `open()` on an already-constructed Path is equally clear. PTH is therefore
+    # not enabled as a rule family; the Path-first style is a convention, not a gate.
+    "SIM105",   # contextlib.suppress allocates a context manager in hot cleanup paths
+    "SIM108",   # ternaries hurt readability in the branch-heavy classification code
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The tools are long-running batch jobs over a whole media library. A single
+# unexpected exception on one movie must never abort a sweep that has already
+# done real work, so the top-level per-item and main() handlers are broad on
+# purpose - each one logs the failure and continues. New blind excepts outside
+# these files are flagged.
+"bitdepth.py" = ["BLE001"]
+"jellyfin_one_shot.py" = ["BLE001"]
+"library_auditor.py" = ["BLE001"]
+"mkv_track_cleaner.py" = ["BLE001"]
+"movie_standardizer.py" = ["BLE001"]
+"organize.py" = ["BLE001"]
+"pipeline.py" = ["BLE001"]
+"subtitle_fetcher.py" = ["BLE001"]
+"sync_subtitles.py" = ["BLE001"]
+
+[tool.coverage.run]
+# Measure the tools, not the tests: including tests/ inflates the number with
+# files that are ~99% covered by definition.
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

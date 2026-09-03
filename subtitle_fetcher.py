@@ -376,7 +376,7 @@ class CoordinationLock:
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(self.path, "a+b")
+        handle = open(self.path, "a+b")  # noqa: SIM115 - released in release(), not here
         self._fh = handle
         # Windows msvcrt locks byte ranges; materialize the first byte once.
         if handle.seek(0, os.SEEK_END) == 0:
@@ -6403,7 +6403,7 @@ def build_scrape_chain(cfg: QueueConfig, ledger: dict[str, int],
     return ScrapeChain(
         keys=keys,
         transport=make_scrape_transport(),
-        search_caps={key: cfg.scrape_daily_cap for key in keys},
+        search_caps=dict.fromkeys(keys, cfg.scrape_daily_cap),
         reserved={key: provider_reserved(ledger, key) for key in keys},
         reserve_cb=reserve_search,
     )
@@ -6489,9 +6489,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             return True
         # Legacy records predate the scraping tier: offer it to them once so
         # every previously-held movie is re-checked against all nine sources.
-        if scrape_keys and not record.get("scrape_checked"):
-            return True
-        return False
+        return bool(scrape_keys and not record.get("scrape_checked"))
 
     for index, video in enumerate(videos, start=1):
         layout_issue = canonical_movie_layout_issue(video, cfg.library)

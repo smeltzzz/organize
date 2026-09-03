@@ -18,12 +18,12 @@ from pathlib import Path
 
 from reporttext import scorecard, section
 
+import bitdepth as bit10
 import library_auditor as la
 import mkv_track_cleaner as tc
 import movie_standardizer as ms
 import pipeline as pl
 import subtitle_fetcher as sf
-import bitdepth as bit10
 
 HEAVY = "\u2550"
 

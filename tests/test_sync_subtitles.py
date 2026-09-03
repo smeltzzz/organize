@@ -27,11 +27,11 @@ SHIFTED_SRT = "1\n00:00:05,000 --> 00:00:06,000\nHello.\n\n2\n00:00:08,000 --> 0
 
 
 def _cfg(tmp: Path, **overrides: object) -> ss.Config:
-    base: dict = dict(
-        library=tmp / "lib",
-        log_file=tmp / "out" / "sync_subtitles.log",
-        report_file=tmp / "out" / "sync_subtitles_report.txt",
-    )
+    base: dict = {
+        "library": tmp / "lib",
+        "log_file": tmp / "out" / "sync_subtitles.log",
+        "report_file": tmp / "out" / "sync_subtitles_report.txt",
+    }
     base.update(overrides)
     return ss.Config(**base)
 

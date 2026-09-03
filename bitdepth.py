@@ -1363,9 +1363,7 @@ def is_junk_name(name: str) -> bool:
         return True
     if any(lower.endswith(s) for s in (".!qb", ".parts", ".part", ".crdownload", ".tmp")):
         return True
-    if re.search(r"(?i)(?:^|[._\-\s])(sample|trailer|teaser)(?:[._\-\s]|$)", Path(name).stem):
-        return True
-    return False
+    return bool(re.search(r"(?i)(?:^|[._\-\s])(sample|trailer|teaser)(?:[._\-\s]|$)", Path(name).stem))
 
 def discover_videos(root: Path, cfg: Config) -> list[Path]:
     found: list[Path] = []

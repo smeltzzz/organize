@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 import bitdepth as tb
 
@@ -167,13 +168,12 @@ class DolbyVisionTests(unittest.TestCase):
 
     def test_a_dolby_vision_codec_name_is_dolby_vision(self) -> None:
         # Rare, but it means DV by definition even with no record to read.
-        result = self._probe(None, codec_name="dvh1", **{"color_transfer": "bt709",
-                                                         "color_primaries": "bt709"})
+        result = self._probe(None, codec_name="dvh1", color_transfer="bt709", color_primaries="bt709")
         self.assertIn("Dolby Vision", result.hdr_flavors)
         self.assertTrue(result.hdr)
 
     def test_a_plain_hevc_file_is_not_dolby_vision(self) -> None:
-        result = self._probe(None, **{"color_transfer": "bt709", "color_primaries": "bt709"})
+        result = self._probe(None, color_transfer="bt709", color_primaries="bt709")
         self.assertNotIn("Dolby Vision", result.hdr_flavors)
         self.assertEqual(result.dv_profile, "")
 

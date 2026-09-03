@@ -549,12 +549,11 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
     if total_fail > 0:
         print(f"\n  {SYM_FAIL} {red('Action required:')} Fix the failed checks above before running automated tasks.")
         return 1
-    elif total_warn > 0:
+    if total_warn > 0:
         print(f"\n  {SYM_WARN} {yellow('Ready with optional steps:')} Core tasks will work; one or more optional pipeline steps will skip until prerequisites are added.")
         return 0
-    else:
-        print(f"\n  {SYM_OK} {green('All systems operational!')} This machine is fully provisioned for the complete Jellyfin media pipeline.")
-        return 0
+    print(f"\n  {SYM_OK} {green('All systems operational!')} This machine is fully provisioned for the complete Jellyfin media pipeline.")
+    return 0
 
 
 # =============================================================================
@@ -632,9 +631,8 @@ def run_all_self_tests() -> int:
     if failed == 0:
         print(f"  {SYM_OK} {green('ALL SELF-TESTS PASSED')} {dim(f'in {total_elapsed:.2f}s')}\n")
         return 0
-    else:
-        print(f"  {SYM_FAIL} {red(f'{failed} SELF-TEST(S) FAILED')} {dim(f'in {total_elapsed:.2f}s')}\n")
-        return 1
+    print(f"  {SYM_FAIL} {red(f'{failed} SELF-TEST(S) FAILED')} {dim(f'in {total_elapsed:.2f}s')}\n")
+    return 1
 
 
 def run_unit_tests() -> int:
@@ -763,51 +761,50 @@ def main(argv: Sequence[str] | None = None) -> int:
         parsed = p.parse_args(sub_args)
         return run_doctor(library_path=parsed.target, source_path=parsed.source)
 
-    elif command in {"run", "pipeline"}:
+    if command in {"run", "pipeline"}:
         return delegate_to_script("pipeline.py", sub_args)
 
-    elif command in {"standardize", "std"}:
+    if command in {"standardize", "std"}:
         return delegate_to_script("movie_standardizer.py", sub_args)
 
-    elif command in {"subtitles", "subs"}:
+    if command in {"subtitles", "subs"}:
         return delegate_to_script("subtitle_fetcher.py", sub_args)
 
-    elif command in {"clean", "remux"}:
+    if command in {"clean", "remux"}:
         return delegate_to_script("mkv_track_cleaner.py", sub_args)
 
-    elif command in {"10bit", "probe"}:
+    if command in {"10bit", "probe"}:
         return delegate_to_script("bitdepth.py", sub_args)
 
-    elif command in {"sync", "sync-subtitles"}:
+    if command in {"sync", "sync-subtitles"}:
         return delegate_to_script("sync_subtitles.py", sub_args)
 
-    elif command in {"audit"}:
+    if command in {"audit"}:
         return delegate_to_script("library_auditor.py", sub_args)
 
-    elif command in {"one-shot", "oneshot", "complete"}:
+    if command in {"one-shot", "oneshot", "complete"}:
         return delegate_to_script("jellyfin_one_shot.py", sub_args)
 
-    elif command in {"test", "tests"}:
+    if command in {"test", "tests"}:
         code = run_all_self_tests()
         if "--unit" in sub_args or "-u" in sub_args:
             code = code or run_unit_tests()
         return code
 
-    elif command in {"-h", "--help", "help"}:
+    if command in {"-h", "--help", "help"}:
         parser = build_parser()
         parser.print_help()
         return 0
 
-    elif command in {"-v", "--version"}:
+    if command in {"-v", "--version"}:
         print(f"organize {VERSION}")
         return 0
 
-    else:
-        # Unknown command; show parser error
-        parser = build_parser()
-        parser.print_help()
-        print(f"\n{red('Unknown command:')} {command}", file=sys.stderr)
-        return 2
+    # Unknown command; show parser error
+    parser = build_parser()
+    parser.print_help()
+    print(f"\n{red('Unknown command:')} {command}", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":

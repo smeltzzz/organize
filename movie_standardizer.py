@@ -257,7 +257,7 @@ class CoordinationLock:
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(self.path, "a+b")
+        handle = open(self.path, "a+b")  # noqa: SIM115 - released in release(), not here
         self._fh = handle
         # Windows msvcrt locks byte ranges; materialize the first byte once.
         if handle.seek(0, os.SEEK_END) == 0:
@@ -2735,7 +2735,7 @@ def copy_extras_into(src_root: Path, dest_movie_folder: Path, extras: Sequence[S
             rel = Path("extras") / item.path.name
         # Keep extra-folder names Plex understands; if the extra was a
         # loose file, drop it into extras/.
-        if rel.parent == Path("."):
+        if rel.parent == Path():
             rel = Path("extras") / rel.name
         process_file_action(item.path, dest_movie_folder / rel)
 

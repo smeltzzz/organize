@@ -820,7 +820,7 @@ class CoordinationLock:
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(self.path, "a+b")
+        handle = open(self.path, "a+b")  # noqa: SIM115 - released in release(), not here
         self._fh = handle
         # Windows msvcrt locks byte ranges; materialize the first byte once.
         if handle.seek(0, os.SEEK_END) == 0:

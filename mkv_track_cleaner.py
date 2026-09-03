@@ -320,7 +320,7 @@ class CoordinationLock:
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(self.path, "a+b")
+        handle = open(self.path, "a+b")  # noqa: SIM115 - released in release(), not here
         self._fh = handle
         # Windows msvcrt locks byte ranges; materialize the first byte once.
         if handle.seek(0, os.SEEK_END) == 0:
@@ -1344,7 +1344,7 @@ def _summarize_mkvmerge_failure(output: str, rc: int) -> str:
             continue
         if _parse_mkvmerge_progress(s) is not None:
             continue
-        if s.startswith("#GUI#") or s.startswith("# GUI #") or s.lower().startswith("progress:"):
+        if s.startswith(("#GUI#", "# GUI #")) or s.lower().startswith("progress:"):
             continue
         lines.append(s)
     text = " | ".join(lines).strip() or f"mkvmerge remux failed with code {rc}"
@@ -1594,7 +1594,7 @@ def _open_log_fp(log_file_path: str) -> IO[str] | None:
         log_dir = os.path.dirname(log_file_path)
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
-        _log_fp = open(log_file_path, "a", encoding="utf-8", errors="replace", buffering=1)
+        _log_fp = open(log_file_path, "a", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115 - module-level append log, closed at exit
         _log_fp_path = log_file_path
         return _log_fp
     except Exception:
@@ -1670,14 +1670,14 @@ def is_commentary_name(name: str, *, track_type: str = "audio") -> bool:
         "",
         name_lower,
     )
-    if re.search(
-        r"\b(director|directors|producer|producers|cast|crew|"
-        r"filmmaker|filmmakers|writer|writers|actor|actors|"
-        r"discussion|interview)\b",
-        cleaned,
-    ):
-        return True
-    return False
+    return bool(
+        re.search(
+            r"\b(director|directors|producer|producers|cast|crew|"
+            r"filmmaker|filmmakers|writer|writers|actor|actors|"
+            r"discussion|interview)\b",
+            cleaned,
+        )
+    )
 
 def is_commentary_track(track: dict[str, Any], remove_commentary: bool = True) -> bool:
     """Drop commentary / DVS audio. Never drop hearing-impaired (SDH) subtitles."""
@@ -1892,7 +1892,7 @@ def validate_exact_external_english_srt(mkv_path: Path) -> dict[str, Any]:
         for suffix in COVERING_ENGLISH_SRT_SUFFIXES
     ]
     result: dict[str, Any] = {"mkv_path": str(mkv_path), "path": str(covering[0]), "valid": False, "reason": ""}
-    if promoted is None and promote_reason and "absent" not in promote_reason:
+    if promoted is None and promote_reason and "absent" not in promote_reason:  # noqa: SIM102 - kept nested so the comment below scopes to the inner test
         # Dual-name / occupied-destination cases must not silently drop embeds.
         if "unusable" not in promote_reason:
             result["reason"] = f"legacy external SRT could not be promoted: {promote_reason}"
@@ -2071,15 +2071,15 @@ def _run_mkvmerge(cmd: list[str], on_progress: Callable[[int], None] | None = No
         run_cmd.insert(1, "--gui-mode")
 
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-    popen_kwargs: dict[str, Any] = dict(
-        args=run_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT if live else subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        creationflags=creationflags,
-    )
+    popen_kwargs: dict[str, Any] = {
+        "args": run_cmd,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT if live else subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "creationflags": creationflags,
+    }
     if live:
         popen_kwargs["bufsize"] = 1
 
@@ -3789,7 +3789,7 @@ def run_self_tests() -> int:
 
     check(normalize_language("fre") == "fr", "fre->fr")
     check(normalize_language("eng") == "en", "eng->en")
-    check(normalize_language("en-US".split("-")[0]) == "en", "en-US")
+    check(normalize_language(["en", "US"][0]) == "en", "en-US")
 
     eng = {"id": 1, "type": "audio", "properties": {"language": "eng", "language_ietf": "en"}}
     fre = {"id": 2, "type": "audio", "properties": {"language": "fre"}}
