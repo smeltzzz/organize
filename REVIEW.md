@@ -1,5 +1,16 @@
 # Code & Workflow Review — `organize`
 
+> **Status: the "Now" and "Next" tiers of §5 are implemented** (commits on
+> `arena/01a067a9-organize`). Items 1–9 are done; §5's "Then" tier — splitting
+> `process_mkv`, collapsing one-shot into a loop over `pipeline`, moving the
+> self-tests, adding `--workers`, and the SQLite state store — is deliberately
+> left open, since each is a large behavioural change that wants its own review.
+> See the CHANGELOG's Unreleased section for what shipped.
+>
+> Note: the CI workflow changes ship as `ci-improvements.patch` rather than as a
+> committed `.github/workflows/ci.yml` edit, because the Arena GitHub App is not
+> permitted to push workflow files. Apply with `git apply ci-improvements.patch`.
+
 An outside read of all ~25,000 lines of Python (plus tests, CI, packaging, docs),
 looking at the repo as a *workflow* rather than as nine separate scripts.
 
