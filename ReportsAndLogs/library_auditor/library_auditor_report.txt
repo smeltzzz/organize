@@ -1,0 +1,447 @@
+╔══════════════════════════════════════════════════════════════════════════════════════════════╗
+║ JELLYFIN MOVIE LIBRARY AUDIT                                                                 ║
+║ Read-only health check · canonical folder layout and external English subtitle integrity     ║
+╟──────────────────────────────────────────────────────────────────────────────────────────────╢
+║ Generated        2026-09-03 04:42:18 Central Daylight Time                                   ║
+║ Library          E:\torrents\final_organized                                                 ║
+║ Folders checked  382                                                                         ║
+║ Elapsed          4.90s                                                                       ║
+║ Report           E:\torrents\tools\ReportsAndLogs\library_auditor\library_auditor_report.txt ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+   379   Canonical MKV            one MKV + a validated .eng.srt
+     3   Missing Eng SRT          run subtitle_fetcher.py
+     0   Invalid Eng SRT          delete the broken sidecar
+     0   Noncanonical SRT         rename it to .eng.srt
+     0   MKV stem mismatch        rename the MKV to match its folder
+     0   Single other container   remux to MKV or accept it
+     0   Multiple movie files     keep one feature per folder
+     0   No movie file            the folder holds no feature
+     0   Inaccessible             check permissions and the path
+   382   Folders checked          every top-level folder in the library
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  Start here: 3 of 382 folder(s) are not canonical · every one is listed below with the fix that
+  clears it.
+
+  ══ FOLDERS THAT NEED ATTENTION ═══════════════════════════════════════════════════ 3 of 382 ══
+
+  Grouped by the fix that clears them, cheapest first. A folder appears in exactly one group.
+
+  ── MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE) ────────────────────────────── 3 ──
+  Missing Eng SRT: Run subtitle_fetcher.py before mkv_track_cleaner.py: fetching first keeps the
+  pristine release moviehash, which is what makes an exact subtitle match possible.
+
+       1  Uncut Gems (2019)
+            MISSING  ·  no English .eng.srt sidecar; subtitle_fetcher.py can still fetch one
+
+       2  United 93 (2006)
+            MISSING  ·  no English .eng.srt sidecar; subtitle_fetcher.py can still fetch one
+
+       3  Warrior (2011)
+            MISSING  ·  no English .eng.srt sidecar; subtitle_fetcher.py can still fetch one
+
+  ══ EVERY FOLDER CHECKED ═══════════════════════════════════════════════════════════════ 382 ══
+
+  The complete inventory, healthy folders included.
+
+    Folder                            Status           Type(s)  Movie file(s) / detail
+    ────────────────────────────────  ───────────────  ───────  ────────────────────────────────
+    10 Cloverfield Lane (2016)        CANONICAL MKV    .MKV     10 Cloverfield Lane (2016).mkv
+    10 Things I Hate About You (1...  CANONICAL MKV    .MKV     10 Things I Hate About You (1...
+    12 Years a Slave (2013)           CANONICAL MKV    .MKV     12 Years a Slave (2013).mkv
+    13 Hours - The Secret Soldier...  CANONICAL MKV    .MKV     13 Hours - The Secret Soldier...
+    1917 (2019)                       CANONICAL MKV    .MKV     1917 (2019).mkv
+    2001 - A Space Odyssey (1968)     CANONICAL MKV    .MKV     2001 - A Space Odyssey (1968)...
+    21 Jump Street (2012)             CANONICAL MKV    .MKV     21 Jump Street (2012).mkv
+    22 Jump Street (2014)             CANONICAL MKV    .MKV     22 Jump Street (2014).mkv
+    300 (2006)                        CANONICAL MKV    .MKV     300 (2006).mkv
+    42 (2013)                         CANONICAL MKV    .MKV     42 (2013).mkv
+    50 First Dates (2004)             CANONICAL MKV    .MKV     50 First Dates (2004).mkv
+    500 Days of Summer (2009)         CANONICAL MKV    .MKV     500 Days of Summer (2009).mkv
+    8 Mile (2002)                     CANONICAL MKV    .MKV     8 Mile (2002).mkv
+    9 (2009)                          CANONICAL MKV    .MKV     9 (2009).mkv
+    A Beautiful Mind (2001)           CANONICAL MKV    .MKV     A Beautiful Mind (2001).mkv
+    A Christmas Story (1983)          CANONICAL MKV    .MKV     A Christmas Story (1983).mkv
+    A I Artificial Intelligence (...  CANONICAL MKV    .MKV     A I Artificial Intelligence (...
+    A Quiet Place (2018)              CANONICAL MKV    .MKV     A Quiet Place (2018).mkv
+    A Quiet Place Part II (2021)      CANONICAL MKV    .MKV     A Quiet Place Part II (2021).mkv
+    About Time (2013)                 CANONICAL MKV    .MKV     About Time (2013).mkv
+    Accepted (2006)                   CANONICAL MKV    .MKV     Accepted (2006).mkv
+    Air (2023)                        CANONICAL MKV    .MKV     Air (2023).mkv
+    Aladdin (1992)                    CANONICAL MKV    .MKV     Aladdin (1992).mkv
+    Alien (1979)                      CANONICAL MKV    .MKV     Alien (1979).mkv
+    Aliens (1986)                     CANONICAL MKV    .MKV     Aliens (1986).mkv
+    All Quiet on the Western Fron...  CANONICAL MKV    .MKV     All Quiet on the Western Fron...
+    American History X (1998)         CANONICAL MKV    .MKV     American History X (1998).mkv
+    American Pie (1999)               CANONICAL MKV    .MKV     American Pie (1999).mkv
+    American Psycho (2000)            CANONICAL MKV    .MKV     American Psycho (2000).mkv
+    American Sniper (2014)            CANONICAL MKV    .MKV     American Sniper (2014).mkv
+    Annihilation (2018)               CANONICAL MKV    .MKV     Annihilation (2018).mkv
+    Apollo 13 (1995)                  CANONICAL MKV    .MKV     Apollo 13 (1995).mkv
+    Arrival (2016)                    CANONICAL MKV    .MKV     Arrival (2016).mkv
+    Avatar (2009)                     CANONICAL MKV    .MKV     Avatar (2009).mkv
+    Avengers Age of Ultron (2015)     CANONICAL MKV    .MKV     Avengers Age of Ultron (2015)...
+    Avengers Endgame (2019)           CANONICAL MKV    .MKV     Avengers Endgame (2019).mkv
+    Avengers Infinity War (2018)      CANONICAL MKV    .MKV     Avengers Infinity War (2018).mkv
+    Back to the Future (1985)         CANONICAL MKV    .MKV     Back to the Future (1985).mkv
+    Back to the Future Part II (1...  CANONICAL MKV    .MKV     Back to the Future Part II (1...
+    Back to the Future Part III (...  CANONICAL MKV    .MKV     Back to the Future Part III (...
+    Backrooms (2026)                  CANONICAL MKV    .MKV     Backrooms (2026).mkv
+    Barbie (2023)                     CANONICAL MKV    .MKV     Barbie (2023).mkv
+    Batman Begins (2005)              CANONICAL MKV    .MKV     Batman Begins (2005).mkv
+    Bee Movie (2007)                  CANONICAL MKV    .MKV     Bee Movie (2007).mkv
+    Black Hawk Down (2001)            CANONICAL MKV    .MKV     Black Hawk Down (2001).mkv
+    Black Panther (2018)              CANONICAL MKV    .MKV     Black Panther (2018).mkv
+    Blade Runner (1982)               CANONICAL MKV    .MKV     Blade Runner (1982).mkv
+    Blade Runner 2049 (2017)          CANONICAL MKV    .MKV     Blade Runner 2049 (2017).mkv
+    Blended (2014)                    CANONICAL MKV    .MKV     Blended (2014).mkv
+    Bohemian Rhapsody (2018)          CANONICAL MKV    .MKV     Bohemian Rhapsody (2018).mkv
+    Borat (2006)                      CANONICAL MKV    .MKV     Borat (2006).mkv
+    Boyhood (2014)                    CANONICAL MKV    .MKV     Boyhood (2014).mkv
+    Boyz N the Hood (1991)            CANONICAL MKV    .MKV     Boyz N the Hood (1991).mkv
+    Braveheart (1995)                 CANONICAL MKV    .MKV     Braveheart (1995).mkv
+    Bugonia (2025)                    CANONICAL MKV    .MKV     Bugonia (2025).mkv
+    Captain America Civil War (2016)  CANONICAL MKV    .MKV     Captain America Civil War (20...
+    Captain America The First Ave...  CANONICAL MKV    .MKV     Captain America The First Ave...
+    Captain America The Winter So...  CANONICAL MKV    .MKV     Captain America The Winter So...
+    Cars (2006)                       CANONICAL MKV    .MKV     Cars (2006).mkv
+    Casino Royale (2006)              CANONICAL MKV    .MKV     Casino Royale (2006).mkv
+    Cast Away (2000)                  CANONICAL MKV    .MKV     Cast Away (2000).mkv
+    Catch Me If You Can (2002)        CANONICAL MKV    .MKV     Catch Me If You Can (2002).mkv
+    Charlie and the Chocolate Fac...  CANONICAL MKV    .MKV     Charlie and the Chocolate Fac...
+    Chicken Little (2005)             CANONICAL MKV    .MKV     Chicken Little (2005).mkv
+    Children of Men (2006)            CANONICAL MKV    .MKV     Children of Men (2006).mkv
+    Chronicle (2012)                  CANONICAL MKV    .MKV     Chronicle (2012).mkv
+    Civil War (2024)                  CANONICAL MKV    .MKV     Civil War (2024).mkv
+    Cloudy with a Chance of Meatb...  CANONICAL MKV    .MKV     Cloudy with a Chance of Meatb...
+    Cloverfield (2008)                CANONICAL MKV    .MKV     Cloverfield (2008).mkv
+    Coach Carter (2005)               CANONICAL MKV    .MKV     Coach Carter (2005).mkv
+    Coco (2017)                       CANONICAL MKV    .MKV     Coco (2017).mkv
+    Contact (1997)                    CANONICAL MKV    .MKV     Contact (1997).mkv
+    Contagion (2011)                  CANONICAL MKV    .MKV     Contagion (2011).mkv
+    Coraline (2009)                   CANONICAL MKV    .MKV     Coraline (2009).mkv
+    Crazy Rich Asians (2018)          CANONICAL MKV    .MKV     Crazy Rich Asians (2018).mkv
+    Creed (2015)                      CANONICAL MKV    .MKV     Creed (2015).mkv
+    Dawn of the Planet of the Ape...  CANONICAL MKV    .MKV     Dawn of the Planet of the Ape...
+    Dead Poets Society (1989)         CANONICAL MKV    .MKV     Dead Poets Society (1989).mkv
+    Deadpool (2016)                   CANONICAL MKV    .MKV     Deadpool (2016).mkv
+    Deadpool 2 (2018)                 CANONICAL MKV    .MKV     Deadpool 2 (2018).mkv
+    Despicable Me (2010)              CANONICAL MKV    .MKV     Despicable Me (2010).mkv
+    Die Hard (1988)                   CANONICAL MKV    .MKV     Die Hard (1988).mkv
+    District 9 (2009)                 CANONICAL MKV    .MKV     District 9 (2009).mkv
+    Django Unchained (2012)           CANONICAL MKV    .MKV     Django Unchained (2012).mkv
+    Donnie Darko (2001)               CANONICAL MKV    .MKV     Donnie Darko (2001).mkv
+    Dune (2021)                       CANONICAL MKV    .MKV     Dune (2021).mkv
+    Dune - Part Two (2024)            CANONICAL MKV    .MKV     Dune - Part Two (2024).mkv
+    Dunkirk (2017)                    CANONICAL MKV    .MKV     Dunkirk (2017).mkv
+    E T the Extra-Terrestrial (1982)  CANONICAL MKV    .MKV     E T the Extra-Terrestrial (19...
+    Easy A (2010)                     CANONICAL MKV    .MKV     Easy A (2010).mkv
+    Edge of Tomorrow (2014)           CANONICAL MKV    .MKV     Edge of Tomorrow (2014).mkv
+    Edward Scissorhands (1990)        CANONICAL MKV    .MKV     Edward Scissorhands (1990).mkv
+    Elemental (2023)                  CANONICAL MKV    .MKV     Elemental (2023).mkv
+    Elysium (2013)                    CANONICAL MKV    .MKV     Elysium (2013).mkv
+    Enchanted (2007)                  CANONICAL MKV    .MKV     Enchanted (2007).mkv
+    Enemy (2013)                      CANONICAL MKV    .MKV     Enemy (2013).mkv
+    Eternal Sunshine of the Spotl...  CANONICAL MKV    .MKV     Eternal Sunshine of the Spotl...
+    Ex Machina (2015)                 CANONICAL MKV    .MKV     Ex Machina (2015).mkv
+    Fargo (1996)                      CANONICAL MKV    .MKV     Fargo (1996).mkv
+    Fast Five (2011)                  CANONICAL MKV    .MKV     Fast Five (2011).mkv
+    Ferris Bueller's Day Off (1986)   CANONICAL MKV    .MKV     Ferris Bueller's Day Off (198...
+    Fight Club (1999)                 CANONICAL MKV    .MKV     Fight Club (1999).mkv
+    Finding Nemo (2003)               CANONICAL MKV    .MKV     Finding Nemo (2003).mkv
+    First Man (2018)                  CANONICAL MKV    .MKV     First Man (2018).mkv
+    Ford v Ferrari (2019)             CANONICAL MKV    .MKV     Ford v Ferrari (2019).mkv
+    Forrest Gump (1994)               CANONICAL MKV    .MKV     Forrest Gump (1994).mkv
+    Fractured (2019)                  CANONICAL MKV    .MKV     Fractured (2019).mkv
+    Fury (2014)                       CANONICAL MKV    .MKV     Fury (2014).mkv
+    Get Out (2017)                    CANONICAL MKV    .MKV     Get Out (2017).mkv
+    Ghostbusters (1984)               CANONICAL MKV    .MKV     Ghostbusters (1984).mkv
+    Gladiator (2000)                  CANONICAL MKV    .MKV     Gladiator (2000).mkv
+    Gone Girl (2014)                  CANONICAL MKV    .MKV     Gone Girl (2014).mkv
+    Good Will Hunting (1997)          CANONICAL MKV    .MKV     Good Will Hunting (1997).mkv
+    Goodfellas (1990)                 CANONICAL MKV    .MKV     Goodfellas (1990).mkv
+    Gravity (2013)                    CANONICAL MKV    .MKV     Gravity (2013).mkv
+    Green Book (2018)                 CANONICAL MKV    .MKV     Green Book (2018).mkv
+    Greenland (2020)                  CANONICAL MKV    .MKV     Greenland (2020).mkv
+    Groundhog Day (1993)              CANONICAL MKV    .MKV     Groundhog Day (1993).mkv
+    Grown Ups (2010)                  CANONICAL MKV    .MKV     Grown Ups (2010).mkv
+    Guardians of the Galaxy (2014)    CANONICAL MKV    .MKV     Guardians of the Galaxy (2014...
+    Hacksaw Ridge (2016)              CANONICAL MKV    .MKV     Hacksaw Ridge (2016).mkv
+    Happy Feet (2006)                 CANONICAL MKV    .MKV     Happy Feet (2006).mkv
+    Happy Gilmore (1996)              CANONICAL MKV    .MKV     Happy Gilmore (1996).mkv
+    Harry Potter and the Chamber...   CANONICAL MKV    .MKV     Harry Potter and the Chamber...
+    Harry Potter and the Deathly...   CANONICAL MKV    .MKV     Harry Potter and the Deathly...
+    Harry Potter and the Deathly...   CANONICAL MKV    .MKV     Harry Potter and the Deathly...
+    Harry Potter and the Goblet o...  CANONICAL MKV    .MKV     Harry Potter and the Goblet o...
+    Harry Potter and the Half-Blo...  CANONICAL MKV    .MKV     Harry Potter and the Half-Blo...
+    Harry Potter and the Order of...  CANONICAL MKV    .MKV     Harry Potter and the Order of...
+    Harry Potter and the Prisoner...  CANONICAL MKV    .MKV     Harry Potter and the Prisoner...
+    Harry Potter and the Sorcerer...  CANONICAL MKV    .MKV     Harry Potter and the Sorcerer...
+    Heat (1995)                       CANONICAL MKV    .MKV     Heat (1995).mkv
+    Her (2013)                        CANONICAL MKV    .MKV     Her (2013).mkv
+    Hercules (1997)                   CANONICAL MKV    .MKV     Hercules (1997).mkv
+    Hereditary (2018)                 CANONICAL MKV    .MKV     Hereditary (2018).mkv
+    Hidden Figures (2016)             CANONICAL MKV    .MKV     Hidden Figures (2016).mkv
+    Holes (2003)                      CANONICAL MKV    .MKV     Holes (2003).mkv
+    Home Alone (1990)                 CANONICAL MKV    .MKV     Home Alone (1990).mkv
+    Home Alone 2 - Lost in New Yo...  CANONICAL MKV    .MKV     Home Alone 2 - Lost in New Yo...
+    How to Train Your Dragon (2010)   CANONICAL MKV    .MKV     How to Train Your Dragon (201...
+    I Am Legend (2007)                CANONICAL MKV    .MKV     I Am Legend (2007).mkv
+    I, Robot (2004)                   CANONICAL MKV    .MKV     I, Robot (2004).mkv
+    I, Tonya (2017)                   CANONICAL MKV    .MKV     I, Tonya (2017).mkv
+    Ice Age (2002)                    CANONICAL MKV    .MKV     Ice Age (2002).mkv
+    Idiocracy (2006)                  CANONICAL MKV    .MKV     Idiocracy (2006).mkv
+    Inception (2010)                  CANONICAL MKV    .MKV     Inception (2010).mkv
+    Incredibles 2 (2018)              CANONICAL MKV    .MKV     Incredibles 2 (2018).mkv
+    Independence Day (1996)           CANONICAL MKV    .MKV     Independence Day (1996).mkv
+    Indiana Jones and the Last Cr...  CANONICAL MKV    .MKV     Indiana Jones and the Last Cr...
+    Indiana Jones and the Raiders...  CANONICAL MKV    .MKV     Indiana Jones and the Raiders...
+    Indiana Jones and the Temple...   CANONICAL MKV    .MKV     Indiana Jones and the Temple...
+    Inglourious Basterds (2009)       CANONICAL MKV    .MKV     Inglourious Basterds (2009).mkv
+    Insomnia (2002)                   CANONICAL MKV    .MKV     Insomnia (2002).mkv
+    Interstellar (2014)               CANONICAL MKV    .MKV     Interstellar (2014).mkv
+    Into the Wild (2007)              CANONICAL MKV    .MKV     Into the Wild (2007).mkv
+    Iron Man (2008)                   CANONICAL MKV    .MKV     Iron Man (2008).mkv
+    Iron Man 2 (2010)                 CANONICAL MKV    .MKV     Iron Man 2 (2010).mkv
+    IT (2017)                         CANONICAL MKV    .MKV     IT (2017).mkv
+    James and the Giant Peach (1996)  CANONICAL MKV    .MKV     James and the Giant Peach (19...
+    Jaws (1975)                       CANONICAL MKV    .MKV     Jaws (1975).mkv
+    Jimmy Neutron Boy Genius (2001)   CANONICAL MKV    .MKV     Jimmy Neutron Boy Genius (200...
+    John Q (2002)                     CANONICAL MKV    .MKV     John Q (2002).mkv
+    Joker (2019)                      CANONICAL MKV    .MKV     Joker (2019).mkv
+    Jumanji (1995)                    CANONICAL MKV    .MKV     Jumanji (1995).mkv
+    Juno (2007)                       CANONICAL MKV    .MKV     Juno (2007).mkv
+    Jurassic Park (1993)              CANONICAL MKV    .MKV     Jurassic Park (1993).mkv
+    Jurassic World (2015)             CANONICAL MKV    .MKV     Jurassic World (2015).mkv
+    Kick-Ass (2010)                   CANONICAL MKV    .MKV     Kick-Ass (2010).mkv
+    King Richard (2021)               CANONICAL MKV    .MKV     King Richard (2021).mkv
+    Knives Out (2019)                 CANONICAL MKV    .MKV     Knives Out (2019).mkv
+    Knowing (2009)                    CANONICAL MKV    .MKV     Knowing (2009).mkv
+    Kung Fu Panda (2008)              CANONICAL MKV    .MKV     Kung Fu Panda (2008).mkv
+    Legally Blonde (2001)             CANONICAL MKV    .MKV     Legally Blonde (2001).mkv
+    Logan (2017)                      CANONICAL MKV    .MKV     Logan (2017).mkv
+    Lone Survivor (2013)              CANONICAL MKV    .MKV     Lone Survivor (2013).mkv
+    Madagascar (2005)                 CANONICAL MKV    .MKV     Madagascar (2005).mkv
+    Magnolia (1999)                   CANONICAL MKV    .MKV     Magnolia (1999).mkv
+    Marty Supreme (2025)              CANONICAL MKV    .MKV     Marty Supreme (2025).mkv
+    Mean Girls (2004)                 CANONICAL MKV    .MKV     Mean Girls (2004).mkv
+    Meet the Robinsons (2007)         CANONICAL MKV    .MKV     Meet the Robinsons (2007).mkv
+    Megamind (2010)                   CANONICAL MKV    .MKV     Megamind (2010).mkv
+    Memento (2000)                    CANONICAL MKV    .MKV     Memento (2000).mkv
+    Minority Report (2002)            CANONICAL MKV    .MKV     Minority Report (2002).mkv
+    Mission - Impossible - Fallou...  CANONICAL MKV    .MKV     Mission - Impossible - Fallou...
+    Monsters University (2013)        CANONICAL MKV    .MKV     Monsters University (2013).mkv
+    Monsters, Inc (2001)              CANONICAL MKV    .MKV     Monsters, Inc (2001).mkv
+    Moon (2009)                       CANONICAL MKV    .MKV     Moon (2009).mkv
+    Mulan (1998)                      CANONICAL MKV    .MKV     Mulan (1998).mkv
+    Napoleon Dynamite (2004)          CANONICAL MKV    .MKV     Napoleon Dynamite (2004).mkv
+    National Lampoon's Christmas...   CANONICAL MKV    .MKV     National Lampoon's Christmas...
+    National Treasure (2004)          CANONICAL MKV    .MKV     National Treasure (2004).mkv
+    National Treasure Book of Sec...  CANONICAL MKV    .MKV     National Treasure Book of Sec...
+    Night at the Museum (2006)        CANONICAL MKV    .MKV     Night at the Museum (2006).mkv
+    Nightcrawler (2014)               CANONICAL MKV    .MKV     Nightcrawler (2014).mkv
+    No Country for Old Men (2007)     CANONICAL MKV    .MKV     No Country for Old Men (2007)...
+    Now You See Me (2013)             CANONICAL MKV    .MKV     Now You See Me (2013).mkv
+    Oblivion (2013)                   CANONICAL MKV    .MKV     Oblivion (2013).mkv
+    Obsession (2026)                  CANONICAL MKV    .MKV     Obsession (2026).mkv
+    October Sky (1999)                CANONICAL MKV    .MKV     October Sky (1999).mkv
+    Office Space (1999)               CANONICAL MKV    .MKV     Office Space (1999).mkv
+    One Flew Over the Cuckoo's Ne...  CANONICAL MKV    .MKV     One Flew Over the Cuckoo's Ne...
+    Open Season (2006)                CANONICAL MKV    .MKV     Open Season (2006).mkv
+    Oppenheimer (2023)                CANONICAL MKV    .MKV     Oppenheimer (2023).mkv
+    Osmosis Jones (2001)              CANONICAL MKV    .MKV     Osmosis Jones (2001).mkv
+    Over the Hedge (2006)             CANONICAL MKV    .MKV     Over the Hedge (2006).mkv
+    Parasite (2019)                   CANONICAL MKV    .MKV     Parasite (2019).mkv
+    Pearl (2022)                      CANONICAL MKV    .MKV     Pearl (2022).mkv
+    Pineapple Express (2008)          CANONICAL MKV    .MKV     Pineapple Express (2008).mkv
+    Pirates of the Caribbean At W...  CANONICAL MKV    .MKV     Pirates of the Caribbean At W...
+    Pirates of the Caribbean Dead...  CANONICAL MKV    .MKV     Pirates of the Caribbean Dead...
+    Pirates of the Caribbean The...   CANONICAL MKV    .MKV     Pirates of the Caribbean The...
+    Pitch Perfect (2012)              CANONICAL MKV    .MKV     Pitch Perfect (2012).mkv
+    Prisoners (2013)                  CANONICAL MKV    .MKV     Prisoners (2013).mkv
+    Project Hail Mary (2026)          CANONICAL MKV    .MKV     Project Hail Mary (2026).mkv
+    Project X (2012)                  CANONICAL MKV    .MKV     Project X (2012).mkv
+    Pulp Fiction (1994)               CANONICAL MKV    .MKV     Pulp Fiction (1994).mkv
+    Ratatouille (2007)                CANONICAL MKV    .MKV     Ratatouille (2007).mkv
+    Ready Player One (2018)           CANONICAL MKV    .MKV     Ready Player One (2018).mkv
+    Real Steel (2011)                 CANONICAL MKV    .MKV     Real Steel (2011).mkv
+    Remember the Titans (2000)        CANONICAL MKV    .MKV     Remember the Titans (2000).mkv
+    Requiem for a Dream (2000)        CANONICAL MKV    .MKV     Requiem for a Dream (2000).mkv
+    Rise of the Planet of the Ape...  CANONICAL MKV    .MKV     Rise of the Planet of the Ape...
+    Robots (2005)                     CANONICAL MKV    .MKV     Robots (2005).mkv
+    Rocky (1976)                      CANONICAL MKV    .MKV     Rocky (1976).mkv
+    Room (2015)                       CANONICAL MKV    .MKV     Room (2015).mkv
+    Sausage Party (2016)              CANONICAL MKV    .MKV     Sausage Party (2016).mkv
+    Saving Private Ryan (1998)        CANONICAL MKV    .MKV     Saving Private Ryan (1998).mkv
+    Saw (2004)                        CANONICAL MKV    .MKV     Saw (2004).mkv
+    Scarface (1983)                   CANONICAL MKV    .MKV     Scarface (1983).mkv
+    Schindler's List (1993)           CANONICAL MKV    .MKV     Schindler's List (1993).mkv
+    Scream (1996)                     CANONICAL MKV    .MKV     Scream (1996).mkv
+    Se7en (1995)                      CANONICAL MKV    .MKV     Se7en (1995).mkv
+    Shark Tale (2004)                 CANONICAL MKV    .MKV     Shark Tale (2004).mkv
+    Shazam! (2019)                    CANONICAL MKV    .MKV     Shazam! (2019).mkv
+    Shrek (2001)                      CANONICAL MKV    .MKV     Shrek (2001).mkv
+    Shrek 2 (2004)                    CANONICAL MKV    .MKV     Shrek 2 (2004).mkv
+    Shrek Forever After (2010)        CANONICAL MKV    .MKV     Shrek Forever After (2010).mkv
+    Shutter Island (2010)             CANONICAL MKV    .MKV     Shutter Island (2010).mkv
+    Sicario (2015)                    CANONICAL MKV    .MKV     Sicario (2015).mkv
+    Signs (2002)                      CANONICAL MKV    .MKV     Signs (2002).mkv
+    Sinister (2012)                   CANONICAL MKV    .MKV     Sinister (2012).mkv
+    Sinners (2025)                    CANONICAL MKV    .MKV     Sinners (2025).mkv
+    Skyfall (2012)                    CANONICAL MKV    .MKV     Skyfall (2012).mkv
+    Slumdog Millionaire (2008)        CANONICAL MKV    .MKV     Slumdog Millionaire (2008).mkv
+    Snatch (2000)                     CANONICAL MKV    .MKV     Snatch (2000).mkv
+    Snowden (2016)                    CANONICAL MKV    .MKV     Snowden (2016).mkv
+    Source Code (2011)                CANONICAL MKV    .MKV     Source Code (2011).mkv
+    Spaceballs (1987)                 CANONICAL MKV    .MKV     Spaceballs (1987).mkv
+    Spider-Man (2002)                 CANONICAL MKV    .MKV     Spider-Man (2002).mkv
+    Spider-Man - Across the Spide...  CANONICAL MKV    .MKV     Spider-Man - Across the Spide...
+    Spider-Man - Homecoming (2017)    CANONICAL MKV    .MKV     Spider-Man - Homecoming (2017...
+    Spider-Man - Into the Spider-...  CANONICAL MKV    .MKV     Spider-Man - Into the Spider-...
+    Spider-Man 2 (2004)               CANONICAL MKV    .MKV     Spider-Man 2 (2004).mkv
+    Spider-Man No Way Home (2021)     CANONICAL MKV    .MKV     Spider-Man No Way Home (2021)...
+    Spirited Away (2001)              CANONICAL MKV    .MKV     Spirited Away (2001).mkv
+    Split (2016)                      CANONICAL MKV    .MKV     Split (2016).mkv
+    Stalker (1979)                    CANONICAL MKV    .MKV     Stalker (1979).mkv
+    Stand by Me (1986)                CANONICAL MKV    .MKV     Stand by Me (1986).mkv
+    Star Trek (2009)                  CANONICAL MKV    .MKV     Star Trek (2009).mkv
+    Star Trek - Into Darkness (2013)  CANONICAL MKV    .MKV     Star Trek - Into Darkness (20...
+    Star Wars - Episode I - The P...  CANONICAL MKV    .MKV     Star Wars - Episode I - The P...
+    Star Wars - Episode II - Atta...  CANONICAL MKV    .MKV     Star Wars - Episode II - Atta...
+    Star Wars - Episode III - Rev...  CANONICAL MKV    .MKV     Star Wars - Episode III - Rev...
+    Star Wars - Episode IV - A Ne...  CANONICAL MKV    .MKV     Star Wars - Episode IV - A Ne...
+    Star Wars - Episode V - The E...  CANONICAL MKV    .MKV     Star Wars - Episode V - The E...
+    Star Wars - Episode VI - Retu...  CANONICAL MKV    .MKV     Star Wars - Episode VI - Retu...
+    Straight Outta Compton (2015)     CANONICAL MKV    .MKV     Straight Outta Compton (2015)...
+    Super 8 (2011)                    CANONICAL MKV    .MKV     Super 8 (2011).mkv
+    Superbad (2007)                   CANONICAL MKV    .MKV     Superbad (2007).mkv
+    Surf's Up (2007)                  CANONICAL MKV    .MKV     Surf's Up (2007).mkv
+    Taken (2008)                      CANONICAL MKV    .MKV     Taken (2008).mkv
+    Tangled (2010)                    CANONICAL MKV    .MKV     Tangled (2010).mkv
+    Taxi Driver (1976)                CANONICAL MKV    .MKV     Taxi Driver (1976).mkv
+    Ted (2012)                        CANONICAL MKV    .MKV     Ted (2012).mkv
+    Tenet (2020)                      CANONICAL MKV    .MKV     Tenet (2020).mkv
+    Terminator 2 - Judgment Day (...  CANONICAL MKV    .MKV     Terminator 2 - Judgment Day (...
+    Tetris (2023)                     CANONICAL MKV    .MKV     Tetris (2023).mkv
+    The Accountant (2016)             CANONICAL MKV    .MKV     The Accountant (2016).mkv
+    The Amazing Spider-Man (2012)     CANONICAL MKV    .MKV     The Amazing Spider-Man (2012)...
+    The Avengers (2012)               CANONICAL MKV    .MKV     The Avengers (2012).mkv
+    The Batman (2022)                 CANONICAL MKV    .MKV     The Batman (2022).mkv
+    The Big Lebowski (1998)           CANONICAL MKV    .MKV     The Big Lebowski (1998).mkv
+    The Big Short (2015)              CANONICAL MKV    .MKV     The Big Short (2015).mkv
+    The Book of Eli (2010)            CANONICAL MKV    .MKV     The Book of Eli (2010).mkv
+    The Bourne Identity (2002)        CANONICAL MKV    .MKV     The Bourne Identity (2002).mkv
+    The Bourne Supremacy (2004)       CANONICAL MKV    .MKV     The Bourne Supremacy (2004).mkv
+    The Bourne Ultimatum (2007)       CANONICAL MKV    .MKV     The Bourne Ultimatum (2007).mkv
+    The Boy in the Striped Pyjama...  CANONICAL MKV    .MKV     The Boy in the Striped Pyjama...
+    The Breakfast Club (1985)         CANONICAL MKV    .MKV     The Breakfast Club (1985).mkv
+    The Curious Case of Benjamin...   CANONICAL MKV    .MKV     The Curious Case of Benjamin...
+    The Dark Knight (2008)            CANONICAL MKV    .MKV     The Dark Knight (2008).mkv
+    The Dark Knight Rises (2012)      CANONICAL MKV    .MKV     The Dark Knight Rises (2012).mkv
+    The Day After (1983)              CANONICAL MKV    .MKV     The Day After (1983).mkv
+    The Departed (2006)               CANONICAL MKV    .MKV     The Departed (2006).mkv
+    The Edge of Seventeen (2016)      CANONICAL MKV    .MKV     The Edge of Seventeen (2016).mkv
+    The Emperor's New Groove (2000)   CANONICAL MKV    .MKV     The Emperor's New Groove (200...
+    The Fast and the Furious (2001)   CANONICAL MKV    .MKV     The Fast and the Furious (200...
+    The Founder (2016)                CANONICAL MKV    .MKV     The Founder (2016).mkv
+    The Godfather (1972)              CANONICAL MKV    .MKV     The Godfather (1972).mkv
+    The Godfather - Part II (1974)    CANONICAL MKV    .MKV     The Godfather - Part II (1974...
+    The Goonies (1985)                CANONICAL MKV    .MKV     The Goonies (1985).mkv
+    The Green Mile (1999)             CANONICAL MKV    .MKV     The Green Mile (1999).mkv
+    The Hangover (2009)               CANONICAL MKV    .MKV     The Hangover (2009).mkv
+    The Help (2011)                   CANONICAL MKV    .MKV     The Help (2011).mkv
+    The Hunger Games (2012)           CANONICAL MKV    .MKV     The Hunger Games (2012).mkv
+    The Hunger Games - Mockingjay...  CANONICAL MKV    .MKV     The Hunger Games - Mockingjay...
+    The Hunger Games - Mockingjay...  CANONICAL MKV    .MKV     The Hunger Games - Mockingjay...
+    The Hunger Games Catching Fir...  CANONICAL MKV    .MKV     The Hunger Games Catching Fir...
+    The Hurt Locker (2008)            CANONICAL MKV    .MKV     The Hurt Locker (2008).mkv
+    The Imitation Game (2014)         CANONICAL MKV    .MKV     The Imitation Game (2014).mkv
+    The Incredibles (2004)            CANONICAL MKV    .MKV     The Incredibles (2004).mkv
+    The Interview (2014)              CANONICAL MKV    .MKV     The Interview (2014).mkv
+    The Invisible Man (2020)          CANONICAL MKV    .MKV     The Invisible Man (2020).mkv
+    The Karate Kid (1984)             CANONICAL MKV    .MKV     The Karate Kid (1984).mkv
+    The Longest Yard (2005)           CANONICAL MKV    .MKV     The Longest Yard (2005).mkv
+    The Lord of the Rings The Fel...  CANONICAL MKV    .MKV     The Lord of the Rings The Fel...
+    The Lord of the Rings The Ret...  CANONICAL MKV    .MKV     The Lord of the Rings The Ret...
+    The Lord of the Rings The Two...  CANONICAL MKV    .MKV     The Lord of the Rings The Two...
+    The Martian (2015)                CANONICAL MKV    .MKV     The Martian (2015).mkv
+    The Matrix (1999)                 CANONICAL MKV    .MKV     The Matrix (1999).mkv
+    The Maze Runner (2014)            CANONICAL MKV    .MKV     The Maze Runner (2014).mkv
+    The Nightmare Before Christma...  CANONICAL MKV    .MKV     The Nightmare Before Christma...
+    The Polar Express (2004)          CANONICAL MKV    .MKV     The Polar Express (2004).mkv
+    The Prestige (2006)               CANONICAL MKV    .MKV     The Prestige (2006).mkv
+    The Princess and the Frog (2009)  CANONICAL MKV    .MKV     The Princess and the Frog (20...
+    The Proposal (2009)               CANONICAL MKV    .MKV     The Proposal (2009).mkv
+    The Revenant (2015)               CANONICAL MKV    .MKV     The Revenant (2015).mkv
+    The Sandlot (1993)                CANONICAL MKV    .MKV     The Sandlot (1993).mkv
+    The Shawshank Redemption (1994)   CANONICAL MKV    .MKV     The Shawshank Redemption (199...
+    The Silence of the Lambs (1991)   CANONICAL MKV    .MKV     The Silence of the Lambs (199...
+    The Sixth Sense (1999)            CANONICAL MKV    .MKV     The Sixth Sense (1999).mkv
+    The Social Network (2010)         CANONICAL MKV    .MKV     The Social Network (2010).mkv
+    The Substance (2024)              CANONICAL MKV    .MKV     The Substance (2024).mkv
+    The Terminator (1984)             CANONICAL MKV    .MKV     The Terminator (1984).mkv
+    The Theory of Everything (2014)   CANONICAL MKV    .MKV     The Theory of Everything (201...
+    The Thing (1982)                  CANONICAL MKV    .MKV     The Thing (1982).mkv
+    The Truman Show (1998)            CANONICAL MKV    .MKV     The Truman Show (1998).mkv
+    The Usual Suspects (1995)         CANONICAL MKV    .MKV     The Usual Suspects (1995).mkv
+    The Wild Robot (2024)             CANONICAL MKV    .MKV     The Wild Robot (2024).mkv
+    The Wolf of Wall Street (2013)    CANONICAL MKV    .MKV     The Wolf of Wall Street (2013...
+    There Will Be Blood (2007)        CANONICAL MKV    .MKV     There Will Be Blood (2007).mkv
+    This Christmas (2007)             CANONICAL MKV    .MKV     This Christmas (2007).mkv
+    This Is the End (2013)            CANONICAL MKV    .MKV     This Is the End (2013).mkv
+    Thor - Ragnarok (2017)            CANONICAL MKV    .MKV     Thor - Ragnarok (2017).mkv
+    Threads (1984)                    CANONICAL MKV    .MKV     Threads (1984).mkv
+    Titanic (1997)                    CANONICAL MKV    .MKV     Titanic (1997).mkv
+    Top Gun (1986)                    CANONICAL MKV    .MKV     Top Gun (1986).mkv
+    Top Gun - Maverick (2022)         CANONICAL MKV    .MKV     Top Gun - Maverick (2022).mkv
+    Toy Story (1995)                  CANONICAL MKV    .MKV     Toy Story (1995).mkv
+    Toy Story 2 (1999)                CANONICAL MKV    .MKV     Toy Story 2 (1999).mkv
+    Toy Story 3 (2010)                CANONICAL MKV    .MKV     Toy Story 3 (2010).mkv
+    Toy Story 4 (2019)                CANONICAL MKV    .MKV     Toy Story 4 (2019).mkv
+    Toy Story 5 (2026)                CANONICAL MKV    .MKV     Toy Story 5 (2026).mkv
+    Training Day (2001)               CANONICAL MKV    .MKV     Training Day (2001).mkv
+    Transformers (2007)               CANONICAL MKV    .MKV     Transformers (2007).mkv
+    Transformers Dark Of The Moon...  CANONICAL MKV    .MKV     Transformers Dark Of The Moon...
+    Transformers Revenge of the F...  CANONICAL MKV    .MKV     Transformers Revenge of the F...
+    Treasure Planet (2002)            CANONICAL MKV    .MKV     Treasure Planet (2002).mkv
+    TRON - Legacy (2010)              CANONICAL MKV    .MKV     TRON - Legacy (2010).mkv
+    Turtles Forever (2009)            CANONICAL MKV    .MKV     Turtles Forever (2009).mkv
+    Twelve Monkeys (1995)             CANONICAL MKV    .MKV     Twelve Monkeys (1995).mkv
+    Uncut Gems (2019)                 MISSING SIDECAR  .MKV     no English .eng.srt sidecar;...
+    United 93 (2006)                  MISSING SIDECAR  .MKV     no English .eng.srt sidecar;...
+    Us (2019)                         CANONICAL MKV    .MKV     Us (2019).mkv
+    V for Vendetta (2005)             CANONICAL MKV    .MKV     V for Vendetta (2005).mkv
+    WALL-E (2008)                     CANONICAL MKV    .MKV     WALL-E (2008).mkv
+    Wallace & Gromit - The Curse...   CANONICAL MKV    .MKV     Wallace & Gromit - The Curse...
+    War Dogs (2016)                   CANONICAL MKV    .MKV     War Dogs (2016).mkv
+    War for the Planet of the Ape...  CANONICAL MKV    .MKV     War for the Planet of the Ape...
+    WarGames (1983)                   CANONICAL MKV    .MKV     WarGames (1983).mkv
+    Warrior (2011)                    MISSING SIDECAR  .MKV     no English .eng.srt sidecar;...
+    We're the Millers (2013)          CANONICAL MKV    .MKV     We're the Millers (2013).mkv
+    Weapons (2025)                    CANONICAL MKV    .MKV     Weapons (2025).mkv
+    When Harry Met Sally (1989)       CANONICAL MKV    .MKV     When Harry Met Sally (1989).mkv
+    Whiplash (2014)                   CANONICAL MKV    .MKV     Whiplash (2014).mkv
+    Willy Wonka & the Chocolate F...  CANONICAL MKV    .MKV     Willy Wonka & the Chocolate F...
+    World War Z (2013)                CANONICAL MKV    .MKV     World War Z (2013).mkv
+    Wreck-It Ralph (2012)             CANONICAL MKV    .MKV     Wreck-It Ralph (2012).mkv
+    Zathura - A Space Adventure (...  CANONICAL MKV    .MKV     Zathura - A Space Adventure (...
+    Zero Dark Thirty (2012)           CANONICAL MKV    .MKV     Zero Dark Thirty (2012).mkv
+    Zootopia (2016)                   CANONICAL MKV    .MKV     Zootopia (2016).mkv
+    Zootopia 2 (2025)                 CANONICAL MKV    .MKV     Zootopia 2 (2025).mkv
+
+  ══ DIRECT MOVIE FILE TYPES ═══════════════════════════════════════════════════════════════════
+
+  Container labels are file extensions only.
+
+    Type  Files
+    ────  ─────
+    .MKV    382
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  AUDIT SUMMARY: canonical=379; total=382; pct=99.2%
+  Scope: direct feature containers plus direct SRT sidecar names. Artwork, NFO files, and nested
+  extras are ignored.
+  Container labels are file extensions only; they do not verify codecs or Jellyfin client
+  direct-play support.

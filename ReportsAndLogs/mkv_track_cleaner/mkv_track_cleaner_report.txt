@@ -1,0 +1,885 @@
+╔══════════════════════════════════════════════════════════════════════════════════════════════╗
+║ JELLYFIN MKV TRACK CLEANUP REPORT                                                            ║
+║ Lossless mkvmerge remux · commentary, dubs and embedded bitmaps removed; video bytes never   ║
+║ touched                                                                                      ║
+╟──────────────────────────────────────────────────────────────────────────────────────────────╢
+║ Mode                LIVE RUN (changes applied)                                               ║
+║ Target              E:\torrents\final_organized                                              ║
+║ mkvmerge            C:\Program Files\MKVToolNix\mkvmerge.EXE  ·  mkvmerge v100.0 ('Do Hot    ║
+║                     Girls Like Chords') 64-bit                                               ║
+║ Audio languages     en, eng                                                                  ║
+║ Subtitle languages  en, eng                                                                  ║
+║ Commentary / DVS    removed (fixed policy)                                                   ║
+║ External SRT        a validated exact .eng.srt becomes the sole subtitle option              ║
+║ Standardizer lock   acquired (timeout 60.0 s)                                                ║
+║ Started             2026-09-02 20:54:04                                                      ║
+║ Finished            2026-09-02 21:11:59                                                      ║
+║ Duration            0:17:54                                                                  ║
+║ Report              E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\                      ║
+║                     mkv_track_cleaner_report.txt                                             ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+     8   Cleaned / remuxed       tracks pruned, video untouched
+   374   Already clean           no writes needed
+     0   Errors                  unreadable or failed
+     0   Remuxed without SRT     moviehash now invalidated
+     0   Deferred (hardlinked)   still being seeded
+     0   Skipped (layout)        folder is not canonical
+     0   Skipped (no English)    foreign film, kept as-is
+   382   Movies scanned          every MKV found in the target
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  Reclaimed 61.30 MB across 8 movie(s): 38.39 GB before  ·  38.33 GB after.
+
+  ══ CLEANED THIS RUN ══════════════════════════════════════════════════════════════ 8 of 382 ══
+
+  Each remux kept the best English audio and dropped everything else; the video stream was
+  copied untouched.
+
+       1  42 (2013).mkv
+          Kept audio         ID 1: AC-3 6ch [eng]
+          Removed audio      (none - a single English audio track was already the only one)
+          External SRT       42 (2013).eng.sdh.srt (validated; preserved)
+          Subtitles kept     0
+          Subtitles removed  1
+                             ·  ID 2: HDMV PGS [eng]
+          File size          4.79 GB ·  4.78 GB  ·  saved 14.94 MB
+          Elapsed            135.41 s
+
+       2  Air (2023).mkv
+          Kept audio         ID 1: AAC 8ch [eng]
+          Removed audio      (none - a single English audio track was already the only one)
+          External SRT       Air (2023).eng.sdh.srt (validated; preserved)
+          Subtitles kept     0
+          Subtitles removed  1
+                             ·  ID 2: VobSub [eng]
+          File size          4.96 GB ·  4.95 GB  ·  saved 7.65 MB
+          Elapsed            124.39 s
+
+       3  Alien (1979).mkv
+          Kept audio         ID 1: AAC 6ch [eng]
+          Removed audio      (none - a single English audio track was already the only one)
+          External SRT       Alien (1979).eng.sdh.srt (validated; preserved)
+          Subtitles kept     0
+          Subtitles removed  1
+                             ·  ID 2: HDMV PGS [eng] - 'English (SDH)'
+          File size          5.48 GB ·  5.46 GB  ·  saved 13.45 MB
+          Elapsed            133.19 s
+
+       4  All Quiet on the Western Front (2022).mkv
+          Kept audio         ID 1: AAC 6ch [eng] - 'Dubbed'
+          Removed audio      (none - a single English audio track was already the only one)
+          External SRT       All Quiet on the Western Front (2022).eng.sdh.srt (validated;
+                             preserved)
+          Subtitles kept     0
+          Subtitles removed  2
+                             ·  ID 2: VobSub [eng]
+                             ·  ID 3: VobSub [eng] - 'Dubbed-Forced'
+          File size          8.06 GB ·  8.06 GB  ·  saved 4.19 MB
+          Elapsed            214.09 s
+
+       5  Apollo 13 (1995).mkv
+          Kept audio         ID 1: AAC 6ch [eng]
+          Removed audio      (none - a single English audio track was already the only one)
+          External SRT       Apollo 13 (1995).eng.sdh.srt (validated; preserved)
+          Subtitles kept     0
+          Subtitles removed  1
+                             ·  ID 2: VobSub [eng]
+          File size          4.40 GB ·  4.39 GB  ·  saved 8.80 MB
+          Elapsed            106.73 s
+
+       6  Backrooms (2026).mkv
+          Kept audio         ID 1: E-AC-3 6ch [eng] - 'Surround 5.1 w/Atmos'
+          Removed audio      (none - a single English audio track was already the only one)
+          External SRT       Backrooms (2026).eng.sdh.srt (validated; preserved)
+          Subtitles kept     0
+          Subtitles removed  2
+                             ·  ID 2: SubRip/SRT [eng]
+                             ·  ID 3: SubRip/SRT [eng] - 'SDH'
+          File size          4.45 GB ·  4.45 GB  ·  saved 194.60 KB
+          Elapsed            125.78 s
+
+       7  Osmosis Jones (2001).mkv
+          Kept audio         ID 1: E-AC-3 2ch [eng]
+          Removed audio      (none - a single English audio track was already the only one)
+          External SRT       Osmosis Jones (2001).eng.sdh.srt (validated; preserved)
+          Subtitles kept     0
+          Subtitles removed  2
+                             ·  ID 2: SubRip/SRT [eng]
+                             ·  ID 3: SubRip/SRT [eng] - 'SDH'
+          File size          2.85 GB ·  2.85 GB  ·  saved 147.62 KB
+          Elapsed            78.69 s
+
+       8  Shark Tale (2004).mkv
+          Kept audio         ID 1: AAC 6ch [eng]
+          Removed audio      (none - a single English audio track was already the only one)
+          External SRT       Shark Tale (2004).eng.sdh.srt (validated; preserved)
+          Subtitles kept     0
+          Subtitles removed  1
+                             ·  ID 2: HDMV PGS [eng]
+          File size          3.41 GB ·  3.39 GB  ·  saved 11.95 MB
+          Elapsed            80.22 s
+
+  ══ ALREADY CLEAN (NO WRITES) ═══════════════════════════════════════════════════ 374 of 382 ══
+
+  These needed no changes and were skipped with zero disk writes.
+
+       1  10 Cloverfield Lane (2016).mkv
+
+       2  10 Things I Hate About You (1999).mkv
+
+       3  12 Years a Slave (2013).mkv
+
+       4  13 Hours - The Secret Soldiers of Benghazi (2016).mkv
+
+       5  1917 (2019).mkv
+
+       6  2001 - A Space Odyssey (1968).mkv
+
+       7  21 Jump Street (2012).mkv
+
+       8  22 Jump Street (2014).mkv
+
+       9  300 (2006).mkv
+
+      10  50 First Dates (2004).mkv
+
+      11  500 Days of Summer (2009).mkv
+
+      12  8 Mile (2002).mkv
+
+      13  9 (2009).mkv
+
+      14  A Beautiful Mind (2001).mkv
+
+      15  A Christmas Story (1983).mkv
+
+      16  A I Artificial Intelligence (2001).mkv
+
+      17  A Quiet Place (2018).mkv
+
+      18  A Quiet Place Part II (2021).mkv
+
+      19  About Time (2013).mkv
+
+      20  Accepted (2006).mkv
+
+      21  Aladdin (1992).mkv
+
+      22  Aliens (1986).mkv
+
+      23  American History X (1998).mkv
+
+      24  American Pie (1999).mkv
+
+      25  American Psycho (2000).mkv
+
+      26  American Sniper (2014).mkv
+
+      27  Annihilation (2018).mkv
+
+      28  Arrival (2016).mkv
+
+      29  Avatar (2009).mkv
+
+      30  Avengers Age of Ultron (2015).mkv
+
+      31  Avengers Endgame (2019).mkv
+
+      32  Avengers Infinity War (2018).mkv
+
+      33  Back to the Future (1985).mkv
+
+      34  Back to the Future Part II (1989).mkv
+
+      35  Back to the Future Part III (1990).mkv
+
+      36  Barbie (2023).mkv
+
+      37  Batman Begins (2005).mkv
+
+      38  Bee Movie (2007).mkv
+
+      39  Black Hawk Down (2001).mkv
+
+      40  Black Panther (2018).mkv
+
+      41  Blade Runner (1982).mkv
+
+      42  Blade Runner 2049 (2017).mkv
+
+      43  Blended (2014).mkv
+
+      44  Bohemian Rhapsody (2018).mkv
+
+      45  Borat (2006).mkv
+
+      46  Boyhood (2014).mkv
+
+      47  Boyz N the Hood (1991).mkv
+
+      48  Braveheart (1995).mkv
+
+      49  Bugonia (2025).mkv
+
+      50  Captain America Civil War (2016).mkv
+
+      51  Captain America The First Avenger (2011).mkv
+
+      52  Captain America The Winter Soldier (2014).mkv
+
+      53  Cars (2006).mkv
+
+      54  Casino Royale (2006).mkv
+
+      55  Cast Away (2000).mkv
+
+      56  Catch Me If You Can (2002).mkv
+
+      57  Charlie and the Chocolate Factory (2005).mkv
+
+      58  Chicken Little (2005).mkv
+
+      59  Children of Men (2006).mkv
+
+      60  Chronicle (2012).mkv
+
+      61  Civil War (2024).mkv
+
+      62  Cloudy with a Chance of Meatballs (2009).mkv
+
+      63  Cloverfield (2008).mkv
+
+      64  Coach Carter (2005).mkv
+
+      65  Coco (2017).mkv
+
+      66  Contact (1997).mkv
+
+      67  Contagion (2011).mkv
+
+      68  Coraline (2009).mkv
+
+      69  Crazy Rich Asians (2018).mkv
+
+      70  Creed (2015).mkv
+
+      71  Dawn of the Planet of the Apes (2014).mkv
+
+      72  Dead Poets Society (1989).mkv
+
+      73  Deadpool (2016).mkv
+
+      74  Deadpool 2 (2018).mkv
+
+      75  Despicable Me (2010).mkv
+
+      76  Die Hard (1988).mkv
+
+      77  District 9 (2009).mkv
+
+      78  Django Unchained (2012).mkv
+
+      79  Donnie Darko (2001).mkv
+
+      80  Dune (2021).mkv
+
+      81  Dune - Part Two (2024).mkv
+
+      82  Dunkirk (2017).mkv
+
+      83  E T the Extra-Terrestrial (1982).mkv
+
+      84  Easy A (2010).mkv
+
+      85  Edge of Tomorrow (2014).mkv
+
+      86  Edward Scissorhands (1990).mkv
+
+      87  Elemental (2023).mkv
+
+      88  Elysium (2013).mkv
+
+      89  Enchanted (2007).mkv
+
+      90  Enemy (2013).mkv
+
+      91  Eternal Sunshine of the Spotless Mind (2004).mkv
+
+      92  Ex Machina (2015).mkv
+
+      93  Fargo (1996).mkv
+
+      94  Fast Five (2011).mkv
+
+      95  Ferris Bueller's Day Off (1986).mkv
+
+      96  Fight Club (1999).mkv
+
+      97  Finding Nemo (2003).mkv
+
+      98  First Man (2018).mkv
+
+      99  Ford v Ferrari (2019).mkv
+
+     100  Forrest Gump (1994).mkv
+
+     101  Fractured (2019).mkv
+
+     102  Fury (2014).mkv
+
+     103  Get Out (2017).mkv
+
+     104  Ghostbusters (1984).mkv
+
+     105  Gladiator (2000).mkv
+
+     106  Gone Girl (2014).mkv
+
+     107  Good Will Hunting (1997).mkv
+
+     108  Goodfellas (1990).mkv
+
+     109  Gravity (2013).mkv
+
+     110  Green Book (2018).mkv
+
+     111  Greenland (2020).mkv
+
+     112  Groundhog Day (1993).mkv
+
+     113  Grown Ups (2010).mkv
+
+     114  Guardians of the Galaxy (2014).mkv
+
+     115  Hacksaw Ridge (2016).mkv
+
+     116  Happy Feet (2006).mkv
+
+     117  Happy Gilmore (1996).mkv
+
+     118  Harry Potter and the Chamber of Secrets (2002).mkv
+
+     119  Harry Potter and the Deathly Hallows - Part 1 (2010).mkv
+
+     120  Harry Potter and the Deathly Hallows - Part 2 (2011).mkv
+
+     121  Harry Potter and the Goblet of Fire (2005).mkv
+
+     122  Harry Potter and the Half-Blood Prince (2009).mkv
+
+     123  Harry Potter and the Order of the Phoenix (2007).mkv
+
+     124  Harry Potter and the Prisoner of Azkaban (2004).mkv
+
+     125  Harry Potter and the Sorcerer's Stone (2001).mkv
+
+     126  Heat (1995).mkv
+
+     127  Her (2013).mkv
+
+     128  Hercules (1997).mkv
+
+     129  Hereditary (2018).mkv
+
+     130  Hidden Figures (2016).mkv
+
+     131  Holes (2003).mkv
+
+     132  Home Alone (1990).mkv
+
+     133  Home Alone 2 - Lost in New York (1992).mkv
+
+     134  How to Train Your Dragon (2010).mkv
+
+     135  I Am Legend (2007).mkv
+
+     136  I, Robot (2004).mkv
+
+     137  I, Tonya (2017).mkv
+
+     138  Ice Age (2002).mkv
+
+     139  Idiocracy (2006).mkv
+
+     140  Inception (2010).mkv
+
+     141  Incredibles 2 (2018).mkv
+
+     142  Independence Day (1996).mkv
+
+     143  Indiana Jones and the Last Crusade (1989).mkv
+
+     144  Indiana Jones and the Raiders of the Lost Ark (1981).mkv
+
+     145  Indiana Jones and the Temple of Doom (1984).mkv
+
+     146  Inglourious Basterds (2009).mkv
+
+     147  Insomnia (2002).mkv
+
+     148  Interstellar (2014).mkv
+
+     149  Into the Wild (2007).mkv
+
+     150  Iron Man (2008).mkv
+
+     151  Iron Man 2 (2010).mkv
+
+     152  IT (2017).mkv
+
+     153  James and the Giant Peach (1996).mkv
+
+     154  Jaws (1975).mkv
+
+     155  Jimmy Neutron Boy Genius (2001).mkv
+
+     156  John Q (2002).mkv
+
+     157  Joker (2019).mkv
+
+     158  Jumanji (1995).mkv
+
+     159  Juno (2007).mkv
+
+     160  Jurassic Park (1993).mkv
+
+     161  Jurassic World (2015).mkv
+
+     162  Kick-Ass (2010).mkv
+
+     163  King Richard (2021).mkv
+
+     164  Knives Out (2019).mkv
+
+     165  Knowing (2009).mkv
+
+     166  Kung Fu Panda (2008).mkv
+
+     167  Legally Blonde (2001).mkv
+
+     168  Logan (2017).mkv
+
+     169  Lone Survivor (2013).mkv
+
+     170  Madagascar (2005).mkv
+
+     171  Magnolia (1999).mkv
+
+     172  Marty Supreme (2025).mkv
+
+     173  Mean Girls (2004).mkv
+
+     174  Meet the Robinsons (2007).mkv
+
+     175  Megamind (2010).mkv
+
+     176  Memento (2000).mkv
+
+     177  Minority Report (2002).mkv
+
+     178  Mission - Impossible - Fallout (2018).mkv
+
+     179  Monsters University (2013).mkv
+
+     180  Monsters, Inc (2001).mkv
+
+     181  Moon (2009).mkv
+
+     182  Mulan (1998).mkv
+
+     183  Napoleon Dynamite (2004).mkv
+
+     184  National Lampoon's Christmas Vacation (1989).mkv
+
+     185  National Treasure (2004).mkv
+
+     186  National Treasure Book of Secrets (2007).mkv
+
+     187  Night at the Museum (2006).mkv
+
+     188  Nightcrawler (2014).mkv
+
+     189  No Country for Old Men (2007).mkv
+
+     190  Now You See Me (2013).mkv
+
+     191  Oblivion (2013).mkv
+
+     192  Obsession (2026).mkv
+
+     193  October Sky (1999).mkv
+
+     194  Office Space (1999).mkv
+
+     195  One Flew Over the Cuckoo's Nest (1975).mkv
+
+     196  Open Season (2006).mkv
+
+     197  Oppenheimer (2023).mkv
+
+     198  Over the Hedge (2006).mkv
+
+     199  Parasite (2019).mkv
+
+     200  Pearl (2022).mkv
+
+     201  Pineapple Express (2008).mkv
+
+     202  Pirates of the Caribbean At World's End (2007).mkv
+
+     203  Pirates of the Caribbean Dead Man's Chest (2006).mkv
+
+     204  Pirates of the Caribbean The Curse of the Black Pearl (2003).mkv
+
+     205  Pitch Perfect (2012).mkv
+
+     206  Prisoners (2013).mkv
+
+     207  Project Hail Mary (2026).mkv
+
+     208  Project X (2012).mkv
+
+     209  Pulp Fiction (1994).mkv
+
+     210  Ratatouille (2007).mkv
+
+     211  Ready Player One (2018).mkv
+
+     212  Real Steel (2011).mkv
+
+     213  Remember the Titans (2000).mkv
+
+     214  Requiem for a Dream (2000).mkv
+
+     215  Rise of the Planet of the Apes (2011).mkv
+
+     216  Robots (2005).mkv
+
+     217  Rocky (1976).mkv
+
+     218  Room (2015).mkv
+
+     219  Sausage Party (2016).mkv
+
+     220  Saving Private Ryan (1998).mkv
+
+     221  Saw (2004).mkv
+
+     222  Scarface (1983).mkv
+
+     223  Schindler's List (1993).mkv
+
+     224  Scream (1996).mkv
+
+     225  Se7en (1995).mkv
+
+     226  Shazam! (2019).mkv
+
+     227  Shrek (2001).mkv
+
+     228  Shrek 2 (2004).mkv
+
+     229  Shrek Forever After (2010).mkv
+
+     230  Shutter Island (2010).mkv
+
+     231  Sicario (2015).mkv
+
+     232  Signs (2002).mkv
+
+     233  Sinister (2012).mkv
+
+     234  Sinners (2025).mkv
+
+     235  Skyfall (2012).mkv
+
+     236  Slumdog Millionaire (2008).mkv
+
+     237  Snatch (2000).mkv
+
+     238  Snowden (2016).mkv
+
+     239  Source Code (2011).mkv
+
+     240  Spaceballs (1987).mkv
+
+     241  Spider-Man (2002).mkv
+
+     242  Spider-Man - Across the Spider-Verse (2023).mkv
+
+     243  Spider-Man - Homecoming (2017).mkv
+
+     244  Spider-Man - Into the Spider-Verse (2018).mkv
+
+     245  Spider-Man 2 (2004).mkv
+
+     246  Spider-Man No Way Home (2021).mkv
+
+     247  Spirited Away (2001).mkv
+
+     248  Split (2016).mkv
+
+     249  Stalker (1979).mkv
+
+     250  Stand by Me (1986).mkv
+
+     251  Star Trek (2009).mkv
+
+     252  Star Trek - Into Darkness (2013).mkv
+
+     253  Star Wars - Episode I - The Phantom Menace (1999).mkv
+
+     254  Star Wars - Episode II - Attack of the Clones (2002).mkv
+
+     255  Star Wars - Episode III - Revenge of the Sith (2005).mkv
+
+     256  Star Wars - Episode IV - A New Hope (1977).mkv
+
+     257  Star Wars - Episode V - The Empire Strikes Back (1980).mkv
+
+     258  Star Wars - Episode VI - Return of the Jedi (1983).mkv
+
+     259  Straight Outta Compton (2015).mkv
+
+     260  Super 8 (2011).mkv
+
+     261  Superbad (2007).mkv
+
+     262  Surf's Up (2007).mkv
+
+     263  Taken (2008).mkv
+
+     264  Tangled (2010).mkv
+
+     265  Taxi Driver (1976).mkv
+
+     266  Ted (2012).mkv
+
+     267  Tenet (2020).mkv
+
+     268  Terminator 2 - Judgment Day (1991).mkv
+
+     269  Tetris (2023).mkv
+
+     270  The Accountant (2016).mkv
+
+     271  The Amazing Spider-Man (2012).mkv
+
+     272  The Avengers (2012).mkv
+
+     273  The Batman (2022).mkv
+
+     274  The Big Lebowski (1998).mkv
+
+     275  The Big Short (2015).mkv
+
+     276  The Book of Eli (2010).mkv
+
+     277  The Bourne Identity (2002).mkv
+
+     278  The Bourne Supremacy (2004).mkv
+
+     279  The Bourne Ultimatum (2007).mkv
+
+     280  The Boy in the Striped Pyjamas (2008).mkv
+
+     281  The Breakfast Club (1985).mkv
+
+     282  The Curious Case of Benjamin Button (2008).mkv
+
+     283  The Dark Knight (2008).mkv
+
+     284  The Dark Knight Rises (2012).mkv
+
+     285  The Day After (1983).mkv
+
+     286  The Departed (2006).mkv
+
+     287  The Edge of Seventeen (2016).mkv
+
+     288  The Emperor's New Groove (2000).mkv
+
+     289  The Fast and the Furious (2001).mkv
+
+     290  The Founder (2016).mkv
+
+     291  The Godfather (1972).mkv
+
+     292  The Godfather - Part II (1974).mkv
+
+     293  The Goonies (1985).mkv
+
+     294  The Green Mile (1999).mkv
+
+     295  The Hangover (2009).mkv
+
+     296  The Help (2011).mkv
+
+     297  The Hunger Games (2012).mkv
+
+     298  The Hunger Games - Mockingjay - Part 1 (2014).mkv
+
+     299  The Hunger Games - Mockingjay - Part 2 (2015).mkv
+
+     300  The Hunger Games Catching Fire (2013).mkv
+
+     301  The Hurt Locker (2008).mkv
+
+     302  The Imitation Game (2014).mkv
+
+     303  The Incredibles (2004).mkv
+
+     304  The Interview (2014).mkv
+
+     305  The Invisible Man (2020).mkv
+
+     306  The Karate Kid (1984).mkv
+
+     307  The Longest Yard (2005).mkv
+
+     308  The Lord of the Rings The Fellowship of the Ring (2001).mkv
+
+     309  The Lord of the Rings The Return of the King (2003).mkv
+
+     310  The Lord of the Rings The Two Towers (2002).mkv
+
+     311  The Martian (2015).mkv
+
+     312  The Matrix (1999).mkv
+
+     313  The Maze Runner (2014).mkv
+
+     314  The Nightmare Before Christmas (1993).mkv
+
+     315  The Polar Express (2004).mkv
+
+     316  The Prestige (2006).mkv
+
+     317  The Princess and the Frog (2009).mkv
+
+     318  The Proposal (2009).mkv
+
+     319  The Revenant (2015).mkv
+
+     320  The Sandlot (1993).mkv
+
+     321  The Shawshank Redemption (1994).mkv
+
+     322  The Silence of the Lambs (1991).mkv
+
+     323  The Sixth Sense (1999).mkv
+
+     324  The Social Network (2010).mkv
+
+     325  The Substance (2024).mkv
+
+     326  The Terminator (1984).mkv
+
+     327  The Theory of Everything (2014).mkv
+
+     328  The Thing (1982).mkv
+
+     329  The Truman Show (1998).mkv
+
+     330  The Usual Suspects (1995).mkv
+
+     331  The Wild Robot (2024).mkv
+
+     332  The Wolf of Wall Street (2013).mkv
+
+     333  There Will Be Blood (2007).mkv
+
+     334  This Christmas (2007).mkv
+
+     335  This Is the End (2013).mkv
+
+     336  Thor - Ragnarok (2017).mkv
+
+     337  Threads (1984).mkv
+
+     338  Titanic (1997).mkv
+
+     339  Top Gun (1986).mkv
+
+     340  Top Gun - Maverick (2022).mkv
+
+     341  Toy Story (1995).mkv
+
+     342  Toy Story 2 (1999).mkv
+
+     343  Toy Story 3 (2010).mkv
+
+     344  Toy Story 4 (2019).mkv
+
+     345  Toy Story 5 (2026).mkv
+
+     346  Training Day (2001).mkv
+
+     347  Transformers (2007).mkv
+
+     348  Transformers Dark Of The Moon (2011).mkv
+
+     349  Transformers Revenge of the Fallen (2009).mkv
+
+     350  Treasure Planet (2002).mkv
+
+     351  TRON - Legacy (2010).mkv
+
+     352  Turtles Forever (2009).mkv
+
+     353  Twelve Monkeys (1995).mkv
+
+     354  Uncut Gems (2019).mkv
+
+     355  United 93 (2006).mkv
+
+     356  Us (2019).mkv
+
+     357  V for Vendetta (2005).mkv
+
+     358  WALL-E (2008).mkv
+
+     359  Wallace & Gromit - The Curse of the Were-Rabbit (2005).mkv
+
+     360  War Dogs (2016).mkv
+
+     361  War for the Planet of the Apes (2017).mkv
+
+     362  WarGames (1983).mkv
+
+     363  Warrior (2011).mkv
+
+     364  We're the Millers (2013).mkv
+
+     365  Weapons (2025).mkv
+
+     366  When Harry Met Sally (1989).mkv
+
+     367  Whiplash (2014).mkv
+
+     368  Willy Wonka & the Chocolate Factory (1971).mkv
+
+     369  World War Z (2013).mkv
+
+     370  Wreck-It Ralph (2012).mkv
+
+     371  Zathura - A Space Adventure (2005).mkv
+
+     372  Zero Dark Thirty (2012).mkv
+
+     373  Zootopia (2016).mkv
+
+     374  Zootopia 2 (2025).mkv
+
+  ══ SKIPPED (FOREIGN / NO ENGLISH AUDIO) ══════════════════════════════════════════ 0 of 382 ══
+
+  Policy, not a fault: a film with no usable English audio is left exactly as it is unless it
+  already has a validated external English SRT.
+
+  None.
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  Hardlinked movies are always deferred until qBittorrent removes the seeded source.
+  Log: E:\torrents\tools\ReportsAndLogs\mkv_track_cleaner\mkv_track_cleaner.log

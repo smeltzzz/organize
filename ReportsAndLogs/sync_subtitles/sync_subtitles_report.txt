@@ -1,0 +1,2191 @@
+╔══════════════════════════════════════════════════════════════════════════════════════════════╗
+║ JELLYFIN SUBTITLE SYNCHRONIZER (FFSUBSYNC)                                                   ║
+║ Every .srt sidecar checked against its movie - the final content step, right before the      ║
+║ library audit                                                                                ║
+╟──────────────────────────────────────────────────────────────────────────────────────────────╢
+║ Mode          LIVE                                                                           ║
+║ Library       E:\torrents\final_organized                                                    ║
+║ ffsubsync     C:\Users\bensm\AppData\Local\Programs\Python\Python312\Scripts\ffsubsync.EXE   ║
+║               ffsubsync 0.5.1                                                                ║
+║ Quality gate  on                                                                             ║
+║ Trust window  apply >= 0.1s drift, hold beyond +/-30s                                        ║
+║ Log           E:\torrents\tools\ReportsAndLogs\sync_subtitles\sync_subtitles.log             ║
+║ Report        E:\torrents\tools\ReportsAndLogs\sync_subtitles\sync_subtitles_report.txt      ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+    28   Synced                   timing corrected, sidecar replaced atomically
+   337   In sync                  already aligned, file untouched
+     0   Extracted (not synced)   built from the movie's own track; no drift exists
+     0   Remembered in sync       measured on an earlier run; unchanged, not re-measured
+    16   Held for review          untrustworthy sync, original kept
+     1   Failed                   ffsubsync error, original kept
+     0   Skipped                  nothing to sync (no video / unusable sidecar)
+   382   Sidecars checked         every non-junk .srt in the library
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  Start here: 16 subtitle(s) need a human decision - the sync looked wrong, and the original is
+  untouched.
+
+  ══ SUBTITLES HELD FOR REVIEW ═══════════════════════════════════════════════════════════ 16 ══
+
+  A sync was measured but refused: the offset is beyond the trust window, the alignment is
+  anti-correlated, or ffsubsync's own quality gate rejected it. The original file is
+  byte-identical. Watch the movie or re-fetch the subtitle for the cut you actually own.
+
+          E:\torrents\final_organized\Accepted (2006)\Accepted (2006).eng.srt
+          Offset     -0.04s
+          Framerate  x1.000
+          Score      -46606
+          Video      E:\torrents\final_organized\Accepted (2006)\Accepted (2006).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review;
+            replacement fetch stopped: no unused qualifying English SRT for a replacement fetch
+
+          E:\torrents\final_organized\Aladdin (1992)\Aladdin (1992).eng.srt
+          Offset     +4.45s
+          Framerate  x1.000
+          Score      -101908
+          Video      E:\torrents\final_organized\Aladdin (1992)\Aladdin (1992).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\Barbie (2023)\Barbie (2023).eng.srt
+          Offset     +57.69s
+          Framerate  x1.001
+          Score      2577
+          Video      E:\torrents\final_organized\Barbie (2023)\Barbie (2023).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review;
+            replacement fetch stopped: no unused qualifying English SRT for a replacement fetch
+
+          E:\torrents\final_organized\Enchanted (2007)\Enchanted (2007).eng.srt
+          Offset     -0.39s
+          Framerate  x1.000
+          Score      -112175
+          Video      E:\torrents\final_organized\Enchanted (2007)\Enchanted (2007).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\Finding Nemo (2003)\Finding Nemo (2003).eng.srt
+          Offset     -0.03s
+          Framerate  x1.000
+          Score      -19630
+          Video      E:\torrents\final_organized\Finding Nemo (2003)\Finding Nemo (2003).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\Hercules (1997)\Hercules (1997).eng.srt
+          Offset     +19.15s
+          Framerate  x1.000
+          Score      -42265
+          Video      E:\torrents\final_organized\Hercules (1997)\Hercules (1997).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\Marty Supreme (2025)\Marty Supreme (2025).eng.srt
+          Offset     -0.17s
+          Framerate  x1.000
+          Score      -39637
+          Video      E:\torrents\final_organized\Marty Supreme (2025)\Marty Supreme (2025).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\Oppenheimer (2023)\Oppenheimer (2023).eng.srt
+          Offset     +23.05s
+          Framerate  x1.000
+          Score      -132307
+          Video      E:\torrents\final_organized\Oppenheimer (2023)\Oppenheimer (2023).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\The Big Short (2015)\The Big Short (2015).eng.srt
+          Offset     -0.05s
+          Framerate  x1.000
+          Score      -22187
+          Video      E:\torrents\final_organized\The Big Short (2015)\The Big Short (2015).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\The Nightmare Before Christmas (1993)\The Nightmare
+          Before Christmas (1993).eng.srt
+          Offset     +0.13s
+          Framerate  x1.000
+          Score      -61975
+          Video      E:\torrents\final_organized\The Nightmare Before Christmas (1993)\The
+                     Nightmare Before Christmas (1993).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\The Princess and the Frog (2009)\The Princess and the
+          Frog (2009).eng.srt
+          Offset     +0.02s
+          Framerate  x1.000
+          Score      -125910
+          Video      E:\torrents\final_organized\The Princess and the Frog (2009)\The Princess
+                     and the Frog (2009).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review;
+            replacement fetch stopped: no unused qualifying English SRT for a replacement fetch
+
+          E:\torrents\final_organized\The Wolf of Wall Street (2013)\The Wolf of Wall Street
+          (2013).eng.srt
+          Offset     -0.13s
+          Framerate  x1.000
+          Score      -136139
+          Video      E:\torrents\final_organized\The Wolf of Wall Street (2013)\The Wolf of Wall
+                     Street (2013).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\This Is the End (2013)\This Is the End (2013).eng.srt
+          Offset     -0.08s
+          Framerate  x1.000
+          Score      -55034
+          Video      E:\torrents\final_organized\This Is the End (2013)\This Is the End
+                     (2013).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review
+
+          E:\torrents\final_organized\Uncut Gems (2019)\Uncut Gems (2019).eng.srt
+          Offset     -5.04s
+          Framerate  x1.001
+          Score      -27686
+          Video      E:\torrents\final_organized\Uncut Gems (2019)\Uncut Gems (2019).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review;
+            replacement fetch stopped: HTTP 406 /download:
+            {"requests":101,"remaining":-1,"message":"You have downloaded your allowed 100
+            subtitles for 24h.Your quota will be renewed in 14 hours and 36 minutes (2026-09-03
+            23:59:59 UTC) ts=1788427425 ","reset_time":"14 hours and 36 minutes","reset_time_utc
+            ":"2026-09-03T23:59:59.000Z","uk":"app_ud_173498","uid":2,"ts":1788427425}
+
+          E:\torrents\final_organized\United 93 (2006)\United 93 (2006).eng.srt
+          Offset     +0.16s
+          Framerate  x1.000
+          Score      -26148
+          Video      E:\torrents\final_organized\United 93 (2006)\United 93 (2006).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review;
+            replacement fetch stopped: HTTP 406 /download:
+            {"requests":101,"remaining":-1,"message":"You have downloaded your allowed 100
+            subtitles for 24h.Your quota will be renewed in 14 hours and 35 minutes (2026-09-04
+            00:00:00 UTC) ts=1788427488 ","reset_time":"14 hours and 35 minutes","reset_time_utc
+            ":"2026-09-04T00:00:00.000Z","uk":"app_ud_173498","uid":2,"ts":1788427488}
+
+          E:\torrents\final_organized\Warrior (2011)\Warrior (2011).eng.srt
+          Offset     +0.87s
+          Framerate  x1.000
+          Score      -7412
+          Video      E:\torrents\final_organized\Warrior (2011)\Warrior (2011).mkv
+            ffsubsync's quality gate rejected the alignment; original kept for review;
+            replacement fetch stopped: HTTP 406 /download:
+            {"requests":101,"remaining":-1,"message":"You have downloaded your allowed 100
+            subtitles for 24h.Your quota will be renewed in 14 hours and 27 minutes (2026-09-04
+            00:00:00 UTC) ts=1788427920 ","reset_time":"14 hours and 27 minutes","reset_time_utc
+            ":"2026-09-04T00:00:00.000Z","uk":"app_ud_173498","uid":2,"ts":1788427920}
+
+  ══ FAILED SYNC ATTEMPTS ═════════════════════════════════════════════════════════════════ 1 ══
+
+  ffsubsync could not finish. The original sidecar is untouched; the staged output (if any) was
+  removed. The error lines are ffsubsync's own stderr.
+
+          E:\torrents\final_organized\Turtles Forever (2009)\Turtles Forever (2009).eng.srt
+          Video           E:\torrents\final_organized\Turtles Forever (2009)\Turtles Forever
+                          (2009).mkv
+          Took            25.1s
+          ffsubsync said  \u0645\u0628\u064a\u0639\u0627\u062a\n\n\n1181 \n01:08:50\u060c370 -->
+                          | 01:08:52\u060c020 \n\u0646\u0639\u0645 \u060c \u0643\u0646\u062a
+                          \u0623\u0641\u0643\u0631 \u0641\u064a \u0646\u0641\u0633 |
+                          \u0627\u0644\u0634\u0649\u0621\n\n\n1182 \n01:08:52\u060c300 --> |
+                          01:08:52\u060c790 \n\u0647\u0627 \u0647\u0627')
+            ffsubsync wrote no output file; replacement fetch stopped: no unused qualifying
+            English SRT for a replacement fetch
+
+  ══ SUBTITLES SYNCED (TIMING CORRECTED) ═════════════════════════════════════════════════ 28 ══
+
+  The drift was real and inside the trust window, so the sidecar was replaced with the corrected
+  copy (verified staged file, atomic swap).
+
+          E:\torrents\final_organized\A Quiet Place (2018)\A Quiet Place (2018).eng.srt
+          Offset     +15.10s
+          Framerate  x1.043
+          Score      386996
+          Took       87.2s
+          SHA256     bf02f3d321c4... -> 21e921ed2ad6...
+
+          E:\torrents\final_organized\A Quiet Place Part II (2021)\A Quiet Place Part II
+          (2021).eng.srt
+          Offset     +26.59s
+          Framerate  x1.043
+          Score      393970
+          Took       71.5s
+          SHA256     9bfda6d96fd2... -> 68522df569bf...
+
+          E:\torrents\final_organized\Backrooms (2026)\Backrooms (2026).eng.sdh.srt
+          Offset     -0.30s
+          Framerate  x1.000
+          Score      315913
+          Took       59.6s
+          SHA256     50a34b43cfeb... -> 4dadda7dab59...
+
+          E:\torrents\final_organized\Groundhog Day (1993)\Groundhog Day (1993).eng.srt
+          Offset     +1.36s
+          Framerate  x1.000
+          Score      53533
+          Took       63.5s
+          SHA256     d11310dbd3e9... -> a0406801caa5...
+
+          E:\torrents\final_organized\Harry Potter and the Chamber of Secrets (2002)\Harry
+          Potter and the Chamber of Secrets (2002).eng.srt
+          Offset     -24.95s
+          Framerate  x1.042
+          Score      41134
+          Took       62.2s
+          SHA256     887192e2f615... -> f249f1c90ea2...
+
+          E:\torrents\final_organized\Idiocracy (2006)\Idiocracy (2006).eng.srt
+          Offset     -1.03s
+          Framerate  x1.000
+          Score      26493
+          Took       33.5s
+          SHA256     b58cf200def0... -> 795ab5209bb1...
+
+          E:\torrents\final_organized\Independence Day (1996)\Independence Day (1996).eng.srt
+          Offset     +20.50s
+          Framerate  x1.043
+          Score      32458
+          Took       229.0s
+          SHA256     ec806ca8e471... -> 829c63751878...
+
+          E:\torrents\final_organized\Monsters, Inc (2001)\Monsters, Inc (2001).eng.srt
+          Offset     +0.39s
+          Framerate  x1.043
+          Score      1808
+          Took       42.8s
+          SHA256     db3f1fa70740... -> a97711cb2433...
+
+          E:\torrents\final_organized\Obsession (2026)\Obsession (2026).eng.srt
+          Offset     +2.19s
+          Framerate  x1.001
+          Score      172877
+          Took       58.2s
+          SHA256     4311137e4e76... -> 7ff506bde7d4...
+
+          E:\torrents\final_organized\Office Space (1999)\Office Space (1999).eng.srt
+          Offset     -0.10s
+          Framerate  x1.000
+          Score      43874
+          Took       52.9s
+          SHA256     de35b056d22f... -> a7a392dd848a...
+
+          E:\torrents\final_organized\Osmosis Jones (2001)\Osmosis Jones (2001).eng.sdh.srt
+          Offset     +1.54s
+          Framerate  x1.000
+          Score      90352
+          Took       59.8s
+          SHA256     c4c5ad37d5ce... -> 562d634194ff...
+
+          E:\torrents\final_organized\Pirates of the Caribbean Dead Man's Chest (2006)\Pirates
+          of the Caribbean Dead Man's Chest (2006).eng.srt
+          Offset     -0.50s
+          Framerate  x1.000
+          Score      244359
+          Took       91.5s
+          SHA256     691b6db9cdd5... -> 2cd1d0c47c68...
+
+          E:\torrents\final_organized\Project X (2012)\Project X (2012).eng.srt
+          Offset     -26.34s
+          Framerate  x1.042
+          Score      38748
+          Took       62.0s
+          SHA256     6a0f5d85e906... -> 4e2a1693dcac...
+
+          E:\torrents\final_organized\Rise of the Planet of the Apes (2011)\Rise of the Planet
+          of the Apes (2011).eng.srt
+          Offset     +0.12s
+          Framerate  x1.000
+          Score      156744
+          Took       77.3s
+          SHA256     2ce25715d81d... -> 8fb4474ce544...
+
+          E:\torrents\final_organized\Sausage Party (2016)\Sausage Party (2016).eng.srt
+          Offset     +0.13s
+          Framerate  x1.000
+          Score      1758
+          Took       41.3s
+          SHA256     7d037020ceef... -> dc2988ed263e...
+
+          E:\torrents\final_organized\Slumdog Millionaire (2008)\Slumdog Millionaire
+          (2008).eng.srt
+          Offset     +29.92s
+          Framerate  x1.000
+          Score      185276
+          Took       131.0s
+          SHA256     d14aad7f4290... -> db6d7847421c...
+
+          E:\torrents\final_organized\Spider-Man 2 (2004)\Spider-Man 2 (2004).eng.srt
+          Offset     -0.32s
+          Framerate  x1.000
+          Score      325940
+          Took       95.1s
+          SHA256     43022fb24a73... -> 14ee26126b61...
+
+          E:\torrents\final_organized\Star Wars - Episode I - The Phantom Menace (1999)\Star
+          Wars - Episode I - The Phantom Menace (1999).eng.srt
+          Offset     -5.48s
+          Framerate  x1.043
+          Score      89985
+          Took       121.4s
+          SHA256     eca9731a64e1... -> bd2cbd134aef...
+
+          E:\torrents\final_organized\Star Wars - Episode III - Revenge of the Sith (2005)\Star
+          Wars - Episode III - Revenge of the Sith (2005).eng.srt
+          Offset     -8.37s
+          Framerate  x1.043
+          Score      200715
+          Took       77.8s
+          SHA256     0b9f7dc2b85a... -> e0298a6eadc1...
+
+          E:\torrents\final_organized\Star Wars - Episode VI - Return of the Jedi (1983)\Star
+          Wars - Episode VI - Return of the Jedi (1983).eng.srt
+          Offset     +10.91s
+          Framerate  x1.043
+          Score      246765
+          Took       78.6s
+          SHA256     8da67a85df32... -> 9a3b009e14cf...
+
+          E:\torrents\final_organized\Superbad (2007)\Superbad (2007).eng.srt
+          Offset     +0.16s
+          Framerate  x1.001
+          Score      3474
+          Took       29.4s
+          SHA256     c4bdaa7f43a5... -> ce36d77c5648...
+
+          E:\torrents\final_organized\Ted (2012)\Ted (2012).eng.srt
+          Offset     +14.40s
+          Framerate  x1.043
+          Score      54854
+          Took       32.2s
+          SHA256     4669b61de618... -> 99674c5418d4...
+
+          E:\torrents\final_organized\Tenet (2020)\Tenet (2020).eng.srt
+          Offset     +26.62s
+          Framerate  x1.043
+          Score      98195
+          Took       98.3s
+          SHA256     b02b4c44dea7... -> b39c1d457523...
+
+          E:\torrents\final_organized\Terminator 2 - Judgment Day (1991)\Terminator 2 -
+          Judgment Day (1991).eng.srt
+          Offset     +24.54s
+          Framerate  x0.960
+          Score      300949
+          Took       96.5s
+          SHA256     81fd0f8929e7... -> 92f9b4e73ac6...
+
+          E:\torrents\final_organized\The Day After (1983)\The Day After (1983).eng.srt
+          Offset     +0.72s
+          Framerate  x1.000
+          Score      353566
+          Took       31.7s
+          SHA256     dce66b419c23... -> 7635bc2e1061...
+
+          E:\torrents\final_organized\The Lord of the Rings The Return of the King (2003)\The
+          Lord of the Rings The Return of the King (2003).eng.srt
+          Offset     -6.81s
+          Framerate  x1.043
+          Score      560874
+          Took       95.6s
+          SHA256     a12f004ffa58... -> 084c00d5b466...
+
+          E:\torrents\final_organized\There Will Be Blood (2007)\There Will Be Blood
+          (2007).eng.srt
+          Offset     +15.70s
+          Framerate  x1.000
+          Score      326952
+          Took       93.9s
+          SHA256     b7d1772fef92... -> f255529d1f1c...
+
+          E:\torrents\final_organized\Twelve Monkeys (1995)\Twelve Monkeys (1995).eng.srt
+          Offset     -2.02s
+          Framerate  x1.000
+          Score      26692
+          Took       251.1s
+          SHA256     6ec6a07ef4ee... -> 35e39f2ffbe4...
+
+  ══ ALREADY IN SYNC ════════════════════════════════════════════════════════════════════ 337 ══
+
+  Measured drift below the threshold (and no framerate correction): the original bytes were
+  deliberately left untouched.
+
+          E:\torrents\final_organized\10 Cloverfield Lane (2016)\10 Cloverfield Lane
+          (2016).eng.srt
+          Offset  -0.04s
+          Took    44.5s
+            already aligned (offset -0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\10 Things I Hate About You (1999)\10 Things I Hate About
+          You (1999).eng.srt
+          Offset  +0.08s
+          Took    66.1s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\12 Years a Slave (2013)\12 Years a Slave (2013).eng.srt
+          Offset  -0.04s
+          Took    98.6s
+            already aligned (offset -0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\13 Hours - The Secret Soldiers of Benghazi (2016)\13
+          Hours - The Secret Soldiers of Benghazi (2016).eng.srt
+          Offset  -0.01s
+          Took    82.6s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\1917 (2019)\1917 (2019).eng.srt
+          Offset  +0.00s
+          Took    72.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\2001 - A Space Odyssey (1968)\2001 - A Space Odyssey
+          (1968).eng.srt
+          Offset  +0.02s
+          Took    74.5s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\21 Jump Street (2012)\21 Jump Street (2012).eng.srt
+          Offset  +0.06s
+          Took    50.5s
+            already aligned (offset +0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\22 Jump Street (2014)\22 Jump Street (2014).eng.srt
+          Offset  +0.07s
+          Took    60.7s
+            already aligned (offset +0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\300 (2006)\300 (2006).eng.srt
+          Offset  +0.00s
+          Took    55.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\42 (2013)\42 (2013).eng.sdh.srt
+          Offset  +0.09s
+          Took    63.4s
+            already aligned (offset +0.090s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\50 First Dates (2004)\50 First Dates (2004).eng.srt
+          Offset  -0.05s
+          Took    56.1s
+            already aligned (offset -0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\500 Days of Summer (2009)\500 Days of Summer
+          (2009).eng.srt
+          Offset  -0.07s
+          Took    38.9s
+            already aligned (offset -0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\8 Mile (2002)\8 Mile (2002).eng.srt
+          Offset  +0.00s
+          Took    46.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\9 (2009)\9 (2009).eng.srt
+          Offset  -0.05s
+          Took    32.1s
+            already aligned (offset -0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\A Beautiful Mind (2001)\A Beautiful Mind (2001).eng.srt
+          Offset  +0.00s
+          Took    104.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\A Christmas Story (1983)\A Christmas Story (1983).eng.srt
+          Offset  +0.00s
+          Took    51.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\A I Artificial Intelligence (2001)\A I Artificial
+          Intelligence (2001).eng.srt
+          Offset  +0.00s
+          Took    77.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\About Time (2013)\About Time (2013).eng.srt
+          Offset  -0.04s
+          Took    69.7s
+            already aligned (offset -0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Air (2023)\Air (2023).eng.sdh.srt
+          Offset  +0.00s
+          Took    64.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Alien (1979)\Alien (1979).eng.sdh.srt
+          Offset  +0.00s
+          Took    68.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Aliens (1986)\Aliens (1986).eng.srt
+          Offset  +0.00s
+          Took    87.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\All Quiet on the Western Front (2022)\All Quiet on the
+          Western Front (2022).eng.sdh.srt
+          Offset  +0.01s
+          Took    93.4s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\American History X (1998)\American History X
+          (1998).eng.srt
+          Offset  +0.00s
+          Took    60.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\American Pie (1999)\American Pie (1999).eng.srt
+          Offset  +0.00s
+          Took    54.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\American Psycho (2000)\American Psycho (2000).eng.srt
+          Offset  +0.08s
+          Took    62.5s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\American Sniper (2014)\American Sniper (2014).eng.srt
+          Offset  +0.00s
+          Took    50.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Annihilation (2018)\Annihilation (2018).eng.srt
+          Offset  +0.00s
+          Took    60.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Apollo 13 (1995)\Apollo 13 (1995).eng.sdh.srt
+          Offset  +0.00s
+          Took    52.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Arrival (2016)\Arrival (2016).eng.srt
+          Offset  +0.00s
+          Took    47.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Avatar (2009)\Avatar (2009).eng.srt
+          Offset  -0.05s
+          Took    67.4s
+            already aligned (offset -0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Avengers Age of Ultron (2015)\Avengers Age of Ultron
+          (2015).eng.srt
+          Offset  -0.01s
+          Took    35.4s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Avengers Endgame (2019)\Avengers Endgame (2019).eng.srt
+          Offset  +0.00s
+          Took    40.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Avengers Infinity War (2018)\Avengers Infinity War
+          (2018).eng.srt
+          Offset  +0.00s
+          Took    37.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Back to the Future (1985)\Back to the Future
+          (1985).eng.srt
+          Offset  +0.00s
+          Took    62.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Back to the Future Part II (1989)\Back to the Future Part
+          II (1989).eng.srt
+          Offset  -0.08s
+          Took    55.6s
+            already aligned (offset -0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Back to the Future Part III (1990)\Back to the Future
+          Part III (1990).eng.srt
+          Offset  +0.00s
+          Took    55.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Batman Begins (2005)\Batman Begins (2005).eng.srt
+          Offset  +0.00s
+          Took    62.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Bee Movie (2007)\Bee Movie (2007).eng.srt
+          Offset  +0.00s
+          Took    30.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Black Hawk Down (2001)\Black Hawk Down (2001).eng.srt
+          Offset  -0.04s
+          Took    96.7s
+            already aligned (offset -0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Black Panther (2018)\Black Panther (2018).eng.srt
+          Offset  +0.00s
+          Took    48.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Blade Runner (1982)\Blade Runner (1982).eng.srt
+          Offset  -0.09s
+          Took    72.9s
+            already aligned (offset -0.090s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Blade Runner 2049 (2017)\Blade Runner 2049 (2017).eng.srt
+          Offset  +0.00s
+          Took    86.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Blended (2014)\Blended (2014).eng.srt
+          Offset  +0.07s
+          Took    41.9s
+            already aligned (offset +0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Bohemian Rhapsody (2018)\Bohemian Rhapsody (2018).eng.srt
+          Offset  +0.08s
+          Took    73.9s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Borat (2006)\Borat (2006).eng.srt
+          Offset  -0.03s
+          Took    41.5s
+            already aligned (offset -0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Boyhood (2014)\Boyhood (2014).eng.srt
+          Offset  -0.01s
+          Took    86.5s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Boyz N the Hood (1991)\Boyz N the Hood (1991).eng.srt
+          Offset  +0.00s
+          Took    68.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Braveheart (1995)\Braveheart (1995).eng.srt
+          Offset  +0.04s
+          Took    86.5s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Bugonia (2025)\Bugonia (2025).eng.srt
+          Offset  +0.00s
+          Took    73.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Captain America Civil War (2016)\Captain America Civil
+          War (2016).eng.srt
+          Offset  +0.07s
+          Took    35.8s
+            already aligned (offset +0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Captain America The First Avenger (2011)\Captain America
+          The First Avenger (2011).eng.srt
+          Offset  +0.04s
+          Took    26.2s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Captain America The Winter Soldier (2014)\Captain America
+          The Winter Soldier (2014).eng.srt
+          Offset  -0.05s
+          Took    30.8s
+            already aligned (offset -0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Cars (2006)\Cars (2006).eng.srt
+          Offset  +0.02s
+          Took    52.3s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Casino Royale (2006)\Casino Royale (2006).eng.srt
+          Offset  +0.00s
+          Took    84.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Cast Away (2000)\Cast Away (2000).eng.srt
+          Offset  -0.08s
+          Took    92.3s
+            already aligned (offset -0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Catch Me If You Can (2002)\Catch Me If You Can
+          (2002).eng.srt
+          Offset  +0.00s
+          Took    75.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Charlie and the Chocolate Factory (2005)\Charlie and the
+          Chocolate Factory (2005).eng.srt
+          Offset  -0.02s
+          Took    60.0s
+            already aligned (offset -0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Chicken Little (2005)\Chicken Little (2005).eng.srt
+          Offset  +0.00s
+          Took    27.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Children of Men (2006)\Children of Men (2006).eng.srt
+          Offset  +0.00s
+          Took    55.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Chronicle (2012)\Chronicle (2012).eng.srt
+          Offset  +0.04s
+          Took    40.4s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Civil War (2024)\Civil War (2024).eng.srt
+          Offset  +0.00s
+          Took    70.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Cloudy with a Chance of Meatballs (2009)\Cloudy with a
+          Chance of Meatballs (2009).eng.srt
+          Offset  +0.00s
+          Took    30.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Cloverfield (2008)\Cloverfield (2008).eng.srt
+          Offset  +0.00s
+          Took    38.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Coach Carter (2005)\Coach Carter (2005).eng.srt
+          Offset  +0.00s
+          Took    50.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Coco (2017)\Coco (2017).eng.srt
+          Offset  +0.00s
+          Took    48.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Contact (1997)\Contact (1997).eng.srt
+          Offset  +0.00s
+          Took    63.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Contagion (2011)\Contagion (2011).eng.srt
+          Offset  -0.03s
+          Took    50.4s
+            already aligned (offset -0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Coraline (2009)\Coraline (2009).eng.srt
+          Offset  +0.06s
+          Took    46.5s
+            already aligned (offset +0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Crazy Rich Asians (2018)\Crazy Rich Asians (2018).eng.srt
+          Offset  +0.01s
+          Took    49.5s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Creed (2015)\Creed (2015).eng.srt
+          Offset  +0.00s
+          Took    63.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Dawn of the Planet of the Apes (2014)\Dawn of the Planet
+          of the Apes (2014).eng.srt
+          Offset  +0.08s
+          Took    80.4s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Dead Poets Society (1989)\Dead Poets Society
+          (1989).eng.srt
+          Offset  +0.00s
+          Took    37.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Deadpool (2016)\Deadpool (2016).eng.srt
+          Offset  -0.05s
+          Took    40.1s
+            already aligned (offset -0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Deadpool 2 (2018)\Deadpool 2 (2018).eng.srt
+          Offset  +0.01s
+          Took    61.0s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Despicable Me (2010)\Despicable Me (2010).eng.srt
+          Offset  +0.08s
+          Took    44.3s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Die Hard (1988)\Die Hard (1988).eng.srt
+          Offset  +0.01s
+          Took    59.2s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\District 9 (2009)\District 9 (2009).eng.srt
+          Offset  +0.00s
+          Took    47.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Django Unchained (2012)\Django Unchained (2012).eng.srt
+          Offset  -0.01s
+          Took    44.0s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Donnie Darko (2001)\Donnie Darko (2001).eng.srt
+          Offset  -0.01s
+          Took    49.2s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Dune (2021)\Dune (2021).eng.srt
+          Offset  +0.00s
+          Took    90.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Dune - Part Two (2024)\Dune - Part Two (2024).eng.srt
+          Offset  +0.00s
+          Took    115.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Dunkirk (2017)\Dunkirk (2017).eng.srt
+          Offset  -0.01s
+          Took    58.3s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\E T the Extra-Terrestrial (1982)\E T the
+          Extra-Terrestrial (1982).eng.srt
+          Offset  +0.05s
+          Took    53.2s
+            already aligned (offset +0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Easy A (2010)\Easy A (2010).eng.srt
+          Offset  +0.02s
+          Took    56.8s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Edge of Tomorrow (2014)\Edge of Tomorrow (2014).eng.srt
+          Offset  +0.09s
+          Took    54.7s
+            already aligned (offset +0.090s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Edward Scissorhands (1990)\Edward Scissorhands
+          (1990).eng.srt
+          Offset  +0.00s
+          Took    51.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Elemental (2023)\Elemental (2023).eng.srt
+          Offset  +0.08s
+          Took    40.5s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Elysium (2013)\Elysium (2013).eng.srt
+          Offset  +0.03s
+          Took    48.4s
+            already aligned (offset +0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Enemy (2013)\Enemy (2013).eng.srt
+          Offset  +0.00s
+          Took    17.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Eternal Sunshine of the Spotless Mind (2004)\Eternal
+          Sunshine of the Spotless Mind (2004).eng.srt
+          Offset  +0.00s
+          Took    65.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Ex Machina (2015)\Ex Machina (2015).eng.srt
+          Offset  +0.07s
+          Took    53.0s
+            already aligned (offset +0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Fargo (1996)\Fargo (1996).eng.srt
+          Offset  +0.00s
+          Took    59.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Fast Five (2011)\Fast Five (2011).eng.srt
+          Offset  -0.08s
+          Took    56.0s
+            already aligned (offset -0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Ferris Bueller's Day Off (1986)\Ferris Bueller's Day Off
+          (1986).eng.srt
+          Offset  +0.02s
+          Took    58.3s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Fight Club (1999)\Fight Club (1999).eng.srt
+          Offset  +0.00s
+          Took    68.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\First Man (2018)\First Man (2018).eng.srt
+          Offset  -0.02s
+          Took    67.2s
+            already aligned (offset -0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Ford v Ferrari (2019)\Ford v Ferrari (2019).eng.srt
+          Offset  +0.00s
+          Took    90.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Forrest Gump (1994)\Forrest Gump (1994).eng.srt
+          Offset  +0.00s
+          Took    81.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Fractured (2019)\Fractured (2019).eng.srt
+          Offset  +0.08s
+          Took    23.2s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Fury (2014)\Fury (2014).eng.srt
+          Offset  +0.00s
+          Took    56.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Get Out (2017)\Get Out (2017).eng.srt
+          Offset  +0.00s
+          Took    43.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Ghostbusters (1984)\Ghostbusters (1984).eng.srt
+          Offset  +0.04s
+          Took    54.0s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Gladiator (2000)\Gladiator (2000).eng.srt
+          Offset  +0.00s
+          Took    65.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Gone Girl (2014)\Gone Girl (2014).eng.srt
+          Offset  -0.01s
+          Took    40.3s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Good Will Hunting (1997)\Good Will Hunting (1997).eng.srt
+          Offset  -0.09s
+          Took    76.6s
+            already aligned (offset -0.090s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Goodfellas (1990)\Goodfellas (1990).eng.srt
+          Offset  +0.00s
+          Took    72.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Gravity (2013)\Gravity (2013).eng.srt
+          Offset  +0.00s
+          Took    43.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Green Book (2018)\Green Book (2018).eng.srt
+          Offset  +0.00s
+          Took    58.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Greenland (2020)\Greenland (2020).eng.srt
+          Offset  +0.00s
+          Took    68.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Grown Ups (2010)\Grown Ups (2010).eng.srt
+          Offset  +0.08s
+          Took    43.0s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Guardians of the Galaxy (2014)\Guardians of the Galaxy
+          (2014).eng.srt
+          Offset  +0.00s
+          Took    43.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Hacksaw Ridge (2016)\Hacksaw Ridge (2016).eng.srt
+          Offset  +0.00s
+          Took    51.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Happy Feet (2006)\Happy Feet (2006).eng.srt
+          Offset  -0.01s
+          Took    36.9s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Happy Gilmore (1996)\Happy Gilmore (1996).eng.srt
+          Offset  +0.01s
+          Took    56.8s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Harry Potter and the Deathly Hallows - Part 1 (2010)\
+          Harry Potter and the Deathly Hallows - Part 1 (2010).eng.srt
+          Offset  +0.00s
+          Took    47.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Harry Potter and the Deathly Hallows - Part 2 (2011)\
+          Harry Potter and the Deathly Hallows - Part 2 (2011).eng.srt
+          Offset  +0.00s
+          Took    49.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Harry Potter and the Goblet of Fire (2005)\Harry Potter
+          and the Goblet of Fire (2005).eng.srt
+          Offset  -0.06s
+          Took    70.4s
+            already aligned (offset -0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Harry Potter and the Half-Blood Prince (2009)\Harry
+          Potter and the Half-Blood Prince (2009).eng.srt
+          Offset  +0.01s
+          Took    58.5s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Harry Potter and the Order of the Phoenix (2007)\Harry
+          Potter and the Order of the Phoenix (2007).eng.srt
+          Offset  +0.00s
+          Took    60.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Harry Potter and the Prisoner of Azkaban (2004)\Harry
+          Potter and the Prisoner of Azkaban (2004).eng.srt
+          Offset  +0.00s
+          Took    60.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Harry Potter and the Sorcerer's Stone (2001)\Harry Potter
+          and the Sorcerer's Stone (2001).eng.srt
+          Offset  +0.00s
+          Took    64.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Heat (1995)\Heat (1995).eng.srt
+          Offset  +0.00s
+          Took    113.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Her (2013)\Her (2013).eng.srt
+          Offset  +0.09s
+          Took    24.1s
+            already aligned (offset +0.090s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Hereditary (2018)\Hereditary (2018).eng.srt
+          Offset  +0.00s
+          Took    59.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Hidden Figures (2016)\Hidden Figures (2016).eng.srt
+          Offset  +0.03s
+          Took    73.6s
+            already aligned (offset +0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Holes (2003)\Holes (2003).eng.srt
+          Offset  +0.03s
+          Took    108.1s
+            already aligned (offset +0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Home Alone (1990)\Home Alone (1990).eng.srt
+          Offset  +0.00s
+          Took    76.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Home Alone 2 - Lost in New York (1992)\Home Alone 2 -
+          Lost in New York (1992).eng.srt
+          Offset  -0.08s
+          Took    76.4s
+            already aligned (offset -0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\How to Train Your Dragon (2010)\How to Train Your Dragon
+          (2010).eng.srt
+          Offset  +0.05s
+          Took    55.9s
+            already aligned (offset +0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\I Am Legend (2007)\I Am Legend (2007).eng.srt
+          Offset  +0.00s
+          Took    51.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\I, Robot (2004)\I, Robot (2004).eng.srt
+          Offset  +0.00s
+          Took    60.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\I, Tonya (2017)\I, Tonya (2017).eng.srt
+          Offset  +0.01s
+          Took    108.1s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Ice Age (2002)\Ice Age (2002).eng.srt
+          Offset  +0.00s
+          Took    35.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Inception (2010)\Inception (2010).eng.srt
+          Offset  +0.00s
+          Took    74.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Incredibles 2 (2018)\Incredibles 2 (2018).eng.srt
+          Offset  +0.00s
+          Took    67.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Indiana Jones and the Last Crusade (1989)\Indiana Jones
+          and the Last Crusade (1989).eng.srt
+          Offset  +0.00s
+          Took    83.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Indiana Jones and the Raiders of the Lost Ark (1981)\
+          Indiana Jones and the Raiders of the Lost Ark (1981).eng.srt
+          Offset  +0.00s
+          Took    77.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Indiana Jones and the Temple of Doom (1984)\Indiana Jones
+          and the Temple of Doom (1984).eng.srt
+          Offset  +0.00s
+          Took    90.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Inglourious Basterds (2009)\Inglourious Basterds
+          (2009).eng.srt
+          Offset  +0.00s
+          Took    79.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Insomnia (2002)\Insomnia (2002).eng.srt
+          Offset  +0.00s
+          Took    63.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Interstellar (2014)\Interstellar (2014).eng.srt
+          Offset  -0.03s
+          Took    95.0s
+            already aligned (offset -0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Into the Wild (2007)\Into the Wild (2007).eng.srt
+          Offset  +0.00s
+          Took    80.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Iron Man (2008)\Iron Man (2008).eng.srt
+          Offset  +0.00s
+          Took    57.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Iron Man 2 (2010)\Iron Man 2 (2010).eng.srt
+          Offset  +0.04s
+          Took    50.0s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\IT (2017)\IT (2017).eng.srt
+          Offset  +0.02s
+          Took    48.6s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\James and the Giant Peach (1996)\James and the Giant
+          Peach (1996).eng.srt
+          Offset  +0.01s
+          Took    57.5s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Jaws (1975)\Jaws (1975).eng.srt
+          Offset  +0.06s
+          Took    60.7s
+            already aligned (offset +0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Jimmy Neutron Boy Genius (2001)\Jimmy Neutron Boy Genius
+          (2001).eng.srt
+          Offset  +0.04s
+          Took    34.6s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\John Q (2002)\John Q (2002).eng.srt
+          Offset  -0.04s
+          Took    78.9s
+            already aligned (offset -0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Joker (2019)\Joker (2019).eng.srt
+          Offset  -0.03s
+          Took    66.5s
+            already aligned (offset -0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Jumanji (1995)\Jumanji (1995).eng.srt
+          Offset  +0.00s
+          Took    69.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Juno (2007)\Juno (2007).eng.srt
+          Offset  +0.00s
+          Took    90.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Jurassic Park (1993)\Jurassic Park (1993).eng.srt
+          Offset  +0.00s
+          Took    88.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Jurassic World (2015)\Jurassic World (2015).eng.srt
+          Offset  +0.00s
+          Took    113.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Kick-Ass (2010)\Kick-Ass (2010).eng.srt
+          Offset  -0.02s
+          Took    81.4s
+            already aligned (offset -0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\King Richard (2021)\King Richard (2021).eng.srt
+          Offset  +0.02s
+          Took    101.8s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Knives Out (2019)\Knives Out (2019).eng.srt
+          Offset  +0.00s
+          Took    89.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Knowing (2009)\Knowing (2009).eng.srt
+          Offset  +0.02s
+          Took    29.8s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Kung Fu Panda (2008)\Kung Fu Panda (2008).eng.srt
+          Offset  +0.00s
+          Took    47.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Legally Blonde (2001)\Legally Blonde (2001).eng.srt
+          Offset  +0.08s
+          Took    69.0s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Logan (2017)\Logan (2017).eng.srt
+          Offset  +0.08s
+          Took    74.3s
+            already aligned (offset +0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Lone Survivor (2013)\Lone Survivor (2013).eng.srt
+          Offset  +0.00s
+          Took    67.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Madagascar (2005)\Madagascar (2005).eng.srt
+          Offset  -0.06s
+          Took    47.4s
+            already aligned (offset -0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Magnolia (1999)\Magnolia (1999).eng.srt
+          Offset  +0.02s
+          Took    107.2s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Mean Girls (2004)\Mean Girls (2004).eng.srt
+          Offset  -0.06s
+          Took    45.9s
+            already aligned (offset -0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Meet the Robinsons (2007)\Meet the Robinsons
+          (2007).eng.srt
+          Offset  +0.00s
+          Took    42.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Megamind (2010)\Megamind (2010).eng.srt
+          Offset  +0.04s
+          Took    50.4s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Memento (2000)\Memento (2000).eng.srt
+          Offset  -0.01s
+          Took    39.2s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Minority Report (2002)\Minority Report (2002).eng.srt
+          Offset  +0.01s
+          Took    74.6s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Mission - Impossible - Fallout (2018)\Mission -
+          Impossible - Fallout (2018).eng.srt
+          Offset  +0.00s
+          Took    79.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Monsters University (2013)\Monsters University
+          (2013).eng.srt
+          Offset  +0.00s
+          Took    32.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Moon (2009)\Moon (2009).eng.srt
+          Offset  +0.00s
+          Took    38.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Mulan (1998)\Mulan (1998).eng.srt
+          Offset  -0.06s
+          Took    37.1s
+            already aligned (offset -0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Napoleon Dynamite (2004)\Napoleon Dynamite (2004).eng.srt
+          Offset  +0.00s
+          Took    40.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\National Lampoon's Christmas Vacation (1989)\National
+          Lampoon's Christmas Vacation (1989).eng.srt
+          Offset  +0.07s
+          Took    38.2s
+            already aligned (offset +0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\National Treasure (2004)\National Treasure (2004).eng.srt
+          Offset  +0.00s
+          Took    43.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\National Treasure Book of Secrets (2007)\National
+          Treasure Book of Secrets (2007).eng.srt
+          Offset  +0.00s
+          Took    40.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Night at the Museum (2006)\Night at the Museum
+          (2006).eng.srt
+          Offset  +0.01s
+          Took    63.5s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Nightcrawler (2014)\Nightcrawler (2014).eng.srt
+          Offset  +0.00s
+          Took    52.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\No Country for Old Men (2007)\No Country for Old Men
+          (2007).eng.srt
+          Offset  -0.08s
+          Took    45.8s
+            already aligned (offset -0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Now You See Me (2013)\Now You See Me (2013).eng.srt
+          Offset  +0.04s
+          Took    69.8s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Oblivion (2013)\Oblivion (2013).eng.srt
+          Offset  +0.00s
+          Took    48.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\October Sky (1999)\October Sky (1999).eng.srt
+          Offset  +0.00s
+          Took    37.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\One Flew Over the Cuckoo's Nest (1975)\One Flew Over the
+          Cuckoo's Nest (1975).eng.srt
+          Offset  +0.01s
+          Took    66.7s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Open Season (2006)\Open Season (2006).eng.srt
+          Offset  +0.00s
+          Took    33.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Over the Hedge (2006)\Over the Hedge (2006).eng.srt
+          Offset  +0.04s
+          Took    79.9s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Parasite (2019)\Parasite (2019).eng.srt
+          Offset  +0.01s
+          Took    53.5s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Pearl (2022)\Pearl (2022).eng.srt
+          Offset  -0.05s
+          Took    63.7s
+            already aligned (offset -0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Pineapple Express (2008)\Pineapple Express (2008).eng.srt
+          Offset  +0.00s
+          Took    57.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Pirates of the Caribbean At World's End (2007)\Pirates of
+          the Caribbean At World's End (2007).eng.srt
+          Offset  +0.00s
+          Took    50.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Pirates of the Caribbean The Curse of the Black Pearl
+          (2003)\Pirates of the Caribbean The Curse of the Black Pearl (2003).eng.srt
+          Offset  +0.01s
+          Took    44.7s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Pitch Perfect (2012)\Pitch Perfect (2012).eng.srt
+          Offset  +0.06s
+          Took    49.3s
+            already aligned (offset +0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Prisoners (2013)\Prisoners (2013).eng.srt
+          Offset  -0.06s
+          Took    31.3s
+            already aligned (offset -0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Project Hail Mary (2026)\Project Hail Mary (2026).eng.srt
+          Offset  -0.01s
+          Took    114.1s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Pulp Fiction (1994)\Pulp Fiction (1994).eng.srt
+          Offset  +0.00s
+          Took    113.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Ratatouille (2007)\Ratatouille (2007).eng.srt
+          Offset  -0.01s
+          Took    37.4s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Ready Player One (2018)\Ready Player One (2018).eng.srt
+          Offset  +0.00s
+          Took    63.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Real Steel (2011)\Real Steel (2011).eng.srt
+          Offset  +0.00s
+          Took    79.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Remember the Titans (2000)\Remember the Titans
+          (2000).eng.srt
+          Offset  -0.05s
+          Took    155.0s
+            already aligned (offset -0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Requiem for a Dream (2000)\Requiem for a Dream
+          (2000).eng.srt
+          Offset  +0.00s
+          Took    66.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Robots (2005)\Robots (2005).eng.srt
+          Offset  +0.02s
+          Took    27.8s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Rocky (1976)\Rocky (1976).eng.srt
+          Offset  +0.00s
+          Took    32.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Room (2015)\Room (2015).eng.srt
+          Offset  +0.00s
+          Took    45.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Saving Private Ryan (1998)\Saving Private Ryan
+          (1998).eng.srt
+          Offset  +0.01s
+          Took    319.7s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Saw (2004)\Saw (2004).eng.srt
+          Offset  +0.00s
+          Took    70.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Scarface (1983)\Scarface (1983).eng.srt
+          Offset  +0.00s
+          Took    69.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Schindler's List (1993)\Schindler's List (1993).eng.srt
+          Offset  +0.04s
+          Took    114.6s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Scream (1996)\Scream (1996).eng.srt
+          Offset  -0.05s
+          Took    127.0s
+            already aligned (offset -0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Se7en (1995)\Se7en (1995).eng.srt
+          Offset  +0.00s
+          Took    102.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Shark Tale (2004)\Shark Tale (2004).eng.sdh.srt
+          Offset  +0.05s
+          Took    40.4s
+            already aligned (offset +0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Shazam! (2019)\Shazam! (2019).eng.srt
+          Offset  +0.02s
+          Took    71.2s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Shrek (2001)\Shrek (2001).eng.srt
+          Offset  -0.01s
+          Took    51.5s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Shrek 2 (2004)\Shrek 2 (2004).eng.srt
+          Offset  -0.03s
+          Took    69.6s
+            already aligned (offset -0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Shrek Forever After (2010)\Shrek Forever After
+          (2010).eng.srt
+          Offset  -0.01s
+          Took    37.1s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Shutter Island (2010)\Shutter Island (2010).eng.srt
+          Offset  +0.01s
+          Took    40.4s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Sicario (2015)\Sicario (2015).eng.srt
+          Offset  +0.02s
+          Took    40.3s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Signs (2002)\Signs (2002).eng.srt
+          Offset  +0.00s
+          Took    55.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Sinister (2012)\Sinister (2012).eng.srt
+          Offset  +0.00s
+          Took    51.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Sinners (2025)\Sinners (2025).eng.srt
+          Offset  +0.00s
+          Took    74.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Skyfall (2012)\Skyfall (2012).eng.srt
+          Offset  +0.00s
+          Took    66.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Snatch (2000)\Snatch (2000).eng.srt
+          Offset  +0.00s
+          Took    66.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Snowden (2016)\Snowden (2016).eng.srt
+          Offset  +0.00s
+          Took    65.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Source Code (2011)\Source Code (2011).eng.srt
+          Offset  +0.00s
+          Took    41.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Spaceballs (1987)\Spaceballs (1987).eng.srt
+          Offset  -0.09s
+          Took    50.9s
+            already aligned (offset -0.090s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Spider-Man (2002)\Spider-Man (2002).eng.srt
+          Offset  +0.00s
+          Took    86.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Spider-Man - Across the Spider-Verse (2023)\Spider-Man -
+          Across the Spider-Verse (2023).eng.srt
+          Offset  +0.02s
+          Took    95.0s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Spider-Man - Homecoming (2017)\Spider-Man - Homecoming
+          (2017).eng.srt
+          Offset  +0.00s
+          Took    64.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Spider-Man - Into the Spider-Verse (2018)\Spider-Man -
+          Into the Spider-Verse (2018).eng.srt
+          Offset  +0.00s
+          Took    77.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Spider-Man No Way Home (2021)\Spider-Man No Way Home
+          (2021).eng.srt
+          Offset  -0.09s
+          Took    48.2s
+            already aligned (offset -0.090s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Spirited Away (2001)\Spirited Away (2001).eng.srt
+          Offset  +0.00s
+          Took    69.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Split (2016)\Split (2016).eng.srt
+          Offset  +0.00s
+          Took    28.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Stalker (1979)\Stalker (1979).eng.srt
+          Offset  +0.00s
+          Took    71.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Stand by Me (1986)\Stand by Me (1986).eng.srt
+          Offset  -0.03s
+          Took    48.6s
+            already aligned (offset -0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Star Trek (2009)\Star Trek (2009).eng.srt
+          Offset  +0.00s
+          Took    56.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Star Trek - Into Darkness (2013)\Star Trek - Into
+          Darkness (2013).eng.srt
+          Offset  +0.00s
+          Took    66.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Star Wars - Episode II - Attack of the Clones (2002)\Star
+          Wars - Episode II - Attack of the Clones (2002).eng.srt
+          Offset  +0.00s
+          Took    51.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Star Wars - Episode IV - A New Hope (1977)\Star Wars -
+          Episode IV - A New Hope (1977).eng.srt
+          Offset  -0.01s
+          Took    70.3s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Star Wars - Episode V - The Empire Strikes Back (1980)\
+          Star Wars - Episode V - The Empire Strikes Back (1980).eng.srt
+          Offset  +0.00s
+          Took    59.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Straight Outta Compton (2015)\Straight Outta Compton
+          (2015).eng.srt
+          Offset  +0.00s
+          Took    49.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Super 8 (2011)\Super 8 (2011).eng.srt
+          Offset  +0.01s
+          Took    59.5s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Surf's Up (2007)\Surf's Up (2007).eng.srt
+          Offset  -0.01s
+          Took    39.4s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Taken (2008)\Taken (2008).eng.srt
+          Offset  +0.01s
+          Took    44.8s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Tangled (2010)\Tangled (2010).eng.srt
+          Offset  +0.00s
+          Took    45.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Taxi Driver (1976)\Taxi Driver (1976).eng.srt
+          Offset  +0.00s
+          Took    59.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Tetris (2023)\Tetris (2023).eng.srt
+          Offset  +0.02s
+          Took    32.3s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Accountant (2016)\The Accountant (2016).eng.srt
+          Offset  +0.07s
+          Took    73.0s
+            already aligned (offset +0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Amazing Spider-Man (2012)\The Amazing Spider-Man
+          (2012).eng.srt
+          Offset  +0.00s
+          Took    43.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Avengers (2012)\The Avengers (2012).eng.srt
+          Offset  -0.01s
+          Took    46.2s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Batman (2022)\The Batman (2022).eng.srt
+          Offset  +0.00s
+          Took    101.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Big Lebowski (1998)\The Big Lebowski (1998).eng.srt
+          Offset  +0.04s
+          Took    65.9s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Book of Eli (2010)\The Book of Eli (2010).eng.srt
+          Offset  +0.00s
+          Took    57.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Bourne Identity (2002)\The Bourne Identity
+          (2002).eng.srt
+          Offset  +0.00s
+          Took    44.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Bourne Supremacy (2004)\The Bourne Supremacy
+          (2004).eng.srt
+          Offset  +0.00s
+          Took    38.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Bourne Ultimatum (2007)\The Bourne Ultimatum
+          (2007).eng.srt
+          Offset  +0.00s
+          Took    48.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Boy in the Striped Pyjamas (2008)\The Boy in the
+          Striped Pyjamas (2008).eng.srt
+          Offset  +0.00s
+          Took    52.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Breakfast Club (1985)\The Breakfast Club
+          (1985).eng.srt
+          Offset  -0.07s
+          Took    46.1s
+            already aligned (offset -0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Curious Case of Benjamin Button (2008)\The Curious
+          Case of Benjamin Button (2008).eng.srt
+          Offset  +0.00s
+          Took    77.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Dark Knight (2008)\The Dark Knight (2008).eng.srt
+          Offset  +0.00s
+          Took    80.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Dark Knight Rises (2012)\The Dark Knight Rises
+          (2012).eng.srt
+          Offset  -0.08s
+          Took    66.2s
+            already aligned (offset -0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Departed (2006)\The Departed (2006).eng.srt
+          Offset  +0.00s
+          Took    86.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Edge of Seventeen (2016)\The Edge of Seventeen
+          (2016).eng.srt
+          Offset  +0.04s
+          Took    72.4s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Emperor's New Groove (2000)\The Emperor's New Groove
+          (2000).eng.srt
+          Offset  +0.03s
+          Took    19.4s
+            already aligned (offset +0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Fast and the Furious (2001)\The Fast and the Furious
+          (2001).eng.srt
+          Offset  +0.07s
+          Took    83.0s
+            already aligned (offset +0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Founder (2016)\The Founder (2016).eng.srt
+          Offset  +0.01s
+          Took    60.2s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Godfather (1972)\The Godfather (1972).eng.srt
+          Offset  +0.00s
+          Took    109.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Godfather - Part II (1974)\The Godfather - Part II
+          (1974).eng.srt
+          Offset  +0.00s
+          Took    150.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Goonies (1985)\The Goonies (1985).eng.srt
+          Offset  -0.01s
+          Took    65.3s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Green Mile (1999)\The Green Mile (1999).eng.srt
+          Offset  +0.00s
+          Took    107.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Hangover (2009)\The Hangover (2009).eng.srt
+          Offset  +0.00s
+          Took    65.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Help (2011)\The Help (2011).eng.srt
+          Offset  +0.00s
+          Took    61.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Hunger Games (2012)\The Hunger Games (2012).eng.srt
+          Offset  +0.00s
+          Took    81.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Hunger Games - Mockingjay - Part 1 (2014)\The Hunger
+          Games - Mockingjay - Part 1 (2014).eng.srt
+          Offset  +0.00s
+          Took    35.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Hunger Games - Mockingjay - Part 2 (2015)\The Hunger
+          Games - Mockingjay - Part 2 (2015).eng.srt
+          Offset  -0.08s
+          Took    54.7s
+            already aligned (offset -0.080s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Hunger Games Catching Fire (2013)\The Hunger Games
+          Catching Fire (2013).eng.srt
+          Offset  +0.00s
+          Took    79.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Hurt Locker (2008)\The Hurt Locker (2008).eng.srt
+          Offset  +0.00s
+          Took    58.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Imitation Game (2014)\The Imitation Game
+          (2014).eng.srt
+          Offset  +0.00s
+          Took    49.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Incredibles (2004)\The Incredibles (2004).eng.srt
+          Offset  -0.02s
+          Took    64.5s
+            already aligned (offset -0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Interview (2014)\The Interview (2014).eng.srt
+          Offset  +0.00s
+          Took    43.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Invisible Man (2020)\The Invisible Man (2020).eng.srt
+          Offset  -0.01s
+          Took    43.0s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Karate Kid (1984)\The Karate Kid (1984).eng.srt
+          Offset  +0.00s
+          Took    62.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Longest Yard (2005)\The Longest Yard (2005).eng.srt
+          Offset  +0.00s
+          Took    53.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Lord of the Rings The Fellowship of the Ring (2001)\
+          The Lord of the Rings The Fellowship of the Ring (2001).eng.srt
+          Offset  -0.05s
+          Took    69.8s
+            already aligned (offset -0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Lord of the Rings The Two Towers (2002)\The Lord of
+          the Rings The Two Towers (2002).eng.srt
+          Offset  +0.00s
+          Took    80.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Martian (2015)\The Martian (2015).eng.srt
+          Offset  +0.00s
+          Took    44.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Matrix (1999)\The Matrix (1999).eng.srt
+          Offset  +0.00s
+          Took    58.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Maze Runner (2014)\The Maze Runner (2014).eng.srt
+          Offset  +0.00s
+          Took    49.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Polar Express (2004)\The Polar Express (2004).eng.srt
+          Offset  +0.04s
+          Took    44.3s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Prestige (2006)\The Prestige (2006).eng.srt
+          Offset  +0.00s
+          Took    35.6s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Proposal (2009)\The Proposal (2009).eng.srt
+          Offset  +0.00s
+          Took    54.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Revenant (2015)\The Revenant (2015).eng.srt
+          Offset  +0.02s
+          Took    80.4s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Sandlot (1993)\The Sandlot (1993).eng.srt
+          Offset  +0.00s
+          Took    63.3s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Shawshank Redemption (1994)\The Shawshank Redemption
+          (1994).eng.srt
+          Offset  +0.00s
+          Took    109.8s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Silence of the Lambs (1991)\The Silence of the Lambs
+          (1991).eng.srt
+          Offset  +0.00s
+          Took    51.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Sixth Sense (1999)\The Sixth Sense (1999).eng.srt
+          Offset  +0.00s
+          Took    36.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Social Network (2010)\The Social Network
+          (2010).eng.srt
+          Offset  +0.00s
+          Took    26.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Substance (2024)\The Substance (2024).eng.srt
+          Offset  +0.00s
+          Took    71.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Terminator (1984)\The Terminator (1984).eng.srt
+          Offset  +0.00s
+          Took    64.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Theory of Everything (2014)\The Theory of Everything
+          (2014).eng.srt
+          Offset  +0.04s
+          Took    54.6s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Thing (1982)\The Thing (1982).eng.srt
+          Offset  +0.00s
+          Took    47.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Truman Show (1998)\The Truman Show (1998).eng.srt
+          Offset  +0.00s
+          Took    72.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Usual Suspects (1995)\The Usual Suspects
+          (1995).eng.srt
+          Offset  +0.00s
+          Took    71.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\The Wild Robot (2024)\The Wild Robot (2024).eng.srt
+          Offset  +0.02s
+          Took    43.2s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\This Christmas (2007)\This Christmas (2007).eng.srt
+          Offset  -0.01s
+          Took    37.4s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Thor - Ragnarok (2017)\Thor - Ragnarok (2017).eng.srt
+          Offset  +0.00s
+          Took    63.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Threads (1984)\Threads (1984).eng.srt
+          Offset  +0.00s
+          Took    50.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Titanic (1997)\Titanic (1997).eng.srt
+          Offset  +0.09s
+          Took    138.3s
+            already aligned (offset +0.090s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Top Gun (1986)\Top Gun (1986).eng.srt
+          Offset  +0.04s
+          Took    61.4s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Top Gun - Maverick (2022)\Top Gun - Maverick
+          (2022).eng.srt
+          Offset  +0.00s
+          Took    61.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Toy Story (1995)\Toy Story (1995).eng.srt
+          Offset  +0.02s
+          Took    43.0s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Toy Story 2 (1999)\Toy Story 2 (1999).eng.srt
+          Offset  +0.00s
+          Took    41.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Toy Story 3 (2010)\Toy Story 3 (2010).eng.srt
+          Offset  +0.03s
+          Took    44.2s
+            already aligned (offset +0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Toy Story 4 (2019)\Toy Story 4 (2019).eng.srt
+          Offset  +0.06s
+          Took    50.8s
+            already aligned (offset +0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Toy Story 5 (2026)\Toy Story 5 (2026).eng.srt
+          Offset  +0.00s
+          Took    65.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Training Day (2001)\Training Day (2001).eng.srt
+          Offset  +0.00s
+          Took    66.1s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Transformers (2007)\Transformers (2007).eng.srt
+          Offset  +0.00s
+          Took    69.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Transformers Dark Of The Moon (2011)\Transformers Dark Of
+          The Moon (2011).eng.srt
+          Offset  +0.00s
+          Took    75.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Transformers Revenge of the Fallen (2009)\Transformers
+          Revenge of the Fallen (2009).eng.srt
+          Offset  +0.05s
+          Took    74.1s
+            already aligned (offset +0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Treasure Planet (2002)\Treasure Planet (2002).eng.srt
+          Offset  +0.02s
+          Took    55.9s
+            already aligned (offset +0.020s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\TRON - Legacy (2010)\TRON - Legacy (2010).eng.srt
+          Offset  +0.03s
+          Took    95.1s
+            already aligned (offset +0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Us (2019)\Us (2019).eng.srt
+          Offset  -0.01s
+          Took    31.8s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\V for Vendetta (2005)\V for Vendetta (2005).eng.srt
+          Offset  -0.07s
+          Took    52.1s
+            already aligned (offset -0.070s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\WALL-E (2008)\WALL-E (2008).eng.srt
+          Offset  +0.00s
+          Took    35.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Wallace & Gromit - The Curse of the Were-Rabbit (2005)\
+          Wallace & Gromit - The Curse of the Were-Rabbit (2005).eng.srt
+          Offset  +0.00s
+          Took    43.4s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\War Dogs (2016)\War Dogs (2016).eng.srt
+          Offset  +0.05s
+          Took    47.7s
+            already aligned (offset +0.050s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\War for the Planet of the Apes (2017)\War for the Planet
+          of the Apes (2017).eng.srt
+          Offset  +0.00s
+          Took    75.9s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\WarGames (1983)\WarGames (1983).eng.srt
+          Offset  -0.01s
+          Took    70.6s
+            already aligned (offset -0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\We're the Millers (2013)\We're the Millers (2013).eng.srt
+          Offset  +0.01s
+          Took    57.9s
+            already aligned (offset +0.010s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Weapons (2025)\Weapons (2025).eng.srt
+          Offset  +0.00s
+          Took    79.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\When Harry Met Sally (1989)\When Harry Met Sally
+          (1989).eng.srt
+          Offset  +0.06s
+          Took    44.9s
+            already aligned (offset +0.060s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Whiplash (2014)\Whiplash (2014).eng.srt
+          Offset  +0.00s
+          Took    28.0s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Willy Wonka & the Chocolate Factory (1971)\Willy Wonka &
+          the Chocolate Factory (1971).eng.srt
+          Offset  +0.00s
+          Took    49.7s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\World War Z (2013)\World War Z (2013).eng.srt
+          Offset  +0.04s
+          Took    80.2s
+            already aligned (offset +0.040s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Wreck-It Ralph (2012)\Wreck-It Ralph (2012).eng.srt
+          Offset  -0.09s
+          Took    35.4s
+            already aligned (offset -0.090s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Zathura - A Space Adventure (2005)\Zathura - A Space
+          Adventure (2005).eng.srt
+          Offset  +0.03s
+          Took    48.5s
+            already aligned (offset +0.030s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Zero Dark Thirty (2012)\Zero Dark Thirty (2012).eng.srt
+          Offset  +0.00s
+          Took    67.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Zootopia (2016)\Zootopia (2016).eng.srt
+          Offset  +0.00s
+          Took    49.5s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+          E:\torrents\final_organized\Zootopia 2 (2025)\Zootopia 2 (2025).eng.sdh.srt
+          Offset  +0.00s
+          Took    71.2s
+            already aligned (offset +0.000s, below the 0.1s threshold); original untouched
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  Sidecars checked: 382 - movies with a video file: 382
+  Elapsed: 26999.5s - Log: E:\torrents\tools\ReportsAndLogs\sync_subtitles\sync_subtitles.log
+  A failed or untrusted sync never touches the original: every replacement is a verified staged
+  copy swapped in with os.replace.

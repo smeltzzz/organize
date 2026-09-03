@@ -1,0 +1,24 @@
+2026-09-03 04:42:13 [INFO] Starting read-only library audit; source=E:\torrents\final_organized
+2026-09-03 04:42:13 [INFO] Log=E:\torrents\tools\ReportsAndLogs\library_auditor\library_auditor.log; report=E:\torrents\tools\ReportsAndLogs\library_auditor\library_auditor_report.txt
+2026-09-03 04:42:13 [INFO] Found 382 top-level movie folder(s).
+2026-09-03 04:42:13 [INFO] [25/382] audited: Aliens (1986)
+2026-09-03 04:42:14 [INFO] [50/382] audited: Bohemian Rhapsody (2018)
+2026-09-03 04:42:14 [INFO] [75/382] audited: Crazy Rich Asians (2018)
+2026-09-03 04:42:15 [INFO] [100/382] audited: Fast Five (2011)
+2026-09-03 04:42:15 [INFO] [125/382] audited: Harry Potter and the Deathly Hallows - Part 1 (2010)
+2026-09-03 04:42:15 [INFO] [150/382] audited: Indiana Jones and the Raiders of the Lost Ark (1981)
+2026-09-03 04:42:16 [INFO] [175/382] audited: Lone Survivor (2013)
+2026-09-03 04:42:16 [INFO] [200/382] audited: Office Space (1999)
+2026-09-03 04:42:16 [INFO] [225/382] audited: Room (2015)
+2026-09-03 04:42:17 [INFO] [250/382] audited: Spider-Man - Across the Spider-Verse (2023)
+2026-09-03 04:42:17 [INFO] [275/382] audited: Tenet (2020)
+2026-09-03 04:42:17 [INFO] [300/382] audited: The Godfather - Part II (1974)
+2026-09-03 04:42:17 [INFO] [325/382] audited: The Princess and the Frog (2009)
+2026-09-03 04:42:18 [INFO] [350/382] audited: Toy Story 2 (1999)
+2026-09-03 04:42:18 [INFO] [362/382] MISSING_SIDECAR: Uncut Gems (2019)
+2026-09-03 04:42:18 [INFO] [363/382] MISSING_SIDECAR: United 93 (2006)
+2026-09-03 04:42:18 [INFO] [371/382] MISSING_SIDECAR: Warrior (2011)
+2026-09-03 04:42:18 [INFO] [375/382] audited: Whiplash (2014)
+2026-09-03 04:42:18 [INFO] [382/382] audited: Zootopia 2 (2025)
+2026-09-03 04:42:18 [INFO] Audit complete: canonical_mkv=379; exceptions=3; elapsed=4.90s
+2026-09-03 04:42:18 [INFO] Report published: E:\torrents\tools\ReportsAndLogs\library_auditor\library_auditor_report.txt

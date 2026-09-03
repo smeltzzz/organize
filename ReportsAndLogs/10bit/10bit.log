@@ -1,0 +1,409 @@
+2026-09-02 21:11:59 [INFO] Starting read-only 10-bit inspection; source=E:\torrents\final_organized
+2026-09-02 21:11:59 [INFO] ===============================================================================
+2026-09-02 21:11:59 [INFO] HANDBRAKE BIT-DEPTH INSPECTOR
+2026-09-02 21:11:59 [INFO] ===============================================================================
+2026-09-02 21:12:00 [INFO] Library   : E:\torrents\final_organized
+2026-09-02 21:12:00 [INFO] Workers   : 8
+2026-09-02 21:12:00 [INFO] Min size  : 0 MB
+2026-09-02 21:12:00 [INFO] ffprobe   : C:\Users\bensm\AppData\Local\Microsoft\WinGet\Links\ffprobe.EXE
+2026-09-02 21:12:00 [INFO] Log       : E:\torrents\tools\ReportsAndLogs\10bit\10bit.log
+2026-09-02 21:12:00 [INFO] Report    : E:\torrents\tools\ReportsAndLogs\10bit\10bit_report.txt
+2026-09-02 21:12:00 [INFO] 
+2026-09-02 21:12:00 [INFO] Found 382 canonical MKV movie file(s).
+2026-09-02 21:12:00 [INFO] Probe cache: E:\torrents\tools\ReportsAndLogs\10bit\10bit_probe_cache.json (0 entries loaded)
+2026-09-02 21:12:00 [INFO] [1/382] SKIP-SDR  2001 - A Space Odyssey (1968).mkv
+2026-09-02 21:12:00 [INFO] [2/382] SKIP-SDR  1917 (2019).mkv
+2026-09-02 21:12:00 [INFO] [3/382] SKIP-SDR  22 Jump Street (2014).mkv
+2026-09-02 21:12:00 [INFO] [4/382] SKIP-SDR  21 Jump Street (2012).mkv
+2026-09-02 21:12:00 [INFO] [5/382] SKIP-SDR  13 Hours - The Secret Soldiers of Benghazi (2016).mkv
+2026-09-02 21:12:00 [INFO] [6/382] SKIP-SDR  10 Cloverfield Lane (2016).mkv
+2026-09-02 21:12:00 [INFO] [7/382] SKIP-SDR  300 (2006).mkv
+2026-09-02 21:12:00 [INFO] [8/382] SKIP-SDR  12 Years a Slave (2013).mkv
+2026-09-02 21:12:00 [INFO] [9/382] SKIP-SDR  8 Mile (2002).mkv
+2026-09-02 21:12:01 [INFO] [10/382] SKIP-SDR  50 First Dates (2004).mkv
+2026-09-02 21:12:01 [INFO] [11/382] SKIP-SDR  500 Days of Summer (2009).mkv
+2026-09-02 21:12:01 [INFO] [12/382] SKIP-SDR  42 (2013).mkv
+2026-09-02 21:12:01 [INFO] [13/382] SKIP-SDR  9 (2009).mkv
+2026-09-02 21:12:01 [INFO] [14/382] SKIP-SDR  A Quiet Place (2018).mkv
+2026-09-02 21:12:01 [INFO] [15/382] SKIP-SDR  A Christmas Story (1983).mkv
+2026-09-02 21:12:01 [INFO] [16/382] SKIP-SDR  A Quiet Place Part II (2021).mkv
+2026-09-02 21:12:01 [INFO] [17/382] SKIP-SDR  A Beautiful Mind (2001).mkv
+2026-09-02 21:12:01 [INFO] [18/382] SKIP-SDR  A I Artificial Intelligence (2001).mkv
+2026-09-02 21:12:01 [INFO] [19/382] SKIP-SDR  Air (2023).mkv
+2026-09-02 21:12:01 [INFO] [20/382] SKIP-SDR  10 Things I Hate About You (1999).mkv
+2026-09-02 21:12:01 [INFO] [21/382] SKIP-SDR  Accepted (2006).mkv
+2026-09-02 21:12:01 [INFO] [22/382] SKIP-SDR  Aladdin (1992).mkv
+2026-09-02 21:12:01 [INFO] [23/382] SKIP-SDR  American History X (1998).mkv
+2026-09-02 21:12:01 [INFO] [24/382] KEEP-HDR  Alien (1979).mkv
+2026-09-02 21:12:01 [INFO] [25/382] SKIP-SDR  All Quiet on the Western Front (2022).mkv
+2026-09-02 21:12:01 [INFO] [26/382] SKIP-SDR  Aliens (1986).mkv
+2026-09-02 21:12:01 [INFO] [27/382] SKIP-SDR  American Pie (1999).mkv
+2026-09-02 21:12:01 [INFO] [28/382] SKIP-SDR  About Time (2013).mkv
+2026-09-02 21:12:01 [INFO] [29/382] SKIP-SDR  Apollo 13 (1995).mkv
+2026-09-02 21:12:01 [INFO] [30/382] SKIP-SDR  Arrival (2016).mkv
+2026-09-02 21:12:01 [INFO] [31/382] SKIP-SDR  Annihilation (2018).mkv
+2026-09-02 21:12:02 [INFO] [32/382] SKIP-SDR  American Psycho (2000).mkv
+2026-09-02 21:12:02 [INFO] [33/382] SKIP-SDR  American Sniper (2014).mkv
+2026-09-02 21:12:02 [INFO] [34/382] SKIP-SDR  Back to the Future (1985).mkv
+2026-09-02 21:12:02 [INFO] [35/382] SKIP-SDR  Back to the Future Part II (1989).mkv
+2026-09-02 21:12:02 [INFO] [36/382] SKIP-SDR  Avengers Age of Ultron (2015).mkv
+2026-09-02 21:12:02 [INFO] [37/382] SKIP-SDR  Back to the Future Part III (1990).mkv
+2026-09-02 21:12:02 [INFO] [38/382] SKIP-SDR  Avengers Endgame (2019).mkv
+2026-09-02 21:12:02 [INFO] [39/382] SKIP-SDR  Avatar (2009).mkv
+2026-09-02 21:12:02 [INFO] [40/382] SKIP-SDR  Avengers Infinity War (2018).mkv
+2026-09-02 21:12:02 [INFO] [41/382] SKIP-SDR  Black Panther (2018).mkv
+2026-09-02 21:12:02 [INFO] [42/382] SKIP-SDR  Barbie (2023).mkv
+2026-09-02 21:12:02 [INFO] [43/382] SKIP-SDR  Blade Runner (1982).mkv
+2026-09-02 21:12:02 [INFO] [44/382] SKIP-SDR  Batman Begins (2005).mkv
+2026-09-02 21:12:02 [INFO] [45/382] SKIP-SDR  Black Hawk Down (2001).mkv
+2026-09-02 21:12:02 [INFO] [46/382] SKIP-SDR  Bee Movie (2007).mkv
+2026-09-02 21:12:02 [INFO] [47/382] SKIP-SDR  Blended (2014).mkv
+2026-09-02 21:12:02 [INFO] [48/382] SKIP-SDR  Borat (2006).mkv
+2026-09-02 21:12:03 [INFO] [49/382] SKIP-SDR  Boyhood (2014).mkv
+2026-09-02 21:12:03 [INFO] [50/382] SKIP-SDR  Braveheart (1995).mkv
+2026-09-02 21:12:03 [INFO] [51/382] QUEUE     Blade Runner 2049 (2017).mkv
+2026-09-02 21:12:03 [INFO] [52/382] SKIP-SDR  Bohemian Rhapsody (2018).mkv
+2026-09-02 21:12:03 [INFO] [53/382] SKIP-SDR  Cars (2006).mkv
+2026-09-02 21:12:03 [INFO] [54/382] SKIP-SDR  Captain America The Winter Soldier (2014).mkv
+2026-09-02 21:12:03 [INFO] [55/382] SKIP-SDR  Captain America Civil War (2016).mkv
+2026-09-02 21:12:03 [INFO] [56/382] SKIP-SDR  Boyz N the Hood (1991).mkv
+2026-09-02 21:12:03 [INFO] [57/382] SKIP-SDR  Casino Royale (2006).mkv
+2026-09-02 21:12:03 [INFO] [58/382] SKIP-SDR  Captain America The First Avenger (2011).mkv
+2026-09-02 21:12:03 [INFO] [59/382] SKIP-SDR  Charlie and the Chocolate Factory (2005).mkv
+2026-09-02 21:12:03 [INFO] [60/382] SKIP-SDR  Chicken Little (2005).mkv
+2026-09-02 21:12:03 [INFO] [61/382] SKIP-SDR  Bugonia (2025).mkv
+2026-09-02 21:12:03 [INFO] [62/382] SKIP-SDR  Cast Away (2000).mkv
+2026-09-02 21:12:03 [INFO] [63/382] SKIP-SDR  Catch Me If You Can (2002).mkv
+2026-09-02 21:12:03 [INFO] [64/382] QUEUE     Backrooms (2026).mkv
+2026-09-02 21:12:03 [INFO] [65/382] SKIP-SDR  Children of Men (2006).mkv
+2026-09-02 21:12:03 [INFO] [66/382] SKIP-SDR  Chronicle (2012).mkv
+2026-09-02 21:12:03 [INFO] [67/382] SKIP-SDR  Coach Carter (2005).mkv
+2026-09-02 21:12:03 [INFO] [68/382] SKIP-SDR  Cloverfield (2008).mkv
+2026-09-02 21:12:03 [INFO] [69/382] SKIP-SDR  Contact (1997).mkv
+2026-09-02 21:12:03 [INFO] [70/382] SKIP-SDR  Civil War (2024).mkv
+2026-09-02 21:12:03 [INFO] [71/382] SKIP-SDR  Contagion (2011).mkv
+2026-09-02 21:12:03 [INFO] [72/382] SKIP-SDR  Crazy Rich Asians (2018).mkv
+2026-09-02 21:12:04 [INFO] [73/382] SKIP-SDR  Cloudy with a Chance of Meatballs (2009).mkv
+2026-09-02 21:12:04 [INFO] [74/382] SKIP-SDR  Deadpool (2016).mkv
+2026-09-02 21:12:04 [INFO] [75/382] SKIP-SDR  Coraline (2009).mkv
+2026-09-02 21:12:04 [INFO] [76/382] SKIP-SDR  Coco (2017).mkv
+2026-09-02 21:12:04 [INFO] [77/382] SKIP-SDR  Creed (2015).mkv
+2026-09-02 21:12:04 [INFO] [78/382] SKIP-SDR  Dawn of the Planet of the Apes (2014).mkv
+2026-09-02 21:12:04 [INFO] [79/382] SKIP-SDR  Deadpool 2 (2018).mkv
+2026-09-02 21:12:04 [INFO] [80/382] SKIP-SDR  Die Hard (1988).mkv
+2026-09-02 21:12:04 [INFO] [81/382] SKIP-SDR  Despicable Me (2010).mkv
+2026-09-02 21:12:04 [INFO] [82/382] SKIP-SDR  Donnie Darko (2001).mkv
+2026-09-02 21:12:04 [INFO] [83/382] SKIP-SDR  Dunkirk (2017).mkv
+2026-09-02 21:12:04 [INFO] [84/382] SKIP-SDR  Dune (2021).mkv
+2026-09-02 21:12:04 [INFO] [85/382] SKIP-SDR  District 9 (2009).mkv
+2026-09-02 21:12:04 [INFO] [86/382] SKIP-SDR  Easy A (2010).mkv
+2026-09-02 21:12:04 [INFO] [87/382] SKIP-SDR  E T the Extra-Terrestrial (1982).mkv
+2026-09-02 21:12:04 [INFO] [88/382] SKIP-SDR  Edge of Tomorrow (2014).mkv
+2026-09-02 21:12:04 [INFO] [89/382] SKIP-SDR  Dune - Part Two (2024).mkv
+2026-09-02 21:12:04 [INFO] [90/382] SKIP-SDR  Dead Poets Society (1989).mkv
+2026-09-02 21:12:05 [INFO] [91/382] SKIP-SDR  Elemental (2023).mkv
+2026-09-02 21:12:05 [INFO] [92/382] SKIP-SDR  Elysium (2013).mkv
+2026-09-02 21:12:05 [INFO] [93/382] SKIP-SDR  Edward Scissorhands (1990).mkv
+2026-09-02 21:12:05 [INFO] [94/382] SKIP-SDR  Django Unchained (2012).mkv
+2026-09-02 21:12:05 [INFO] [95/382] SKIP-SDR  Enemy (2013).mkv
+2026-09-02 21:12:05 [INFO] [96/382] SKIP-SDR  Eternal Sunshine of the Spotless Mind (2004).mkv
+2026-09-02 21:12:05 [INFO] [97/382] SKIP-SDR  Enchanted (2007).mkv
+2026-09-02 21:12:05 [INFO] [98/382] SKIP-SDR  First Man (2018).mkv
+2026-09-02 21:12:05 [INFO] [99/382] SKIP-SDR  Ex Machina (2015).mkv
+2026-09-02 21:12:05 [INFO] [100/382] SKIP-SDR  Fast Five (2011).mkv
+2026-09-02 21:12:05 [INFO] [101/382] SKIP-SDR  Fargo (1996).mkv
+2026-09-02 21:12:05 [INFO] [102/382] SKIP-SDR  Forrest Gump (1994).mkv
+2026-09-02 21:12:05 [INFO] [103/382] SKIP-SDR  Finding Nemo (2003).mkv
+2026-09-02 21:12:05 [INFO] [104/382] SKIP-SDR  Fractured (2019).mkv
+2026-09-02 21:12:05 [INFO] [105/382] SKIP-SDR  Ferris Bueller's Day Off (1986).mkv
+2026-09-02 21:12:05 [INFO] [106/382] SKIP-SDR  Ford v Ferrari (2019).mkv
+2026-09-02 21:12:05 [INFO] [107/382] SKIP-SDR  Ghostbusters (1984).mkv
+2026-09-02 21:12:05 [INFO] [108/382] SKIP-SDR  Gladiator (2000).mkv
+2026-09-02 21:12:05 [INFO] [109/382] SKIP-SDR  Good Will Hunting (1997).mkv
+2026-09-02 21:12:05 [INFO] [110/382] SKIP-SDR  Goodfellas (1990).mkv
+2026-09-02 21:12:05 [INFO] [111/382] SKIP-SDR  Gone Girl (2014).mkv
+2026-09-02 21:12:05 [INFO] [112/382] SKIP-SDR  Greenland (2020).mkv
+2026-09-02 21:12:05 [INFO] [113/382] SKIP-SDR  Groundhog Day (1993).mkv
+2026-09-02 21:12:05 [INFO] [114/382] SKIP-SDR  Fight Club (1999).mkv
+2026-09-02 21:12:05 [INFO] [115/382] SKIP-SDR  Fury (2014).mkv
+2026-09-02 21:12:05 [INFO] [116/382] SKIP-SDR  Green Book (2018).mkv
+2026-09-02 21:12:05 [INFO] [117/382] SKIP-SDR  Get Out (2017).mkv
+2026-09-02 21:12:05 [INFO] [118/382] SKIP-SDR  Hacksaw Ridge (2016).mkv
+2026-09-02 21:12:05 [INFO] [119/382] SKIP-SDR  Harry Potter and the Deathly Hallows - Part 1 (2010).mkv
+2026-09-02 21:12:06 [INFO] [120/382] SKIP-SDR  Harry Potter and the Deathly Hallows - Part 2 (2011).mkv
+2026-09-02 21:12:06 [INFO] [121/382] SKIP-SDR  Happy Gilmore (1996).mkv
+2026-09-02 21:12:06 [INFO] [122/382] SKIP-SDR  Harry Potter and the Half-Blood Prince (2009).mkv
+2026-09-02 21:12:06 [INFO] [123/382] SKIP-SDR  Grown Ups (2010).mkv
+2026-09-02 21:12:06 [INFO] [124/382] SKIP-SDR  Guardians of the Galaxy (2014).mkv
+2026-09-02 21:12:06 [INFO] [125/382] SKIP-SDR  Happy Feet (2006).mkv
+2026-09-02 21:12:06 [INFO] [126/382] SKIP-SDR  Gravity (2013).mkv
+2026-09-02 21:12:06 [INFO] [127/382] SKIP-SDR  Harry Potter and the Chamber of Secrets (2002).mkv
+2026-09-02 21:12:06 [INFO] [128/382] SKIP-SDR  Harry Potter and the Goblet of Fire (2005).mkv
+2026-09-02 21:12:06 [INFO] [129/382] SKIP-SDR  Harry Potter and the Order of the Phoenix (2007).mkv
+2026-09-02 21:12:06 [INFO] [130/382] SKIP-SDR  Heat (1995).mkv
+2026-09-02 21:12:06 [INFO] [131/382] SKIP-SDR  Harry Potter and the Prisoner of Azkaban (2004).mkv
+2026-09-02 21:12:06 [INFO] [132/382] SKIP-SDR  Hereditary (2018).mkv
+2026-09-02 21:12:06 [INFO] [133/382] SKIP-SDR  Her (2013).mkv
+2026-09-02 21:12:06 [INFO] [134/382] SKIP-SDR  Hidden Figures (2016).mkv
+2026-09-02 21:12:06 [INFO] [135/382] SKIP-SDR  Harry Potter and the Sorcerer's Stone (2001).mkv
+2026-09-02 21:12:06 [INFO] [136/382] SKIP-SDR  I Am Legend (2007).mkv
+2026-09-02 21:12:06 [INFO] [137/382] SKIP-SDR  How to Train Your Dragon (2010).mkv
+2026-09-02 21:12:06 [INFO] [138/382] SKIP-SDR  I, Robot (2004).mkv
+2026-09-02 21:12:06 [INFO] [139/382] SKIP-SDR  I, Tonya (2017).mkv
+2026-09-02 21:12:06 [INFO] [140/382] SKIP-SDR  Home Alone (1990).mkv
+2026-09-02 21:12:06 [INFO] [141/382] SKIP-SDR  Hercules (1997).mkv
+2026-09-02 21:12:06 [INFO] [142/382] SKIP-SDR  Ice Age (2002).mkv
+2026-09-02 21:12:06 [INFO] [143/382] SKIP-SDR  Independence Day (1996).mkv
+2026-09-02 21:12:06 [INFO] [144/382] SKIP-SDR  Indiana Jones and the Last Crusade (1989).mkv
+2026-09-02 21:12:06 [INFO] [145/382] SKIP-SDR  Indiana Jones and the Raiders of the Lost Ark (1981).mkv
+2026-09-02 21:12:07 [INFO] [146/382] SKIP-SDR  Indiana Jones and the Temple of Doom (1984).mkv
+2026-09-02 21:12:07 [INFO] [147/382] SKIP-SDR  Inception (2010).mkv
+2026-09-02 21:12:07 [INFO] [148/382] SKIP-SDR  Inglourious Basterds (2009).mkv
+2026-09-02 21:12:07 [INFO] [149/382] SKIP-SDR  Home Alone 2 - Lost in New York (1992).mkv
+2026-09-02 21:12:07 [INFO] [150/382] SKIP-SDR  Interstellar (2014).mkv
+2026-09-02 21:12:07 [INFO] [151/382] SKIP-SDR  Insomnia (2002).mkv
+2026-09-02 21:12:07 [INFO] [152/382] SKIP-SDR  Idiocracy (2006).mkv
+2026-09-02 21:12:07 [INFO] [153/382] SKIP-SDR  Holes (2003).mkv
+2026-09-02 21:12:07 [INFO] [154/382] SKIP-SDR  Incredibles 2 (2018).mkv
+2026-09-02 21:12:07 [INFO] [155/382] SKIP-SDR  Into the Wild (2007).mkv
+2026-09-02 21:12:07 [INFO] [156/382] SKIP-SDR  Jimmy Neutron Boy Genius (2001).mkv
+2026-09-02 21:12:07 [INFO] [157/382] SKIP-SDR  James and the Giant Peach (1996).mkv
+2026-09-02 21:12:07 [INFO] [158/382] SKIP-SDR  Iron Man (2008).mkv
+2026-09-02 21:12:07 [INFO] [159/382] SKIP-SDR  Iron Man 2 (2010).mkv
+2026-09-02 21:12:07 [INFO] [160/382] SKIP-SDR  Jaws (1975).mkv
+2026-09-02 21:12:07 [INFO] [161/382] SKIP-SDR  John Q (2002).mkv
+2026-09-02 21:12:07 [INFO] [162/382] SKIP-SDR  Jurassic World (2015).mkv
+2026-09-02 21:12:07 [INFO] [163/382] SKIP-SDR  IT (2017).mkv
+2026-09-02 21:12:07 [INFO] [164/382] SKIP-SDR  King Richard (2021).mkv
+2026-09-02 21:12:07 [INFO] [165/382] SKIP-SDR  Joker (2019).mkv
+2026-09-02 21:12:07 [INFO] [166/382] SKIP-SDR  Jurassic Park (1993).mkv
+2026-09-02 21:12:07 [INFO] [167/382] SKIP-SDR  Jumanji (1995).mkv
+2026-09-02 21:12:07 [INFO] [168/382] SKIP-SDR  Kick-Ass (2010).mkv
+2026-09-02 21:12:07 [INFO] [169/382] SKIP-SDR  Juno (2007).mkv
+2026-09-02 21:12:07 [INFO] [170/382] SKIP-SDR  Lone Survivor (2013).mkv
+2026-09-02 21:12:07 [INFO] [171/382] SKIP-SDR  Logan (2017).mkv
+2026-09-02 21:12:07 [INFO] [172/382] SKIP-SDR  Knives Out (2019).mkv
+2026-09-02 21:12:08 [INFO] [173/382] SKIP-SDR  Kung Fu Panda (2008).mkv
+2026-09-02 21:12:08 [INFO] [174/382] SKIP-SDR  Knowing (2009).mkv
+2026-09-02 21:12:08 [INFO] [175/382] SKIP-SDR  Mean Girls (2004).mkv
+2026-09-02 21:12:08 [INFO] [176/382] SKIP-SDR  Madagascar (2005).mkv
+2026-09-02 21:12:08 [INFO] [177/382] SKIP-SDR  Legally Blonde (2001).mkv
+2026-09-02 21:12:08 [INFO] [178/382] SKIP-SDR  Marty Supreme (2025).mkv
+2026-09-02 21:12:08 [INFO] [179/382] SKIP-SDR  Megamind (2010).mkv
+2026-09-02 21:12:08 [INFO] [180/382] SKIP-SDR  Magnolia (1999).mkv
+2026-09-02 21:12:09 [INFO] [181/382] SKIP-SDR  Meet the Robinsons (2007).mkv
+2026-09-02 21:12:09 [INFO] [182/382] SKIP-SDR  Memento (2000).mkv
+2026-09-02 21:12:09 [INFO] [183/382] SKIP-SDR  Minority Report (2002).mkv
+2026-09-02 21:12:09 [INFO] [184/382] SKIP-SDR  Mission - Impossible - Fallout (2018).mkv
+2026-09-02 21:12:09 [INFO] [185/382] SKIP-SDR  Monsters University (2013).mkv
+2026-09-02 21:12:09 [INFO] [186/382] SKIP-SDR  Moon (2009).mkv
+2026-09-02 21:12:09 [INFO] [187/382] SKIP-SDR  National Lampoon's Christmas Vacation (1989).mkv
+2026-09-02 21:12:09 [INFO] [188/382] SKIP-SDR  Napoleon Dynamite (2004).mkv
+2026-09-02 21:12:09 [INFO] [189/382] SKIP-SDR  National Treasure (2004).mkv
+2026-09-02 21:12:09 [INFO] [190/382] SKIP-SDR  National Treasure Book of Secrets (2007).mkv
+2026-09-02 21:12:09 [INFO] [191/382] SKIP-SDR  Monsters, Inc (2001).mkv
+2026-09-02 21:12:09 [INFO] [192/382] SKIP-SDR  Mulan (1998).mkv
+2026-09-02 21:12:09 [INFO] [193/382] SKIP-SDR  Night at the Museum (2006).mkv
+2026-09-02 21:12:09 [INFO] [194/382] SKIP-SDR  Nightcrawler (2014).mkv
+2026-09-02 21:12:09 [INFO] [195/382] SKIP-SDR  No Country for Old Men (2007).mkv
+2026-09-02 21:12:09 [INFO] [196/382] SKIP-SDR  Now You See Me (2013).mkv
+2026-09-02 21:12:09 [INFO] [197/382] SKIP-SDR  Office Space (1999).mkv
+2026-09-02 21:12:09 [INFO] [198/382] SKIP-SDR  October Sky (1999).mkv
+2026-09-02 21:12:09 [INFO] [199/382] SKIP-SDR  Open Season (2006).mkv
+2026-09-02 21:12:09 [INFO] [200/382] SKIP-SDR  Obsession (2026).mkv
+2026-09-02 21:12:09 [INFO] [201/382] SKIP-SDR  Oppenheimer (2023).mkv
+2026-09-02 21:12:09 [INFO] [202/382] SKIP-SDR  Osmosis Jones (2001).mkv
+2026-09-02 21:12:09 [INFO] [203/382] SKIP-SDR  Oblivion (2013).mkv
+2026-09-02 21:12:09 [INFO] [204/382] SKIP-SDR  Pirates of the Caribbean Dead Man's Chest (2006).mkv
+2026-09-02 21:12:09 [INFO] [205/382] SKIP-SDR  One Flew Over the Cuckoo's Nest (1975).mkv
+2026-09-02 21:12:09 [INFO] [206/382] SKIP-SDR  Over the Hedge (2006).mkv
+2026-09-02 21:12:09 [INFO] [207/382] SKIP-SDR  Parasite (2019).mkv
+2026-09-02 21:12:09 [INFO] [208/382] SKIP-SDR  Pirates of the Caribbean At World's End (2007).mkv
+2026-09-02 21:12:10 [INFO] [209/382] SKIP-SDR  Pineapple Express (2008).mkv
+2026-09-02 21:12:10 [INFO] [210/382] SKIP-SDR  Project X (2012).mkv
+2026-09-02 21:12:10 [INFO] [211/382] SKIP-SDR  Pitch Perfect (2012).mkv
+2026-09-02 21:12:10 [INFO] [212/382] SKIP-SDR  Prisoners (2013).mkv
+2026-09-02 21:12:10 [INFO] [213/382] SKIP-SDR  Pulp Fiction (1994).mkv
+2026-09-02 21:12:10 [INFO] [214/382] SKIP-SDR  Ratatouille (2007).mkv
+2026-09-02 21:12:10 [INFO] [215/382] SKIP-SDR  Pirates of the Caribbean The Curse of the Black Pearl (2003).mkv
+2026-09-02 21:12:10 [INFO] [216/382] SKIP-SDR  Ready Player One (2018).mkv
+2026-09-02 21:12:10 [INFO] [217/382] SKIP-SDR  Robots (2005).mkv
+2026-09-02 21:12:10 [INFO] [218/382] SKIP-SDR  Requiem for a Dream (2000).mkv
+2026-09-02 21:12:10 [INFO] [219/382] SKIP-SDR  Remember the Titans (2000).mkv
+2026-09-02 21:12:10 [INFO] [220/382] SKIP-SDR  Rise of the Planet of the Apes (2011).mkv
+2026-09-02 21:12:10 [INFO] [221/382] SKIP-SDR  Rocky (1976).mkv
+2026-09-02 21:12:10 [INFO] [222/382] SKIP-SDR  Real Steel (2011).mkv
+2026-09-02 21:12:10 [INFO] [223/382] SKIP-SDR  Room (2015).mkv
+2026-09-02 21:12:10 [INFO] [224/382] SKIP-SDR  Saving Private Ryan (1998).mkv
+2026-09-02 21:12:10 [INFO] [225/382] SKIP-SDR  Scream (1996).mkv
+2026-09-02 21:12:10 [INFO] [226/382] SKIP-SDR  Scarface (1983).mkv
+2026-09-02 21:12:10 [INFO] [227/382] SKIP-SDR  Shark Tale (2004).mkv
+2026-09-02 21:12:10 [INFO] [228/382] SKIP-SDR  Pearl (2022).mkv
+2026-09-02 21:12:10 [INFO] [229/382] SKIP-SDR  Shazam! (2019).mkv
+2026-09-02 21:12:10 [INFO] [230/382] SKIP-SDR  Project Hail Mary (2026).mkv
+2026-09-02 21:12:10 [INFO] [231/382] SKIP-SDR  Shrek 2 (2004).mkv
+2026-09-02 21:12:10 [INFO] [232/382] SKIP-SDR  Shrek (2001).mkv
+2026-09-02 21:12:10 [INFO] [233/382] SKIP-SDR  Se7en (1995).mkv
+2026-09-02 21:12:10 [INFO] [234/382] SKIP-SDR  Shrek Forever After (2010).mkv
+2026-09-02 21:12:10 [INFO] [235/382] SKIP-SDR  Shutter Island (2010).mkv
+2026-09-02 21:12:10 [INFO] [236/382] SKIP-SDR  Schindler's List (1993).mkv
+2026-09-02 21:12:10 [INFO] [237/382] SKIP-SDR  Sausage Party (2016).mkv
+2026-09-02 21:12:10 [INFO] [238/382] SKIP-SDR  Sicario (2015).mkv
+2026-09-02 21:12:10 [INFO] [239/382] SKIP-SDR  Sinister (2012).mkv
+2026-09-02 21:12:10 [INFO] [240/382] SKIP-SDR  Signs (2002).mkv
+2026-09-02 21:12:10 [INFO] [241/382] QUEUE     Sinners (2025).mkv
+2026-09-02 21:12:10 [INFO] [242/382] SKIP-SDR  Skyfall (2012).mkv
+2026-09-02 21:12:10 [INFO] [243/382] SKIP-SDR  Saw (2004).mkv
+2026-09-02 21:12:10 [INFO] [244/382] SKIP-SDR  Slumdog Millionaire (2008).mkv
+2026-09-02 21:12:10 [INFO] [245/382] SKIP-SDR  Snatch (2000).mkv
+2026-09-02 21:12:10 [INFO] [246/382] SKIP-SDR  Source Code (2011).mkv
+2026-09-02 21:12:10 [INFO] [247/382] SKIP-SDR  Spaceballs (1987).mkv
+2026-09-02 21:12:10 [INFO] [248/382] SKIP-SDR  Spider-Man (2002).mkv
+2026-09-02 21:12:10 [INFO] [249/382] SKIP-SDR  Snowden (2016).mkv
+2026-09-02 21:12:10 [INFO] [250/382] SKIP-SDR  Spider-Man - Across the Spider-Verse (2023).mkv
+2026-09-02 21:12:10 [INFO] [251/382] SKIP-SDR  Spider-Man - Homecoming (2017).mkv
+2026-09-02 21:12:10 [INFO] [252/382] SKIP-SDR  Spider-Man - Into the Spider-Verse (2018).mkv
+2026-09-02 21:12:10 [INFO] [253/382] SKIP-SDR  Spider-Man 2 (2004).mkv
+2026-09-02 21:12:10 [INFO] [254/382] SKIP-SDR  Spider-Man No Way Home (2021).mkv
+2026-09-02 21:12:10 [INFO] [255/382] SKIP-SDR  Stand by Me (1986).mkv
+2026-09-02 21:12:10 [INFO] [256/382] SKIP-SDR  Stalker (1979).mkv
+2026-09-02 21:12:10 [INFO] [257/382] SKIP-SDR  Spirited Away (2001).mkv
+2026-09-02 21:12:10 [INFO] [258/382] SKIP-SDR  Split (2016).mkv
+2026-09-02 21:12:10 [INFO] [259/382] SKIP-SDR  Star Trek (2009).mkv
+2026-09-02 21:12:10 [INFO] [260/382] SKIP-SDR  Star Trek - Into Darkness (2013).mkv
+2026-09-02 21:12:10 [INFO] [261/382] SKIP-SDR  Star Wars - Episode I - The Phantom Menace (1999).mkv
+2026-09-02 21:12:11 [INFO] [262/382] SKIP-SDR  Star Wars - Episode II - Attack of the Clones (2002).mkv
+2026-09-02 21:12:11 [INFO] [263/382] SKIP-SDR  Straight Outta Compton (2015).mkv
+2026-09-02 21:12:11 [INFO] [264/382] SKIP-SDR  Star Wars - Episode VI - Return of the Jedi (1983).mkv
+2026-09-02 21:12:11 [INFO] [265/382] SKIP-SDR  Star Wars - Episode III - Revenge of the Sith (2005).mkv
+2026-09-02 21:12:11 [INFO] [266/382] SKIP-SDR  Star Wars - Episode IV - A New Hope (1977).mkv
+2026-09-02 21:12:11 [INFO] [267/382] SKIP-SDR  Star Wars - Episode V - The Empire Strikes Back (1980).mkv
+2026-09-02 21:12:11 [INFO] [268/382] SKIP-SDR  Super 8 (2011).mkv
+2026-09-02 21:12:11 [INFO] [269/382] SKIP-SDR  Superbad (2007).mkv
+2026-09-02 21:12:11 [INFO] [270/382] SKIP-SDR  Surf's Up (2007).mkv
+2026-09-02 21:12:11 [INFO] [271/382] SKIP-SDR  Tangled (2010).mkv
+2026-09-02 21:12:11 [INFO] [272/382] SKIP-SDR  Taken (2008).mkv
+2026-09-02 21:12:11 [INFO] [273/382] SKIP-SDR  Tenet (2020).mkv
+2026-09-02 21:12:11 [INFO] [274/382] SKIP-SDR  Terminator 2 - Judgment Day (1991).mkv
+2026-09-02 21:12:11 [INFO] [275/382] SKIP-SDR  Taxi Driver (1976).mkv
+2026-09-02 21:12:11 [INFO] [276/382] SKIP-SDR  Ted (2012).mkv
+2026-09-02 21:12:11 [INFO] [277/382] SKIP-SDR  Tetris (2023).mkv
+2026-09-02 21:12:11 [INFO] [278/382] SKIP-SDR  The Accountant (2016).mkv
+2026-09-02 21:12:11 [INFO] [279/382] SKIP-SDR  The Amazing Spider-Man (2012).mkv
+2026-09-02 21:12:11 [INFO] [280/382] SKIP-SDR  The Avengers (2012).mkv
+2026-09-02 21:12:11 [INFO] [281/382] SKIP-SDR  The Big Lebowski (1998).mkv
+2026-09-02 21:12:11 [INFO] [282/382] SKIP-SDR  The Big Short (2015).mkv
+2026-09-02 21:12:11 [INFO] [283/382] SKIP-SDR  The Batman (2022).mkv
+2026-09-02 21:12:11 [INFO] [284/382] SKIP-SDR  The Bourne Identity (2002).mkv
+2026-09-02 21:12:11 [INFO] [285/382] SKIP-SDR  The Book of Eli (2010).mkv
+2026-09-02 21:12:11 [INFO] [286/382] SKIP-SDR  The Bourne Supremacy (2004).mkv
+2026-09-02 21:12:11 [INFO] [287/382] SKIP-SDR  The Bourne Ultimatum (2007).mkv
+2026-09-02 21:12:11 [INFO] [288/382] SKIP-SDR  The Boy in the Striped Pyjamas (2008).mkv
+2026-09-02 21:12:11 [INFO] [289/382] SKIP-SDR  The Curious Case of Benjamin Button (2008).mkv
+2026-09-02 21:12:11 [INFO] [290/382] SKIP-SDR  The Breakfast Club (1985).mkv
+2026-09-02 21:12:11 [INFO] [291/382] SKIP-SDR  The Dark Knight (2008).mkv
+2026-09-02 21:12:11 [INFO] [292/382] SKIP-SDR  The Dark Knight Rises (2012).mkv
+2026-09-02 21:12:11 [INFO] [293/382] SKIP-SDR  The Day After (1983).mkv
+2026-09-02 21:12:11 [INFO] [294/382] SKIP-SDR  The Departed (2006).mkv
+2026-09-02 21:12:11 [INFO] [295/382] SKIP-SDR  The Edge of Seventeen (2016).mkv
+2026-09-02 21:12:11 [INFO] [296/382] SKIP-SDR  The Founder (2016).mkv
+2026-09-02 21:12:11 [INFO] [297/382] SKIP-SDR  The Fast and the Furious (2001).mkv
+2026-09-02 21:12:11 [INFO] [298/382] SKIP-SDR  The Emperor's New Groove (2000).mkv
+2026-09-02 21:12:11 [INFO] [299/382] SKIP-SDR  The Godfather (1972).mkv
+2026-09-02 21:12:11 [INFO] [300/382] SKIP-SDR  The Godfather - Part II (1974).mkv
+2026-09-02 21:12:11 [INFO] [301/382] SKIP-SDR  The Goonies (1985).mkv
+2026-09-02 21:12:11 [INFO] [302/382] SKIP-SDR  The Green Mile (1999).mkv
+2026-09-02 21:12:11 [INFO] [303/382] SKIP-SDR  The Hangover (2009).mkv
+2026-09-02 21:12:11 [INFO] [304/382] SKIP-SDR  The Hunger Games - Mockingjay - Part 1 (2014).mkv
+2026-09-02 21:12:11 [INFO] [305/382] SKIP-SDR  The Help (2011).mkv
+2026-09-02 21:12:11 [INFO] [306/382] SKIP-SDR  The Hunger Games - Mockingjay - Part 2 (2015).mkv
+2026-09-02 21:12:11 [INFO] [307/382] SKIP-SDR  The Hunger Games (2012).mkv
+2026-09-02 21:12:11 [INFO] [308/382] SKIP-SDR  The Hunger Games Catching Fire (2013).mkv
+2026-09-02 21:12:11 [INFO] [309/382] SKIP-SDR  The Hurt Locker (2008).mkv
+2026-09-02 21:12:11 [INFO] [310/382] SKIP-SDR  The Imitation Game (2014).mkv
+2026-09-02 21:12:11 [INFO] [311/382] SKIP-SDR  The Incredibles (2004).mkv
+2026-09-02 21:12:11 [INFO] [312/382] SKIP-SDR  The Interview (2014).mkv
+2026-09-02 21:12:11 [INFO] [313/382] SKIP-SDR  The Karate Kid (1984).mkv
+2026-09-02 21:12:11 [INFO] [314/382] SKIP-SDR  The Lord of the Rings The Fellowship of the Ring (2001).mkv
+2026-09-02 21:12:11 [INFO] [315/382] SKIP-SDR  The Longest Yard (2005).mkv
+2026-09-02 21:12:11 [INFO] [316/382] SKIP-SDR  The Invisible Man (2020).mkv
+2026-09-02 21:12:11 [INFO] [317/382] SKIP-SDR  The Lord of the Rings The Two Towers (2002).mkv
+2026-09-02 21:12:11 [INFO] [318/382] SKIP-SDR  The Lord of the Rings The Return of the King (2003).mkv
+2026-09-02 21:12:11 [INFO] [319/382] SKIP-SDR  The Martian (2015).mkv
+2026-09-02 21:12:11 [INFO] [320/382] SKIP-SDR  The Matrix (1999).mkv
+2026-09-02 21:12:11 [INFO] [321/382] SKIP-SDR  The Prestige (2006).mkv
+2026-09-02 21:12:11 [INFO] [322/382] SKIP-SDR  The Maze Runner (2014).mkv
+2026-09-02 21:12:11 [INFO] [323/382] SKIP-SDR  The Nightmare Before Christmas (1993).mkv
+2026-09-02 21:12:11 [INFO] [324/382] SKIP-SDR  The Proposal (2009).mkv
+2026-09-02 21:12:11 [INFO] [325/382] SKIP-SDR  The Polar Express (2004).mkv
+2026-09-02 21:12:11 [INFO] [326/382] SKIP-SDR  The Princess and the Frog (2009).mkv
+2026-09-02 21:12:11 [INFO] [327/382] SKIP-SDR  The Revenant (2015).mkv
+2026-09-02 21:12:11 [INFO] [328/382] SKIP-SDR  The Sandlot (1993).mkv
+2026-09-02 21:12:11 [INFO] [329/382] SKIP-SDR  The Sixth Sense (1999).mkv
+2026-09-02 21:12:11 [INFO] [330/382] SKIP-SDR  The Shawshank Redemption (1994).mkv
+2026-09-02 21:12:11 [INFO] [331/382] SKIP-SDR  The Substance (2024).mkv
+2026-09-02 21:12:11 [INFO] [332/382] SKIP-SDR  The Social Network (2010).mkv
+2026-09-02 21:12:11 [INFO] [333/382] SKIP-SDR  The Silence of the Lambs (1991).mkv
+2026-09-02 21:12:11 [INFO] [334/382] SKIP-SDR  The Terminator (1984).mkv
+2026-09-02 21:12:11 [INFO] [335/382] SKIP-SDR  The Theory of Everything (2014).mkv
+2026-09-02 21:12:11 [INFO] [336/382] SKIP-SDR  The Wolf of Wall Street (2013).mkv
+2026-09-02 21:12:11 [INFO] [337/382] SKIP-SDR  The Wild Robot (2024).mkv
+2026-09-02 21:12:11 [INFO] [338/382] SKIP-SDR  The Thing (1982).mkv
+2026-09-02 21:12:11 [INFO] [339/382] SKIP-SDR  The Usual Suspects (1995).mkv
+2026-09-02 21:12:11 [INFO] [340/382] SKIP-SDR  This Christmas (2007).mkv
+2026-09-02 21:12:11 [INFO] [341/382] SKIP-SDR  The Truman Show (1998).mkv
+2026-09-02 21:12:11 [INFO] [342/382] SKIP-SDR  There Will Be Blood (2007).mkv
+2026-09-02 21:12:11 [INFO] [343/382] SKIP-SDR  This Is the End (2013).mkv
+2026-09-02 21:12:11 [INFO] [344/382] SKIP-SDR  Threads (1984).mkv
+2026-09-02 21:12:11 [INFO] [345/382] SKIP-SDR  Titanic (1997).mkv
+2026-09-02 21:12:11 [INFO] [346/382] SKIP-SDR  Thor - Ragnarok (2017).mkv
+2026-09-02 21:12:11 [INFO] [347/382] SKIP-SDR  Top Gun - Maverick (2022).mkv
+2026-09-02 21:12:11 [INFO] [348/382] SKIP-SDR  Toy Story (1995).mkv
+2026-09-02 21:12:11 [INFO] [349/382] SKIP-SDR  Toy Story 3 (2010).mkv
+2026-09-02 21:12:11 [INFO] [350/382] SKIP-SDR  Toy Story 2 (1999).mkv
+2026-09-02 21:12:11 [INFO] [351/382] SKIP-SDR  Top Gun (1986).mkv
+2026-09-02 21:12:12 [INFO] [352/382] SKIP-SDR  Toy Story 4 (2019).mkv
+2026-09-02 21:12:12 [INFO] [353/382] SKIP-SDR  Toy Story 5 (2026).mkv
+2026-09-02 21:12:12 [INFO] [354/382] SKIP-SDR  Transformers (2007).mkv
+2026-09-02 21:12:12 [INFO] [355/382] SKIP-SDR  TRON - Legacy (2010).mkv
+2026-09-02 21:12:12 [INFO] [356/382] SKIP-SDR  Transformers Revenge of the Fallen (2009).mkv
+2026-09-02 21:12:12 [INFO] [357/382] SKIP-SDR  Transformers Dark Of The Moon (2011).mkv
+2026-09-02 21:12:12 [INFO] [358/382] SKIP-SDR  Treasure Planet (2002).mkv
+2026-09-02 21:12:12 [INFO] [359/382] SKIP-SDR  Training Day (2001).mkv
+2026-09-02 21:12:12 [INFO] [360/382] SKIP-SDR  Turtles Forever (2009).mkv
+2026-09-02 21:12:12 [INFO] [361/382] SKIP-SDR  Us (2019).mkv
+2026-09-02 21:12:12 [INFO] [362/382] SKIP-SDR  Twelve Monkeys (1995).mkv
+2026-09-02 21:12:12 [INFO] [363/382] SKIP-SDR  United 93 (2006).mkv
+2026-09-02 21:12:12 [INFO] [364/382] SKIP-SDR  Uncut Gems (2019).mkv
+2026-09-02 21:12:12 [INFO] [365/382] SKIP-SDR  V for Vendetta (2005).mkv
+2026-09-02 21:12:12 [INFO] [366/382] SKIP-SDR  Wallace & Gromit - The Curse of the Were-Rabbit (2005).mkv
+2026-09-02 21:12:12 [INFO] [367/382] SKIP-SDR  WALL-E (2008).mkv
+2026-09-02 21:12:12 [INFO] [368/382] SKIP-SDR  Warrior (2011).mkv
+2026-09-02 21:12:12 [INFO] [369/382] SKIP-SDR  War Dogs (2016).mkv
+2026-09-02 21:12:12 [INFO] [370/382] QUEUE     Weapons (2025).mkv
+2026-09-02 21:12:12 [INFO] [371/382] SKIP-SDR  We're the Millers (2013).mkv
+2026-09-02 21:12:12 [INFO] [372/382] SKIP-SDR  Whiplash (2014).mkv
+2026-09-02 21:12:12 [INFO] [373/382] SKIP-SDR  When Harry Met Sally (1989).mkv
+2026-09-02 21:12:12 [INFO] [374/382] SKIP-SDR  War for the Planet of the Apes (2017).mkv
+2026-09-02 21:12:12 [INFO] [375/382] SKIP-SDR  WarGames (1983).mkv
+2026-09-02 21:12:12 [INFO] [376/382] SKIP-SDR  World War Z (2013).mkv
+2026-09-02 21:12:12 [INFO] [377/382] SKIP-SDR  Wreck-It Ralph (2012).mkv
+2026-09-02 21:12:12 [INFO] [378/382] SKIP-SDR  Zootopia 2 (2025).mkv
+2026-09-02 21:12:12 [INFO] [379/382] SKIP-SDR  Willy Wonka & the Chocolate Factory (1971).mkv
+2026-09-02 21:12:12 [INFO] [380/382] SKIP-SDR  Zero Dark Thirty (2012).mkv
+2026-09-02 21:12:12 [INFO] [381/382] SKIP-SDR  Zathura - A Space Adventure (2005).mkv
+2026-09-02 21:12:12 [INFO] [382/382] SKIP-SDR  Zootopia (2016).mkv
+2026-09-02 21:12:12 [INFO] Probe cache: 0 reused, 382 probed.
+2026-09-02 21:12:12 [INFO] 
+2026-09-02 21:12:12 [INFO] ===============================================================================
+2026-09-02 21:12:12 [INFO] SCAN COMPLETE
+2026-09-02 21:12:12 [INFO] ===============================================================================
+2026-09-02 21:12:12 [INFO]   8-bit SDR (QUEUE)         : 4
+2026-09-02 21:12:12 [INFO]   10/12/16-bit SDR (SKIP)   : 377
+2026-09-02 21:12:12 [INFO]   Native HDR (KEEP)         : 1
+2026-09-02 21:12:12 [INFO]   8-bit tagged HDR (REVIEW) : 0
+2026-09-02 21:12:12 [INFO]   Unknown bit depth (REVIEW): 0
+2026-09-02 21:12:12 [INFO]   Total review required     : 0
+2026-09-02 21:12:12 [INFO]   Errors                    : 0
+2026-09-02 21:12:12 [INFO] ===============================================================================
+2026-09-02 21:12:12 [INFO] Report : E:\torrents\tools\ReportsAndLogs\10bit\10bit_report.txt

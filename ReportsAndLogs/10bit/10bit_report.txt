@@ -1,0 +1,2962 @@
+╔══════════════════════════════════════════════════════════════════════════════════════════════╗
+║ HANDBRAKE WORKFLOW ACTION REPORT                                                             ║
+║ Bit-depth and HDR classification for every movie · fail-closed: anything uncertain is never  ║
+║ queued                                                                                       ║
+╟──────────────────────────────────────────────────────────────────────────────────────────────╢
+║ Generated         2026-09-02 21:12:12 Central Daylight Time                                  ║
+║ Target directory  E:\torrents\final_organized                                                ║
+║ Movies inspected  382                                                                        ║
+║ Elapsed           12.2s                                                                      ║
+║ Report            E:\torrents\tools\ReportsAndLogs\10bit\10bit_report.txt                    ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+     4   8-bit SDR (QUEUE)            re-encode these to 10-bit
+     0   8-bit tagged HDR (REVIEW)    never queue automatically
+     0   Unknown bit depth (REVIEW)   inspect the metadata
+     0   Errors                       ffprobe could not read them
+     1   Native HDR (KEEP)            protected from tone-mapping
+   377   10/12/16-bit SDR (SKIP)      already high bit depth
+   382   Movies inspected             every movie-sized video found
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  Start here: 4 movie(s) to re-encode · both groups are listed first, below.
+
+  ══ QUEUE FOR HANDBRAKE (8-BIT SDR) ═══════════════════════════════════════════════ 4 of 382 ══
+
+  Action: Re-encode in HandBrake with H.265 (x265 / NVENC / QSV) 10-bit, or AV1 10-bit.
+
+       1  Backrooms (2026).mkv
+          Path            E:\torrents\final_organized\Backrooms (2026)\Backrooms (2026).mkv
+          Info            1384x2048 | MJPEG Baseline | 8-bit SDR | yuvj422p | depth=raw-sample
+                          metadata
+          Size            4.45 GiB   ·   duration 1:50:29
+          Depth evidence  raw-sample metadata
+
+       2  Blade Runner 2049 (2017).mkv
+          Path            E:\torrents\final_organized\Blade Runner 2049 (2017)\Blade Runner 2049
+                          (2017).mkv
+          Info            1280x1920 | MJPEG Progressive | 8-bit SDR | yuvj420p |
+                          depth=raw-sample metadata
+          Size            6.62 GiB   ·   duration 2:43:34
+          Depth evidence  raw-sample metadata
+
+       3  Sinners (2025).mkv
+          Path            E:\torrents\final_organized\Sinners (2025)\Sinners (2025).mkv
+          Info            1911x2866 | MJPEG Progressive | 8-bit SDR | yuvj420p |
+                          depth=raw-sample metadata
+          Size            6.03 GiB   ·   duration 2:17:34
+          Depth evidence  raw-sample metadata
+
+       4  Weapons (2025).mkv
+          Path            E:\torrents\final_organized\Weapons (2025)\Weapons (2025).mkv
+          Info            2000x3000 | MJPEG Progressive | 8-bit SDR | yuvj420p |
+                          depth=raw-sample metadata
+          Size            5.52 GiB   ·   duration 2:08:30
+          Depth evidence  raw-sample metadata
+
+  ══ 8-BIT TAGGED HDR (REVIEW) ═════════════════════════════════════════════════════ 0 of 382 ══
+
+  Action: Inspect manually. These carry HDR metadata on 8-bit video, so dumping them into the
+  SDR queue would tone-map a film that was never mastered that way.
+
+  None found.
+
+  ══ UNKNOWN BIT DEPTH (REVIEW) ════════════════════════════════════════════════════ 0 of 382 ══
+
+  Action: Bit depth could not be established with confidence. Read the evidence line below each
+  file before deciding anything.
+
+  None found.
+
+  ══ UNREADABLE / ERRORS ═══════════════════════════════════════════════════════════ 0 of 382 ══
+
+  Action: ffprobe could not read these. Corrupt, incomplete, or an unsupported container.
+
+  None found.
+
+  ══ NATIVE HDR (KEEP - DO NOT RE-ENCODE) ══════════════════════════════════════════ 1 of 382 ══
+
+  Action: Keep the original. HandBrake tone-maps or strips HDR10 / HDR10+ / Dolby Vision dynamic
+  metadata unless you know exactly what you are doing.
+
+       1  Alien (1979).mkv
+          Path            E:\torrents\final_organized\Alien (1979)\Alien (1979).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit HDR10 | yuv420p10le | trc=smpte2084 |
+                          depth=pixel format yuv420p10le
+          Size            5.46 GiB   ·   duration 1:55:49
+          HDR             HDR10
+          HDR evidence    transfer: smpte2084
+          Depth evidence  pixel format yuv420p10le
+
+  ══ HIGH BIT-DEPTH SDR (SKIP - NOTHING TO DO) ═══════════════════════════════════ 377 of 382 ══
+
+  Action: Do nothing. Re-encoding an already high bit-depth file only loses quality.
+
+       1  10 Cloverfield Lane (2016).mkv
+          Path            E:\torrents\final_organized\10 Cloverfield Lane (2016)\10 Cloverfield
+                          Lane (2016).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.44 GiB   ·   duration 1:43:35
+          Depth evidence  pixel format yuv420p10le
+
+       2  10 Things I Hate About You (1999).mkv
+          Path            E:\torrents\final_organized\10 Things I Hate About You (1999)\10
+                          Things I Hate About You (1999).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.50 GiB   ·   duration 1:37:36
+          Depth evidence  pixel format yuv420p10le
+
+       3  12 Years a Slave (2013).mkv
+          Path            E:\torrents\final_organized\12 Years a Slave (2013)\12 Years a Slave
+                          (2013).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.48 GiB   ·   duration 2:14:10
+          Depth evidence  pixel format yuv420p10le
+
+       4  13 Hours - The Secret Soldiers of Benghazi (2016).mkv
+          Path            E:\torrents\final_organized\13 Hours - The Secret Soldiers of Benghazi
+                          (2016)\13 Hours - The Secret Soldiers of Benghazi (2016).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.65 GiB   ·   duration 2:24:30
+          Depth evidence  pixel format yuv420p10le
+
+       5  1917 (2019).mkv
+          Path            E:\torrents\final_organized\1917 (2019)\1917 (2019).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.37 GiB   ·   duration 1:58:58
+          Depth evidence  pixel format yuv420p10le
+
+       6  2001 - A Space Odyssey (1968).mkv
+          Path            E:\torrents\final_organized\2001 - A Space Odyssey (1968)\2001 - A
+                          Space Odyssey (1968).mkv
+          Info            1920x872 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.56 GiB   ·   duration 2:28:52
+          Depth evidence  pixel format yuv420p10le
+
+       7  21 Jump Street (2012).mkv
+          Path            E:\torrents\final_organized\21 Jump Street (2012)\21 Jump Street
+                          (2012).mkv
+          Info            1920x802 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.93 GiB   ·   duration 1:49:38
+          Depth evidence  pixel format yuv420p10le
+
+       8  22 Jump Street (2014).mkv
+          Path            E:\torrents\final_organized\22 Jump Street (2014)\22 Jump Street
+                          (2014).mkv
+          Info            1920x802 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.21 GiB   ·   duration 1:51:57
+          Depth evidence  pixel format yuv420p10le
+
+       9  300 (2006).mkv
+          Path            E:\torrents\final_organized\300 (2006)\300 (2006).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.52 GiB   ·   duration 1:56:39
+          Depth evidence  pixel format yuv420p10le
+
+      10  42 (2013).mkv
+          Path            E:\torrents\final_organized\42 (2013)\42 (2013).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.78 GiB   ·   duration 2:08:16
+          Depth evidence  pixel format yuv420p10le
+
+      11  50 First Dates (2004).mkv
+          Path            E:\torrents\final_organized\50 First Dates (2004)\50 First Dates
+                          (2004).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.16 GiB   ·   duration 1:39:04
+          Depth evidence  pixel format yuv420p10le
+
+      12  500 Days of Summer (2009).mkv
+          Path            E:\torrents\final_organized\500 Days of Summer (2009)\500 Days of
+                          Summer (2009).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.07 GiB   ·   duration 1:35:05
+          Depth evidence  pixel format yuv420p10le
+
+      13  8 Mile (2002).mkv
+          Path            E:\torrents\final_organized\8 Mile (2002)\8 Mile (2002).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.79 GiB   ·   duration 1:50:28
+          Depth evidence  pixel format yuv420p10le
+
+      14  9 (2009).mkv
+          Path            E:\torrents\final_organized\9 (2009)\9 (2009).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.74 GiB   ·   duration 1:19:24
+          Depth evidence  pixel format yuv420p10le
+
+      15  A Beautiful Mind (2001).mkv
+          Path            E:\torrents\final_organized\A Beautiful Mind (2001)\A Beautiful Mind
+                          (2001).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.33 GiB   ·   duration 2:15:31
+          Depth evidence  pixel format yuv420p10le
+
+      16  A Christmas Story (1983).mkv
+          Path            E:\torrents\final_organized\A Christmas Story (1983)\A Christmas Story
+                          (1983).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.63 GiB   ·   duration 1:33:24
+          Depth evidence  pixel format yuv420p10le
+
+      17  A I Artificial Intelligence (2001).mkv
+          Path            E:\torrents\final_organized\A I Artificial Intelligence (2001)\A I
+                          Artificial Intelligence (2001).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.72 GiB   ·   duration 2:25:52
+          Depth evidence  pixel format yuv420p10le
+
+      18  A Quiet Place (2018).mkv
+          Path            E:\torrents\final_organized\A Quiet Place (2018)\A Quiet Place
+                          (2018).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.81 GiB   ·   duration 1:30:15
+          Depth evidence  pixel format yuv420p10le
+
+      19  A Quiet Place Part II (2021).mkv
+          Path            E:\torrents\final_organized\A Quiet Place Part II (2021)\A Quiet Place
+                          Part II (2021).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            4.75 GiB   ·   duration 1:37:01
+          Depth evidence  pixel format yuv420p10le
+
+      20  About Time (2013).mkv
+          Path            E:\torrents\final_organized\About Time (2013)\About Time (2013).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.76 GiB   ·   duration 2:03:22
+          Depth evidence  pixel format yuv420p10le
+
+      21  Accepted (2006).mkv
+          Path            E:\torrents\final_organized\Accepted (2006)\Accepted (2006).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.98 GiB   ·   duration 1:32:56
+          Depth evidence  pixel format yuv420p10le
+
+      22  Air (2023).mkv
+          Path            E:\torrents\final_organized\Air (2023)\Air (2023).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.95 GiB   ·   duration 1:51:39
+          Depth evidence  pixel format yuv420p10le
+
+      23  Aladdin (1992).mkv
+          Path            E:\torrents\final_organized\Aladdin (1992)\Aladdin (1992).mkv
+          Info            1912x1032 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.40 GiB   ·   duration 1:30:45
+          Depth evidence  pixel format yuv420p10le
+
+      24  Aliens (1986).mkv
+          Path            E:\torrents\final_organized\Aliens (1986)\Aliens (1986).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.43 GiB   ·   duration 2:34:27
+          Depth evidence  pixel format yuv420p10le
+
+      25  All Quiet on the Western Front (2022).mkv
+          Path            E:\torrents\final_organized\All Quiet on the Western Front (2022)\All
+                          Quiet on the Western Front (2022).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.06 GiB   ·   duration 2:26:58
+          Depth evidence  pixel format yuv420p10le
+
+      26  American History X (1998).mkv
+          Path            E:\torrents\final_organized\American History X (1998)\American History
+                          X (1998).mkv
+          Info            1920x1072 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.85 GiB   ·   duration 1:58:53
+          Depth evidence  pixel format yuv420p10le
+
+      27  American Pie (1999).mkv
+          Path            E:\torrents\final_organized\American Pie (1999)\American Pie
+                          (1999).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.53 GiB   ·   duration 1:35:38
+          Depth evidence  pixel format yuv420p10le
+
+      28  American Psycho (2000).mkv
+          Path            E:\torrents\final_organized\American Psycho (2000)\American Psycho
+                          (2000).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.89 GiB   ·   duration 1:42:01
+          Depth evidence  pixel format yuv420p10le
+
+      29  American Sniper (2014).mkv
+          Path            E:\torrents\final_organized\American Sniper (2014)\American Sniper
+                          (2014).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            3.64 GiB   ·   duration 2:12:42
+          Depth evidence  pixel format yuv420p10le
+
+      30  Annihilation (2018).mkv
+          Path            E:\torrents\final_organized\Annihilation (2018)\Annihilation
+                          (2018).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.36 GiB   ·   duration 1:55:00
+          Depth evidence  pixel format yuv420p10le
+
+      31  Apollo 13 (1995).mkv
+          Path            E:\torrents\final_organized\Apollo 13 (1995)\Apollo 13 (1995).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.39 GiB   ·   duration 2:19:51
+          Depth evidence  pixel format yuv420p10le
+
+      32  Arrival (2016).mkv
+          Path            E:\torrents\final_organized\Arrival (2016)\Arrival (2016).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.60 GiB   ·   duration 1:56:23
+          Depth evidence  pixel format yuv420p10le
+
+      33  Avatar (2009).mkv
+          Path            E:\torrents\final_organized\Avatar (2009)\Avatar (2009).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.00 GiB   ·   duration 2:58:09
+          Depth evidence  pixel format yuv420p10le
+
+      34  Avengers Age of Ultron (2015).mkv
+          Path            E:\torrents\final_organized\Avengers Age of Ultron (2015)\Avengers Age
+                          of Ultron (2015).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.82 GiB   ·   duration 2:21:19
+          Depth evidence  pixel format yuv420p10le
+
+      35  Avengers Endgame (2019).mkv
+          Path            E:\torrents\final_organized\Avengers Endgame (2019)\Avengers Endgame
+                          (2019).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.98 GiB   ·   duration 3:01:12
+          Depth evidence  pixel format yuv420p10le
+
+      36  Avengers Infinity War (2018).mkv
+          Path            E:\torrents\final_organized\Avengers Infinity War (2018)\Avengers
+                          Infinity War (2018).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.92 GiB   ·   duration 2:29:21
+          Depth evidence  pixel format yuv420p10le
+
+      37  Back to the Future (1985).mkv
+          Path            E:\torrents\final_organized\Back to the Future (1985)\Back to the
+                          Future (1985).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.00 GiB   ·   duration 1:56:06
+          Depth evidence  pixel format yuv420p10le
+
+      38  Back to the Future Part II (1989).mkv
+          Path            E:\torrents\final_organized\Back to the Future Part II (1989)\Back to
+                          the Future Part II (1989).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.23 GiB   ·   duration 1:48:06
+          Depth evidence  pixel format yuv420p10le
+
+      39  Back to the Future Part III (1990).mkv
+          Path            E:\torrents\final_organized\Back to the Future Part III (1990)\Back to
+                          the Future Part III (1990).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.87 GiB   ·   duration 1:58:25
+          Depth evidence  pixel format yuv420p10le
+
+      40  Barbie (2023).mkv
+          Path            E:\torrents\final_organized\Barbie (2023)\Barbie (2023).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.68 GiB   ·   duration 1:54:04
+          Depth evidence  pixel format yuv420p10le
+
+      41  Batman Begins (2005).mkv
+          Path            E:\torrents\final_organized\Batman Begins (2005)\Batman Begins
+                          (2005).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.33 GiB   ·   duration 2:20:03
+          Depth evidence  pixel format yuv420p10le
+
+      42  Bee Movie (2007).mkv
+          Path            E:\torrents\final_organized\Bee Movie (2007)\Bee Movie (2007).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            2.67 GiB   ·   duration 1:30:41
+          Depth evidence  pixel format yuv420p10le
+
+      43  Black Hawk Down (2001).mkv
+          Path            E:\torrents\final_organized\Black Hawk Down (2001)\Black Hawk Down
+                          (2001).mkv
+          Info            1920x808 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.52 GiB   ·   duration 2:24:20
+          Depth evidence  pixel format yuv420p10le
+
+      44  Black Panther (2018).mkv
+          Path            E:\torrents\final_organized\Black Panther (2018)\Black Panther
+                          (2018).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.51 GiB   ·   duration 2:14:33
+          Depth evidence  pixel format yuv420p10le
+
+      45  Blade Runner (1982).mkv
+          Path            E:\torrents\final_organized\Blade Runner (1982)\Blade Runner
+                          (1982).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.51 GiB   ·   duration 1:57:37
+          Depth evidence  pixel format yuv420p10le
+
+      46  Blended (2014).mkv
+          Path            E:\torrents\final_organized\Blended (2014)\Blended (2014).mkv
+          Info            1920x1024 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.18 GiB   ·   duration 1:57:14
+          Depth evidence  pixel format yuv420p10le
+
+      47  Bohemian Rhapsody (2018).mkv
+          Path            E:\torrents\final_organized\Bohemian Rhapsody (2018)\Bohemian Rhapsody
+                          (2018).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.81 GiB   ·   duration 2:14:37
+          Depth evidence  pixel format yuv420p10le
+
+      48  Borat (2006).mkv
+          Path            E:\torrents\final_organized\Borat (2006)\Borat (2006).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.76 GiB   ·   duration 1:23:48
+          Depth evidence  pixel format yuv420p10le
+
+      49  Boyhood (2014).mkv
+          Path            E:\torrents\final_organized\Boyhood (2014)\Boyhood (2014).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.30 GiB   ·   duration 2:45:28
+          Depth evidence  pixel format yuv420p10le
+
+      50  Boyz N the Hood (1991).mkv
+          Path            E:\torrents\final_organized\Boyz N the Hood (1991)\Boyz N the Hood
+                          (1991).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.05 GiB   ·   duration 1:52:08
+          Depth evidence  pixel format yuv420p10le
+
+      51  Braveheart (1995).mkv
+          Path            E:\torrents\final_organized\Braveheart (1995)\Braveheart (1995).mkv
+          Info            1920x818 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.88 GiB   ·   duration 2:57:43
+          Depth evidence  pixel format yuv420p10le
+
+      52  Bugonia (2025).mkv
+          Path            E:\torrents\final_organized\Bugonia (2025)\Bugonia (2025).mkv
+          Info            1620x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.43 GiB   ·   duration 1:58:14
+          Depth evidence  pixel format yuv420p10le
+
+      53  Captain America Civil War (2016).mkv
+          Path            E:\torrents\final_organized\Captain America Civil War (2016)\Captain
+                          America Civil War (2016).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            2.78 GiB   ·   duration 2:27:42
+          Depth evidence  pixel format yuv420p10le
+
+      54  Captain America The First Avenger (2011).mkv
+          Path            E:\torrents\final_organized\Captain America The First Avenger
+                          (2011)\Captain America The First Avenger (2011).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.79 GiB   ·   duration 2:04:10
+          Depth evidence  pixel format yuv420p10le
+
+      55  Captain America The Winter Soldier (2014).mkv
+          Path            E:\torrents\final_organized\Captain America The Winter Soldier
+                          (2014)\Captain America The Winter Soldier (2014).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.10 GiB   ·   duration 2:15:54
+          Depth evidence  pixel format yuv420p10le
+
+      56  Cars (2006).mkv
+          Path            E:\torrents\final_organized\Cars (2006)\Cars (2006).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.35 GiB   ·   duration 1:56:36
+          Depth evidence  pixel format yuv420p10le
+
+      57  Casino Royale (2006).mkv
+          Path            E:\torrents\final_organized\Casino Royale (2006)\Casino Royale
+                          (2006).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            5.93 GiB   ·   duration 2:24:33
+          Depth evidence  pixel format yuv420p10le
+
+      58  Cast Away (2000).mkv
+          Path            E:\torrents\final_organized\Cast Away (2000)\Cast Away (2000).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.98 GiB   ·   duration 2:23:47
+          Depth evidence  pixel format yuv420p10le
+
+      59  Catch Me If You Can (2002).mkv
+          Path            E:\torrents\final_organized\Catch Me If You Can (2002)\Catch Me If You
+                          Can (2002).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.29 GiB   ·   duration 2:20:43
+          Depth evidence  pixel format yuv420p10le
+
+      60  Charlie and the Chocolate Factory (2005).mkv
+          Path            E:\torrents\final_organized\Charlie and the Chocolate Factory
+                          (2005)\Charlie and the Chocolate Factory (2005).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.61 GiB   ·   duration 1:55:24
+          Depth evidence  pixel format yuv420p10le
+
+      61  Chicken Little (2005).mkv
+          Path            E:\torrents\final_organized\Chicken Little (2005)\Chicken Little
+                          (2005).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            1.81 GiB   ·   duration 1:20:55
+          Depth evidence  pixel format yuv420p10le
+
+      62  Children of Men (2006).mkv
+          Path            E:\torrents\final_organized\Children of Men (2006)\Children of Men
+                          (2006).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.25 GiB   ·   duration 1:49:08
+          Depth evidence  pixel format yuv420p10le
+
+      63  Chronicle (2012).mkv
+          Path            E:\torrents\final_organized\Chronicle (2012)\Chronicle (2012).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.64 GiB   ·   duration 1:29:31
+          Depth evidence  pixel format yuv420p10le
+
+      64  Civil War (2024).mkv
+          Path            E:\torrents\final_organized\Civil War (2024)\Civil War (2024).mkv
+          Info            1920x1032 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            5.88 GiB   ·   duration 1:49:00
+          Depth evidence  pixel format yuv420p10le
+
+      65  Cloudy with a Chance of Meatballs (2009).mkv
+          Path            E:\torrents\final_organized\Cloudy with a Chance of Meatballs
+                          (2009)\Cloudy with a Chance of Meatballs (2009).mkv
+          Info            1920x818 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.23 GiB   ·   duration 1:29:53
+          Depth evidence  pixel format yuv420p10le
+
+      66  Cloverfield (2008).mkv
+          Path            E:\torrents\final_organized\Cloverfield (2008)\Cloverfield (2008).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.04 GiB   ·   duration 1:24:41
+          Depth evidence  pixel format yuv420p10le
+
+      67  Coach Carter (2005).mkv
+          Path            E:\torrents\final_organized\Coach Carter (2005)\Coach Carter
+                          (2005).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.29 GiB   ·   duration 2:16:20
+          Depth evidence  pixel format yuv420p10le
+
+      68  Coco (2017).mkv
+          Path            E:\torrents\final_organized\Coco (2017)\Coco (2017).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.88 GiB   ·   duration 1:45:02
+          Depth evidence  pixel format yuv420p10le
+
+      69  Contact (1997).mkv
+          Path            E:\torrents\final_organized\Contact (1997)\Contact (1997).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            4.93 GiB   ·   duration 2:29:41
+          Depth evidence  pixel format yuv420p10le
+
+      70  Contagion (2011).mkv
+          Path            E:\torrents\final_organized\Contagion (2011)\Contagion (2011).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.02 GiB   ·   duration 1:46:26
+          Depth evidence  pixel format yuv420p10le
+
+      71  Coraline (2009).mkv
+          Path            E:\torrents\final_organized\Coraline (2009)\Coraline (2009).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.78 GiB   ·   duration 1:40:29
+          Depth evidence  pixel format yuv420p10le
+
+      72  Crazy Rich Asians (2018).mkv
+          Path            E:\torrents\final_organized\Crazy Rich Asians (2018)\Crazy Rich Asians
+                          (2018).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.04 GiB   ·   duration 2:00:39
+          Depth evidence  pixel format yuv420p10le
+
+      73  Creed (2015).mkv
+          Path            E:\torrents\final_organized\Creed (2015)\Creed (2015).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.44 GiB   ·   duration 2:13:10
+          Depth evidence  pixel format yuv420p10le
+
+      74  Dawn of the Planet of the Apes (2014).mkv
+          Path            E:\torrents\final_organized\Dawn of the Planet of the Apes (2014)\Dawn
+                          of the Planet of the Apes (2014).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.02 GiB   ·   duration 2:10:24
+          Depth evidence  pixel format yuv420p10le
+
+      75  Dead Poets Society (1989).mkv
+          Path            E:\torrents\final_organized\Dead Poets Society (1989)\Dead Poets
+                          Society (1989).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.11 GiB   ·   duration 2:10:09
+          Depth evidence  pixel format yuv420p10le
+
+      76  Deadpool (2016).mkv
+          Path            E:\torrents\final_organized\Deadpool (2016)\Deadpool (2016).mkv
+          Info            1920x806 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.43 GiB   ·   duration 1:48:06
+          Depth evidence  pixel format yuv420p10le
+
+      77  Deadpool 2 (2018).mkv
+          Path            E:\torrents\final_organized\Deadpool 2 (2018)\Deadpool 2 (2018).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.96 GiB   ·   duration 2:14:00
+          Depth evidence  pixel format yuv420p10le
+
+      78  Despicable Me (2010).mkv
+          Path            E:\torrents\final_organized\Despicable Me (2010)\Despicable Me
+                          (2010).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            3.74 GiB   ·   duration 1:34:49
+          Depth evidence  pixel format yuv420p10le
+
+      79  Die Hard (1988).mkv
+          Path            E:\torrents\final_organized\Die Hard (1988)\Die Hard (1988).mkv
+          Info            1920x812 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.01 GiB   ·   duration 2:12:08
+          Depth evidence  pixel format yuv420p10le
+
+      80  District 9 (2009).mkv
+          Path            E:\torrents\final_organized\District 9 (2009)\District 9 (2009).mkv
+          Info            1920x1032 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.29 GiB   ·   duration 1:52:16
+          Depth evidence  pixel format yuv420p10le
+
+      81  Django Unchained (2012).mkv
+          Path            E:\torrents\final_organized\Django Unchained (2012)\Django Unchained
+                          (2012).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.75 GiB   ·   duration 2:45:23
+          Depth evidence  pixel format yuv420p10le
+
+      82  Donnie Darko (2001).mkv
+          Path            E:\torrents\final_organized\Donnie Darko (2001)\Donnie Darko
+                          (2001).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.32 GiB   ·   duration 1:53:15
+          Depth evidence  pixel format yuv420p10le
+
+      83  Dune (2021).mkv
+          Path            E:\torrents\final_organized\Dune (2021)\Dune (2021).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            8.60 GiB   ·   duration 2:35:27
+          Depth evidence  pixel format yuv420p10le
+
+      84  Dune - Part Two (2024).mkv
+          Path            E:\torrents\final_organized\Dune - Part Two (2024)\Dune - Part Two
+                          (2024).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            9.56 GiB   ·   duration 2:45:49
+          Depth evidence  pixel format yuv420p10le
+
+      85  Dunkirk (2017).mkv
+          Path            E:\torrents\final_organized\Dunkirk (2017)\Dunkirk (2017).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.83 GiB   ·   duration 1:46:38
+          Depth evidence  pixel format yuv420p10le
+
+      86  E T the Extra-Terrestrial (1982).mkv
+          Path            E:\torrents\final_organized\E T the Extra-Terrestrial (1982)\E T the
+                          Extra-Terrestrial (1982).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.44 GiB   ·   duration 1:54:36
+          Depth evidence  pixel format yuv420p10le
+
+      87  Easy A (2010).mkv
+          Path            E:\torrents\final_organized\Easy A (2010)\Easy A (2010).mkv
+          Info            1920x1038 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.31 GiB   ·   duration 1:32:25
+          Depth evidence  pixel format yuv420p10le
+
+      88  Edge of Tomorrow (2014).mkv
+          Path            E:\torrents\final_organized\Edge of Tomorrow (2014)\Edge of Tomorrow
+                          (2014).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.23 GiB   ·   duration 1:53:29
+          Depth evidence  pixel format yuv420p10le
+
+      89  Edward Scissorhands (1990).mkv
+          Path            E:\torrents\final_organized\Edward Scissorhands (1990)\Edward
+                          Scissorhands (1990).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.81 GiB   ·   duration 1:45:01
+          Depth evidence  pixel format yuv420p10le
+
+      90  Elemental (2023).mkv
+          Path            E:\torrents\final_organized\Elemental (2023)\Elemental (2023).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.35 GiB   ·   duration 1:41:28
+          Depth evidence  pixel format yuv420p10le
+
+      91  Elysium (2013).mkv
+          Path            E:\torrents\final_organized\Elysium (2013)\Elysium (2013).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.29 GiB   ·   duration 1:49:36
+          Depth evidence  pixel format yuv420p10le
+
+      92  Enchanted (2007).mkv
+          Path            E:\torrents\final_organized\Enchanted (2007)\Enchanted (2007).mkv
+          Info            1920x818 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.60 GiB   ·   duration 1:47:28
+          Depth evidence  pixel format yuv420p10le
+
+      93  Enemy (2013).mkv
+          Path            E:\torrents\final_organized\Enemy (2013)\Enemy (2013).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.22 GiB   ·   duration 1:30:53
+          Depth evidence  pixel format yuv420p10le
+
+      94  Eternal Sunshine of the Spotless Mind (2004).mkv
+          Path            E:\torrents\final_organized\Eternal Sunshine of the Spotless Mind
+                          (2004)\Eternal Sunshine of the Spotless Mind (2004).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.53 GiB   ·   duration 1:47:46
+          Depth evidence  pixel format yuv420p10le
+
+      95  Ex Machina (2015).mkv
+          Path            E:\torrents\final_organized\Ex Machina (2015)\Ex Machina (2015).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            4.53 GiB   ·   duration 1:48:01
+          Depth evidence  pixel format yuv420p10le
+
+      96  Fargo (1996).mkv
+          Path            E:\torrents\final_organized\Fargo (1996)\Fargo (1996).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.03 GiB   ·   duration 1:38:15
+          Depth evidence  pixel format yuv420p10le
+
+      97  Fast Five (2011).mkv
+          Path            E:\torrents\final_organized\Fast Five (2011)\Fast Five (2011).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            5.42 GiB   ·   duration 2:10:21
+          Depth evidence  pixel format yuv420p10le
+
+      98  Ferris Bueller's Day Off (1986).mkv
+          Path            E:\torrents\final_organized\Ferris Bueller's Day Off (1986)\Ferris
+                          Bueller's Day Off (1986).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.71 GiB   ·   duration 1:43:00
+          Depth evidence  pixel format yuv420p10le
+
+      99  Fight Club (1999).mkv
+          Path            E:\torrents\final_organized\Fight Club (1999)\Fight Club (1999).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.57 GiB   ·   duration 2:19:08
+          Depth evidence  pixel format yuv420p10le
+
+     100  Finding Nemo (2003).mkv
+          Path            E:\torrents\final_organized\Finding Nemo (2003)\Finding Nemo
+                          (2003).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.64 GiB   ·   duration 1:40:54
+          Depth evidence  pixel format yuv420p10le
+
+     101  First Man (2018).mkv
+          Path            E:\torrents\final_organized\First Man (2018)\First Man (2018).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.37 GiB   ·   duration 2:21:00
+          Depth evidence  pixel format yuv420p10le
+
+     102  Ford v Ferrari (2019).mkv
+          Path            E:\torrents\final_organized\Ford v Ferrari (2019)\Ford v Ferrari
+                          (2019).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.01 GiB   ·   duration 2:32:35
+          Depth evidence  pixel format yuv420p10le
+
+     103  Forrest Gump (1994).mkv
+          Path            E:\torrents\final_organized\Forrest Gump (1994)\Forrest Gump
+                          (1994).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.98 GiB   ·   duration 2:22:06
+          Depth evidence  pixel format yuv420p10le
+
+     104  Fractured (2019).mkv
+          Path            E:\torrents\final_organized\Fractured (2019)\Fractured (2019).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            1.54 GiB   ·   duration 1:40:04
+          Depth evidence  pixel format yuv420p10le
+
+     105  Fury (2014).mkv
+          Path            E:\torrents\final_organized\Fury (2014)\Fury (2014).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.41 GiB   ·   duration 2:14:38
+          Depth evidence  pixel format yuv420p10le
+
+     106  Get Out (2017).mkv
+          Path            E:\torrents\final_organized\Get Out (2017)\Get Out (2017).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.62 GiB   ·   duration 1:44:05
+          Depth evidence  pixel format yuv420p10le
+
+     107  Ghostbusters (1984).mkv
+          Path            E:\torrents\final_organized\Ghostbusters (1984)\Ghostbusters
+                          (1984).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.72 GiB   ·   duration 1:45:08
+          Depth evidence  pixel format yuv420p10le
+
+     108  Gladiator (2000).mkv
+          Path            E:\torrents\final_organized\Gladiator (2000)\Gladiator (2000).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.01 GiB   ·   duration 2:34:59
+          Depth evidence  pixel format yuv420p10le
+
+     109  Gone Girl (2014).mkv
+          Path            E:\torrents\final_organized\Gone Girl (2014)\Gone Girl (2014).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.29 GiB   ·   duration 2:29:02
+          Depth evidence  pixel format yuv420p10le
+
+     110  Good Will Hunting (1997).mkv
+          Path            E:\torrents\final_organized\Good Will Hunting (1997)\Good Will Hunting
+                          (1997).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.77 GiB   ·   duration 2:06:33
+          Depth evidence  pixel format yuv420p10le
+
+     111  Goodfellas (1990).mkv
+          Path            E:\torrents\final_organized\Goodfellas (1990)\Goodfellas (1990).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.75 GiB   ·   duration 2:25:22
+          Depth evidence  pixel format yuv420p10le
+
+     112  Gravity (2013).mkv
+          Path            E:\torrents\final_organized\Gravity (2013)\Gravity (2013).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.47 GiB   ·   duration 1:30:59
+          Depth evidence  pixel format yuv420p10le
+
+     113  Green Book (2018).mkv
+          Path            E:\torrents\final_organized\Green Book (2018)\Green Book (2018).mkv
+          Info            1920x960 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.01 GiB   ·   duration 2:10:05
+          Depth evidence  pixel format yuv420p10le
+
+     114  Greenland (2020).mkv
+          Path            E:\torrents\final_organized\Greenland (2020)\Greenland (2020).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.82 GiB   ·   duration 1:59:27
+          Depth evidence  pixel format yuv420p10le
+
+     115  Groundhog Day (1993).mkv
+          Path            E:\torrents\final_organized\Groundhog Day (1993)\Groundhog Day
+                          (1993).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.60 GiB   ·   duration 1:41:04
+          Depth evidence  pixel format yuv420p10le
+
+     116  Grown Ups (2010).mkv
+          Path            E:\torrents\final_organized\Grown Ups (2010)\Grown Ups (2010).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.94 GiB   ·   duration 1:42:20
+          Depth evidence  pixel format yuv420p10le
+
+     117  Guardians of the Galaxy (2014).mkv
+          Path            E:\torrents\final_organized\Guardians of the Galaxy (2014)\Guardians
+                          of the Galaxy (2014).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.99 GiB   ·   duration 2:00:51
+          Depth evidence  pixel format yuv420p10le
+
+     118  Hacksaw Ridge (2016).mkv
+          Path            E:\torrents\final_organized\Hacksaw Ridge (2016)\Hacksaw Ridge
+                          (2016).mkv
+          Info            1920x806 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.70 GiB   ·   duration 2:19:19
+          Depth evidence  pixel format yuv420p10le
+
+     119  Happy Feet (2006).mkv
+          Path            E:\torrents\final_organized\Happy Feet (2006)\Happy Feet (2006).mkv
+          Info            1920x792 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.27 GiB   ·   duration 1:48:32
+          Depth evidence  pixel format yuv420p10le
+
+     120  Happy Gilmore (1996).mkv
+          Path            E:\torrents\final_organized\Happy Gilmore (1996)\Happy Gilmore
+                          (1996).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.93 GiB   ·   duration 1:31:57
+          Depth evidence  pixel format yuv420p10le
+
+     121  Harry Potter and the Chamber of Secrets (2002).mkv
+          Path            E:\torrents\final_organized\Harry Potter and the Chamber of Secrets
+                          (2002)\Harry Potter and the Chamber of Secrets (2002).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.24 GiB   ·   duration 2:54:24
+          Depth evidence  pixel format yuv420p10le
+
+     122  Harry Potter and the Deathly Hallows - Part 1 (2010).mkv
+          Path            E:\torrents\final_organized\Harry Potter and the Deathly Hallows -
+                          Part 1 (2010)\Harry Potter and the Deathly Hallows - Part 1 (2010).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.26 GiB   ·   duration 2:26:05
+          Depth evidence  pixel format yuv420p10le
+
+     123  Harry Potter and the Deathly Hallows - Part 2 (2011).mkv
+          Path            E:\torrents\final_organized\Harry Potter and the Deathly Hallows -
+                          Part 2 (2011)\Harry Potter and the Deathly Hallows - Part 2 (2011).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.15 GiB   ·   duration 2:10:27
+          Depth evidence  pixel format yuv420p10le
+
+     124  Harry Potter and the Goblet of Fire (2005).mkv
+          Path            E:\torrents\final_organized\Harry Potter and the Goblet of Fire
+                          (2005)\Harry Potter and the Goblet of Fire (2005).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.99 GiB   ·   duration 2:37:06
+          Depth evidence  pixel format yuv420p10le
+
+     125  Harry Potter and the Half-Blood Prince (2009).mkv
+          Path            E:\torrents\final_organized\Harry Potter and the Half-Blood Prince
+                          (2009)\Harry Potter and the Half-Blood Prince (2009).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.89 GiB   ·   duration 2:33:32
+          Depth evidence  pixel format yuv420p10le
+
+     126  Harry Potter and the Order of the Phoenix (2007).mkv
+          Path            E:\torrents\final_organized\Harry Potter and the Order of the Phoenix
+                          (2007)\Harry Potter and the Order of the Phoenix (2007).mkv
+          Info            1920x798 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.39 GiB   ·   duration 2:18:15
+          Depth evidence  pixel format yuv420p10le
+
+     127  Harry Potter and the Prisoner of Azkaban (2004).mkv
+          Path            E:\torrents\final_organized\Harry Potter and the Prisoner of Azkaban
+                          (2004)\Harry Potter and the Prisoner of Azkaban (2004).mkv
+          Info            1920x798 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.49 GiB   ·   duration 2:21:42
+          Depth evidence  pixel format yuv420p10le
+
+     128  Harry Potter and the Sorcerer's Stone (2001).mkv
+          Path            E:\torrents\final_organized\Harry Potter and the Sorcerer's Stone
+                          (2001)\Harry Potter and the Sorcerer's Stone (2001).mkv
+          Info            1920x796 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.32 GiB   ·   duration 2:38:51
+          Depth evidence  pixel format yuv420p10le
+
+     129  Heat (1995).mkv
+          Path            E:\torrents\final_organized\Heat (1995)\Heat (1995).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.72 GiB   ·   duration 2:50:26
+          Depth evidence  pixel format yuv420p10le
+
+     130  Her (2013).mkv
+          Path            E:\torrents\final_organized\Her (2013)\Her (2013).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.85 GiB   ·   duration 2:05:50
+          Depth evidence  pixel format yuv420p10le
+
+     131  Hercules (1997).mkv
+          Path            E:\torrents\final_organized\Hercules (1997)\Hercules (1997).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.13 GiB   ·   duration 1:33:12
+          Depth evidence  pixel format yuv420p10le
+
+     132  Hereditary (2018).mkv
+          Path            E:\torrents\final_organized\Hereditary (2018)\Hereditary (2018).mkv
+          Info            1920x960 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.37 GiB   ·   duration 2:07:26
+          Depth evidence  pixel format yuv420p10le
+
+     133  Hidden Figures (2016).mkv
+          Path            E:\torrents\final_organized\Hidden Figures (2016)\Hidden Figures
+                          (2016).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.96 GiB   ·   duration 2:06:43
+          Depth evidence  pixel format yuv420p10le
+
+     134  Holes (2003).mkv
+          Path            E:\torrents\final_organized\Holes (2003)\Holes (2003).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.10 GiB   ·   duration 1:57:29
+          Depth evidence  pixel format yuv420p10le
+
+     135  Home Alone (1990).mkv
+          Path            E:\torrents\final_organized\Home Alone (1990)\Home Alone (1990).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.62 GiB   ·   duration 1:42:54
+          Depth evidence  pixel format yuv420p10le
+
+     136  Home Alone 2 - Lost in New York (1992).mkv
+          Path            E:\torrents\final_organized\Home Alone 2 - Lost in New York
+                          (1992)\Home Alone 2 - Lost in New York (1992).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.40 GiB   ·   duration 2:00:01
+          Depth evidence  pixel format yuv420p10le
+
+     137  How to Train Your Dragon (2010).mkv
+          Path            E:\torrents\final_organized\How to Train Your Dragon (2010)\How to
+                          Train Your Dragon (2010).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.75 GiB   ·   duration 1:37:51
+          Depth evidence  pixel format yuv420p10le
+
+     138  I Am Legend (2007).mkv
+          Path            E:\torrents\final_organized\I Am Legend (2007)\I Am Legend (2007).mkv
+          Info            1920x796 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.35 GiB   ·   duration 1:40:32
+          Depth evidence  pixel format yuv420p10le
+
+     139  I, Robot (2004).mkv
+          Path            E:\torrents\final_organized\I, Robot (2004)\I, Robot (2004).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.35 GiB   ·   duration 1:54:45
+          Depth evidence  pixel format yuv420p10le
+
+     140  I, Tonya (2017).mkv
+          Path            E:\torrents\final_organized\I, Tonya (2017)\I, Tonya (2017).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.92 GiB   ·   duration 1:59:58
+          Depth evidence  pixel format yuv420p10le
+
+     141  Ice Age (2002).mkv
+          Path            E:\torrents\final_organized\Ice Age (2002)\Ice Age (2002).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.94 GiB   ·   duration 1:21:10
+          Depth evidence  pixel format yuv420p10le
+
+     142  Idiocracy (2006).mkv
+          Path            E:\torrents\final_organized\Idiocracy (2006)\Idiocracy (2006).mkv
+          Info            1920x1058 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            2.32 GiB   ·   duration 1:24:09
+          Depth evidence  pixel format yuv420p10le
+
+     143  Inception (2010).mkv
+          Path            E:\torrents\final_organized\Inception (2010)\Inception (2010).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.60 GiB   ·   duration 2:28:08
+          Depth evidence  pixel format yuv420p10le
+
+     144  Incredibles 2 (2018).mkv
+          Path            E:\torrents\final_organized\Incredibles 2 (2018)\Incredibles 2
+                          (2018).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.92 GiB   ·   duration 1:57:50
+          Depth evidence  pixel format yuv420p10le
+
+     145  Independence Day (1996).mkv
+          Path            E:\torrents\final_organized\Independence Day (1996)\Independence Day
+                          (1996).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.95 GiB   ·   duration 2:33:33
+          Depth evidence  pixel format yuv420p10le
+
+     146  Indiana Jones and the Last Crusade (1989).mkv
+          Path            E:\torrents\final_organized\Indiana Jones and the Last Crusade
+                          (1989)\Indiana Jones and the Last Crusade (1989).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.63 GiB   ·   duration 2:06:53
+          Depth evidence  pixel format yuv420p10le
+
+     147  Indiana Jones and the Raiders of the Lost Ark (1981).mkv
+          Path            E:\torrents\final_organized\Indiana Jones and the Raiders of the Lost
+                          Ark (1981)\Indiana Jones and the Raiders of the Lost Ark (1981).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.00 GiB   ·   duration 1:55:19
+          Depth evidence  pixel format yuv420p10le
+
+     148  Indiana Jones and the Temple of Doom (1984).mkv
+          Path            E:\torrents\final_organized\Indiana Jones and the Temple of Doom
+                          (1984)\Indiana Jones and the Temple of Doom (1984).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.18 GiB   ·   duration 1:58:28
+          Depth evidence  pixel format yuv420p10le
+
+     149  Inglourious Basterds (2009).mkv
+          Path            E:\torrents\final_organized\Inglourious Basterds (2009)\Inglourious
+                          Basterds (2009).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.58 GiB   ·   duration 2:33:00
+          Depth evidence  pixel format yuv420p10le
+
+     150  Insomnia (2002).mkv
+          Path            E:\torrents\final_organized\Insomnia (2002)\Insomnia (2002).mkv
+          Info            1912x808 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            4.91 GiB   ·   duration 1:58:27
+          Depth evidence  pixel format yuv420p10le
+
+     151  Interstellar (2014).mkv
+          Path            E:\torrents\final_organized\Interstellar (2014)\Interstellar
+                          (2014).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.36 GiB   ·   duration 2:49:04
+          Depth evidence  pixel format yuv420p10le
+
+     152  Into the Wild (2007).mkv
+          Path            E:\torrents\final_organized\Into the Wild (2007)\Into the Wild
+                          (2007).mkv
+          Info            1918x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.59 GiB   ·   duration 2:28:07
+          Depth evidence  pixel format yuv420p10le
+
+     153  Iron Man (2008).mkv
+          Path            E:\torrents\final_organized\Iron Man (2008)\Iron Man (2008).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.36 GiB   ·   duration 2:06:02
+          Depth evidence  pixel format yuv420p10le
+
+     154  Iron Man 2 (2010).mkv
+          Path            E:\torrents\final_organized\Iron Man 2 (2010)\Iron Man 2 (2010).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.10 GiB   ·   duration 2:04:39
+          Depth evidence  pixel format yuv420p10le
+
+     155  IT (2017).mkv
+          Path            E:\torrents\final_organized\IT (2017)\IT (2017).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.27 GiB   ·   duration 2:14:42
+          Depth evidence  pixel format yuv420p10le
+
+     156  James and the Giant Peach (1996).mkv
+          Path            E:\torrents\final_organized\James and the Giant Peach (1996)\James and
+                          the Giant Peach (1996).mkv
+          Info            1800x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            5.10 GiB   ·   duration 1:19:25
+          Depth evidence  pixel format yuv420p10le
+
+     157  Jaws (1975).mkv
+          Path            E:\torrents\final_organized\Jaws (1975)\Jaws (1975).mkv
+          Info            1920x812 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.62 GiB   ·   duration 2:03:55
+          Depth evidence  pixel format yuv420p10le
+
+     158  Jimmy Neutron Boy Genius (2001).mkv
+          Path            E:\torrents\final_organized\Jimmy Neutron Boy Genius (2001)\Jimmy
+                          Neutron Boy Genius (2001).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.24 GiB   ·   duration 1:22:36
+          Depth evidence  pixel format yuv420p10le
+
+     159  John Q (2002).mkv
+          Path            E:\torrents\final_organized\John Q (2002)\John Q (2002).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.57 GiB   ·   duration 1:56:05
+          Depth evidence  pixel format yuv420p10le
+
+     160  Joker (2019).mkv
+          Path            E:\torrents\final_organized\Joker (2019)\Joker (2019).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.99 GiB   ·   duration 2:01:49
+          Depth evidence  pixel format yuv420p10le
+
+     161  Jumanji (1995).mkv
+          Path            E:\torrents\final_organized\Jumanji (1995)\Jumanji (1995).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.70 GiB   ·   duration 1:44:06
+          Depth evidence  pixel format yuv420p10le
+
+     162  Juno (2007).mkv
+          Path            E:\torrents\final_organized\Juno (2007)\Juno (2007).mkv
+          Info            1920x1032 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.43 GiB   ·   duration 1:36:05
+          Depth evidence  pixel format yuv420p10le
+
+     163  Jurassic Park (1993).mkv
+          Path            E:\torrents\final_organized\Jurassic Park (1993)\Jurassic Park
+                          (1993).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.53 GiB   ·   duration 2:06:37
+          Depth evidence  pixel format yuv420p10le
+
+     164  Jurassic World (2015).mkv
+          Path            E:\torrents\final_organized\Jurassic World (2015)\Jurassic World
+                          (2015).mkv
+          Info            1920x960 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.37 GiB   ·   duration 2:04:21
+          Depth evidence  pixel format yuv420p10le
+
+     165  Kick-Ass (2010).mkv
+          Path            E:\torrents\final_organized\Kick-Ass (2010)\Kick-Ass (2010).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.39 GiB   ·   duration 1:57:45
+          Depth evidence  pixel format yuv420p10le
+
+     166  King Richard (2021).mkv
+          Path            E:\torrents\final_organized\King Richard (2021)\King Richard
+                          (2021).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.83 GiB   ·   duration 2:24:41
+          Depth evidence  pixel format yuv420p10le
+
+     167  Knives Out (2019).mkv
+          Path            E:\torrents\final_organized\Knives Out (2019)\Knives Out (2019).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.93 GiB   ·   duration 2:10:14
+          Depth evidence  pixel format yuv420p10le
+
+     168  Knowing (2009).mkv
+          Path            E:\torrents\final_organized\Knowing (2009)\Knowing (2009).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.04 GiB   ·   duration 2:01:29
+          Depth evidence  pixel format yuv420p10le
+
+     169  Kung Fu Panda (2008).mkv
+          Path            E:\torrents\final_organized\Kung Fu Panda (2008)\Kung Fu Panda
+                          (2008).mkv
+          Info            1920x818 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.52 GiB   ·   duration 1:32:09
+          Depth evidence  pixel format yuv420p10le
+
+     170  Legally Blonde (2001).mkv
+          Path            E:\torrents\final_organized\Legally Blonde (2001)\Legally Blonde
+                          (2001).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.98 GiB   ·   duration 1:36:01
+          Depth evidence  pixel format yuv420p10le
+
+     171  Logan (2017).mkv
+          Path            E:\torrents\final_organized\Logan (2017)\Logan (2017).mkv
+          Info            1920x806 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.08 GiB   ·   duration 2:17:23
+          Depth evidence  pixel format yuv420p10le
+
+     172  Lone Survivor (2013).mkv
+          Path            E:\torrents\final_organized\Lone Survivor (2013)\Lone Survivor
+                          (2013).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.55 GiB   ·   duration 2:01:16
+          Depth evidence  pixel format yuv420p10le
+
+     173  Madagascar (2005).mkv
+          Path            E:\torrents\final_organized\Madagascar (2005)\Madagascar (2005).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.66 GiB   ·   duration 1:25:58
+          Depth evidence  pixel format yuv420p10le
+
+     174  Magnolia (1999).mkv
+          Path            E:\torrents\final_organized\Magnolia (1999)\Magnolia (1999).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.46 GiB   ·   duration 3:08:40
+          Depth evidence  pixel format yuv420p10le
+
+     175  Marty Supreme (2025).mkv
+          Path            E:\torrents\final_organized\Marty Supreme (2025)\Marty Supreme
+                          (2025).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.45 GiB   ·   duration 2:29:41
+          Depth evidence  pixel format yuv420p10le
+
+     176  Mean Girls (2004).mkv
+          Path            E:\torrents\final_organized\Mean Girls (2004)\Mean Girls (2004).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.69 GiB   ·   duration 1:36:54
+          Depth evidence  pixel format yuv420p10le
+
+     177  Meet the Robinsons (2007).mkv
+          Path            E:\torrents\final_organized\Meet the Robinsons (2007)\Meet the
+                          Robinsons (2007).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.63 GiB   ·   duration 1:35:07
+          Depth evidence  pixel format yuv420p10le
+
+     178  Megamind (2010).mkv
+          Path            E:\torrents\final_organized\Megamind (2010)\Megamind (2010).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            2.73 GiB   ·   duration 1:35:35
+          Depth evidence  pixel format yuv420p10le
+
+     179  Memento (2000).mkv
+          Path            E:\torrents\final_organized\Memento (2000)\Memento (2000).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.01 GiB   ·   duration 1:53:27
+          Depth evidence  pixel format yuv420p10le
+
+     180  Minority Report (2002).mkv
+          Path            E:\torrents\final_organized\Minority Report (2002)\Minority Report
+                          (2002).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.52 GiB   ·   duration 2:25:09
+          Depth evidence  pixel format yuv420p10le
+
+     181  Mission - Impossible - Fallout (2018).mkv
+          Path            E:\torrents\final_organized\Mission - Impossible - Fallout
+                          (2018)\Mission - Impossible - Fallout (2018).mkv
+          Info            1920x1012 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.52 GiB   ·   duration 2:27:25
+          Depth evidence  pixel format yuv420p10le
+
+     182  Monsters University (2013).mkv
+          Path            E:\torrents\final_organized\Monsters University (2013)\Monsters
+                          University (2013).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.95 GiB   ·   duration 1:43:48
+          Depth evidence  pixel format yuv420p10le
+
+     183  Monsters, Inc (2001).mkv
+          Path            E:\torrents\final_organized\Monsters, Inc (2001)\Monsters, Inc
+                          (2001).mkv
+          Info            1920x1038 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.82 GiB   ·   duration 1:32:09
+          Depth evidence  pixel format yuv420p10le
+
+     184  Moon (2009).mkv
+          Path            E:\torrents\final_organized\Moon (2009)\Moon (2009).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.14 GiB   ·   duration 1:37:10
+          Depth evidence  pixel format yuv420p10le
+
+     185  Mulan (1998).mkv
+          Path            E:\torrents\final_organized\Mulan (1998)\Mulan (1998).mkv
+          Info            1816x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.95 GiB   ·   duration 1:27:50
+          Depth evidence  pixel format yuv420p10le
+
+     186  Napoleon Dynamite (2004).mkv
+          Path            E:\torrents\final_organized\Napoleon Dynamite (2004)\Napoleon Dynamite
+                          (2004).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.48 GiB   ·   duration 1:34:54
+          Depth evidence  pixel format yuv420p10le
+
+     187  National Lampoon's Christmas Vacation (1989).mkv
+          Path            E:\torrents\final_organized\National Lampoon's Christmas Vacation
+                          (1989)\National Lampoon's Christmas Vacation (1989).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.80 GiB   ·   duration 1:37:11
+          Depth evidence  pixel format yuv420p10le
+
+     188  National Treasure (2004).mkv
+          Path            E:\torrents\final_organized\National Treasure (2004)\National Treasure
+                          (2004).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.43 GiB   ·   duration 2:11:05
+          Depth evidence  pixel format yuv420p10le
+
+     189  National Treasure Book of Secrets (2007).mkv
+          Path            E:\torrents\final_organized\National Treasure Book of Secrets
+                          (2007)\National Treasure Book of Secrets (2007).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.52 GiB   ·   duration 2:04:32
+          Depth evidence  pixel format yuv420p10le
+
+     190  Night at the Museum (2006).mkv
+          Path            E:\torrents\final_organized\Night at the Museum (2006)\Night at the
+                          Museum (2006).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.82 GiB   ·   duration 1:48:39
+          Depth evidence  pixel format yuv420p10le
+
+     191  Nightcrawler (2014).mkv
+          Path            E:\torrents\final_organized\Nightcrawler (2014)\Nightcrawler
+                          (2014).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            4.88 GiB   ·   duration 1:57:35
+          Depth evidence  pixel format yuv420p10le
+
+     192  No Country for Old Men (2007).mkv
+          Path            E:\torrents\final_organized\No Country for Old Men (2007)\No Country
+                          for Old Men (2007).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.95 GiB   ·   duration 2:02:10
+          Depth evidence  pixel format yuv420p10le
+
+     193  Now You See Me (2013).mkv
+          Path            E:\torrents\final_organized\Now You See Me (2013)\Now You See Me
+                          (2013).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.76 GiB   ·   duration 2:04:48
+          Depth evidence  pixel format yuv420p10le
+
+     194  Oblivion (2013).mkv
+          Path            E:\torrents\final_organized\Oblivion (2013)\Oblivion (2013).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.20 GiB   ·   duration 2:04:42
+          Depth evidence  pixel format yuv420p10le
+
+     195  Obsession (2026).mkv
+          Path            E:\torrents\final_organized\Obsession (2026)\Obsession (2026).mkv
+          Info            1920x1280 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.43 GiB   ·   duration 1:48:40
+          Depth evidence  pixel format yuv420p10le
+
+     196  October Sky (1999).mkv
+          Path            E:\torrents\final_organized\October Sky (1999)\October Sky (1999).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.35 GiB   ·   duration 1:47:29
+          Depth evidence  pixel format yuv420p10le
+
+     197  Office Space (1999).mkv
+          Path            E:\torrents\final_organized\Office Space (1999)\Office Space
+                          (1999).mkv
+          Info            1920x1024 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            4.50 GiB   ·   duration 1:29:15
+          Depth evidence  pixel format yuv420p10le
+
+     198  One Flew Over the Cuckoo's Nest (1975).mkv
+          Path            E:\torrents\final_organized\One Flew Over the Cuckoo's Nest (1975)\One
+                          Flew Over the Cuckoo's Nest (1975).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.92 GiB   ·   duration 2:13:43
+          Depth evidence  pixel format yuv420p10le
+
+     199  Open Season (2006).mkv
+          Path            E:\torrents\final_organized\Open Season (2006)\Open Season (2006).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.80 GiB   ·   duration 1:26:15
+          Depth evidence  pixel format yuv420p10le
+
+     200  Oppenheimer (2023).mkv
+          Path            E:\torrents\final_organized\Oppenheimer (2023)\Oppenheimer (2023).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.35 GiB   ·   duration 3:00:22
+          Depth evidence  pixel format yuv420p10le
+
+     201  Osmosis Jones (2001).mkv
+          Path            E:\torrents\final_organized\Osmosis Jones (2001)\Osmosis Jones
+                          (2001).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.85 GiB   ·   duration 1:35:23
+          Depth evidence  pixel format yuv420p10le
+
+     202  Over the Hedge (2006).mkv
+          Path            E:\torrents\final_organized\Over the Hedge (2006)\Over the Hedge
+                          (2006).mkv
+          Info            1920x1032 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.44 GiB   ·   duration 1:23:31
+          Depth evidence  pixel format yuv420p10le
+
+     203  Parasite (2019).mkv
+          Path            E:\torrents\final_organized\Parasite (2019)\Parasite (2019).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.54 GiB   ·   duration 2:12:16
+          Depth evidence  pixel format yuv420p10le
+
+     204  Pearl (2022).mkv
+          Path            E:\torrents\final_organized\Pearl (2022)\Pearl (2022).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.74 GiB   ·   duration 1:42:06
+          Depth evidence  pixel format yuv420p10le
+
+     205  Pineapple Express (2008).mkv
+          Path            E:\torrents\final_organized\Pineapple Express (2008)\Pineapple Express
+                          (2008).mkv
+          Info            1918x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.85 GiB   ·   duration 1:57:27
+          Depth evidence  pixel format yuv420p10le
+
+     206  Pirates of the Caribbean At World's End (2007).mkv
+          Path            E:\torrents\final_organized\Pirates of the Caribbean At World's End
+                          (2007)\Pirates of the Caribbean At World's End (2007).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.21 GiB   ·   duration 2:48:31
+          Depth evidence  pixel format yuv420p10le
+
+     207  Pirates of the Caribbean Dead Man's Chest (2006).mkv
+          Path            E:\torrents\final_organized\Pirates of the Caribbean Dead Man's Chest
+                          (2006)\Pirates of the Caribbean Dead Man's Chest (2006).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.04 GiB   ·   duration 2:30:40
+          Depth evidence  pixel format yuv420p10le
+
+     208  Pirates of the Caribbean The Curse of the Black Pearl (2003).mkv
+          Path            E:\torrents\final_organized\Pirates of the Caribbean The Curse of the
+                          Black Pearl (2003)\Pirates of the Caribbean The Curse of the Black
+                          Pearl (2003).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.44 GiB   ·   duration 2:23:10
+          Depth evidence  pixel format yuv420p10le
+
+     209  Pitch Perfect (2012).mkv
+          Path            E:\torrents\final_organized\Pitch Perfect (2012)\Pitch Perfect
+                          (2012).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.95 GiB   ·   duration 1:52:00
+          Depth evidence  pixel format yuv420p10le
+
+     210  Prisoners (2013).mkv
+          Path            E:\torrents\final_organized\Prisoners (2013)\Prisoners (2013).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.50 GiB   ·   duration 2:33:12
+          Depth evidence  pixel format yuv420p10le
+
+     211  Project Hail Mary (2026).mkv
+          Path            E:\torrents\final_organized\Project Hail Mary (2026)\Project Hail Mary
+                          (2026).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.92 GiB   ·   duration 2:36:32
+          Depth evidence  pixel format yuv420p10le
+
+     212  Project X (2012).mkv
+          Path            E:\torrents\final_organized\Project X (2012)\Project X (2012).mkv
+          Info            1920x1072 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.60 GiB   ·   duration 1:33:00
+          Depth evidence  pixel format yuv420p10le
+
+     213  Pulp Fiction (1994).mkv
+          Path            E:\torrents\final_organized\Pulp Fiction (1994)\Pulp Fiction
+                          (1994).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            9.80 GiB   ·   duration 2:34:24
+          Depth evidence  pixel format yuv420p10le
+
+     214  Ratatouille (2007).mkv
+          Path            E:\torrents\final_organized\Ratatouille (2007)\Ratatouille (2007).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.14 GiB   ·   duration 1:50:33
+          Depth evidence  pixel format yuv420p10le
+
+     215  Ready Player One (2018).mkv
+          Path            E:\torrents\final_organized\Ready Player One (2018)\Ready Player One
+                          (2018).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.50 GiB   ·   duration 2:19:58
+          Depth evidence  pixel format yuv420p10le
+
+     216  Real Steel (2011).mkv
+          Path            E:\torrents\final_organized\Real Steel (2011)\Real Steel (2011).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.45 GiB   ·   duration 2:06:51
+          Depth evidence  pixel format yuv420p10le
+
+     217  Remember the Titans (2000).mkv
+          Path            E:\torrents\final_organized\Remember the Titans (2000)\Remember the
+                          Titans (2000).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.11 GiB   ·   duration 1:53:27
+          Depth evidence  pixel format yuv420p10le
+
+     218  Requiem for a Dream (2000).mkv
+          Path            E:\torrents\final_organized\Requiem for a Dream (2000)\Requiem for a
+                          Dream (2000).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            5.78 GiB   ·   duration 1:41:31
+          Depth evidence  pixel format yuv420p10le
+
+     219  Rise of the Planet of the Apes (2011).mkv
+          Path            E:\torrents\final_organized\Rise of the Planet of the Apes (2011)\Rise
+                          of the Planet of the Apes (2011).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.74 GiB   ·   duration 1:44:56
+          Depth evidence  pixel format yuv420p10le
+
+     220  Robots (2005).mkv
+          Path            E:\torrents\final_organized\Robots (2005)\Robots (2005).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            2.81 GiB   ·   duration 1:29:48
+          Depth evidence  pixel format yuv420p10le
+
+     221  Rocky (1976).mkv
+          Path            E:\torrents\final_organized\Rocky (1976)\Rocky (1976).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.41 GiB   ·   duration 1:59:41
+          Depth evidence  pixel format yuv420p10le
+
+     222  Room (2015).mkv
+          Path            E:\torrents\final_organized\Room (2015)\Room (2015).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.03 GiB   ·   duration 1:57:38
+          Depth evidence  pixel format yuv420p10le
+
+     223  Sausage Party (2016).mkv
+          Path            E:\torrents\final_organized\Sausage Party (2016)\Sausage Party
+                          (2016).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.83 GiB   ·   duration 1:28:45
+          Depth evidence  pixel format yuv420p10le
+
+     224  Saving Private Ryan (1998).mkv
+          Path            E:\torrents\final_organized\Saving Private Ryan (1998)\Saving Private
+                          Ryan (1998).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.61 GiB   ·   duration 2:48:21
+          Depth evidence  pixel format yuv420p10le
+
+     225  Saw (2004).mkv
+          Path            E:\torrents\final_organized\Saw (2004)\Saw (2004).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.46 GiB   ·   duration 1:42:52
+          Depth evidence  pixel format yuv420p10le
+
+     226  Scarface (1983).mkv
+          Path            E:\torrents\final_organized\Scarface (1983)\Scarface (1983).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.54 GiB   ·   duration 2:49:53
+          Depth evidence  pixel format yuv420p10le
+
+     227  Schindler's List (1993).mkv
+          Path            E:\torrents\final_organized\Schindler's List (1993)\Schindler's List
+                          (1993).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.81 GiB   ·   duration 3:15:07
+          Depth evidence  pixel format yuv420p10le
+
+     228  Scream (1996).mkv
+          Path            E:\torrents\final_organized\Scream (1996)\Scream (1996).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.53 GiB   ·   duration 1:51:02
+          Depth evidence  pixel format yuv420p10le
+
+     229  Se7en (1995).mkv
+          Path            E:\torrents\final_organized\Se7en (1995)\Se7en (1995).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            6.33 GiB   ·   duration 2:06:48
+          Depth evidence  pixel format yuv420p10le
+
+     230  Shark Tale (2004).mkv
+          Path            E:\torrents\final_organized\Shark Tale (2004)\Shark Tale (2004).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.39 GiB   ·   duration 1:30:11
+          Depth evidence  pixel format yuv420p10le
+
+     231  Shazam! (2019).mkv
+          Path            E:\torrents\final_organized\Shazam! (2019)\Shazam! (2019).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.04 GiB   ·   duration 2:11:43
+          Depth evidence  pixel format yuv420p10le
+
+     232  Shrek (2001).mkv
+          Path            E:\torrents\final_organized\Shrek (2001)\Shrek (2001).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.26 GiB   ·   duration 1:30:08
+          Depth evidence  pixel format yuv420p10le
+
+     233  Shrek 2 (2004).mkv
+          Path            E:\torrents\final_organized\Shrek 2 (2004)\Shrek 2 (2004).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.42 GiB   ·   duration 1:32:23
+          Depth evidence  pixel format yuv420p10le
+
+     234  Shrek Forever After (2010).mkv
+          Path            E:\torrents\final_organized\Shrek Forever After (2010)\Shrek Forever
+                          After (2010).mkv
+          Info            1920x816 | AV1 Main | 10-bit SDR | yuv420p10le | depth=pixel format
+                          yuv420p10le
+          Size            1.78 GiB   ·   duration 1:33:11
+          Depth evidence  pixel format yuv420p10le
+
+     235  Shutter Island (2010).mkv
+          Path            E:\torrents\final_organized\Shutter Island (2010)\Shutter Island
+                          (2010).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            3.42 GiB   ·   duration 2:18:05
+          Depth evidence  pixel format yuv420p10le
+
+     236  Sicario (2015).mkv
+          Path            E:\torrents\final_organized\Sicario (2015)\Sicario (2015).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.70 GiB   ·   duration 2:01:20
+          Depth evidence  pixel format yuv420p10le
+
+     237  Signs (2002).mkv
+          Path            E:\torrents\final_organized\Signs (2002)\Signs (2002).mkv
+          Info            1920x1036 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            5.17 GiB   ·   duration 1:46:31
+          Depth evidence  pixel format yuv420p10le
+
+     238  Sinister (2012).mkv
+          Path            E:\torrents\final_organized\Sinister (2012)\Sinister (2012).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.29 GiB   ·   duration 1:50:04
+          Depth evidence  pixel format yuv420p10le
+
+     239  Skyfall (2012).mkv
+          Path            E:\torrents\final_organized\Skyfall (2012)\Skyfall (2012).mkv
+          Info            1912x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            5.77 GiB   ·   duration 2:23:10
+          Depth evidence  pixel format yuv420p10le
+
+     240  Slumdog Millionaire (2008).mkv
+          Path            E:\torrents\final_organized\Slumdog Millionaire (2008)\Slumdog
+                          Millionaire (2008).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.58 GiB   ·   duration 2:00:38
+          Depth evidence  pixel format yuv420p10le
+
+     241  Snatch (2000).mkv
+          Path            E:\torrents\final_organized\Snatch (2000)\Snatch (2000).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.33 GiB   ·   duration 1:42:46
+          Depth evidence  pixel format yuv420p10le
+
+     242  Snowden (2016).mkv
+          Path            E:\torrents\final_organized\Snowden (2016)\Snowden (2016).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.47 GiB   ·   duration 2:14:49
+          Depth evidence  pixel format yuv420p10le
+
+     243  Source Code (2011).mkv
+          Path            E:\torrents\final_organized\Source Code (2011)\Source Code (2011).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.87 GiB   ·   duration 1:33:13
+          Depth evidence  pixel format yuv420p10le
+
+     244  Spaceballs (1987).mkv
+          Path            E:\torrents\final_organized\Spaceballs (1987)\Spaceballs (1987).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.89 GiB   ·   duration 1:36:13
+          Depth evidence  pixel format yuv420p10le
+
+     245  Spider-Man (2002).mkv
+          Path            E:\torrents\final_organized\Spider-Man (2002)\Spider-Man (2002).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.49 GiB   ·   duration 2:01:12
+          Depth evidence  pixel format yuv420p10le
+
+     246  Spider-Man - Across the Spider-Verse (2023).mkv
+          Path            E:\torrents\final_organized\Spider-Man - Across the Spider-Verse
+                          (2023)\Spider-Man - Across the Spider-Verse (2023).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.08 GiB   ·   duration 2:20:05
+          Depth evidence  pixel format yuv420p10le
+
+     247  Spider-Man - Homecoming (2017).mkv
+          Path            E:\torrents\final_organized\Spider-Man - Homecoming (2017)\Spider-Man
+                          - Homecoming (2017).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.00 GiB   ·   duration 2:13:28
+          Depth evidence  pixel format yuv420p10le
+
+     248  Spider-Man - Into the Spider-Verse (2018).mkv
+          Path            E:\torrents\final_organized\Spider-Man - Into the Spider-Verse
+                          (2018)\Spider-Man - Into the Spider-Verse (2018).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.45 GiB   ·   duration 1:56:50
+          Depth evidence  pixel format yuv420p10le
+
+     249  Spider-Man 2 (2004).mkv
+          Path            E:\torrents\final_organized\Spider-Man 2 (2004)\Spider-Man 2
+                          (2004).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.75 GiB   ·   duration 2:07:28
+          Depth evidence  pixel format yuv420p10le
+
+     250  Spider-Man No Way Home (2021).mkv
+          Path            E:\torrents\final_organized\Spider-Man No Way Home (2021)\Spider-Man
+                          No Way Home (2021).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.49 GiB   ·   duration 2:28:10
+          Depth evidence  pixel format yuv420p10le
+
+     251  Spirited Away (2001).mkv
+          Path            E:\torrents\final_organized\Spirited Away (2001)\Spirited Away
+                          (2001).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.24 GiB   ·   duration 2:04:32
+          Depth evidence  pixel format yuv420p10le
+
+     252  Split (2016).mkv
+          Path            E:\torrents\final_organized\Split (2016)\Split (2016).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.59 GiB   ·   duration 1:57:08
+          Depth evidence  pixel format yuv420p10le
+
+     253  Stalker (1979).mkv
+          Path            E:\torrents\final_organized\Stalker (1979)\Stalker (1979).mkv
+          Info            1480x1078 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            6.91 GiB   ·   duration 2:41:41
+          Depth evidence  pixel format yuv420p10le
+
+     254  Stand by Me (1986).mkv
+          Path            E:\torrents\final_organized\Stand by Me (1986)\Stand by Me (1986).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.96 GiB   ·   duration 1:28:44
+          Depth evidence  pixel format yuv420p10le
+
+     255  Star Trek (2009).mkv
+          Path            E:\torrents\final_organized\Star Trek (2009)\Star Trek (2009).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.69 GiB   ·   duration 2:06:50
+          Depth evidence  pixel format yuv420p10le
+
+     256  Star Trek - Into Darkness (2013).mkv
+          Path            E:\torrents\final_organized\Star Trek - Into Darkness (2013)\Star Trek
+                          - Into Darkness (2013).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.12 GiB   ·   duration 2:12:06
+          Depth evidence  pixel format yuv420p10le
+
+     257  Star Wars - Episode I - The Phantom Menace (1999).mkv
+          Path            E:\torrents\final_organized\Star Wars - Episode I - The Phantom Menace
+                          (1999)\Star Wars - Episode I - The Phantom Menace (1999).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.62 GiB   ·   duration 2:16:12
+          Depth evidence  pixel format yuv420p10le
+
+     258  Star Wars - Episode II - Attack of the Clones (2002).mkv
+          Path            E:\torrents\final_organized\Star Wars - Episode II - Attack of the
+                          Clones (2002)\Star Wars - Episode II - Attack of the Clones (2002).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.36 GiB   ·   duration 2:22:30
+          Depth evidence  pixel format yuv420p10le
+
+     259  Star Wars - Episode III - Revenge of the Sith (2005).mkv
+          Path            E:\torrents\final_organized\Star Wars - Episode III - Revenge of the
+                          Sith (2005)\Star Wars - Episode III - Revenge of the Sith (2005).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.35 GiB   ·   duration 2:20:06
+          Depth evidence  pixel format yuv420p10le
+
+     260  Star Wars - Episode IV - A New Hope (1977).mkv
+          Path            E:\torrents\final_organized\Star Wars - Episode IV - A New Hope
+                          (1977)\Star Wars - Episode IV - A New Hope (1977).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.27 GiB   ·   duration 2:04:45
+          Depth evidence  pixel format yuv420p10le
+
+     261  Star Wars - Episode V - The Empire Strikes Back (1980).mkv
+          Path            E:\torrents\final_organized\Star Wars - Episode V - The Empire Strikes
+                          Back (1980)\Star Wars - Episode V - The Empire Strikes Back (1980).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.46 GiB   ·   duration 2:07:23
+          Depth evidence  pixel format yuv420p10le
+
+     262  Star Wars - Episode VI - Return of the Jedi (1983).mkv
+          Path            E:\torrents\final_organized\Star Wars - Episode VI - Return of the
+                          Jedi (1983)\Star Wars - Episode VI - Return of the Jedi (1983).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.09 GiB   ·   duration 2:14:48
+          Depth evidence  pixel format yuv420p10le
+
+     263  Straight Outta Compton (2015).mkv
+          Path            E:\torrents\final_organized\Straight Outta Compton (2015)\Straight
+                          Outta Compton (2015).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.97 GiB   ·   duration 2:46:46
+          Depth evidence  pixel format yuv420p10le
+
+     264  Super 8 (2011).mkv
+          Path            E:\torrents\final_organized\Super 8 (2011)\Super 8 (2011).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.77 GiB   ·   duration 1:51:49
+          Depth evidence  pixel format yuv420p10le
+
+     265  Superbad (2007).mkv
+          Path            E:\torrents\final_organized\Superbad (2007)\Superbad (2007).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.75 GiB   ·   duration 1:58:40
+          Depth evidence  pixel format yuv420p10le
+
+     266  Surf's Up (2007).mkv
+          Path            E:\torrents\final_organized\Surf's Up (2007)\Surf's Up (2007).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.25 GiB   ·   duration 1:25:31
+          Depth evidence  pixel format yuv420p10le
+
+     267  Taken (2008).mkv
+          Path            E:\torrents\final_organized\Taken (2008)\Taken (2008).mkv
+          Info            1908x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.21 GiB   ·   duration 1:33:25
+          Depth evidence  pixel format yuv420p10le
+
+     268  Tangled (2010).mkv
+          Path            E:\torrents\final_organized\Tangled (2010)\Tangled (2010).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.80 GiB   ·   duration 1:40:17
+          Depth evidence  pixel format yuv420p10le
+
+     269  Taxi Driver (1976).mkv
+          Path            E:\torrents\final_organized\Taxi Driver (1976)\Taxi Driver (1976).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.09 GiB   ·   duration 1:53:48
+          Depth evidence  pixel format yuv420p10le
+
+     270  Ted (2012).mkv
+          Path            E:\torrents\final_organized\Ted (2012)\Ted (2012).mkv
+          Info            1920x1036 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            2.73 GiB   ·   duration 1:52:21
+          Depth evidence  pixel format yuv420p10le
+
+     271  Tenet (2020).mkv
+          Path            E:\torrents\final_organized\Tenet (2020)\Tenet (2020).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            8.44 GiB   ·   duration 2:30:09
+          Depth evidence  pixel format yuv420p10le
+
+     272  Terminator 2 - Judgment Day (1991).mkv
+          Path            E:\torrents\final_organized\Terminator 2 - Judgment Day
+                          (1991)\Terminator 2 - Judgment Day (1991).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.75 GiB   ·   duration 2:17:08
+          Depth evidence  pixel format yuv420p10le
+
+     273  Tetris (2023).mkv
+          Path            E:\torrents\final_organized\Tetris (2023)\Tetris (2023).mkv
+          Info            1920x802 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            2.74 GiB   ·   duration 1:57:47
+          Depth evidence  pixel format yuv420p10le
+
+     274  The Accountant (2016).mkv
+          Path            E:\torrents\final_organized\The Accountant (2016)\The Accountant
+                          (2016).mkv
+          Info            1912x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.17 GiB   ·   duration 2:07:54
+          Depth evidence  pixel format yuv420p10le
+
+     275  The Amazing Spider-Man (2012).mkv
+          Path            E:\torrents\final_organized\The Amazing Spider-Man (2012)\The Amazing
+                          Spider-Man (2012).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.48 GiB   ·   duration 2:16:17
+          Depth evidence  pixel format yuv420p10le
+
+     276  The Avengers (2012).mkv
+          Path            E:\torrents\final_organized\The Avengers (2012)\The Avengers
+                          (2012).mkv
+          Info            1920x1038 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.98 GiB   ·   duration 2:22:56
+          Depth evidence  pixel format yuv420p10le
+
+     277  The Batman (2022).mkv
+          Path            E:\torrents\final_organized\The Batman (2022)\The Batman (2022).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            7.01 GiB   ·   duration 2:56:12
+          Depth evidence  pixel format yuv420p10le
+
+     278  The Big Lebowski (1998).mkv
+          Path            E:\torrents\final_organized\The Big Lebowski (1998)\The Big Lebowski
+                          (1998).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.83 GiB   ·   duration 1:57:16
+          Depth evidence  pixel format yuv420p10le
+
+     279  The Big Short (2015).mkv
+          Path            E:\torrents\final_organized\The Big Short (2015)\The Big Short
+                          (2015).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.53 GiB   ·   duration 2:10:16
+          Depth evidence  pixel format yuv420p10le
+
+     280  The Book of Eli (2010).mkv
+          Path            E:\torrents\final_organized\The Book of Eli (2010)\The Book of Eli
+                          (2010).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            4.67 GiB   ·   duration 1:57:36
+          Depth evidence  pixel format yuv420p10le
+
+     281  The Bourne Identity (2002).mkv
+          Path            E:\torrents\final_organized\The Bourne Identity (2002)\The Bourne
+                          Identity (2002).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.51 GiB   ·   duration 1:58:37
+          Depth evidence  pixel format yuv420p10le
+
+     282  The Bourne Supremacy (2004).mkv
+          Path            E:\torrents\final_organized\The Bourne Supremacy (2004)\The Bourne
+                          Supremacy (2004).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.59 GiB   ·   duration 1:48:32
+          Depth evidence  pixel format yuv420p10le
+
+     283  The Bourne Ultimatum (2007).mkv
+          Path            E:\torrents\final_organized\The Bourne Ultimatum (2007)\The Bourne
+                          Ultimatum (2007).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.86 GiB   ·   duration 1:55:14
+          Depth evidence  pixel format yuv420p10le
+
+     284  The Boy in the Striped Pyjamas (2008).mkv
+          Path            E:\torrents\final_organized\The Boy in the Striped Pyjamas (2008)\The
+                          Boy in the Striped Pyjamas (2008).mkv
+          Info            1920x1036 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.38 GiB   ·   duration 1:34:31
+          Depth evidence  pixel format yuv420p10le
+
+     285  The Breakfast Club (1985).mkv
+          Path            E:\torrents\final_organized\The Breakfast Club (1985)\The Breakfast
+                          Club (1985).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.98 GiB   ·   duration 1:37:09
+          Depth evidence  pixel format yuv420p10le
+
+     286  The Curious Case of Benjamin Button (2008).mkv
+          Path            E:\torrents\final_organized\The Curious Case of Benjamin Button
+                          (2008)\The Curious Case of Benjamin Button (2008).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.41 GiB   ·   duration 2:46:03
+          Depth evidence  pixel format yuv420p10le
+
+     287  The Dark Knight (2008).mkv
+          Path            E:\torrents\final_organized\The Dark Knight (2008)\The Dark Knight
+                          (2008).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.90 GiB   ·   duration 2:32:13
+          Depth evidence  pixel format yuv420p10le
+
+     288  The Dark Knight Rises (2012).mkv
+          Path            E:\torrents\final_organized\The Dark Knight Rises (2012)\The Dark
+                          Knight Rises (2012).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.52 GiB   ·   duration 2:44:34
+          Depth evidence  pixel format yuv420p10le
+
+     289  The Day After (1983).mkv
+          Path            E:\torrents\final_organized\The Day After (1983)\The Day After
+                          (1983).mkv
+          Info            1916x1076 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.98 GiB   ·   duration 2:07:02
+          Depth evidence  pixel format yuv420p10le
+
+     290  The Departed (2006).mkv
+          Path            E:\torrents\final_organized\The Departed (2006)\The Departed
+                          (2006).mkv
+          Info            1920x796 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            6.83 GiB   ·   duration 2:31:21
+          Depth evidence  pixel format yuv420p10le
+
+     291  The Edge of Seventeen (2016).mkv
+          Path            E:\torrents\final_organized\The Edge of Seventeen (2016)\The Edge of
+                          Seventeen (2016).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.56 GiB   ·   duration 1:44:56
+          Depth evidence  pixel format yuv420p10le
+
+     292  The Emperor's New Groove (2000).mkv
+          Path            E:\torrents\final_organized\The Emperor's New Groove (2000)\The
+                          Emperor's New Groove (2000).mkv
+          Info            1824x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.55 GiB   ·   duration 1:18:36
+          Depth evidence  pixel format yuv420p10le
+
+     293  The Fast and the Furious (2001).mkv
+          Path            E:\torrents\final_organized\The Fast and the Furious (2001)\The Fast
+                          and the Furious (2001).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.43 GiB   ·   duration 1:46:57
+          Depth evidence  pixel format yuv420p10le
+
+     294  The Founder (2016).mkv
+          Path            E:\torrents\final_organized\The Founder (2016)\The Founder (2016).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            5.00 GiB   ·   duration 1:55:20
+          Depth evidence  pixel format yuv420p10le
+
+     295  The Godfather (1972).mkv
+          Path            E:\torrents\final_organized\The Godfather (1972)\The Godfather
+                          (1972).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            9.38 GiB   ·   duration 2:55:28
+          Depth evidence  pixel format yuv420p10le
+
+     296  The Godfather - Part II (1974).mkv
+          Path            E:\torrents\final_organized\The Godfather - Part II (1974)\The
+                          Godfather - Part II (1974).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            11.37 GiB   ·   duration 3:20:34
+          Depth evidence  pixel format yuv420p10le
+
+     297  The Goonies (1985).mkv
+          Path            E:\torrents\final_organized\The Goonies (1985)\The Goonies (1985).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.14 GiB   ·   duration 1:53:55
+          Depth evidence  pixel format yuv420p10le
+
+     298  The Green Mile (1999).mkv
+          Path            E:\torrents\final_organized\The Green Mile (1999)\The Green Mile
+                          (1999).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            8.96 GiB   ·   duration 3:08:43
+          Depth evidence  pixel format yuv420p10le
+
+     299  The Hangover (2009).mkv
+          Path            E:\torrents\final_organized\The Hangover (2009)\The Hangover
+                          (2009).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.44 GiB   ·   duration 1:47:54
+          Depth evidence  pixel format yuv420p10le
+
+     300  The Help (2011).mkv
+          Path            E:\torrents\final_organized\The Help (2011)\The Help (2011).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.83 GiB   ·   duration 2:26:15
+          Depth evidence  pixel format yuv420p10le
+
+     301  The Hunger Games (2012).mkv
+          Path            E:\torrents\final_organized\The Hunger Games (2012)\The Hunger Games
+                          (2012).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.54 GiB   ·   duration 2:22:57
+          Depth evidence  pixel format yuv420p10le
+
+     302  The Hunger Games - Mockingjay - Part 1 (2014).mkv
+          Path            E:\torrents\final_organized\The Hunger Games - Mockingjay - Part 1
+                          (2014)\The Hunger Games - Mockingjay - Part 1 (2014).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.79 GiB   ·   duration 2:02:50
+          Depth evidence  pixel format yuv420p10le
+
+     303  The Hunger Games - Mockingjay - Part 2 (2015).mkv
+          Path            E:\torrents\final_organized\The Hunger Games - Mockingjay - Part 2
+                          (2015)\The Hunger Games - Mockingjay - Part 2 (2015).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.31 GiB   ·   duration 2:16:57
+          Depth evidence  pixel format yuv420p10le
+
+     304  The Hunger Games Catching Fire (2013).mkv
+          Path            E:\torrents\final_organized\The Hunger Games Catching Fire (2013)\The
+                          Hunger Games Catching Fire (2013).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.94 GiB   ·   duration 2:26:12
+          Depth evidence  pixel format yuv420p10le
+
+     305  The Hurt Locker (2008).mkv
+          Path            E:\torrents\final_organized\The Hurt Locker (2008)\The Hurt Locker
+                          (2008).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.04 GiB   ·   duration 2:10:40
+          Depth evidence  pixel format yuv420p10le
+
+     306  The Imitation Game (2014).mkv
+          Path            E:\torrents\final_organized\The Imitation Game (2014)\The Imitation
+                          Game (2014).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.31 GiB   ·   duration 1:53:52
+          Depth evidence  pixel format yuv420p10le
+
+     307  The Incredibles (2004).mkv
+          Path            E:\torrents\final_organized\The Incredibles (2004)\The Incredibles
+                          (2004).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.73 GiB   ·   duration 1:55:26
+          Depth evidence  pixel format yuv420p10le
+
+     308  The Interview (2014).mkv
+          Path            E:\torrents\final_organized\The Interview (2014)\The Interview
+                          (2014).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.37 GiB   ·   duration 1:52:12
+          Depth evidence  pixel format yuv420p10le
+
+     309  The Invisible Man (2020).mkv
+          Path            E:\torrents\final_organized\The Invisible Man (2020)\The Invisible Man
+                          (2020).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.13 GiB   ·   duration 2:04:23
+          Depth evidence  pixel format yuv420p10le
+
+     310  The Karate Kid (1984).mkv
+          Path            E:\torrents\final_organized\The Karate Kid (1984)\The Karate Kid
+                          (1984).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.70 GiB   ·   duration 2:06:55
+          Depth evidence  pixel format yuv420p10le
+
+     311  The Longest Yard (2005).mkv
+          Path            E:\torrents\final_organized\The Longest Yard (2005)\The Longest Yard
+                          (2005).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.07 GiB   ·   duration 1:53:29
+          Depth evidence  pixel format yuv420p10le
+
+     312  The Lord of the Rings The Fellowship of the Ring (2001).mkv
+          Path            E:\torrents\final_organized\The Lord of the Rings The Fellowship of
+                          the Ring (2001)\The Lord of the Rings The Fellowship of the Ring
+                          (2001).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.40 GiB   ·   duration 3:48:12
+          Depth evidence  pixel format yuv420p10le
+
+     313  The Lord of the Rings The Return of the King (2003).mkv
+          Path            E:\torrents\final_organized\The Lord of the Rings The Return of the
+                          King (2003)\The Lord of the Rings The Return of the King (2003).mkv
+          Info            1920x796 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.04 GiB   ·   duration 4:23:11
+          Depth evidence  pixel format yuv420p10le
+
+     314  The Lord of the Rings The Two Towers (2002).mkv
+          Path            E:\torrents\final_organized\The Lord of the Rings The Two Towers
+                          (2002)\The Lord of the Rings The Two Towers (2002).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.33 GiB   ·   duration 3:55:32
+          Depth evidence  pixel format yuv420p10le
+
+     315  The Martian (2015).mkv
+          Path            E:\torrents\final_organized\The Martian (2015)\The Martian (2015).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.26 GiB   ·   duration 2:31:21
+          Depth evidence  pixel format yuv420p10le
+
+     316  The Matrix (1999).mkv
+          Path            E:\torrents\final_organized\The Matrix (1999)\The Matrix (1999).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.28 GiB   ·   duration 2:16:21
+          Depth evidence  pixel format yuv420p10le
+
+     317  The Maze Runner (2014).mkv
+          Path            E:\torrents\final_organized\The Maze Runner (2014)\The Maze Runner
+                          (2014).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.08 GiB   ·   duration 1:53:27
+          Depth evidence  pixel format yuv420p10le
+
+     318  The Nightmare Before Christmas (1993).mkv
+          Path            E:\torrents\final_organized\The Nightmare Before Christmas (1993)\The
+                          Nightmare Before Christmas (1993).mkv
+          Info            1800x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.08 GiB   ·   duration 1:16:40
+          Depth evidence  pixel format yuv420p10le
+
+     319  The Polar Express (2004).mkv
+          Path            E:\torrents\final_organized\The Polar Express (2004)\The Polar Express
+                          (2004).mkv
+          Info            1920x796 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.20 GiB   ·   duration 1:39:57
+          Depth evidence  pixel format yuv420p10le
+
+     320  The Prestige (2006).mkv
+          Path            E:\torrents\final_organized\The Prestige (2006)\The Prestige
+                          (2006).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.77 GiB   ·   duration 2:10:19
+          Depth evidence  pixel format yuv420p10le
+
+     321  The Princess and the Frog (2009).mkv
+          Path            E:\torrents\final_organized\The Princess and the Frog (2009)\The
+                          Princess and the Frog (2009).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.92 GiB   ·   duration 1:37:28
+          Depth evidence  pixel format yuv420p10le
+
+     322  The Proposal (2009).mkv
+          Path            E:\torrents\final_organized\The Proposal (2009)\The Proposal
+                          (2009).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.12 GiB   ·   duration 1:47:48
+          Depth evidence  pixel format yuv420p10le
+
+     323  The Revenant (2015).mkv
+          Path            E:\torrents\final_organized\The Revenant (2015)\The Revenant
+                          (2015).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.12 GiB   ·   duration 2:36:21
+          Depth evidence  pixel format yuv420p10le
+
+     324  The Sandlot (1993).mkv
+          Path            E:\torrents\final_organized\The Sandlot (1993)\The Sandlot (1993).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.86 GiB   ·   duration 1:41:08
+          Depth evidence  pixel format yuv420p10le
+
+     325  The Shawshank Redemption (1994).mkv
+          Path            E:\torrents\final_organized\The Shawshank Redemption (1994)\The
+                          Shawshank Redemption (1994).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.86 GiB   ·   duration 2:22:33
+          Depth evidence  pixel format yuv420p10le
+
+     326  The Silence of the Lambs (1991).mkv
+          Path            E:\torrents\final_organized\The Silence of the Lambs (1991)\The
+                          Silence of the Lambs (1991).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.60 GiB   ·   duration 1:58:48
+          Depth evidence  pixel format yuv420p10le
+
+     327  The Sixth Sense (1999).mkv
+          Path            E:\torrents\final_organized\The Sixth Sense (1999)\The Sixth Sense
+                          (1999).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.25 GiB   ·   duration 1:47:23
+          Depth evidence  pixel format yuv420p10le
+
+     328  The Social Network (2010).mkv
+          Path            E:\torrents\final_organized\The Social Network (2010)\The Social
+                          Network (2010).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.83 GiB   ·   duration 2:00:27
+          Depth evidence  pixel format yuv420p10le
+
+     329  The Substance (2024).mkv
+          Path            E:\torrents\final_organized\The Substance (2024)\The Substance
+                          (2024).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            6.06 GiB   ·   duration 2:22:11
+          Depth evidence  pixel format yuv420p10le
+
+     330  The Terminator (1984).mkv
+          Path            E:\torrents\final_organized\The Terminator (1984)\The Terminator
+                          (1984).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.84 GiB   ·   duration 1:47:03
+          Depth evidence  pixel format yuv420p10le
+
+     331  The Theory of Everything (2014).mkv
+          Path            E:\torrents\final_organized\The Theory of Everything (2014)\The Theory
+                          of Everything (2014).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.05 GiB   ·   duration 2:03:25
+          Depth evidence  pixel format yuv420p10le
+
+     332  The Thing (1982).mkv
+          Path            E:\torrents\final_organized\The Thing (1982)\The Thing (1982).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.63 GiB   ·   duration 1:48:34
+          Depth evidence  pixel format yuv420p10le
+
+     333  The Truman Show (1998).mkv
+          Path            E:\torrents\final_organized\The Truman Show (1998)\The Truman Show
+                          (1998).mkv
+          Info            1918x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.77 GiB   ·   duration 1:42:57
+          Depth evidence  pixel format yuv420p10le
+
+     334  The Usual Suspects (1995).mkv
+          Path            E:\torrents\final_organized\The Usual Suspects (1995)\The Usual
+                          Suspects (1995).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.65 GiB   ·   duration 1:45:43
+          Depth evidence  pixel format yuv420p10le
+
+     335  The Wild Robot (2024).mkv
+          Path            E:\torrents\final_organized\The Wild Robot (2024)\The Wild Robot
+                          (2024).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.74 GiB   ·   duration 1:41:41
+          Depth evidence  pixel format yuv420p10le
+
+     336  The Wolf of Wall Street (2013).mkv
+          Path            E:\torrents\final_organized\The Wolf of Wall Street (2013)\The Wolf of
+                          Wall Street (2013).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.34 GiB   ·   duration 2:59:52
+          Depth evidence  pixel format yuv420p10le
+
+     337  There Will Be Blood (2007).mkv
+          Path            E:\torrents\final_organized\There Will Be Blood (2007)\There Will Be
+                          Blood (2007).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            8.23 GiB   ·   duration 2:38:41
+          Depth evidence  pixel format yuv420p10le
+
+     338  This Christmas (2007).mkv
+          Path            E:\torrents\final_organized\This Christmas (2007)\This Christmas
+                          (2007).mkv
+          Info            1918x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            3.07 GiB   ·   duration 1:58:53
+          Depth evidence  pixel format yuv420p10le
+
+     339  This Is the End (2013).mkv
+          Path            E:\torrents\final_organized\This Is the End (2013)\This Is the End
+                          (2013).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.82 GiB   ·   duration 1:46:41
+          Depth evidence  pixel format yuv420p10le
+
+     340  Thor - Ragnarok (2017).mkv
+          Path            E:\torrents\final_organized\Thor - Ragnarok (2017)\Thor - Ragnarok
+                          (2017).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.60 GiB   ·   duration 2:10:31
+          Depth evidence  pixel format yuv420p10le
+
+     341  Threads (1984).mkv
+          Path            E:\torrents\final_organized\Threads (1984)\Threads (1984).mkv
+          Info            1440x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.22 GiB   ·   duration 1:57:11
+          Depth evidence  pixel format yuv420p10le
+
+     342  Titanic (1997).mkv
+          Path            E:\torrents\final_organized\Titanic (1997)\Titanic (1997).mkv
+          Info            1920x820 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            9.48 GiB   ·   duration 3:14:50
+          Depth evidence  pixel format yuv420p10le
+
+     343  Top Gun (1986).mkv
+          Path            E:\torrents\final_organized\Top Gun (1986)\Top Gun (1986).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.05 GiB   ·   duration 1:49:27
+          Depth evidence  pixel format yuv420p10le
+
+     344  Top Gun - Maverick (2022).mkv
+          Path            E:\torrents\final_organized\Top Gun - Maverick (2022)\Top Gun -
+                          Maverick (2022).mkv
+          Info            1920x1012 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.14 GiB   ·   duration 2:10:15
+          Depth evidence  pixel format yuv420p10le
+
+     345  Toy Story (1995).mkv
+          Path            E:\torrents\final_organized\Toy Story (1995)\Toy Story (1995).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.68 GiB   ·   duration 1:21:03
+          Depth evidence  pixel format yuv420p10le
+
+     346  Toy Story 2 (1999).mkv
+          Path            E:\torrents\final_organized\Toy Story 2 (1999)\Toy Story 2 (1999).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.57 GiB   ·   duration 1:32:25
+          Depth evidence  pixel format yuv420p10le
+
+     347  Toy Story 3 (2010).mkv
+          Path            E:\torrents\final_organized\Toy Story 3 (2010)\Toy Story 3 (2010).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.07 GiB   ·   duration 1:42:33
+          Depth evidence  pixel format yuv420p10le
+
+     348  Toy Story 4 (2019).mkv
+          Path            E:\torrents\final_organized\Toy Story 4 (2019)\Toy Story 4 (2019).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.63 GiB   ·   duration 1:40:03
+          Depth evidence  pixel format yuv420p10le
+
+     349  Toy Story 5 (2026).mkv
+          Path            E:\torrents\final_organized\Toy Story 5 (2026)\Toy Story 5 (2026).mkv
+          Info            1920x1038 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            4.34 GiB   ·   duration 1:41:47
+          Depth evidence  pixel format yuv420p10le
+
+     350  Training Day (2001).mkv
+          Path            E:\torrents\final_organized\Training Day (2001)\Training Day
+                          (2001).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.62 GiB   ·   duration 2:02:04
+          Depth evidence  pixel format yuv420p10le
+
+     351  Transformers (2007).mkv
+          Path            E:\torrents\final_organized\Transformers (2007)\Transformers
+                          (2007).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.12 GiB   ·   duration 2:23:27
+          Depth evidence  pixel format yuv420p10le
+
+     352  Transformers Dark Of The Moon (2011).mkv
+          Path            E:\torrents\final_organized\Transformers Dark Of The Moon
+                          (2011)\Transformers Dark Of The Moon (2011).mkv
+          Info            3840x2160 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            6.89 GiB   ·   duration 2:34:23
+          Depth evidence  pixel format yuv420p10le
+
+     353  Transformers Revenge of the Fallen (2009).mkv
+          Path            E:\torrents\final_organized\Transformers Revenge of the Fallen
+                          (2009)\Transformers Revenge of the Fallen (2009).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            6.05 GiB   ·   duration 2:30:25
+          Depth evidence  pixel format yuv420p10le
+
+     354  Treasure Planet (2002).mkv
+          Path            E:\torrents\final_organized\Treasure Planet (2002)\Treasure Planet
+                          (2002).mkv
+          Info            1820x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.46 GiB   ·   duration 1:35:24
+          Depth evidence  pixel format yuv420p10le
+
+     355  TRON - Legacy (2010).mkv
+          Path            E:\torrents\final_organized\TRON - Legacy (2010)\TRON - Legacy
+                          (2010).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.77 GiB   ·   duration 2:05:09
+          Depth evidence  pixel format yuv420p10le
+
+     356  Turtles Forever (2009).mkv
+          Path            E:\torrents\final_organized\Turtles Forever (2009)\Turtles Forever
+                          (2009).mkv
+          Info            1888x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | trc=bt709 |
+                          depth=pixel format yuv420p10le
+          Size            2.58 GiB   ·   duration 1:20:52
+          Depth evidence  pixel format yuv420p10le
+
+     357  Twelve Monkeys (1995).mkv
+          Path            E:\torrents\final_organized\Twelve Monkeys (1995)\Twelve Monkeys
+                          (1995).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            7.23 GiB   ·   duration 2:09:31
+          Depth evidence  pixel format yuv420p10le
+
+     358  Uncut Gems (2019).mkv
+          Path            E:\torrents\final_organized\Uncut Gems (2019)\Uncut Gems (2019).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.04 GiB   ·   duration 2:15:08
+          Depth evidence  pixel format yuv420p10le
+
+     359  United 93 (2006).mkv
+          Path            E:\torrents\final_organized\United 93 (2006)\United 93 (2006).mkv
+          Info            1918x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.68 GiB   ·   duration 1:50:51
+          Depth evidence  pixel format yuv420p10le
+
+     360  Us (2019).mkv
+          Path            E:\torrents\final_organized\Us (2019)\Us (2019).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.48 GiB   ·   duration 1:56:28
+          Depth evidence  pixel format yuv420p10le
+
+     361  V for Vendetta (2005).mkv
+          Path            E:\torrents\final_organized\V for Vendetta (2005)\V for Vendetta
+                          (2005).mkv
+          Info            1920x816 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.84 GiB   ·   duration 2:12:32
+          Depth evidence  pixel format yuv420p10le
+
+     362  WALL-E (2008).mkv
+          Path            E:\torrents\final_organized\WALL-E (2008)\WALL-E (2008).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.76 GiB   ·   duration 1:38:12
+          Depth evidence  pixel format yuv420p10le
+
+     363  Wallace & Gromit - The Curse of the Were-Rabbit (2005).mkv
+          Path            E:\torrents\final_organized\Wallace & Gromit - The Curse of the
+                          Were-Rabbit (2005)\Wallace & Gromit - The Curse of the Were-Rabbit
+                          (2005).mkv
+          Info            1920x1036 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.50 GiB   ·   duration 1:25:00
+          Depth evidence  pixel format yuv420p10le
+
+     364  War Dogs (2016).mkv
+          Path            E:\torrents\final_organized\War Dogs (2016)\War Dogs (2016).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.31 GiB   ·   duration 1:54:13
+          Depth evidence  pixel format yuv420p10le
+
+     365  War for the Planet of the Apes (2017).mkv
+          Path            E:\torrents\final_organized\War for the Planet of the Apes (2017)\War
+                          for the Planet of the Apes (2017).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.44 GiB   ·   duration 2:20:09
+          Depth evidence  pixel format yuv420p10le
+
+     366  WarGames (1983).mkv
+          Path            E:\torrents\final_organized\WarGames (1983)\WarGames (1983).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.61 GiB   ·   duration 1:52:43
+          Depth evidence  pixel format yuv420p10le
+
+     367  Warrior (2011).mkv
+          Path            E:\torrents\final_organized\Warrior (2011)\Warrior (2011).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.40 GiB   ·   duration 2:19:54
+          Depth evidence  pixel format yuv420p10le
+
+     368  We're the Millers (2013).mkv
+          Path            E:\torrents\final_organized\We're the Millers (2013)\We're the Millers
+                          (2013).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.15 GiB   ·   duration 1:58:43
+          Depth evidence  pixel format yuv420p10le
+
+     369  When Harry Met Sally (1989).mkv
+          Path            E:\torrents\final_organized\When Harry Met Sally (1989)\When Harry Met
+                          Sally (1989).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            3.56 GiB   ·   duration 1:35:33
+          Depth evidence  pixel format yuv420p10le
+
+     370  Whiplash (2014).mkv
+          Path            E:\torrents\final_organized\Whiplash (2014)\Whiplash (2014).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            1.60 GiB   ·   duration 1:46:59
+          Depth evidence  pixel format yuv420p10le
+
+     371  Willy Wonka & the Chocolate Factory (1971).mkv
+          Path            E:\torrents\final_organized\Willy Wonka & the Chocolate Factory
+                          (1971)\Willy Wonka & the Chocolate Factory (1971).mkv
+          Info            1920x1080 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.44 GiB   ·   duration 1:39:45
+          Depth evidence  pixel format yuv420p10le
+
+     372  World War Z (2013).mkv
+          Path            E:\torrents\final_organized\World War Z (2013)\World War Z (2013).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            5.17 GiB   ·   duration 2:03:04
+          Depth evidence  pixel format yuv420p10le
+
+     373  Wreck-It Ralph (2012).mkv
+          Path            E:\torrents\final_organized\Wreck-It Ralph (2012)\Wreck-It Ralph
+                          (2012).mkv
+          Info            1920x800 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            2.84 GiB   ·   duration 1:41:14
+          Depth evidence  pixel format yuv420p10le
+
+     374  Zathura - A Space Adventure (2005).mkv
+          Path            E:\torrents\final_organized\Zathura - A Space Adventure (2005)\Zathura
+                          - A Space Adventure (2005).mkv
+          Info            1920x1040 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.54 GiB   ·   duration 1:41:20
+          Depth evidence  pixel format yuv420p10le
+
+     375  Zero Dark Thirty (2012).mkv
+          Path            E:\torrents\final_organized\Zero Dark Thirty (2012)\Zero Dark Thirty
+                          (2012).mkv
+          Info            1920x1036 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            6.27 GiB   ·   duration 2:36:59
+          Depth evidence  pixel format yuv420p10le
+
+     376  Zootopia (2016).mkv
+          Path            E:\torrents\final_organized\Zootopia (2016)\Zootopia (2016).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.04 GiB   ·   duration 1:48:32
+          Depth evidence  pixel format yuv420p10le
+
+     377  Zootopia 2 (2025).mkv
+          Path            E:\torrents\final_organized\Zootopia 2 (2025)\Zootopia 2 (2025).mkv
+          Info            1920x804 | HEVC Main 10 | 10-bit SDR | yuv420p10le | depth=pixel
+                          format yuv420p10le
+          Size            4.59 GiB   ·   duration 1:47:45
+          Depth evidence  pixel format yuv420p10le
+
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  QUEUE = 8-bit SDR. Re-encode to H.265 10-bit (or AV1 10-bit) in HandBrake.
+  SKIP = already 10-bit or better SDR. Re-encoding only loses quality.
+  KEEP = HDR10 / HDR10+ / Dolby Vision / HLG. HandBrake tone-maps or strips dynamic metadata.
+  A Dolby Vision profile ending in 'no fallback' needs a Dolby Vision client; one listing a base
+  layer still plays as HDR10, HLG or SDR.
+  REVIEW = HDR-tagged 8-bit, or metadata too uncertain to trust. Never queued automatically.
+  BT.2020 primaries without PQ or HLG is wide-gamut SDR, not HDR.
