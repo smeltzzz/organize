@@ -28,7 +28,6 @@ Zero runtime dependencies. Standard library only.
 from __future__ import annotations
 
 import argparse
-import importlib
 import os
 import platform
 import shutil
@@ -212,6 +211,53 @@ def get_binary_version(binary_path: str, flag: str = "-version") -> str:
         return ""
 
 
+def _resolve_library_path(explicit: Path | None) -> Path:
+    """The library root doctor checks, resolved exactly like the tools do.
+
+    ``doctor`` must never disagree with the tools about which folder is the
+    library. Precedence is the repo-wide contract: an explicit flag, then
+    ``ORGANIZE_LIBRARY``, then the legacy ``MOVIE_STD_TARGET``, then the
+    platform default - and a ``.env`` next to the scripts is honoured too.
+    Delegate to the tools' shared resolver; the inline fallback keeps a copied
+    ``organize.py`` usable when its siblings are not present.
+    """
+    if explicit is not None:
+        return explicit.expanduser()
+    try:
+        import bitdepth as probe_mod
+        return probe_mod.resolve_library(None)
+    except Exception:
+        pass
+    for value in (os.environ.get("ORGANIZE_LIBRARY"), os.environ.get("MOVIE_STD_TARGET")):
+        if value and value.strip():
+            return Path(value).expanduser()
+    if os.name == "nt":
+        return Path(r"E:\torrents\final_organized")
+    return Path.home() / "Media" / "Movies"
+
+
+def _resolve_source_path(explicit: Path | None) -> Path:
+    """The completed-download root doctor checks, resolved like the standardizer.
+
+    Same contract as :func:`_resolve_library_path`, using ``MOVIE_STD_SOURCE``
+    for the source directory and a platform-aware default so a POSIX machine
+    never sees a literal ``E:\\torrents\\final`` warning.
+    """
+    if explicit is not None:
+        return explicit.expanduser()
+    try:
+        import movie_standardizer as standardizer
+        return standardizer.resolve_source_root(None)
+    except Exception:
+        pass
+    value = os.environ.get("MOVIE_STD_SOURCE")
+    if value and value.strip():
+        return Path(value).expanduser()
+    if os.name == "nt":
+        return Path(r"E:\torrents\final")
+    return Path.home() / "torrents" / "final"
+
+
 def run_doctor(library_path: Path | None = None, source_path: Path | None = None) -> int:
     """Run full system diagnostics and print a beautiful scorecard."""
     print_hero_banner()
@@ -273,7 +319,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
 
     # 4. FFmpeg (ffprobe) — needed by bitdepth.py and standardizer duplicate check
     try:
-        probe_mod = importlib.import_module("10bit")
+        import bitdepth as probe_mod
         ffprobe_bin = probe_mod.find_ffprobe()
         if ffprobe_bin and probe_mod.ffprobe_works(ffprobe_bin):
             ver_text = get_binary_version(ffprobe_bin, "-version")
@@ -453,8 +499,8 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
         ))
 
     # 6. Library directories and Hardlink check
-    lib_path = library_path or Path(os.environ.get("MOVIE_STD_TARGET", r"E:\torrents\final_organized"))
-    src_path = source_path or Path(os.environ.get("MOVIE_STD_SOURCE", r"E:\torrents\final"))
+    lib_path = _resolve_library_path(library_path)
+    src_path = _resolve_source_path(source_path)
 
     # Library directory check
     if lib_path.exists() and lib_path.is_dir():
@@ -469,7 +515,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             status="warn",
             message=f"Path not found: {lib_path}",
             detail="This is the target folder where organized movies will be placed",
-            remedy=f"Create it, set MOVIE_STD_TARGET, or pass --target: mkdir {lib_path}",
+            remedy=f"Create it, set ORGANIZE_LIBRARY, or pass --target: mkdir {lib_path}",
         ))
 
     # Source directory check

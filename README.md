@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-400%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-532%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -88,7 +88,7 @@ One file, one purpose. Nothing else.
 | `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. Sidecars extracted from the movie itself are skipped (they are already frame-accurate). |
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
-| `tests/` | Fully offline unit tests (444) + per-tool built-in self-tests. |
+| `tests/` | Fully offline unit tests (532) + per-tool built-in self-tests. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. |
 
@@ -571,7 +571,7 @@ Everything is overridable per run with CLI flags (see each tool's
 | `OPENSUBTITLES_API_KEY` | subtitle_fetcher | Subtitle source (exact-moviehash matching) |
 | `SUBDL_API_KEY` | subtitle_fetcher | Equal subtitle source (release match scored ≥ 0.80) |
 | `ORGANIZE_LIBRARY` | **every tool** | The movie-library root. Set this one variable and no tool needs a path flag. |
-| `MOVIE_STD_SOURCE` | movie_standardizer | Completed-download root to ingest from |
+| `MOVIE_STD_SOURCE` | movie_standardizer / `doctor` | Completed-download root to ingest from (platform default: `E:\torrents\final` on Windows, `~/torrents/final` elsewhere) |
 | `MOVIE_STD_TARGET` | every tool (legacy) | Older name for `ORGANIZE_LIBRARY`; still honoured, lower precedence |
 | `MOVIE_STD_LOCK_TIMEOUT` | movie_standardizer | Coordination-lock wait (default 60 s) |
 | `MOVIE_STD_MAINTENANCE_MODE` | movie_standardizer | `REPORT` (default) / `QUARANTINE` / `DELETE` for duplicates |
@@ -581,9 +581,12 @@ tool; anything already exported in the environment wins over the file.
 
 Path defaults are platform-aware. On Windows they follow the documented
 `E:\torrents\...` layout; on Linux/macOS the library defaults to
-`~/Media/Movies` and logs, reports and probe caches to
-`$XDG_STATE_HOME/organize` (`~/.local/state/organize`). Source and target
-**must be on the same filesystem** (hardlink-only ingest).
+`~/Media/Movies`, the completed-download batch-scan root to `~/torrents/final`,
+and logs, reports and probe caches to `$XDG_STATE_HOME/organize`
+(`~/.local/state/organize`). Source and target **must be on the same
+filesystem** (hardlink-only ingest). `organize.py doctor` resolves both roots
+through the same rules, so it can never disagree with the tools about which
+folder needs attention.
 
 ---
 
@@ -594,7 +597,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 514 unit tests
+python3 -m unittest discover -s tests -p "test_*.py"   # 532 unit tests
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```

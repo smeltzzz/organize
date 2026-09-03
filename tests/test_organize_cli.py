@@ -10,6 +10,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+import bitdepth
 import organize
 
 
@@ -93,6 +94,62 @@ class OrganizeCliTests(unittest.TestCase):
                 output = buf.getvalue()
                 self.assertIn("DIFFERENT filesystems", output)
                 self.assertEqual(code, 1)
+
+    def test_doctor_reports_ffprobe_when_the_inspector_finds_it(self) -> None:
+        """doctor must ask bitdepth (not a stale '10bit' module) about ffprobe."""
+        fake = "/fake/ffprobe"
+        with patch.object(bitdepth, "find_ffprobe", return_value=fake), \
+                patch.object(bitdepth, "ffprobe_works", return_value=True), \
+                patch.object(organize, "get_binary_version", return_value="ffprobe 6.0"):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = organize.run_doctor(library_path=Path("/tmp/lib"), source_path=Path("/tmp/src"))
+        output = buf.getvalue()
+        self.assertIn("FFmpeg (ffprobe)", output)
+        self.assertIn("Found:", output)
+        self.assertIn(fake, output)
+        self.assertEqual(code, 0)
+
+    def test_doctor_resolution_honours_organize_library(self) -> None:
+        saved = {var: os.environ.pop(var, None)
+                 for var in ("ORGANIZE_LIBRARY", "MOVIE_STD_TARGET", "MOVIE_STD_SOURCE")}
+        try:
+            os.environ["ORGANIZE_LIBRARY"] = "/env/library"
+            os.environ["MOVIE_STD_SOURCE"] = "/env/source"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                organize.run_doctor()
+            output = buf.getvalue()
+            self.assertIn("/env/library", output)
+            self.assertIn("/env/source", output)
+            self.assertNotIn(r"E:\torrents", output)
+        finally:
+            for var, value in saved.items():
+                if value is not None:
+                    os.environ[var] = value
+                else:
+                    os.environ.pop(var, None)
+
+    def test_doctor_resolution_is_platform_aware(self) -> None:
+        saved = {var: os.environ.pop(var, None)
+                 for var in ("ORGANIZE_LIBRARY", "MOVIE_STD_TARGET", "MOVIE_STD_SOURCE")}
+        try:
+            expected_lib = (
+                Path(r"E:\torrents\final_organized") if os.name == "nt"
+                else Path.home() / "Media" / "Movies"
+            )
+            expected_src = (
+                Path(r"E:\torrents\final") if os.name == "nt"
+                else Path.home() / "torrents" / "final"
+            )
+            self.assertEqual(organize._resolve_library_path(None), expected_lib)
+            self.assertEqual(organize._resolve_source_path(None), expected_src)
+        finally:
+            for var, value in saved.items():
+                if value is not None:
+                    os.environ[var] = value
+                else:
+                    os.environ.pop(var, None)
 
     def test_self_test_flag(self) -> None:
         buf = io.StringIO()

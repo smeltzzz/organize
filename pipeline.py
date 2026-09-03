@@ -698,7 +698,8 @@ class Config:
 HINTS: dict[str, str] = {
     "cleaner": (
         "Movies still hardlinked to their qBittorrent source are ALWAYS deferred, never "
-        "cleaned - there is no override. If this step cleans nothing, open E:\\torrents\\final: "
+        "cleaned - there is no override. If this step cleans nothing, open your completed-download "
+        "folder (the standardizer's source root): "
         "qBittorrent's default seed-limit action only pauses the torrent and leaves the file, so "
         "the link count never drops and the deferral never clears. Delete the source (safe - it "
         "is a hardlink, so your library copy keeps the data) or set qBittorrent to remove the "

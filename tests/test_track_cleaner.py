@@ -769,5 +769,150 @@ class ExternalSrtRecordPathTests(unittest.TestCase):
         tc._target_root = real_root
 
 
+def _audio(track_id: int, language: str = "eng", *, name: str = "", codec: str = "AAC",
+           channels: int = 2, commentary: bool = False) -> dict:
+    """A minimal audio track dict in the shape mkvmerge -J returns."""
+    props = {
+        "language": language,
+        "language_ietf": language,
+        "codec_id": "A_AAC" if codec == "AAC" else "A_MLP",
+        "audio_channels": channels,
+    }
+    if name:
+        props["track_name"] = name
+    if commentary:
+        props["flag_commentary"] = True
+    return {"id": track_id, "type": "audio", "codec": codec, "properties": props}
+
+
+def _sub(track_id: int, language: str = "eng", *, name: str = "") -> dict:
+    props = {"language": language, "language_ietf": language}
+    if name:
+        props["track_name"] = name
+    return {"id": track_id, "type": "subtitles", "properties": props}
+
+
+def _media_info(*tracks: dict) -> dict:
+    return {"container": {"recognized": True, "supported": True}, "tracks": list(tracks)}
+
+
+class CleanupPlanTests(unittest.TestCase):
+    """The track-retention decision is pure, so every branch is table-testable."""
+
+    def test_single_english_audio_is_already_clean(self) -> None:
+        plan, reason = tc.plan_cleanup(_media_info(_audio(1)))
+        self.assertEqual(reason, "")
+        self.assertIsNotNone(plan)
+        assert plan is not None
+        self.assertEqual(plan.best_audio_id, 1)
+        self.assertTrue(plan.is_clean)
+        self.assertEqual(plan.keep_sub_ids, [])
+        self.assertEqual(plan.removed_audio, [])
+        self.assertFalse(plan.foreign_with_srt)
+
+    def test_best_english_audio_and_english_subs_are_kept(self) -> None:
+        info = _media_info(
+            _audio(1, name="English AAC"),
+            _audio(2, codec="TrueHD", channels=8, name="Atmos"),
+            _audio(3, name="Director Commentary", commentary=True),
+            _audio(4, language="spa", name="Spanish"),
+            _sub(5),
+            _sub(6, name="English SDH"),
+            _sub(7, language="spa", name="Spanish"),
+            _sub(8, language="eng", name="English Forced"),
+        )
+        plan, reason = tc.plan_cleanup(info)
+        self.assertEqual(reason, "")
+        assert plan is not None
+        # TrueHD beats AAC, commentary and dubs are dropped.
+        self.assertEqual(plan.best_audio_id, 2)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [1, 3, 4])
+        # English subtitles survive (including SDH/forced); Spanish is dropped.
+        self.assertEqual(plan.keep_sub_ids, [5, 6, 8])
+        self.assertEqual([t["id"] for t in plan.removed_subs], [7])
+        self.assertFalse(plan.is_clean)
+        self.assertFalse(plan.foreign_with_srt)
+
+    def test_external_srt_makes_every_embedded_subtitle_removable(self) -> None:
+        srt = {"path": "/movies/Film (2020).eng.srt", "sha256": "a" * 64, "size": 100}
+        plan, reason = tc.plan_cleanup(
+            _media_info(_audio(1), _sub(5), _sub(6, name="English Forced")),
+            external_srt=srt,
+        )
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertEqual(plan.keep_sub_ids, [])
+        self.assertEqual([t["id"] for t in plan.removed_subs], [5, 6])
+        self.assertIs(plan.external_srt, srt)
+        self.assertFalse(plan.foreign_with_srt)
+
+    def test_foreign_film_with_srt_keeps_best_non_commentary_audio(self) -> None:
+        srt = {"path": "/movies/Film (2020).eng.srt", "sha256": "a" * 64, "size": 100}
+        plan, reason = tc.plan_cleanup(
+            _media_info(
+                _audio(1, language="spa", codec="TrueHD", channels=8),
+                _audio(2, language="spa"),
+                _audio(3, language="und", name="Director Commentary", commentary=True),
+                _sub(4, language="spa"),
+            ),
+            external_srt=srt,
+        )
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertTrue(plan.foreign_with_srt)
+        self.assertEqual(plan.best_audio_id, 1)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3])
+        # The external sidecar is the sole subtitle option.
+        self.assertEqual(plan.keep_sub_ids, [])
+        self.assertEqual([t["id"] for t in plan.removed_subs], [4])
+
+    def test_foreign_film_without_srt_is_left_alone(self) -> None:
+        plan, reason = tc.plan_cleanup(_media_info(_audio(1, language="spa")))
+        self.assertIsNone(plan)
+        self.assertIn("foreign film", reason)
+
+    def test_all_english_audio_commentary_is_left_alone(self) -> None:
+        plan, reason = tc.plan_cleanup(
+            _media_info(_audio(1, name="Director Commentary", commentary=True))
+        )
+        self.assertIsNone(plan)
+        self.assertIn("commentary", reason)
+
+    def test_foreign_film_with_srt_but_no_usable_audio_is_left_alone(self) -> None:
+        srt = {"path": "/movies/Film (2020).eng.srt", "sha256": "a" * 64, "size": 100}
+        plan, reason = tc.plan_cleanup(
+            _media_info(_audio(1, name="Director Commentary", commentary=True)),
+            external_srt=srt,
+        )
+        self.assertIsNone(plan)
+        self.assertIn("no non-commentary audio", reason)
+
+    def test_untagged_audio_named_english_is_retained(self) -> None:
+        plan, reason = tc.plan_cleanup(
+            _media_info(_audio(1, language="und", name="English Audio"))
+        )
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertEqual(plan.best_audio_id, 1)
+
+    def test_bare_untagged_audio_is_never_guessed_english(self) -> None:
+        plan, reason = tc.plan_cleanup(_media_info(_audio(1, language="und")))
+        self.assertIsNone(plan)
+        self.assertIn("foreign film", reason)
+
+    def test_remove_commentary_false_keeps_commentary_in_the_pool(self) -> None:
+        # remove_commentary=False is the operator's explicit override: the
+        # commentary track stays a candidate and can even win on quality.
+        comm = _audio(2, codec="TrueHD", channels=8, name="Director Commentary", commentary=True)
+        plan, reason = tc.plan_cleanup(
+            _media_info(_audio(1), comm), remove_commentary=False
+        )
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertEqual(plan.best_audio_id, 2)
+        # The weaker AAC is what goes; commentary 2 is kept and wins.
+        self.assertEqual([t["id"] for t in plan.removed_audio], [1])
+
+
 if __name__ == "__main__":
     unittest.main()
