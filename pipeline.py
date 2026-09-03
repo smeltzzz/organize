@@ -1026,18 +1026,25 @@ def run_self_tests() -> int:
 
     # Library resolution: flag wins, then the environment, then the documented
     # default. Docker and scheduled runs rely on the middle case.
-    saved_target = os.environ.pop("MOVIE_STD_TARGET", None)
+    saved_env = {var: os.environ.pop(var, None)
+                 for var in ("ORGANIZE_LIBRARY", "MOVIE_STD_TARGET")}
     try:
-        check(resolve_library(None) == Path(DEFAULT_LIBRARY).resolve(),
-              "no flag and no env resolves to the documented default library")
+        check(resolve_library(None) == default_library_root(),
+              "no flag and no env resolves to the platform default library")
         os.environ["MOVIE_STD_TARGET"] = str(Path("/media/movies"))
-        check(resolve_library(None) == Path("/media/movies").resolve(),
+        check(resolve_library(None) == Path("/media/movies"),
               "MOVIE_STD_TARGET is honored when no --source flag is given")
-        check(resolve_library(Path("/srv/library")) == Path("/srv/library").resolve(),
-              "an explicit --source flag beats MOVIE_STD_TARGET")
+        os.environ["ORGANIZE_LIBRARY"] = str(Path("/media/current"))
+        check(resolve_library(None) == Path("/media/current"),
+              "ORGANIZE_LIBRARY takes precedence over the legacy variable")
+        check(resolve_library(Path("/srv/library")) == Path("/srv/library"),
+              "an explicit --source flag beats the environment")
     finally:
-        if saved_target is not None:
-            os.environ["MOVIE_STD_TARGET"] = saved_target
+        for var, value in saved_env.items():
+            if value is not None:
+                os.environ[var] = value
+            else:
+                os.environ.pop(var, None)
         else:
             os.environ.pop("MOVIE_STD_TARGET", None)
 

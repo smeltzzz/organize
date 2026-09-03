@@ -2126,11 +2126,12 @@ def run_self_tests() -> int:
 
         # Test 12: Library root resolution — flag > MOVIE_STD_TARGET > default,
         # the same ladder every sibling tool walks.
-        saved_target = os.environ.pop("MOVIE_STD_TARGET", None)
+        saved_env = {var: os.environ.pop(var, None)
+                     for var in ("ORGANIZE_LIBRARY", "MOVIE_STD_TARGET")}
         try:
-            check(resolve_library(None) == Path(DEFAULT_LIBRARY),
-                  "library falls back to the documented default")
-            check(describe_library_origin(None) == f"the default library root ({DEFAULT_LIBRARY})",
+            check(resolve_library(None) == default_library_root(),
+                  "library falls back to the platform default")
+            check(describe_library_origin(None) == f"the default library root ({default_library_root()})",
                   "default provenance is reported")
 
             os.environ["MOVIE_STD_TARGET"] = str(tmp_path / "env_library")
@@ -2139,15 +2140,23 @@ def run_self_tests() -> int:
             check(describe_library_origin(None) == "MOVIE_STD_TARGET",
                   "MOVIE_STD_TARGET provenance is reported")
 
-            check(resolve_library(Path("/explicit/library")) == Path("/explicit/library"),
-                  "--source beats MOVIE_STD_TARGET")
-            check(describe_library_origin(Path("/explicit/library")) == "--source",
+            os.environ["ORGANIZE_LIBRARY"] = str(tmp_path / "current_library")
+            check(resolve_library(None) == tmp_path / "current_library",
+                  "ORGANIZE_LIBRARY takes precedence over the legacy variable")
+            check(describe_library_origin(None) == "ORGANIZE_LIBRARY",
+                  "ORGANIZE_LIBRARY provenance is reported")
+
+            explicit = tmp_path / "explicit_library"
+            check(resolve_library(explicit) == explicit,
+                  "--source beats the environment")
+            check(describe_library_origin(explicit) == "--source",
                   "--source provenance is reported")
         finally:
-            if saved_target is not None:
-                os.environ["MOVIE_STD_TARGET"] = saved_target
-            else:
-                os.environ.pop("MOVIE_STD_TARGET", None)
+            for var, value in saved_env.items():
+                if value is not None:
+                    os.environ[var] = value
+                else:
+                    os.environ.pop(var, None)
 
     if errors:
         print("SELF-TEST FAILED:")
