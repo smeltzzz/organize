@@ -1225,10 +1225,21 @@ def classify_hdr(stream: dict[str, Any], fmt: dict[str, Any] | None = None) -> t
 
 def pick_video_stream(payload: dict[str, Any]) -> dict[str, Any] | None:
     streams = [s for s in payload.get("streams", []) if isinstance(s, dict)]
+    def is_attached_picture(stream: dict[str, Any]) -> bool:
+        disposition = stream.get("disposition") or {}
+        tags = stream.get("tags") or {}
+        mimetype = str(tags.get("mimetype") or "").strip().casefold()
+        # Matroska attachments are not consistently exposed by ffprobe with
+        # disposition.attached_pic=1.  In the live-run cache, cover.jpg files
+        # appeared as full-duration MJPEG video streams with no disposition,
+        # causing four 10-bit features to be falsely queued as 8-bit.  The
+        # attachment MIME tag is the container's unambiguous signal.
+        return disposition.get("attached_pic") == 1 or mimetype.startswith("image/")
+
     real = [
         s for s in streams
         if str(s.get("codec_type") or "video") == "video"
-        and (s.get("disposition") or {}).get("attached_pic") != 1
+        and not is_attached_picture(s)
     ]
     if not real:
         return None
@@ -1947,6 +1958,16 @@ def run_self_tests() -> int:
         {"index": 2, "codec_type": "video", "pix_fmt": "yuv420p", "width": 4000, "height": 4000, "disposition": {"attached_pic": 1}},
     ]})
     _assert(multi_feature.status == STATUS_QUEUE and multi_feature.width == 1920, f"main feature selection {multi_feature}", errors)
+
+    matroska_cover = result_from_probe("cover.mkv", {"streams": [
+        {"index": 0, "codec_type": "video", "codec_name": "hevc", "pix_fmt": "yuv420p10le",
+         "width": 1920, "height": 804},
+        {"index": 2, "codec_type": "video", "codec_name": "mjpeg", "pix_fmt": "yuvj420p",
+         "bits_per_raw_sample": "8", "width": 2000, "height": 3000,
+         "tags": {"filename": "cover.jpg", "mimetype": "image/jpeg"}},
+    ]})
+    _assert(matroska_cover.status == STATUS_SKIP_SDR and matroska_cover.width == 1920,
+            f"Matroska MIME-tagged cover excluded {matroska_cover}", errors)
 
     _assert(bit_depth_from_pix_fmt("yuv420p") == 8, "yuv420p", errors)
     _assert(bit_depth_from_pix_fmt("yuv420p10le") == 10, "p10le", errors)

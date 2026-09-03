@@ -3846,23 +3846,36 @@ def refetch_english_srt(
             selected_provider = PROVIDER_SUBDL
     if pick is None:
         return False, "", "no unused qualifying English SRT for a replacement fetch"
-    try:
-        if dest.exists() and not dest.is_symlink():
-            dest.unlink()
-    except OSError as exc:
-        return False, str(pick.file_id), f"could not remove unsyncable sidecar: {exc}"
+
+    # Never remove or download over the live sidecar.  API quota errors,
+    # interrupted transfers, validation failures, and disk errors must leave
+    # the exact file that the caller gave us in place.  The sync caller may
+    # try several candidates, so each successful candidate is published with
+    # one atomic swap only after the downloader has completely written it.
+    if dest.is_symlink():
+        return False, str(pick.file_id), "refusing to replace a symlink sidecar"
+    staging = dest.with_name(f".{dest.name}.{os.getpid()}.{uuid.uuid4().hex}.refetch.tmp")
     try:
         if selected_provider == PROVIDER_SUBDL:
             download = subdl_downloads.get(str(pick.file_id))
             if download is None:
                 return False, str(pick.file_id), "SubDL candidate download reference is missing"
-            SubdlClient(subdl_key).download_srt(download, dest, video=video, expected_video=snapshot)
+            SubdlClient(subdl_key).download_srt(download, staging, video=video, expected_video=snapshot)
         else:
             if not isinstance(pick.file_id, int):
                 return False, str(pick.file_id), "OpenSubtitles candidate has an invalid file identifier"
-            OpenSubtitlesClient(cfg).download_srt(pick.file_id, dest, video=video, expected_video=snapshot)
+            OpenSubtitlesClient(cfg).download_srt(pick.file_id, staging, video=video, expected_video=snapshot)
+        usable, reason = validate_srt_sidecar(staging)
+        if not usable:
+            return False, str(pick.file_id), f"downloaded replacement is unusable ({reason})"
+        os.replace(staging, dest)
     except (RuntimeError, ValueError, OSError, ConcurrentSidecarError) as exc:
         return False, str(pick.file_id), str(exc)
+    finally:
+        try:
+            staging.unlink(missing_ok=True)
+        except OSError:
+            pass
     return True, str(pick.file_id), pick.release or "unnamed release"
 
 def run_extract_self_tests(errors: list[str]) -> None:

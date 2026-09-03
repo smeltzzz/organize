@@ -459,6 +459,46 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(self.srt.read_bytes(), before)
         self.assertIn("SUBTITLES HELD FOR REVIEW", self.report.read_text(encoding="utf-8"))
 
+    def test_rejected_refetch_restores_entry_time_original(self) -> None:
+        before = self.srt.read_bytes()
+        candidate = GOOD_SRT.replace("Hello.", "Replacement candidate.")
+        fake = FakeFfsubsync(offset=45.0)
+
+        def refetch(_video: Path, dest: Path, _excluded: list[str], _log: Path | None):
+            dest.write_text(candidate, encoding="utf-8")
+            return True, "123", "candidate release"
+
+        with mock.patch.object(ss, "run_ffsubsync", fake), \
+                mock.patch.object(ss, "_refetch_sidecar", side_effect=refetch), \
+                mock.patch.object(ss, "MAX_SYNC_REFETCHES", 1):
+            result = ss.sync_one(
+                ss.Job(self.srt, self.mkv), _cfg(self.tmp), "fake-ffsubsync",
+                ss.FfsubsyncFeatures(True, True, True),
+            )
+
+        self.assertEqual(result.status, ss.STATUS_REVIEW)
+        self.assertEqual(self.srt.read_bytes(), before)
+        self.assertEqual(len(fake.calls), 2)
+
+    def test_failed_refetch_restores_original_even_if_fetcher_removed_it(self) -> None:
+        before = self.srt.read_bytes()
+        fake = FakeFfsubsync(offset=45.0)
+
+        def destructive_failure(_video: Path, dest: Path, _excluded: list[str], _log: Path | None):
+            dest.unlink()
+            return False, "456", "HTTP 406 quota exceeded"
+
+        with mock.patch.object(ss, "run_ffsubsync", fake), \
+                mock.patch.object(ss, "_refetch_sidecar", side_effect=destructive_failure):
+            result = ss.sync_one(
+                ss.Job(self.srt, self.mkv), _cfg(self.tmp), "fake-ffsubsync",
+                ss.FfsubsyncFeatures(True, True, True),
+            )
+
+        self.assertEqual(result.status, ss.STATUS_REVIEW)
+        self.assertEqual(self.srt.read_bytes(), before)
+        self.assertIn("HTTP 406", result.detail)
+
     def test_dry_run_never_launches_ffsubsync(self) -> None:
         before = self.srt.read_bytes()
         fake = FakeFfsubsync(offset=-4.0)

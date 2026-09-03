@@ -1420,6 +1420,23 @@ def _remembered_offset(record: dict[str, Any]) -> float | None:
     return float(value)
 
 
+def _restore_sidecar_bytes(path: Path, content: bytes) -> str | None:
+    """Atomically restore the entry-time sidecar bytes; return an error detail."""
+    try:
+        if path.is_file() and not path.is_symlink() and path.read_bytes() == content:
+            return None
+    except OSError:
+        pass
+    staging = path.with_name(f"{STAGING_PREFIX}restore.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        staging.write_bytes(content)
+        os.replace(staging, path)
+        return None
+    except OSError as exc:
+        _remove_staging(staging)
+        return f"CRITICAL: could not restore original sidecar ({exc})"
+
+
 def sync_one(
     job: Job,
     cfg: Config,
@@ -1452,7 +1469,17 @@ def sync_one(
         return SyncResult(srt=srt, video=video, status=STATUS_SKIPPED,
                           detail=f"could not stat movie file ({exc})")
 
-    original_sha = sha256_file(srt)
+    # Keep the entry-time bytes for the whole retry transaction.  Replacement
+    # candidates may temporarily occupy the canonical path because ffsubsync
+    # consumes that path, but every terminal REVIEW/FAILED result restores
+    # these exact bytes before returning.
+    try:
+        entry_bytes = srt.read_bytes()
+    except OSError as exc:
+        return SyncResult(srt=srt, video=video, status=STATUS_SKIPPED,
+                          detail=f"could not read sidecar ({exc})")
+    entry_sha = hashlib.sha256(entry_bytes).hexdigest()
+    original_sha = entry_sha
 
     # Extracted, not downloaded: the cues came out of this movie's own
     # container timeline, so there is no drift to correct. Measuring it would
@@ -1551,32 +1578,60 @@ def sync_one(
                                   offset_seconds=parsed.offset_seconds,
                                   scale_factor=parsed.scale_factor, score=parsed.score,
                                   seconds=time.monotonic() - started,
-                                  original_sha=original_sha, new_sha=new_sha)
+                                  original_sha=entry_sha, new_sha=new_sha)
 
         _remove_staging(staging)
         last = SyncResult(srt=srt, video=video, status=status, detail=detail,
                           offset_seconds=parsed.offset_seconds,
                           scale_factor=parsed.scale_factor, score=parsed.score,
                           seconds=time.monotonic() - started,
-                          original_sha=original_sha, error_tail=error_tail)
+                          original_sha=entry_sha, error_tail=error_tail)
         if status not in {STATUS_REVIEW, STATUS_FAILED}:
-            if status == STATUS_IN_SYNC and state is not None:
+            if status == STATUS_IN_SYNC and attempt > 0:
+                # A downloaded candidate is a real sidecar replacement even
+                # when ffsubsync measures no correction.  Report the write
+                # honestly instead of claiming the entry-time file was
+                # untouched.
+                candidate_sha = sha256_file(srt)
+                last.status = STATUS_SYNCED
+                last.detail = (
+                    "replacement subtitle verified in sync"
+                    + (f" (offset {parsed.offset_seconds:+.3f}s)"
+                       if parsed.offset_seconds is not None else "")
+                )
+                last.new_sha = candidate_sha
+                if state is not None:
+                    remember_sync_state(state, srt, candidate_sha, video, STATUS_SYNCED,
+                                        parsed.offset_seconds)
+            elif status == STATUS_IN_SYNC and state is not None:
                 # Nothing was written, so these are the bytes that measured
                 # in sync. Held-for-review and failed syncs are never recorded.
-                remember_sync_state(state, srt, original_sha, video, STATUS_IN_SYNC,
+                remember_sync_state(state, srt, entry_sha, video, STATUS_IN_SYNC,
                                     parsed.offset_seconds)
             return last
         if attempt >= MAX_SYNC_REFETCHES:
+            restore_error = _restore_sidecar_bytes(srt, entry_bytes)
+            if restore_error:
+                last.status = STATUS_FAILED
+                last.detail = f"{last.detail}; {restore_error}"
             return last
         ok, file_id, fetch_detail = _refetch_sidecar(video, srt, exclude_ids, cfg.log_file)
         if file_id:
             exclude_ids.append(str(file_id))
         if not ok:
             last.detail = f"{last.detail}; replacement fetch stopped: {fetch_detail}"
+            restore_error = _restore_sidecar_bytes(srt, entry_bytes)
+            if restore_error:
+                last.status = STATUS_FAILED
+                last.detail = f"{last.detail}; {restore_error}"
             return last
         log(f"fetched replacement subtitle id={file_id} ({fetch_detail}); retrying ffsubsync")
         original_sha = sha256_file(srt)
     assert last is not None
+    restore_error = _restore_sidecar_bytes(srt, entry_bytes)
+    if restore_error:
+        last.status = STATUS_FAILED
+        last.detail = f"{last.detail}; {restore_error}"
     return last
 
 
