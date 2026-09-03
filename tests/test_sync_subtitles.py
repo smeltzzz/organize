@@ -615,7 +615,10 @@ class EndToEndTests(unittest.TestCase):
 
     def test_unreadable_video_is_a_failure(self) -> None:
         # chmod 000 makes the video unreadable to ffsubsync's permission check.
-        # Skip on platforms where the test user can still read it (e.g. root).
+        # Skip on platforms where the test user can still read it (e.g. root),
+        # and on Windows, where chmod cannot clear the read bit at all.
+        if os.name == "nt":
+            self.skipTest("Windows chmod cannot revoke read access")
         if getattr(os, "geteuid", lambda: 1)() == 0:
             self.skipTest("running as root; permission bits do not apply")
         self.mkv.chmod(0)

@@ -22,6 +22,7 @@ comments may differ per file but behaviour cannot.
 from __future__ import annotations
 
 import ast
+import os
 import unittest
 from pathlib import Path
 
@@ -203,10 +204,6 @@ class PipelineOrderIsLoadBearing(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class PrerequisiteChecksAgree(unittest.TestCase):
     """All three prerequisite surfaces must answer the same question.
 
@@ -242,9 +239,15 @@ class PrerequisiteChecksAgree(unittest.TestCase):
         import mkv_track_cleaner
 
         with tempfile.TemporaryDirectory() as td:
-            fake = Path(td) / "mkvmerge"
-            fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            fake.chmod(0o755)
+            # shutil.which() only accepts a PATHEXT extension on Windows, and
+            # chmod is a no-op there, so the stub has to be named per platform.
+            if os.name == "nt":
+                fake = Path(td) / "mkvmerge.exe"
+                fake.write_bytes(b"MZ")  # never executed, only located
+            else:
+                fake = Path(td) / "mkvmerge"
+                fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                fake.chmod(0o755)
 
             original = mkv_track_cleaner.KNOWN_MKVMERGE_PATHS
             try:
@@ -257,3 +260,7 @@ class PrerequisiteChecksAgree(unittest.TestCase):
                 )
             finally:
                 mkv_track_cleaner.KNOWN_MKVMERGE_PATHS = original
+
+
+if __name__ == "__main__":
+    unittest.main()
