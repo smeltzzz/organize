@@ -7,9 +7,10 @@ the canonical movie library, pairs every external ``.srt`` sidecar with its
 movie file, and uses ``ffsubsync`` to measure how far the subtitle timing
 drifts from the actual audio. When the drift is real and trustworthy the
 sidecar is atomically replaced with the corrected copy; when it is
-essentially zero the file is left byte-identical; when it is untrustworthy -
-or ffsubsync fails outright - the original is kept and the movie is held for
-review.
+essentially zero the file is left byte-identical. When a candidate is
+untrustworthy - or ffsubsync fails outright - up to 10 different replacement
+downloads are tested. If none can be synced, the entry-time sidecar is restored
+byte-for-byte and the movie is held for review.
 
 Why this position:
 
@@ -896,7 +897,7 @@ def is_junk_filename(name: str) -> bool:
 # Tool constants
 # =============================================================================
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # The documented Windows layout; every path below is overridable per run.
 DEFAULT_LIBRARY = r"E:\torrents\final_organized"
@@ -954,8 +955,11 @@ DEFAULT_TIMEOUT_SECONDS = 1800.0  # a feature film's audio, with margin
 DEFAULT_LOCK_TIMEOUT_SECONDS = 60.0
 
 # When ffsubsync cannot trust the current sidecar, download a different
-# qualifying English SRT and retry. Cap keeps the daily provider quota finite.
-MAX_SYNC_REFETCHES = 5
+# qualifying English SRT and retry.  This counts replacement downloads only:
+# the sidecar that entered the sync step was fetched earlier in the workflow
+# (or supplied by the user) and does not consume this retry budget.  Keep the
+# cap finite so one movie cannot consume an unbounded provider quota.
+MAX_SYNC_REFETCHES = 10
 
 # Result statuses. Reading order in the report is urgency order:
 # review -> failed -> synced -> preview -> skipped -> in_sync -> remembered

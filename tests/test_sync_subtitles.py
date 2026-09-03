@@ -499,6 +499,43 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(self.srt.read_bytes(), before)
         self.assertIn("HTTP 406", result.detail)
 
+    def test_tenth_replacement_download_can_be_the_one_that_syncs(self) -> None:
+        """The per-movie retry budget is inclusive: candidate ten is tested."""
+        before = self.srt.read_bytes()
+        rejected = FakeFfsubsync(offset=45.0)
+        accepted = FakeFfsubsync(offset=-4.0)
+        sync_calls = 0
+        download_ids: list[str] = []
+
+        def run(cfg: ss.Config, command: list[str]):
+            nonlocal sync_calls
+            sync_calls += 1
+            # The entry-time sidecar and the first nine downloads are bad;
+            # the tenth replacement is accepted and atomically activated.
+            fake = accepted if sync_calls == 11 else rejected
+            return fake(cfg, command)
+
+        def refetch(_video: Path, dest: Path, excluded: list[str], _log: Path | None):
+            candidate_id = str(len(download_ids) + 1)
+            self.assertEqual(excluded, download_ids)
+            download_ids.append(candidate_id)
+            dest.write_text(GOOD_SRT.replace("Hello.", f"Candidate {candidate_id}."), encoding="utf-8")
+            return True, candidate_id, f"candidate release {candidate_id}"
+
+        with mock.patch.object(ss, "run_ffsubsync", side_effect=run), \
+                mock.patch.object(ss, "_refetch_sidecar", side_effect=refetch):
+            result = ss.sync_one(
+                ss.Job(self.srt, self.mkv), _cfg(self.tmp), "fake-ffsubsync",
+                ss.FfsubsyncFeatures(True, True, True),
+            )
+
+        self.assertEqual(ss.MAX_SYNC_REFETCHES, 10)
+        self.assertEqual(download_ids, [str(number) for number in range(1, 11)])
+        self.assertEqual(sync_calls, 11)
+        self.assertEqual(result.status, ss.STATUS_SYNCED)
+        self.assertNotEqual(self.srt.read_bytes(), before)
+        self.assertEqual(self.srt.read_text(encoding="utf-8"), SHIFTED_SRT)
+
     def test_dry_run_never_launches_ffsubsync(self) -> None:
         before = self.srt.read_bytes()
         fake = FakeFfsubsync(offset=-4.0)

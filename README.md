@@ -323,9 +323,13 @@ Trustworthy drift is applied by atomically swapping in the corrected sidecar;
 sub-threshold drift (`--min-offset`, default 0.1 s) leaves the file
 byte-identical; anything untrustworthy — beyond the trust window
 (`--max-offset`, default 30 s), anti-correlated scores, ffsubsync's own
-quality-gate refusal, or a plain failure — is **held for review, never
-applied**. Movie bytes are never touched, so the OpenSubtitles moviehash is
-undisturbed and the audit that follows sees the finished sidecars.
+quality-gate refusal, or a plain failure — triggers another qualifying
+subtitle download. The synchronizer tests up to **10 replacement downloads
+per movie**, stopping as soon as one is already aligned or can be safely
+corrected. If none works (or fetching stops), the entry-time sidecar is
+restored byte-for-byte and **held for review, never applied**. Movie bytes are
+never touched, so the OpenSubtitles moviehash is undisturbed and the audit that
+follows sees the finished sidecars.
 
 ```bash
 python3 sync_subtitles.py --source /path/to/movies --dry-run    # preview
