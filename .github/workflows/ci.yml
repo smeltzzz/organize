@@ -1,0 +1,74 @@
+# Continuous Integration — runs the entire offline test suite on every push
+# and pull request across all supported platforms and Python versions.
+#
+# The suite is deliberately hermetic: no media files, no mkvtoolnix, no ffprobe,
+# no OpenSubtitles API key, and no network access are required.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Byte-compile every script (syntax gate)
+        run: >-
+          python -m compileall -q
+          organize.py pipeline.py jellyfin_one_shot.py 10bit.py
+          library_auditor.py mkv_track_cleaner.py movie_standardizer.py
+          subtitle_fetcher.py sync_subtitles.py
+
+      - name: Built-in self-tests (one per tool)
+        run: python organize.py test
+
+      - name: Unit test suite (fully offline)
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+  doctor-smoke:
+    # Verifies the unified CLI boots and the diagnostic doctor runs green-box
+    # on a pristine machine (no binaries, no API key — warnings, not crashes).
+    name: CLI smoke test (doctor + dashboard)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Dashboard renders with no arguments
+        run: python organize.py
+      - name: Doctor exits 0 on a bare machine
+        run: python organize.py doctor
+      - name: Pipeline step listing works
+        run: python pipeline.py --list-steps
