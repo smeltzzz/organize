@@ -38,12 +38,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Byte-compile every script (syntax gate)
-        run: python -m compileall -q organize.py common.py pipeline.py 10bit.py library_auditor.py mkv_track_cleaner.py movie_standardizer.py subtitle_fetcher.py
+        run: >-
+          python -m compileall -q
+          organize.py pipeline.py jellyfin_one_shot.py 10bit.py
+          library_auditor.py mkv_track_cleaner.py movie_standardizer.py
+          subtitle_fetcher.py sync_subtitles.py
 
       - name: Built-in self-tests (one per tool)
         run: python organize.py test
 
-      - name: Unit test suite (208 tests, fully offline)
+      - name: Unit test suite (fully offline)
         run: python -m unittest discover -s tests -p "test_*.py"
 
   doctor-smoke:
