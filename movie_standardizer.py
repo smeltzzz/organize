@@ -1266,7 +1266,6 @@ def record_outcome(
     reason: str = "",
 ) -> None:
     """Record a material operation for the run summary and end-of-run report."""
-    global RUN_SUMMARY, RUN_EVENTS
     attr = {
         "completed": "completed",
         "skipped": "skipped",

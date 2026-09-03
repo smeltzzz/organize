@@ -1835,80 +1835,85 @@ def _source_snapshot_matches(path: Path, snapshot: dict[str, Any]) -> bool:
             return False
     return bool(expected.get("identity") == observed.get("identity"))
 
+def _validate_srt_file(sidecar: Path) -> tuple[bool, str, dict[str, Any] | None]:
+    """Validate one covering SRT file, returning ``(valid, reason, snapshot)``.
+
+    ``snapshot`` is ``None`` unless the file is a regular, non-symlink,
+    size-bounded SRT that decoded cleanly and did not change while being read.
+    This is the exact check the single-sidecar path always applied, extracted
+    so an unusable ``.eng.srt`` can fall through to a valid ``.eng.sdh.srt``
+    instead of hiding it.
+    """
+    try:
+        file_stat = sidecar.stat(follow_symlinks=False)
+    except OSError as exc:
+        return False, f"could not stat external SRT: {exc}", None
+    if sidecar.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
+        return False, "external SRT is not a regular non-symlink file", None
+    if file_stat.st_size <= 0:
+        return False, "external SRT is empty", None
+    if file_stat.st_size > EXTERNAL_SRT_MAX_BYTES:
+        return False, f"external SRT exceeds {format_size(EXTERNAL_SRT_MAX_BYTES)} safety limit", None
+    try:
+        raw = sidecar.read_bytes()
+    except OSError as exc:
+        return False, f"could not read external SRT: {exc}", None
+    text = decode_srt_bytes(raw)
+    if text is None:
+        return False, "external SRT has an unsupported text encoding", None
+    if not EXTERNAL_SRT_CUE_RE.search(normalize_srt_newlines(text)):
+        return False, "external SRT does not contain a valid numbered cue", None
+    try:
+        after_read_stat = sidecar.stat(follow_symlinks=False)
+    except OSError as exc:
+        return False, f"could not re-stat external SRT after reading: {exc}", None
+    if _source_snapshot(sidecar, file_stat)["identity"] != _source_snapshot(sidecar, after_read_stat)["identity"]:
+        return False, "external SRT changed while being validated", None
+    snapshot = _source_snapshot(sidecar, after_read_stat)
+    snapshot["sha256"] = hashlib.sha256(raw).hexdigest()
+    return True, "", snapshot
+
+
 def validate_exact_external_english_srt(mkv_path: Path) -> dict[str, Any]:
     """Validate the sole sidecar allowed to replace embedded subtitle choices.
 
-    Only ``<exact MKV stem>.eng.srt`` beside the movie qualifies. A validated
-    legacy ``.en.srt`` is renamed to that canonical name first. The helper is
-    intentionally conservative: any uncertain encoding, unsafe file type,
-    oversized payload, or malformed SRT leaves embedded subtitle selection
-    unchanged.
+    Either ``<exact MKV stem>.eng.srt`` or ``<exact MKV stem>.eng.sdh.srt``
+    beside the movie qualifies, preferring the canonical ``.eng.srt``. A
+    validated legacy ``.en.srt`` is renamed to the canonical name first. When
+    the preferred name exists but is unusable (wrong encoding, oversized,
+    malformed, or a symlink), the alternate covering name is still checked so a
+    broken ``.eng.srt`` cannot hide a perfectly valid ``.eng.sdh.srt``. The
+    helper stays conservative: with no usable covering sidecar the embedded
+    subtitle selection is left unchanged.
     """
     promoted, promote_reason = promote_legacy_external_english_srt(mkv_path)
     covering = [
         mkv_path.with_name(f"{mkv_path.stem}{suffix}")
         for suffix in COVERING_ENGLISH_SRT_SUFFIXES
     ]
-    sidecar = covering[0]
-    result: dict[str, Any] = {"mkv_path": str(mkv_path), "path": str(sidecar), "valid": False, "reason": ""}
+    result: dict[str, Any] = {"mkv_path": str(mkv_path), "path": str(covering[0]), "valid": False, "reason": ""}
     if promoted is None and promote_reason and "absent" not in promote_reason:
         # Dual-name / occupied-destination cases must not silently drop embeds.
         if "unusable" not in promote_reason:
             result["reason"] = f"legacy external SRT could not be promoted: {promote_reason}"
             return result
-    chosen: Path | None = None
-    last_stat_error = "external SRT is absent"
+    last_reason = "external SRT is absent"
     for candidate in covering:
-        try:
-            file_stat = candidate.stat(follow_symlinks=False)
-        except OSError as exc:
-            last_stat_error = "external SRT is absent" if not candidate.exists() else f"could not stat external SRT: {exc}"
-            continue
-        sidecar = candidate
-        chosen = candidate
-        break
-    if chosen is None:
-        result["reason"] = last_stat_error
-        return result
-    # The record must point at the sidecar that was actually validated (an
-    # ``.eng.sdh.srt`` found through the covering list, for example). Leaving
-    # the path at the initialized canonical name would make the post-remux
-    # snapshot re-check stat a file that never existed and reject an
-    # untouched, perfectly valid sidecar.
-    result["path"] = str(chosen)
-    if sidecar.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
-        result["reason"] = "external SRT is not a regular non-symlink file"
-        return result
-    if file_stat.st_size <= 0:
-        result["reason"] = "external SRT is empty"
-        return result
-    if file_stat.st_size > EXTERNAL_SRT_MAX_BYTES:
-        result["reason"] = f"external SRT exceeds {format_size(EXTERNAL_SRT_MAX_BYTES)} safety limit"
-        return result
-    try:
-        raw = sidecar.read_bytes()
-    except OSError as exc:
-        result["reason"] = f"could not read external SRT: {exc}"
-        return result
-    text = decode_srt_bytes(raw)
-    if text is None:
-        result["reason"] = "external SRT has an unsupported text encoding"
-        return result
-    normalized = normalize_srt_newlines(text)
-    if not EXTERNAL_SRT_CUE_RE.search(normalized):
-        result["reason"] = "external SRT does not contain a valid numbered cue"
-        return result
-    try:
-        after_read_stat = sidecar.stat(follow_symlinks=False)
-    except OSError as exc:
-        result["reason"] = f"could not re-stat external SRT after reading: {exc}"
-        return result
-    if _source_snapshot(sidecar, file_stat)["identity"] != _source_snapshot(sidecar, after_read_stat)["identity"]:
-        result["reason"] = "external SRT changed while being validated"
-        return result
-    snapshot = _source_snapshot(sidecar, after_read_stat)
-    snapshot["sha256"] = hashlib.sha256(raw).hexdigest()
-    result.update({"valid": True, "reason": "", "snapshot": snapshot})
+        ok, reason, snapshot = _validate_srt_file(candidate)
+        if ok and snapshot is not None:
+            # The record must point at the sidecar that was actually validated
+            # (an ``.eng.sdh.srt`` found through the covering list, for
+            # example). Leaving the path at the initialized canonical name
+            # would make the post-remux snapshot re-check stat a file that
+            # never existed and reject an untouched, perfectly valid sidecar.
+            result.update({"valid": True, "reason": "", "path": str(candidate), "snapshot": snapshot})
+            return result
+        # Distinguish "nothing there" from "something there but unusable": a
+        # fully-absent pair still reads as absent, while a broken sidecar that
+        # hid a valid alternate keeps its fall-through reason for the log.
+        if candidate.exists() or candidate.is_symlink():
+            last_reason = f"{candidate.name} is unusable ({reason})"
+    result["reason"] = last_reason
     return result
 
 def external_srt_snapshot_matches(record: dict[str, Any]) -> bool:
@@ -3891,6 +3896,23 @@ def run_self_tests() -> int:
         check(str(sdh_record.get("path", "")).endswith("Sdh (2002).eng.sdh.srt"),
               "sdh record names the file it was validated from")
         check(external_srt_snapshot_matches(sdh_record), "untouched sdh sidecar keeps its snapshot match")
+        # A broken .eng.srt beside a valid .eng.sdh.srt must fall through to
+        # the valid alternate rather than hiding it.
+        fallthrough_movie = tmp / "Fallthrough (2003)"
+        fallthrough_movie.mkdir()
+        (fallthrough_movie / "Fallthrough (2003).mkv").write_bytes(b"x")
+        (fallthrough_movie / "Fallthrough (2003).eng.srt").write_text(
+            "<html>not a subtitle</html>", encoding="utf-8",
+        )
+        (fallthrough_movie / "Fallthrough (2003).eng.sdh.srt").write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nSDH line\n", encoding="utf-8",
+        )
+        fallthrough_record = validate_exact_external_english_srt(fallthrough_movie / "Fallthrough (2003).mkv")
+        check(bool(fallthrough_record.get("valid")),
+              f"broken .eng.srt falls through to valid .eng.sdh.srt: {fallthrough_record}")
+        check(str(fallthrough_record.get("path", "")).endswith("Fallthrough (2003).eng.sdh.srt"),
+              "fallthrough record names the valid .eng.sdh.srt")
+        check(external_srt_snapshot_matches(fallthrough_record), "fallthrough sdh keeps its snapshot match")
         movie_srt.write_text("<html>not a subtitle</html>", encoding="utf-8")
         check(not external_srt_snapshot_matches(external_record), "changed/malformed external SRT rejects activation")
         check(not validate_exact_external_english_srt(movie / "Film (2000).mkv").get("valid"),
