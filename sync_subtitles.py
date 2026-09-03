@@ -918,15 +918,134 @@ def is_junk_filename(name: str) -> bool:
 VERSION = "1.2.0"
 
 # The documented Windows layout; every path below is overridable per run.
-DEFAULT_LIBRARY = r"E:\torrents\final_organized"
-LOG_FILE = r"E:\torrents\tools\ReportsAndLogs\sync_subtitles\sync_subtitles.log"
-REPORT_FILE = r"E:\torrents\tools\ReportsAndLogs\sync_subtitles\sync_subtitles_report.txt"
+# ---------------------------------------------------------------------------
+# Library-root resolution (vendored inline; keep every copy identical)
+#
+# The movie-library root used to be a bare literal repeated in six files, with
+# only two of them honouring MOVIE_STD_TARGET. On a non-Windows host the tools
+# that ignored it happily defaulted to a Windows drive letter, wrote reports to
+# a literal path like `E:\torrents\...` in the current directory, and .gitignore
+# grew an `E:*` rule to catch the debris. One resolver, used by every tool,
+# removes that whole class of problem.
+#
+# Precedence: explicit --flag > ORGANIZE_LIBRARY > MOVIE_STD_TARGET > platform
+# default. A `.env` beside the scripts is loaded first, but never overrides a
+# variable already exported in the environment.
+# ---------------------------------------------------------------------------
+
+ENV_FILE_NAME = ".env"
+LIBRARY_ENV_VAR = "ORGANIZE_LIBRARY"
+LEGACY_LIBRARY_ENV_VAR = "MOVIE_STD_TARGET"
+
+
+def load_dotenv(path: Path | None = None) -> dict[str, str]:
+    """Load ``KEY=value`` pairs from a .env file next to the scripts.
+
+    The repo ships a fully documented ``.env.example`` telling users to copy it
+    to ``.env``, but nothing ever read that file: every documented variable
+    silently did nothing unless separately exported. This closes that gap.
+
+    Real environment variables always win, so an explicit export still beats a
+    stale file. Blank lines, ``#`` comments, a leading ``export``, and single or
+    double quotes around the value are all accepted. Malformed lines are
+    skipped rather than raising: a typo in a config file must not stop a
+    maintenance run that would otherwise work.
+    """
+    env_path = path or (Path(__file__).resolve().parent / ENV_FILE_NAME)
+    loaded: dict[str, str] = {}
+    try:
+        raw = env_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return loaded
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[len("export "):].lstrip()
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        loaded[key] = value
+        os.environ.setdefault(key, value)
+    return loaded
+
+
+def default_library_root() -> Path:
+    """The platform's documented library root when nothing else is configured.
+
+    The Windows default is the layout the README documents. Pointing a POSIX
+    host at ``E:\\torrents\\final_organized`` only ever produced a confusing
+    "does not exist" (or worse, a literal ``E:...`` directory in the CWD), so
+    those hosts get a sensible home-relative default instead.
+    """
+    if os.name == "nt":
+        return Path(r"E:\torrents\final_organized")
+    return Path.home() / "Media" / "Movies"
+
+
+def resolve_library(explicit: Path | str | None = None) -> Path:
+    """Resolve the movie-library root that every tool in the toolchain shares.
+
+    Precedence: an explicit flag, then ORGANIZE_LIBRARY, then the legacy
+    MOVIE_STD_TARGET, then the platform default.
+    """
+    load_dotenv()
+    if explicit is not None and str(explicit).strip():
+        return Path(explicit).expanduser()
+    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
+        value = (os.environ.get(var) or "").strip()
+        if value:
+            return Path(value).expanduser()
+    return default_library_root()
+
+
+def describe_library_origin(explicit: Path | str | None = None) -> str:
+    """Human-readable provenance of the resolved root, for error messages."""
+    load_dotenv()
+    if explicit is not None and str(explicit).strip():
+        return "--source"
+    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
+        if (os.environ.get(var) or "").strip():
+            return var
+    return f"the default library root ({default_library_root()})"
+
+
+def default_reports_root() -> Path:
+    r"""Where logs, reports and probe caches go when nothing is configured.
+
+    These must live OUTSIDE the media library (the auditor would otherwise
+    count a log folder at the library root as a movie folder). On Windows that
+    is the documented tools directory; elsewhere it follows the XDG state
+    convention. Hardcoding the Windows path for every platform is what made a
+    POSIX run scatter literal `E:\torrents\...` filenames into the current
+    working directory.
+    """
+    if os.name == "nt":
+        return Path(r"E:\torrents\tools\ReportsAndLogs")
+    state_home = (os.environ.get("XDG_STATE_HOME") or "").strip()
+    base = Path(state_home) if state_home else Path.home() / ".local" / "state"
+    return base / "organize"
+
+
+def default_tool_dir(tool_name: str) -> Path:
+    """The per-tool subdirectory of :func:`default_reports_root`."""
+    return default_reports_root() / tool_name
+
+
+DEFAULT_LIBRARY = str(resolve_library())
+LOG_FILE = str(default_tool_dir("sync_subtitles") / "sync_subtitles.log")
+REPORT_FILE = str(default_tool_dir("sync_subtitles") / "sync_subtitles_report.txt")
 
 # Remembered sync verdicts, outside the library like every other artifact.
 # Keyed by sidecar path; a record is honoured only while the sidecar's own
 # SHA-256 and the movie's size and mtime still match it. Override with
 # SUBTITLE_SYNC_LEDGER or --sync-ledger.
-SYNC_STATE_FILE = r"E:\torrents\tools\ReportsAndLogs\sync_subtitles\sync_state.json"
+SYNC_STATE_FILE = str(default_tool_dir("sync_subtitles") / "sync_state.json")
 SYNC_STATE_ENV = "SUBTITLE_SYNC_LEDGER"
 SYNC_STATE_SCHEMA = 1
 MAX_SYNC_STATE_ENTRIES = 20000  # oldest forgotten first; a miss only costs time
@@ -2301,10 +2420,10 @@ def run_self_tests() -> int:
 
     # -- constants ---------------------------------------------------------------------
     check(EXTERNAL_SRT_SUFFIX == ".eng.srt", "canonical sidecar suffix")
-    check(LOG_FILE.startswith(r"E:\torrents\tools\ReportsAndLogs\sync_subtitles"),
-          "log defaults under ReportsAndLogs")
-    check(REPORT_FILE.startswith(r"E:\torrents\tools\ReportsAndLogs\sync_subtitles"),
-          "report defaults under ReportsAndLogs")
+    check(Path(LOG_FILE).parent == default_tool_dir("sync_subtitles"),
+          "log defaults under the platform reports root")
+    check(Path(REPORT_FILE).parent == default_tool_dir("sync_subtitles"),
+          "report defaults under the platform reports root")
 
     if errors:
         print("SELF-TEST FAILED:")

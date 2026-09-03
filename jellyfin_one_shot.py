@@ -102,7 +102,126 @@ VERSION = "1.3.1"
 # library_auditor.py's SOURCE_DIR and pipeline.py's DEFAULT_LIBRARY). Keeping
 # the value identical means a bare run finishes the same library the other
 # scripts maintain. MOVIE_STD_TARGET overrides it; an explicit --source wins.
-DEFAULT_LIBRARY = r"E:\torrents\final_organized"
+# ---------------------------------------------------------------------------
+# Library-root resolution (vendored inline; keep every copy identical)
+#
+# The movie-library root used to be a bare literal repeated in six files, with
+# only two of them honouring MOVIE_STD_TARGET. On a non-Windows host the tools
+# that ignored it happily defaulted to a Windows drive letter, wrote reports to
+# a literal path like `E:\torrents\...` in the current directory, and .gitignore
+# grew an `E:*` rule to catch the debris. One resolver, used by every tool,
+# removes that whole class of problem.
+#
+# Precedence: explicit --flag > ORGANIZE_LIBRARY > MOVIE_STD_TARGET > platform
+# default. A `.env` beside the scripts is loaded first, but never overrides a
+# variable already exported in the environment.
+# ---------------------------------------------------------------------------
+
+ENV_FILE_NAME = ".env"
+LIBRARY_ENV_VAR = "ORGANIZE_LIBRARY"
+LEGACY_LIBRARY_ENV_VAR = "MOVIE_STD_TARGET"
+
+
+def load_dotenv(path: Path | None = None) -> dict[str, str]:
+    """Load ``KEY=value`` pairs from a .env file next to the scripts.
+
+    The repo ships a fully documented ``.env.example`` telling users to copy it
+    to ``.env``, but nothing ever read that file: every documented variable
+    silently did nothing unless separately exported. This closes that gap.
+
+    Real environment variables always win, so an explicit export still beats a
+    stale file. Blank lines, ``#`` comments, a leading ``export``, and single or
+    double quotes around the value are all accepted. Malformed lines are
+    skipped rather than raising: a typo in a config file must not stop a
+    maintenance run that would otherwise work.
+    """
+    env_path = path or (Path(__file__).resolve().parent / ENV_FILE_NAME)
+    loaded: dict[str, str] = {}
+    try:
+        raw = env_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return loaded
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[len("export "):].lstrip()
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        loaded[key] = value
+        os.environ.setdefault(key, value)
+    return loaded
+
+
+def default_library_root() -> Path:
+    """The platform's documented library root when nothing else is configured.
+
+    The Windows default is the layout the README documents. Pointing a POSIX
+    host at ``E:\\torrents\\final_organized`` only ever produced a confusing
+    "does not exist" (or worse, a literal ``E:...`` directory in the CWD), so
+    those hosts get a sensible home-relative default instead.
+    """
+    if os.name == "nt":
+        return Path(r"E:\torrents\final_organized")
+    return Path.home() / "Media" / "Movies"
+
+
+def resolve_library(explicit: Path | str | None = None) -> Path:
+    """Resolve the movie-library root that every tool in the toolchain shares.
+
+    Precedence: an explicit flag, then ORGANIZE_LIBRARY, then the legacy
+    MOVIE_STD_TARGET, then the platform default.
+    """
+    load_dotenv()
+    if explicit is not None and str(explicit).strip():
+        return Path(explicit).expanduser()
+    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
+        value = (os.environ.get(var) or "").strip()
+        if value:
+            return Path(value).expanduser()
+    return default_library_root()
+
+
+def describe_library_origin(explicit: Path | str | None = None) -> str:
+    """Human-readable provenance of the resolved root, for error messages."""
+    load_dotenv()
+    if explicit is not None and str(explicit).strip():
+        return "--source"
+    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
+        if (os.environ.get(var) or "").strip():
+            return var
+    return f"the default library root ({default_library_root()})"
+
+
+def default_reports_root() -> Path:
+    r"""Where logs, reports and probe caches go when nothing is configured.
+
+    These must live OUTSIDE the media library (the auditor would otherwise
+    count a log folder at the library root as a movie folder). On Windows that
+    is the documented tools directory; elsewhere it follows the XDG state
+    convention. Hardcoding the Windows path for every platform is what made a
+    POSIX run scatter literal `E:\torrents\...` filenames into the current
+    working directory.
+    """
+    if os.name == "nt":
+        return Path(r"E:\torrents\tools\ReportsAndLogs")
+    state_home = (os.environ.get("XDG_STATE_HOME") or "").strip()
+    base = Path(state_home) if state_home else Path.home() / ".local" / "state"
+    return base / "organize"
+
+
+def default_tool_dir(tool_name: str) -> Path:
+    """The per-tool subdirectory of :func:`default_reports_root`."""
+    return default_reports_root() / tool_name
+
+
+DEFAULT_LIBRARY = str(resolve_library())
 
 DEFAULT_LOG_DIR = Path(__file__).parent / "logs"
 SCRAPING_DAILY_CAP = 20  # per source, matches subtitle_fetcher.py default
@@ -601,32 +720,6 @@ def log_dir_inside_source(log_dir: Path, source: Path) -> bool:
 # ---------------------------------------------------------------------------
 # Library root resolution
 # ---------------------------------------------------------------------------
-def resolve_library(explicit: Path | None = None) -> Path:
-    """Resolve the movie-library root: --source, then MOVIE_STD_TARGET, then default.
-
-    Every sibling tool defaults its library root to ``DEFAULT_LIBRARY``
-    (``E:\\torrents\\final_organized``) and several honour ``MOVIE_STD_TARGET``,
-    so the one-shot does the same: run bare and it finishes the library the
-    rest of the toolchain already maintains. An explicit flag always wins.
-    """
-    if explicit is not None:
-        return Path(explicit).expanduser()
-    return Path(os.environ.get("MOVIE_STD_TARGET") or DEFAULT_LIBRARY).expanduser()
-
-
-def describe_library_origin(explicit: Path | None = None) -> str:
-    """Human-readable provenance of a resolved library root, for error messages.
-
-    "Which folder did it actually point at, and why?" is the whole content of
-    most misconfiguration reports, so name the source of the value.
-    """
-    if explicit is not None:
-        return "--source"
-    if (os.environ.get("MOVIE_STD_TARGET") or "").strip():
-        return "MOVIE_STD_TARGET"
-    return f"the default library root ({DEFAULT_LIBRARY})"
-
-
 # ---------------------------------------------------------------------------
 # Auditor report parsing
 # ---------------------------------------------------------------------------

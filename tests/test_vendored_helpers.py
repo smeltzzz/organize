@@ -97,6 +97,12 @@ class VendoredHelpersAgree(unittest.TestCase):
             "exact_external_english_srt_path",
             "legacy_external_english_srt_path",
             "promote_legacy_external_english_srt",
+            "load_dotenv",
+            "default_library_root",
+            "resolve_library",
+            "describe_library_origin",
+            "default_reports_root",
+            "default_tool_dir",
         )
         for name in shared:
             copies = {
