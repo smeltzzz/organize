@@ -640,5 +640,45 @@ class CoordinationLockTests(unittest.TestCase):
         self.assertIn(STANDARDIZER_LOCK_NAME, lock_a.path.name)
 
 
+class SourceRootResolutionTests(unittest.TestCase):
+    """The batch-scan source root must be platform-aware and env-driven."""
+
+    def setUp(self) -> None:
+        self._vars = ("MOVIE_STD_SOURCE", "ORGANIZE_LIBRARY", "MOVIE_STD_TARGET")
+        self._saved = {}
+        for var in self._vars:
+            self._saved[var] = os.environ.pop(var, None)
+
+    def tearDown(self) -> None:
+        for var, value in self._saved.items():
+            if value is not None:
+                os.environ[var] = value
+            else:
+                os.environ.pop(var, None)
+
+    def test_explicit_path_beats_environment(self) -> None:
+        os.environ["MOVIE_STD_SOURCE"] = "/env/source"
+        self.assertEqual(
+            ms.resolve_source_root(Path("/flag/source")),
+            Path("/flag/source"),
+        )
+
+    def test_environment_is_honoured(self) -> None:
+        os.environ["MOVIE_STD_SOURCE"] = "/env/source"
+        self.assertEqual(ms.resolve_source_root(None), Path("/env/source"))
+
+    def test_platform_default_is_home_relative_on_posix(self) -> None:
+        expected = (
+            Path(r"E:\torrents\final") if os.name == "nt"
+            else Path.home() / "torrents" / "final"
+        )
+        self.assertEqual(ms.default_source_root(), expected)
+        self.assertEqual(ms.resolve_source_root(None), expected)
+
+    def test_empty_and_whitespace_env_falls_through_to_default(self) -> None:
+        os.environ["MOVIE_STD_SOURCE"] = "   "
+        self.assertEqual(ms.resolve_source_root(None), ms.default_source_root())
+
+
 if __name__ == "__main__":
     unittest.main()

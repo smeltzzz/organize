@@ -991,8 +991,37 @@ def default_tool_dir(tool_name: str) -> Path:
     return default_reports_root() / tool_name
 
 
+def default_source_root() -> Path:
+    r"""The platform's documented completed-download root when nothing else is set.
+
+    Mirrors :func:`default_library_root`: the Windows layout stays as
+    documented, while a POSIX host gets a home-relative default instead of a
+    literal ``E:\torrents\final`` directory created in the working directory.
+    """
+    if os.name == "nt":
+        return Path(r"E:\torrents\final")
+    return Path.home() / "torrents" / "final"
+
+
+def resolve_source_root(explicit: Path | str | None = None) -> Path:
+    """Resolve the completed-download root this tool scans by default.
+
+    Precedence: an explicit path/flag, then ``MOVIE_STD_SOURCE``, then the
+    platform default. qBittorrent call sites always pass the content path, so
+    this resolution only matters for bare batch scans - which is exactly why
+    it must not fall apart on non-Windows hosts.
+    """
+    load_dotenv()
+    if explicit is not None and str(explicit).strip():
+        return Path(explicit).expanduser()
+    value = (os.environ.get("MOVIE_STD_SOURCE") or "").strip()
+    if value:
+        return Path(value).expanduser()
+    return default_source_root()
+
+
 TARGET_DIR = str(resolve_library())
-SOURCE_DIR = r"E:\torrents\final"
+SOURCE_DIR = str(resolve_source_root())
 CREATE_SUBFOLDERS = True
 SKIP_TV_SHOWS = True
 MIN_MOVIE_SIZE_MB = 300
@@ -3499,7 +3528,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", type=Path, help="Batch-scan directory (no paths given)")
     p.add_argument("--log", type=Path, help="Log file path")
     p.add_argument("--min-size", type=float, metavar="MB", help="Minimum movie size in MB")
-    p.add_argument("--report", type=Path, help="Human-readable text report file (default: E:\\torrents\\tools\\ReportsAndLogs\\movie_standardizer\\movie_standardizer_report.txt)")
+    p.add_argument("--report", type=Path,
+                   help="Human-readable text report file (default: the platform's per-tool reports directory)")
     p.add_argument("--lock-timeout", type=float, metavar="SECONDS", help="Maximum wait for another organizer run")
     p.add_argument(
         "--ffprobe", default=None, metavar="PATH",
@@ -3753,8 +3783,8 @@ def run_canonical_self_tests() -> int:
     dst.mkdir()
     errors: list[str] = []
     try:
-        # report_file=None on purpose: the default is a Windows path that
-        # would materialize as a literal "E:\..." file in the CWD on POSIX.
+        # report_file=None / log_file=None on purpose: the self-test must not
+        # scatter files under the host's own reports directory or CWD.
         CFG = Config(
             source_dir=src,
             target_dir=dst,
