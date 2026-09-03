@@ -746,6 +746,24 @@ class ExternalSrtRecordPathTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in stats["cleaned"]], ["Film (2020).mkv"])
         self.assertEqual(self.movie.stat().st_size, 3000, "the remux must have been swapped in")
 
+    def test_broken_plain_falls_through_to_valid_sdh(self) -> None:
+        """A broken .eng.srt must not hide a valid .eng.sdh.srt."""
+        srt = self.folder / "Film (2020).eng.srt"
+        srt.write_text("<html>not a subtitle</html>", encoding="utf-8")
+        sdh = self.folder / "Film (2020).eng.sdh.srt"
+        sdh.write_text("1\n00:00:00,000 --> 00:00:01,000\nEnglish SDH dialogue\n", encoding="utf-8")
+        record = tc.validate_exact_external_english_srt(self.movie)
+        self.assertTrue(record.get("valid"), f"record: {record}")
+        self.assertEqual(record.get("path"), str(sdh))
+        self.assertTrue(tc.external_srt_snapshot_matches(record))
+
+    def test_both_covering_sidecars_broken_stays_invalid(self) -> None:
+        (self.folder / "Film (2020).eng.srt").write_text("<html>bad</html>", encoding="utf-8")
+        (self.folder / "Film (2020).eng.sdh.srt").write_text("also bad", encoding="utf-8")
+        record = tc.validate_exact_external_english_srt(self.movie)
+        self.assertFalse(record.get("valid"))
+        self.assertNotEqual(record.get("reason"), "external SRT is absent")
+
     def _restore_state(self, real, real_root) -> None:
         tc._run_mkvmerge = real
         tc._target_root = real_root

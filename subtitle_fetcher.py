@@ -1670,8 +1670,8 @@ class YifySubtitlesSource(BaseSource):
         page = t.get(f"{self.BASE}/search?q={urllib.parse.quote_plus(identity.title)}").decode("utf-8", errors="replace")
         cands: list[ScrapeCandidate] = []
         seen: set[str] = set()
-        for chunk in re.split(r"<div[^>]+class=[\"']media-body[\"']", page)[1:]:
-            chunk = chunk[:4000]
+        for raw_chunk in re.split(r"<div[^>]+class=[\"']media-body[\"']", page)[1:]:
+            chunk = raw_chunk[:4000]
             title_m = re.search(r"<h3[^>]*itemprop=[\"']name[\"'][^>]*>(.*?)</h3>", chunk, re.S)
             year_m = re.search(r"<span[^>]*class=[\"']movinfo-section[\"'][^>]*>\s*(\d{4})", chunk)
             href_m = re.search(r"<a[^>]+href=[\"']([^\"']+)[\"']", chunk)
