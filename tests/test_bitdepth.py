@@ -1,24 +1,12 @@
-"""Tests for the pure 10-bit / HDR classification in ``10bit.py``.
-
-``10bit.py`` cannot be imported by its real name (it starts with a digit), so
-it is loaded on a per-package name and registered in ``sys.modules``.
-"""
+"""Tests for the pure 10-bit / HDR classification in ``bitdepth.py``."""
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
 
-_SCRIPT = Path(__file__).resolve().parents[1] / "10bit.py"
-_name = "_tbit"
-_spec = importlib.util.spec_from_file_location(_name, _SCRIPT)
-tb: Any = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
-sys.modules[_name] = tb
-_spec.loader.exec_module(tb)  # type: ignore[union-attr]
+import bitdepth as tb
 
 MediaProbeCache = tb.MediaProbeCache
 atomic_write_text = tb.atomic_write_text

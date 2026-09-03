@@ -18,9 +18,9 @@ BT.2020 primaries alone are *not* HDR (wide-gamut SDR exists).
 Requires ``ffprobe`` on PATH (or next to this script / common install dirs).
 Zero Python third-party dependencies.
 
-    python 10bit.py
-    python 10bit.py --source "E:\\torrents\\final_organized" --dry-run
-    python 10bit.py --self-test
+    python bitdepth.py
+    python bitdepth.py --source "E:\\torrents\\final_organized" --dry-run
+    python bitdepth.py --self-test
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def try_file_lock(handle: Any, *, strict_non_contention: bool = False) -> bool:
     ``strict_non_contention`` controls how a *real* OS error is handled:
 
     * ``False`` (the historical behaviour of the per-tool run locks) treats any
-      ``OSError`` as "busy" — ``10bit.py`` and ``library_auditor.py`` retried
+      ``OSError`` as "busy" — ``bitdepth.py`` and ``library_auditor.py`` retried
       every failure until they timed out.
     * ``True`` (the historical behaviour of the standardizer coordination lock)
       re-raises genuine errors and only reports the well-known
@@ -131,7 +131,7 @@ def atomic_write_text(path: Path, text: str) -> None:
 class MediaProbeCache:
     """Best-effort ``(path, size, mtime) -> probe payload`` cache.
 
-    ``10bit.py`` spawns one ``ffprobe`` per movie and ``mkv_track_cleaner.py``
+    ``bitdepth.py`` spawns one ``ffprobe`` per movie and ``mkv_track_cleaner.py``
     spawns one ``mkvmerge -J`` per movie, on every single run, even for a
     library that has not changed since the last sweep. Those subprocesses
     dominate the cost of a maintenance run.
