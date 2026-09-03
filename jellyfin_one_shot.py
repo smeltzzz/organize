@@ -512,12 +512,60 @@ def run_tool(
     return returncode, stdout_text, stderr_text
 
 
+def _mkvmerge_available() -> bool:
+    """Delegate to the track cleaner's own resolver.
+
+    A bare ``shutil.which("mkvmerge")`` is not the same question: the standard
+    Windows MKVToolNix installer does not put itself on PATH, and the cleaner
+    therefore also searches its known install locations. Asking the weaker
+    question here made a fully-provisioned Windows box report mkvmerge as
+    missing and skip the remux, while ``organize.py doctor`` on the same
+    machine printed a green tick and the version string.
+    """
+    try:
+        import mkv_track_cleaner as tc
+
+        tc.resolve_mkvmerge_path()
+        return True
+    except Exception:
+        return shutil.which("mkvmerge") is not None
+
+
+def _ffprobe_available() -> bool:
+    """Delegate to the inspector's resolver (PATH plus known install dirs)."""
+    try:
+        import bitdepth
+
+        return bitdepth.find_ffprobe() is not None
+    except Exception:
+        return shutil.which("ffprobe") is not None
+
+
+def _ffsubsync_available() -> bool:
+    """Delegate to the sync tool's resolver.
+
+    ffsubsync ships three interchangeable entry points (``ffsubsync``, ``ffs``,
+    ``subsync``); only checking the first reports a working install as missing.
+    """
+    try:
+        import sync_subtitles as ss
+
+        return ss.find_ffsubsync() is not None
+    except Exception:
+        return any(shutil.which(name) for name in ("ffsubsync", "ffs", "subsync"))
+
+
 def check_prerequisites(runtime_log: Path) -> dict[str, bool]:
-    """Check which required tools are available."""
+    """Check which required tools are available.
+
+    Each answer comes from the tool that actually has to run the binary, so
+    this runner and ``organize.py doctor`` can never disagree about whether a
+    machine is provisioned.
+    """
     tools = {
-        "mkvmerge": shutil.which("mkvmerge") is not None,
-        "ffprobe": shutil.which("ffprobe") is not None,
-        "ffsubsync": shutil.which("ffsubsync") is not None,
+        "mkvmerge": _mkvmerge_available(),
+        "ffprobe": _ffprobe_available(),
+        "ffsubsync": _ffsubsync_available(),
         "ffmpeg": shutil.which("ffmpeg") is not None,
     }
 

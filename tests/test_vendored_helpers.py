@@ -199,3 +199,55 @@ class PipelineOrderIsLoadBearing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrerequisiteChecksAgree(unittest.TestCase):
+    """All three prerequisite surfaces must answer the same question.
+
+    jellyfin_one_shot.py used a bare ``shutil.which("mkvmerge")`` while
+    pipeline.py and organize.py doctor delegated to
+    ``mkv_track_cleaner.resolve_mkvmerge_path()``, which also searches the
+    standard install locations. The Windows MKVToolNix installer does not put
+    itself on PATH, so a fully-provisioned machine had one-shot silently
+    skipping the remux while doctor reported everything green.
+    """
+
+    def test_one_shot_delegates_binary_detection(self) -> None:
+        import jellyfin_one_shot as one_shot
+        import mkv_track_cleaner
+        import sync_subtitles
+
+        # mkvmerge: resolvable via the cleaner's resolver => one-shot agrees.
+        try:
+            mkv_track_cleaner.resolve_mkvmerge_path()
+            expected_mkvmerge = True
+        except (FileNotFoundError, OSError):
+            expected_mkvmerge = False
+        self.assertEqual(expected_mkvmerge, one_shot._mkvmerge_available())
+
+        expected_ffsubsync = sync_subtitles.find_ffsubsync() is not None
+        self.assertEqual(expected_ffsubsync, one_shot._ffsubsync_available())
+
+    def test_one_shot_finds_binaries_off_PATH(self) -> None:
+        """The regression itself: a binary present but not on PATH."""
+        import tempfile
+
+        import jellyfin_one_shot as one_shot
+        import mkv_track_cleaner
+
+        with tempfile.TemporaryDirectory() as td:
+            fake = Path(td) / "mkvmerge"
+            fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake.chmod(0o755)
+
+            original = mkv_track_cleaner.KNOWN_MKVMERGE_PATHS
+            try:
+                # Present in a known install location, absent from PATH.
+                mkv_track_cleaner.KNOWN_MKVMERGE_PATHS = [str(fake)]
+                self.assertTrue(
+                    one_shot._mkvmerge_available(),
+                    "one-shot must find mkvmerge in a standard install "
+                    "location, not only on PATH",
+                )
+            finally:
+                mkv_track_cleaner.KNOWN_MKVMERGE_PATHS = original
