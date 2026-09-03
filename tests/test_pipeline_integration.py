@@ -108,7 +108,12 @@ class SubtitlePipelineIntegrationTests(unittest.TestCase):
         self.movie = self.folder / "Movie (2020).mkv"
         self.movie.write_bytes(b"x" * 4096)
         self.srt = self.folder / "Movie (2020).eng.srt"
-        self.srt.write_text(SRT_TEXT, encoding="utf-8")
+        # The fetcher writes every sidecar as UTF-8 with LF newlines
+        # (atomic_write_text uses newline="\n"), so the on-disk bytes match
+        # sha256_text() on Windows too. Mirror that here or the
+        # extraction-ledger shortcut under test would mismatch on Windows
+        # (\r\n on disk vs \n in the stored hash).
+        self.srt.write_text(SRT_TEXT, encoding="utf-8", newline="\n")
         self.srt_sha = sf.sha256_text(SRT_TEXT)
 
         self._real_mkvmerge = tc._run_mkvmerge
@@ -232,7 +237,7 @@ class SubtitlePipelineIntegrationTests(unittest.TestCase):
         def fake_ffsubsync(cfg, command):
             argv = [str(part) for part in command]
             staging = Path(argv[argv.index("-o") + 1])
-            staging.write_text(SYNCED_SRT_TEXT, encoding="utf-8")
+            staging.write_text(SYNCED_SRT_TEXT, encoding="utf-8", newline="\n")
             return 0, "", (
                 "INFO: offset seconds: 1.500\n"
                 "INFO: framerate scale factor: 1.0\n"
