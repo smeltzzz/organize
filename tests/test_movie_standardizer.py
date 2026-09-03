@@ -626,9 +626,8 @@ class PathHelpersTests(unittest.TestCase):
 
 class CoordinationLockTests(unittest.TestCase):
     def test_acquire_release_roundtrip(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            with CoordinationLock(Path(td) / "lib", timeout_seconds=10.0):
-                pass  # no exception means the lock was taken and released cleanly
+        with tempfile.TemporaryDirectory() as td, CoordinationLock(Path(td) / "lib", timeout_seconds=10.0):
+            pass  # no exception means the lock was taken and released cleanly
 
     def test_path_is_deterministic(self) -> None:
         # The lock path must be identical for identical normalized targets so the

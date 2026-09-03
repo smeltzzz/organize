@@ -699,39 +699,93 @@ class MainValidationTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class LibraryResolutionTests(unittest.TestCase):
     """The one-shot resolves its library root exactly like the sibling tools:
-    flag first, then MOVIE_STD_TARGET, then the documented default — so a bare
-    run finishes the same library everything else maintains."""
+    flag first, then ORGANIZE_LIBRARY, then the legacy MOVIE_STD_TARGET, then
+    the platform default — so a bare run finishes the same library everything
+    else maintains."""
 
     def setUp(self) -> None:
-        self._saved = os.environ.pop("MOVIE_STD_TARGET", None)
+        self._saved = {
+            var: os.environ.pop(var, None)
+            for var in ("ORGANIZE_LIBRARY", "MOVIE_STD_TARGET")
+        }
 
     def tearDown(self) -> None:
-        if self._saved is not None:
-            os.environ["MOVIE_STD_TARGET"] = self._saved
-        else:
-            os.environ.pop("MOVIE_STD_TARGET", None)
+        for var, value in self._saved.items():
+            if value is not None:
+                os.environ[var] = value
+            else:
+                os.environ.pop(var, None)
 
-    def test_no_flag_no_env_uses_documented_default(self) -> None:
-        self.assertEqual(js.resolve_library(None), Path(js.DEFAULT_LIBRARY))
-        self.assertEqual(js.DEFAULT_LIBRARY, r"E:\torrents\final_organized",
-                         "the default must stay identical to the sibling tools")
+    def test_no_flag_no_env_uses_the_platform_default(self) -> None:
+        self.assertEqual(js.resolve_library(None), js.default_library_root())
 
-    def test_env_var_is_honored_without_a_flag(self) -> None:
+    def test_every_tool_agrees_on_the_default(self) -> None:
+        """The whole point of the shared resolver: no tool may disagree."""
+        import bitdepth
+        import library_auditor
+        import mkv_track_cleaner
+        import movie_standardizer
+        import pipeline
+        import sync_subtitles
+
+        expected = js.default_library_root()
+        for module in (bitdepth, library_auditor, mkv_track_cleaner,
+                       movie_standardizer, pipeline, sync_subtitles):
+            with self.subTest(tool=module.__name__):
+                self.assertEqual(expected, module.default_library_root())
+                self.assertEqual(expected, module.resolve_library(None))
+
+    def test_new_env_var_is_honored_without_a_flag(self) -> None:
+        os.environ["ORGANIZE_LIBRARY"] = "/media/torrents/final_organized"
+        self.assertEqual(js.resolve_library(None), Path("/media/torrents/final_organized"))
+
+    def test_legacy_env_var_is_still_honored(self) -> None:
         os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
         self.assertEqual(js.resolve_library(None), Path("/media/torrents/final_organized"))
 
+    def test_new_env_var_beats_the_legacy_one(self) -> None:
+        os.environ["MOVIE_STD_TARGET"] = "/legacy"
+        os.environ["ORGANIZE_LIBRARY"] = "/current"
+        self.assertEqual(js.resolve_library(None), Path("/current"))
+
     def test_explicit_flag_beats_env_var(self) -> None:
-        os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
+        os.environ["ORGANIZE_LIBRARY"] = "/media/torrents/final_organized"
         self.assertEqual(js.resolve_library(Path("/srv/movies")), Path("/srv/movies"))
 
     def test_origin_is_reported_for_every_source(self) -> None:
         self.assertEqual(
             js.describe_library_origin(None),
-            f"the default library root ({js.DEFAULT_LIBRARY})",
+            f"the default library root ({js.default_library_root()})",
         )
         os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
         self.assertEqual(js.describe_library_origin(None), "MOVIE_STD_TARGET")
+        os.environ["ORGANIZE_LIBRARY"] = "/media/torrents/final_organized"
+        self.assertEqual(js.describe_library_origin(None), "ORGANIZE_LIBRARY")
         self.assertEqual(js.describe_library_origin(Path("/srv/movies")), "--source")
+
+    def test_dotenv_is_loaded_but_never_overrides_the_environment(self) -> None:
+        """.env.example told users to create a .env that nothing ever read."""
+        with tempfile.TemporaryDirectory() as td:
+            env_file = Path(td) / ".env"
+            env_file.write_text(
+                "# a comment\n"
+                "\n"
+                "export ORGANIZE_LIBRARY='/from/dotenv'\n"
+                'OPENSUBTITLES_API_KEY="quoted-key"\n'
+                "malformed line without an equals sign\n",
+                encoding="utf-8",
+            )
+            os.environ.pop("OPENSUBTITLES_API_KEY", None)
+            loaded = js.load_dotenv(env_file)
+            self.assertEqual(loaded["ORGANIZE_LIBRARY"], "/from/dotenv")
+            self.assertEqual(loaded["OPENSUBTITLES_API_KEY"], "quoted-key")
+            self.assertEqual(os.environ["ORGANIZE_LIBRARY"], "/from/dotenv")
+
+            # An exported value must win over the file.
+            os.environ["ORGANIZE_LIBRARY"] = "/from/environment"
+            js.load_dotenv(env_file)
+            self.assertEqual(os.environ["ORGANIZE_LIBRARY"], "/from/environment")
+            os.environ.pop("OPENSUBTITLES_API_KEY", None)
 
     def test_bare_run_rejects_a_default_library_that_is_not_there(self) -> None:
         """A bare run on a machine without the default path must still fail

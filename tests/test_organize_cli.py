@@ -102,7 +102,7 @@ class OrganizeCliTests(unittest.TestCase):
         output = buf.getvalue()
         self.assertIn("ALL SELF-TESTS PASSED", output)
         self.assertIn("organize.py", output)
-        self.assertIn("10bit.py", output)
+        self.assertIn("bitdepth.py", output)
         self.assertIn("movie_standardizer.py", output)
 
     def test_delegate_to_script_nonexistent(self) -> None:

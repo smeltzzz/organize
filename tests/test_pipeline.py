@@ -48,28 +48,43 @@ class StepOrderTests(unittest.TestCase):
 
 
 class LibraryResolutionTests(unittest.TestCase):
-    """The library root resolves flag-first, then MOVIE_STD_TARGET, then the
-    documented default — the env case is what makes Docker one-liners work."""
+    """The library root resolves flag-first, then ORGANIZE_LIBRARY, then the
+    legacy MOVIE_STD_TARGET, then the platform default — the env cases are what
+    make Docker one-liners work.
+
+    These must not call .resolve(). resolve_library() deliberately does not,
+    because on a host without the configured drive .resolve() silently appends
+    the path to the CWD instead of failing.
+    """
 
     def setUp(self) -> None:
-        self._saved = os.environ.pop("MOVIE_STD_TARGET", None)
+        self._saved = {
+            var: os.environ.pop(var, None)
+            for var in ("ORGANIZE_LIBRARY", "MOVIE_STD_TARGET")
+        }
 
     def tearDown(self) -> None:
-        if self._saved is not None:
-            os.environ["MOVIE_STD_TARGET"] = self._saved
-        else:
-            os.environ.pop("MOVIE_STD_TARGET", None)
+        for var, value in self._saved.items():
+            if value is not None:
+                os.environ[var] = value
+            else:
+                os.environ.pop(var, None)
 
     def test_no_flag_no_env_uses_documented_default(self) -> None:
-        self.assertEqual(pl.resolve_library(None), Path(pl.DEFAULT_LIBRARY).resolve())
+        self.assertEqual(pl.resolve_library(None), pl.default_library_root())
 
     def test_env_var_is_honored_without_a_flag(self) -> None:
         os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
-        self.assertEqual(pl.resolve_library(None), Path("/media/torrents/final_organized").resolve())
+        self.assertEqual(pl.resolve_library(None), Path("/media/torrents/final_organized"))
+
+    def test_organize_library_beats_the_legacy_var(self) -> None:
+        os.environ["MOVIE_STD_TARGET"] = "/legacy/path"
+        os.environ["ORGANIZE_LIBRARY"] = "/preferred/path"
+        self.assertEqual(pl.resolve_library(None), Path("/preferred/path"))
 
     def test_explicit_flag_beats_env_var(self) -> None:
         os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
-        self.assertEqual(pl.resolve_library(Path("/srv/movies")), Path("/srv/movies").resolve())
+        self.assertEqual(pl.resolve_library(Path("/srv/movies")), Path("/srv/movies"))
 
 
 class CommandBuildingTests(unittest.TestCase):

@@ -18,9 +18,9 @@ BT.2020 primaries alone are *not* HDR (wide-gamut SDR exists).
 Requires ``ffprobe`` on PATH (or next to this script / common install dirs).
 Zero Python third-party dependencies.
 
-    python 10bit.py
-    python 10bit.py --source "E:\\torrents\\final_organized" --dry-run
-    python 10bit.py --self-test
+    python bitdepth.py
+    python bitdepth.py --source "E:\\torrents\\final_organized" --dry-run
+    python bitdepth.py --self-test
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def try_file_lock(handle: Any, *, strict_non_contention: bool = False) -> bool:
     ``strict_non_contention`` controls how a *real* OS error is handled:
 
     * ``False`` (the historical behaviour of the per-tool run locks) treats any
-      ``OSError`` as "busy" — ``10bit.py`` and ``library_auditor.py`` retried
+      ``OSError`` as "busy" — ``bitdepth.py`` and ``library_auditor.py`` retried
       every failure until they timed out.
     * ``True`` (the historical behaviour of the standardizer coordination lock)
       re-raises genuine errors and only reports the well-known
@@ -108,22 +108,40 @@ def try_file_lock(handle: Any, *, strict_non_contention: bool = False) -> bool:
             return False
         raise
 
-def atomic_write_text(path: Path, text: str) -> None:
-    r"""Publish ``text`` to ``path`` atomically.
+def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
+    r"""Publish ``text`` to ``dest`` atomically and durably.
 
-    Writes through a unique sibling file then ``os.replace``\ s it into place, so
-    a crash never leaves a truncated report and a read in progress always sees
-    either the previous file or the complete new one.  On failure the staged
-    file is removed and the prior report is retained.
+    Writes through a unique sibling file, ``fsync``\ s it, then publishes it
+    with a single atomic operation, so a crash never leaves a truncated file
+    and a reader always sees either the previous contents or the complete new
+    ones. On failure the staged file is removed and the prior file is kept.
+
+    The ``fsync`` is what makes this survive power loss rather than only a
+    process crash: without it the rename can land while the bytes it points at
+    are still only in the page cache, publishing an empty or partial file.
+    ``newline="\n"`` keeps output byte-identical across platforms instead of
+    silently gaining CRLFs on Windows.
+
+    With ``replace=False`` the publish uses ``os.link``, an atomic
+    create-if-absent, so an existing file is never clobbered. The subtitle
+    fetcher needs this: a concurrent or hand-placed English sidecar must win
+    over a download rather than be silently overwritten.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    staged = path.with_name(f".{path.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    stage = dest.with_name(f".{dest.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp")
     try:
-        staged.write_text(text, encoding="utf-8")
-        os.replace(str(staged), str(path))
+        with stage.open("x", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if replace:
+            os.replace(str(stage), str(dest))
+        else:
+            os.link(str(stage), str(dest))
+            stage.unlink()
     except OSError:
         try:
-            staged.unlink(missing_ok=True)
+            stage.unlink(missing_ok=True)
         except OSError:
             pass
         raise
@@ -131,7 +149,7 @@ def atomic_write_text(path: Path, text: str) -> None:
 class MediaProbeCache:
     """Best-effort ``(path, size, mtime) -> probe payload`` cache.
 
-    ``10bit.py`` spawns one ``ffprobe`` per movie and ``mkv_track_cleaner.py``
+    ``bitdepth.py`` spawns one ``ffprobe`` per movie and ``mkv_track_cleaner.py``
     spawns one ``mkvmerge -J`` per movie, on every single run, even for a
     library that has not changed since the last sweep. Those subprocesses
     dominate the cost of a maintenance run.
@@ -619,7 +637,7 @@ class Report:
         detail: str = "",
         ordinal: int | None = None,
         marker: str = "",
-        fields: Iterable[tuple[str, str]] = (),
+        fields: Iterable[tuple[str, object]] = (),
         detail_column: int = 0,
         indent: int = 4,
     ) -> Report:
@@ -765,15 +783,134 @@ class Report:
 # CONFIGURATION  (CLI flags override these)
 # =============================================================================
 
-SOURCE_DIR = r"E:\torrents\final_organized"
+# ---------------------------------------------------------------------------
+# Library-root resolution (vendored inline; keep every copy identical)
+#
+# The movie-library root used to be a bare literal repeated in six files, with
+# only two of them honouring MOVIE_STD_TARGET. On a non-Windows host the tools
+# that ignored it happily defaulted to a Windows drive letter, wrote reports to
+# a literal path like `E:\torrents\...` in the current directory, and .gitignore
+# grew an `E:*` rule to catch the debris. One resolver, used by every tool,
+# removes that whole class of problem.
+#
+# Precedence: explicit --flag > ORGANIZE_LIBRARY > MOVIE_STD_TARGET > platform
+# default. A `.env` beside the scripts is loaded first, but never overrides a
+# variable already exported in the environment.
+# ---------------------------------------------------------------------------
+
+ENV_FILE_NAME = ".env"
+LIBRARY_ENV_VAR = "ORGANIZE_LIBRARY"
+LEGACY_LIBRARY_ENV_VAR = "MOVIE_STD_TARGET"
+
+
+def load_dotenv(path: Path | None = None) -> dict[str, str]:
+    """Load ``KEY=value`` pairs from a .env file next to the scripts.
+
+    The repo ships a fully documented ``.env.example`` telling users to copy it
+    to ``.env``, but nothing ever read that file: every documented variable
+    silently did nothing unless separately exported. This closes that gap.
+
+    Real environment variables always win, so an explicit export still beats a
+    stale file. Blank lines, ``#`` comments, a leading ``export``, and single or
+    double quotes around the value are all accepted. Malformed lines are
+    skipped rather than raising: a typo in a config file must not stop a
+    maintenance run that would otherwise work.
+    """
+    env_path = path or (Path(__file__).resolve().parent / ENV_FILE_NAME)
+    loaded: dict[str, str] = {}
+    try:
+        raw = env_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return loaded
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[len("export "):].lstrip()
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        loaded[key] = value
+        os.environ.setdefault(key, value)
+    return loaded
+
+
+def default_library_root() -> Path:
+    """The platform's documented library root when nothing else is configured.
+
+    The Windows default is the layout the README documents. Pointing a POSIX
+    host at ``E:\\torrents\\final_organized`` only ever produced a confusing
+    "does not exist" (or worse, a literal ``E:...`` directory in the CWD), so
+    those hosts get a sensible home-relative default instead.
+    """
+    if os.name == "nt":
+        return Path(r"E:\torrents\final_organized")
+    return Path.home() / "Media" / "Movies"
+
+
+def resolve_library(explicit: Path | str | None = None) -> Path:
+    """Resolve the movie-library root that every tool in the toolchain shares.
+
+    Precedence: an explicit flag, then ORGANIZE_LIBRARY, then the legacy
+    MOVIE_STD_TARGET, then the platform default.
+    """
+    load_dotenv()
+    if explicit is not None and str(explicit).strip():
+        return Path(explicit).expanduser()
+    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
+        value = (os.environ.get(var) or "").strip()
+        if value:
+            return Path(value).expanduser()
+    return default_library_root()
+
+
+def describe_library_origin(explicit: Path | str | None = None) -> str:
+    """Human-readable provenance of the resolved root, for error messages."""
+    load_dotenv()
+    if explicit is not None and str(explicit).strip():
+        return "--source"
+    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
+        if (os.environ.get(var) or "").strip():
+            return var
+    return f"the default library root ({default_library_root()})"
+
+
+def default_reports_root() -> Path:
+    r"""Where logs, reports and probe caches go when nothing is configured.
+
+    These must live OUTSIDE the media library (the auditor would otherwise
+    count a log folder at the library root as a movie folder). On Windows that
+    is the documented tools directory; elsewhere it follows the XDG state
+    convention. Hardcoding the Windows path for every platform is what made a
+    POSIX run scatter literal `E:\torrents\...` filenames into the current
+    working directory.
+    """
+    if os.name == "nt":
+        return Path(r"E:\torrents\tools\ReportsAndLogs")
+    state_home = (os.environ.get("XDG_STATE_HOME") or "").strip()
+    base = Path(state_home) if state_home else Path.home() / ".local" / "state"
+    return base / "organize"
+
+
+def default_tool_dir(tool_name: str) -> Path:
+    """The per-tool subdirectory of :func:`default_reports_root`."""
+    return default_reports_root() / tool_name
+
+
+SOURCE_DIR = str(resolve_library())
 # Logs, reports, and the probe cache live under tools\ReportsAndLogs so the
 # root of E:\torrents stays media-only.
-OUTPUT_DIR = r"E:\torrents\tools\ReportsAndLogs\10bit"
-LOG_FILE = r"E:\torrents\tools\ReportsAndLogs\10bit\10bit.log"
-REPORT_FILE = r"E:\torrents\tools\ReportsAndLogs\10bit\10bit_report.txt"
+OUTPUT_DIR = str(default_tool_dir("10bit"))
+LOG_FILE = str(default_tool_dir("10bit") / "10bit.log")
+REPORT_FILE = str(default_tool_dir("10bit") / "10bit_report.txt")
 # Reused ffprobe output for files whose size and mtime have not changed, so a
 # re-scan of an unchanged library does not respawn ffprobe per movie.
-CACHE_FILE = r"E:\torrents\tools\ReportsAndLogs\10bit\10bit_probe_cache.json"
+CACHE_FILE = str(default_tool_dir("10bit") / "10bit_probe_cache.json")
 
 # movie_standardizer.py emits canonical MKV feature files only.
 VIDEO_EXTENSIONS = {".mkv"}
@@ -1363,9 +1500,7 @@ def is_junk_name(name: str) -> bool:
         return True
     if any(lower.endswith(s) for s in (".!qb", ".parts", ".part", ".crdownload", ".tmp")):
         return True
-    if re.search(r"(?i)(?:^|[._\-\s])(sample|trailer|teaser)(?:[._\-\s]|$)", Path(name).stem):
-        return True
-    return False
+    return bool(re.search(r"(?i)(?:^|[._\-\s])(sample|trailer|teaser)(?:[._\-\s]|$)", Path(name).stem))
 
 def discover_videos(root: Path, cfg: Config) -> list[Path]:
     found: list[Path] = []

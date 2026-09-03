@@ -50,6 +50,25 @@ free API key.
 | ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track (or best non-commentary audio on foreign films with a validated `.eng.srt`) and drops commentary, dubs, and embedded bitmap subtitles — video untouched. |
 | 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
+
+### Why this and not Bazarr / Tdarr / Radarr?
+
+That stack is excellent and, for many people, the right answer. Choose this if
+you want any of the following, which the usual containers do not give you:
+
+- **Subtitles are fetched *before* the remux, on purpose.** OpenSubtitles
+  matches on a hash of the file's bytes. A remux rewrites those bytes, so a
+  library that transcodes first is permanently downgraded to fuzzy title/year
+  matching. This ordering constraint is the reason `pipeline.py` exists, and
+  it is enforced by a test, not just documented.
+- **Seeding torrents are never touched.** A movie still hardlinked to its
+  qBittorrent source is always deferred, with no override flag.
+- **HDR is protected fail-closed.** Anything uncertain is never queued for
+  re-encoding — the tool would rather do nothing than turn your Dolby Vision
+  master into a green-and-purple mess.
+- **No Docker, no daemon, no database.** Nine files, the standard library, and
+  binaries you already have. Every run is stateless, idempotent, and safe to
+  Ctrl-C at any point.
 | 🛡 **Safety invariants** | Advisory locks, atomic staging, and crash recovery — engineered so a power cut can never corrupt your library. |
 
 ---
@@ -63,7 +82,7 @@ One file, one purpose. Nothing else.
 | `organize.py` | **The front door.** Unified CLI, system doctor, and test runner: `organize.py doctor`, `organize.py run`, `organize.py test`, plus one subcommand per tool. |
 | `subtitle_fetcher.py` | Tool 1 — one validated English `.eng.srt` per movie: extract the movie's own embedded track first, else OpenSubtitles + SubDL + 7 scraping fallbacks. |
 | `mkv_track_cleaner.py` | Tool 2 — lossless remux: keep one best audio, strip commentary/dubs/embedded subs. |
-| `10bit.py` | Tool 3 — ffprobe sweep: queue 8-bit SDR for HandBrake, protect HDR. |
+| `bitdepth.py` | Tool 3 — ffprobe sweep: queue 8-bit SDR for HandBrake, protect HDR. |
 | `library_auditor.py` | Tool 4 — read-only health check of layout, naming, and subtitles. |
 | `movie_standardizer.py` | Tool 5 — the torrent-completion hook: parse scene names, hardlink into `Title (Year)/`. |
 | `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. Sidecars extracted from the movie itself are skipped (they are already frame-accurate). |
@@ -129,8 +148,9 @@ python3 organize.py one-shot --source /path/to/movies --nice     # same, lower p
 ```
 
 With no `--source` it uses the same library root every other tool defaults to
-(`E:\torrents\final_organized`, or `MOVIE_STD_TARGET` when set); an explicit
-`--source` always wins.
+— `ORGANIZE_LIBRARY` if set, else the legacy `MOVIE_STD_TARGET`, else the
+platform default (`E:\torrents\final_organized` on Windows, `~/Media/Movies`
+elsewhere). An explicit `--source` always wins.
 
 All logs, per-tool reports, and full output transcripts land in one place
 (`--log-dir`, default `./logs`, which must be outside the library).
@@ -169,7 +189,7 @@ Prerequisites per tool:
 | :--- | :--- | :--- |
 | `subtitle_fetcher.py` | — | optional — the scraping sources work with no keys at all |
 | `mkv_track_cleaner.py` | `mkvmerge` (MKVToolNix) | — |
-| `10bit.py` | `ffprobe` (FFmpeg) | — |
+| `bitdepth.py` | `ffprobe` (FFmpeg) | — |
 | `library_auditor.py` | — | — |
 | `movie_standardizer.py` | `ffprobe` (optional, for duplicate upgrades) | — |
 | `sync_subtitles.py` | `ffsubsync` (`pip install ffsubsync`) + `ffmpeg` (FFmpeg) | — |
@@ -270,7 +290,7 @@ python3 mkv_track_cleaner.py --dir /path/to/movies --dry-run
 python3 mkv_track_cleaner.py --dir /path/to/movies --nice --only "Some Movie (2020).mkv"
 ```
 
-### 3 · `10bit.py` — bit-depth & HDR inspector
+### 3 · `bitdepth.py` — bit-depth & HDR inspector
 
 Probes every movie with ffprobe and classifies it: 8-bit SDR goes into a
 HandBrake queue, native HDR10 / HDR10+ / Dolby Vision is protected, ambiguous
@@ -287,8 +307,8 @@ Dolby Vision, while `profile 5 · no SDR/HDR10 fallback` does not play correctly
 on one.
 
 ```bash
-python3 10bit.py --source /path/to/movies
-python3 10bit.py --source /path/to/movies --fail-if-queue   # for schedulers
+python3 bitdepth.py --source /path/to/movies
+python3 bitdepth.py --source /path/to/movies --fail-if-queue   # for schedulers
 ```
 
 ### 4 · `library_auditor.py` — read-only health check
@@ -408,13 +428,12 @@ python3 jellyfin_one_shot.py --source /path/to/movies --quiet          # no live
 > ledger — that tool parses its own log back, so it cannot share a file with
 > anything else), the two probe caches, and `sync_state.json`.
 
-`--source` is the Jellyfin movie-library root. Like every other tool in the
-repo it defaults to `E:\torrents\final_organized`, or to `MOVIE_STD_TARGET`
-when that variable is set — so on the documented layout `python3
+`--source` is the Jellyfin movie-library root. Every tool in the repo resolves
+it through one shared resolver — `--source`, then `ORGANIZE_LIBRARY`, then the
+legacy `MOVIE_STD_TARGET`, then the platform default — so `python3
 jellyfin_one_shot.py` with no arguments finishes the same library the rest of
 the toolchain maintains. The library it resolved, and where that value came
-from (`--source` / `MOVIE_STD_TARGET` / the default), is written to the
-runtime log at the start of every run.
+from, is written to the runtime log at the start of every run.
 
 ---
 
@@ -551,13 +570,20 @@ Everything is overridable per run with CLI flags (see each tool's
 | :--- | :--- | :--- |
 | `OPENSUBTITLES_API_KEY` | subtitle_fetcher | Subtitle source (exact-moviehash matching) |
 | `SUBDL_API_KEY` | subtitle_fetcher | Equal subtitle source (release match scored ≥ 0.80) |
-| `MOVIE_STD_SOURCE` / `MOVIE_STD_TARGET` | movie_standardizer, pipeline, jellyfin_one_shot | Download / library roots |
+| `ORGANIZE_LIBRARY` | **every tool** | The movie-library root. Set this one variable and no tool needs a path flag. |
+| `MOVIE_STD_SOURCE` | movie_standardizer | Completed-download root to ingest from |
+| `MOVIE_STD_TARGET` | every tool (legacy) | Older name for `ORGANIZE_LIBRARY`; still honoured, lower precedence |
 | `MOVIE_STD_LOCK_TIMEOUT` | movie_standardizer | Coordination-lock wait (default 60 s) |
 | `MOVIE_STD_MAINTENANCE_MODE` | movie_standardizer | `REPORT` (default) / `QUARANTINE` / `DELETE` for duplicates |
 
-Defaults assume the documented Windows layout (`E:\torrents\...`); on
-Linux/macOS pass `--source` / `--target` or set the variables. Source and
-target **must be on the same filesystem** (hardlink-only ingest).
+A `.env` file next to the scripts is read automatically at startup by every
+tool; anything already exported in the environment wins over the file.
+
+Path defaults are platform-aware. On Windows they follow the documented
+`E:\torrents\...` layout; on Linux/macOS the library defaults to
+`~/Media/Movies` and logs, reports and probe caches to
+`$XDG_STATE_HOME/organize` (`~/.local/state/organize`). Source and target
+**must be on the same filesystem** (hardlink-only ingest).
 
 ---
 
@@ -568,8 +594,17 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 400 unit tests
-pip install -e .[dev] && pytest                   # same suite under pytest
+python3 -m unittest discover -s tests -p "test_*.py"   # 514 unit tests
+pip install -e ".[dev]" && pytest                 # same suite under pytest
+ruff check .                                      # lint (configured in pyproject.toml)
+```
+
+Installing the package also provides an `organize` console script, so the CLI
+works from any directory:
+
+```bash
+pip install .
+organize doctor
 ```
 
 Every tool also carries its own `--self-test`, so a single copied file can

@@ -27,11 +27,11 @@ SHIFTED_SRT = "1\n00:00:05,000 --> 00:00:06,000\nHello.\n\n2\n00:00:08,000 --> 0
 
 
 def _cfg(tmp: Path, **overrides: object) -> ss.Config:
-    base: dict = dict(
-        library=tmp / "lib",
-        log_file=tmp / "out" / "sync_subtitles.log",
-        report_file=tmp / "out" / "sync_subtitles_report.txt",
-    )
+    base: dict = {
+        "library": tmp / "lib",
+        "log_file": tmp / "out" / "sync_subtitles.log",
+        "report_file": tmp / "out" / "sync_subtitles_report.txt",
+    }
     base.update(overrides)
     return ss.Config(**base)
 
@@ -615,7 +615,10 @@ class EndToEndTests(unittest.TestCase):
 
     def test_unreadable_video_is_a_failure(self) -> None:
         # chmod 000 makes the video unreadable to ffsubsync's permission check.
-        # Skip on platforms where the test user can still read it (e.g. root).
+        # Skip on platforms where the test user can still read it (e.g. root),
+        # and on Windows, where chmod cannot clear the read bit at all.
+        if os.name == "nt":
+            self.skipTest("Windows chmod cannot revoke read access")
         if getattr(os, "geteuid", lambda: 1)() == 0:
             self.skipTest("running as root; permission bits do not apply")
         self.mkv.chmod(0)
@@ -793,9 +796,17 @@ class VendoredContractTests(unittest.TestCase):
         key = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
         self.assertEqual(lock.path.name, f".movie_standardizer.lock.{key}")
 
-    def test_report_defaults_live_under_reportsandlogs(self) -> None:
-        self.assertTrue(ss.LOG_FILE.startswith(r"E:\torrents\tools\ReportsAndLogs\sync_subtitles"))
-        self.assertTrue(ss.REPORT_FILE.startswith(r"E:\torrents\tools\ReportsAndLogs\sync_subtitles"))
+    def test_report_defaults_live_under_the_platform_reports_root(self) -> None:
+        r"""Logs and reports default outside the library, on every platform.
+
+        They used to hardcode the Windows tools directory, so a POSIX run with
+        default config wrote a literal `E:\torrents\...` file into the CWD -
+        which .gitignore carried an `E:*` rule to sweep up.
+        """
+        expected = ss.default_tool_dir("sync_subtitles")
+        self.assertEqual(Path(ss.LOG_FILE).parent, expected)
+        self.assertEqual(Path(ss.REPORT_FILE).parent, expected)
+        self.assertEqual(Path(ss.SYNC_STATE_FILE).parent, expected)
 
 
 class ReportShapeTests(unittest.TestCase):

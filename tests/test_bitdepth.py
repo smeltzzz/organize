@@ -1,24 +1,13 @@
-"""Tests for the pure 10-bit / HDR classification in ``10bit.py``.
-
-``10bit.py`` cannot be imported by its real name (it starts with a digit), so
-it is loaded on a per-package name and registered in ``sys.modules``.
-"""
+"""Tests for the pure 10-bit / HDR classification in ``bitdepth.py``."""
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
 
-_SCRIPT = Path(__file__).resolve().parents[1] / "10bit.py"
-_name = "_tbit"
-_spec = importlib.util.spec_from_file_location(_name, _SCRIPT)
-tb: Any = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
-sys.modules[_name] = tb
-_spec.loader.exec_module(tb)  # type: ignore[union-attr]
+import bitdepth as tb
 
 MediaProbeCache = tb.MediaProbeCache
 atomic_write_text = tb.atomic_write_text
@@ -179,13 +168,12 @@ class DolbyVisionTests(unittest.TestCase):
 
     def test_a_dolby_vision_codec_name_is_dolby_vision(self) -> None:
         # Rare, but it means DV by definition even with no record to read.
-        result = self._probe(None, codec_name="dvh1", **{"color_transfer": "bt709",
-                                                         "color_primaries": "bt709"})
+        result = self._probe(None, codec_name="dvh1", color_transfer="bt709", color_primaries="bt709")
         self.assertIn("Dolby Vision", result.hdr_flavors)
         self.assertTrue(result.hdr)
 
     def test_a_plain_hevc_file_is_not_dolby_vision(self) -> None:
-        result = self._probe(None, **{"color_transfer": "bt709", "color_primaries": "bt709"})
+        result = self._probe(None, color_transfer="bt709", color_primaries="bt709")
         self.assertNotIn("Dolby Vision", result.hdr_flavors)
         self.assertEqual(result.dv_profile, "")
 

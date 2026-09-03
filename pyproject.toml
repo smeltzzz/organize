@@ -1,6 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "organize"
-version = "3.4.0"
+# Single-sourced from organize.py's VERSION constant so the wheel, the console
+# script's --version and the dashboard banner can never disagree again.
+dynamic = ["version"]
 description = "The Definitive Media Management Toolkit for Jellyfin & Plex"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +38,28 @@ Changelog = "https://github.com/smeltzzz/organize/blob/main/CHANGELOG.md"
 [project.scripts]
 organize = "organize:main"
 
+# The tools are standalone single-file scripts at the repository root, not a
+# package. They must be declared explicitly: setuptools' auto-discovery finds
+# no package here and would otherwise build a wheel containing nothing at all,
+# leaving the `organize` console script pointing at a module that is not
+# installed. `bitdepth` was named `10bit.py` until it was renamed for exactly
+# this reason - a module name cannot begin with a digit.
+[tool.setuptools]
+py-modules = [
+    "organize",
+    "pipeline",
+    "jellyfin_one_shot",
+    "bitdepth",
+    "library_auditor",
+    "mkv_track_cleaner",
+    "movie_standardizer",
+    "subtitle_fetcher",
+    "sync_subtitles",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "organize.VERSION" }
+
 [project.optional-dependencies]
 # Development only (running the test suite). The runtime tools have no
 # third-party dependencies at all.
@@ -49,5 +77,41 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "B", "I", "UP"]
-ignore = ["E501"]
+select = ["E", "F", "W", "B", "I", "UP", "BLE", "SIM", "RET", "C4", "PIE"]
+ignore = [
+    "E501",     # long lines: the report-rendering code is full of aligned literals
+    # `os.replace` is the atomic-publish primitive this codebase is built on and
+    # `Path.replace` is not a drop-in for it in the str-path call sites here.
+    # `open()` on an already-constructed Path is equally clear. PTH is therefore
+    # not enabled as a rule family; the Path-first style is a convention, not a gate.
+    "SIM105",   # contextlib.suppress allocates a context manager in hot cleanup paths
+    "SIM108",   # ternaries hurt readability in the branch-heavy classification code
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The tools are long-running batch jobs over a whole media library. A single
+# unexpected exception on one movie must never abort a sweep that has already
+# done real work, so the top-level per-item and main() handlers are broad on
+# purpose - each one logs the failure and continues. New blind excepts outside
+# these files are flagged.
+"bitdepth.py" = ["BLE001"]
+"jellyfin_one_shot.py" = ["BLE001"]
+"library_auditor.py" = ["BLE001"]
+"mkv_track_cleaner.py" = ["BLE001"]
+"movie_standardizer.py" = ["BLE001"]
+"organize.py" = ["BLE001"]
+"pipeline.py" = ["BLE001"]
+"subtitle_fetcher.py" = ["BLE001"]
+"sync_subtitles.py" = ["BLE001"]
+
+[tool.coverage.run]
+# Measure the tools, not the tests: including tests/ inflates the number with
+# files that are ~99% covered by definition.
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

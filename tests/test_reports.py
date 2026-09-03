@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import contextlib
 import datetime
-import importlib
 import io
 import tempfile
 import unittest
@@ -19,13 +18,12 @@ from pathlib import Path
 
 from reporttext import scorecard, section
 
+import bitdepth as bit10
 import library_auditor as la
 import mkv_track_cleaner as tc
 import movie_standardizer as ms
 import pipeline as pl
 import subtitle_fetcher as sf
-
-bit10 = importlib.import_module("10bit")
 
 HEAVY = "\u2550"
 

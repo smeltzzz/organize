@@ -12,7 +12,11 @@ To maintain its bulletproof stability, all contributions must respect the projec
    Every runtime script must use **only the Python 3.11+ standard library** — no PyPI packages at runtime. Development-only tooling (e.g. `pytest`) lives in the `dev` extra.
 
 2. **Each Tool Is a Self-Contained Script**
-   Any single tool (`subtitle_fetcher.py`, `mkv_track_cleaner.py`, `10bit.py`, `movie_standardizer.py`, `library_auditor.py`) must stay runnable on its own: the shared helpers it relies on (report rendering, file locking, subtitle validation) are **vendored inline** in a clearly marked section at the top of the file, not imported from a shared module. That is what lets a user copy one file into another project and run it. If you change a vendored helper, keep the other tools' copies byte-identical so they cannot drift apart.
+   Any single tool (`subtitle_fetcher.py`, `mkv_track_cleaner.py`, `bitdepth.py`, `movie_standardizer.py`, `library_auditor.py`) must stay runnable on its own: the shared helpers it relies on (report rendering, file locking, subtitle validation, library-root resolution) are **vendored inline** in a clearly marked section at the top of the file, not imported from a shared module. That is what lets a user copy one file into another project and run it.
+
+   If you change a vendored helper, **change every copy**. This is no longer an honour-system rule: `tests/test_vendored_helpers.py` compares the copies by AST and fails the build on any divergence. Docstrings are excluded from the comparison, so a helper may still explain itself in terms of the tool it lives in, but behaviour must be identical.
+
+   This rule used to be enforced by hand, and hand-enforcement failed: `atomic_write_text` had drifted into two versions, and the safer one (which `fsync`s before publishing, so a report survives power loss and not merely a process crash) existed only in `subtitle_fetcher.py`. The tool that rewrites your movie files had the weakest writer in the repo. Hence the test.
 
 3. **Hardlink-Only Ingest (Zero Extra Disk Usage)**
    Ingestion into the organized library uses `os.link()`. It never silently degrades to a copy or move. Completed torrents remain fully seedable on their original filesystem without taking twice the space.
