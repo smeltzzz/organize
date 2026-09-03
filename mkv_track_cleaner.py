@@ -985,7 +985,7 @@ class Report:
         # Trailing spaces are invisible in a terminal and noisy in a diff.
         return "\n".join(line.rstrip() for line in lines).rstrip() + "\n"
 
-VERSION = "2.6.1"
+VERSION = "2.6.2"
 
 # ==================== DEFAULT CONFIGURATION ====================
 TARGET_DIR = r"E:\torrents\final_organized"
@@ -1870,6 +1870,12 @@ def validate_exact_external_english_srt(mkv_path: Path) -> dict[str, Any]:
     if chosen is None:
         result["reason"] = last_stat_error
         return result
+    # The record must point at the sidecar that was actually validated (an
+    # ``.eng.sdh.srt`` found through the covering list, for example). Leaving
+    # the path at the initialized canonical name would make the post-remux
+    # snapshot re-check stat a file that never existed and reject an
+    # untouched, perfectly valid sidecar.
+    result["path"] = str(chosen)
     if sidecar.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
         result["reason"] = "external SRT is not a regular non-symlink file"
         return result
@@ -3871,6 +3877,20 @@ def run_self_tests() -> int:
             "promoted path is .eng.srt",
         )
         check(not (legacy_movie / "Legacy (2001).en.srt").exists(), "legacy .en.srt removed after promote")
+        # A covering .eng.sdh.srt must be recorded under its OWN name: the
+        # post-remux re-check re-stats the recorded path, and a stale canonical
+        # path that never existed would reject an untouched valid sidecar.
+        sdh_movie = tmp / "Sdh (2002)"
+        sdh_movie.mkdir()
+        (sdh_movie / "Sdh (2002).mkv").write_bytes(b"x")
+        (sdh_movie / "Sdh (2002).eng.sdh.srt").write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nSDH line\n", encoding="utf-8",
+        )
+        sdh_record = validate_exact_external_english_srt(sdh_movie / "Sdh (2002).mkv")
+        check(bool(sdh_record.get("valid")), f"covering .eng.sdh.srt qualifies: {sdh_record}")
+        check(str(sdh_record.get("path", "")).endswith("Sdh (2002).eng.sdh.srt"),
+              "sdh record names the file it was validated from")
+        check(external_srt_snapshot_matches(sdh_record), "untouched sdh sidecar keeps its snapshot match")
         movie_srt.write_text("<html>not a subtitle</html>", encoding="utf-8")
         check(not external_srt_snapshot_matches(external_record), "changed/malformed external SRT rejects activation")
         check(not validate_exact_external_english_srt(movie / "Film (2000).mkv").get("valid"),

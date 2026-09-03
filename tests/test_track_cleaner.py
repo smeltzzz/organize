@@ -649,5 +649,107 @@ class ProbeCacheAfterRemuxTests(unittest.TestCase):
         self.assertEqual(entry["mtime_ns"], self.movie.stat().st_mtime_ns)
 
 
+class ExternalSrtRecordPathTests(unittest.TestCase):
+    """A validated sidecar record must name the file it was validated from.
+
+    ``COVERING_ENGLISH_SRT_SUFFIXES`` accepts ``<stem>.eng.sdh.srt`` when no
+    canonical ``<stem>.eng.srt`` exists.  The record returned by
+    ``validate_exact_external_english_srt`` has to carry that actual path:
+    ``external_srt_snapshot_matches`` re-stats ``record["path"]`` before the
+    atomic swap, and a stale canonical path that never existed would make an
+    untouched, valid sidecar look "changed" and refuse every remux forever.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="tc_srt_record_")
+        self.root = pathlib.Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.folder = self.root / "Film (2020)"
+        self.folder.mkdir()
+        self.movie = self.folder / "Film (2020).mkv"
+        self.movie.write_bytes(b"x" * 4096)
+
+    def test_canonical_record_path_is_the_real_file(self) -> None:
+        srt = self.folder / "Film (2020).eng.srt"
+        srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8")
+        record = tc.validate_exact_external_english_srt(self.movie)
+        self.assertTrue(record.get("valid"), f"record: {record}")
+        self.assertEqual(record.get("path"), str(srt))
+        self.assertTrue(tc.external_srt_snapshot_matches(record))
+
+    def test_sdh_only_record_path_is_the_real_file(self) -> None:
+        srt = self.folder / "Film (2020).eng.sdh.srt"
+        srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nEnglish SDH dialogue\n", encoding="utf-8")
+        record = tc.validate_exact_external_english_srt(self.movie)
+        self.assertTrue(record.get("valid"), f"record: {record}")
+        self.assertEqual(
+            record.get("path"), str(srt),
+            "an .eng.sdh.srt sidecar must be recorded under its own name, not a nonexistent .eng.srt",
+        )
+        self.assertTrue(
+            tc.external_srt_snapshot_matches(record),
+            "an untouched .eng.sdh.srt must keep matching its snapshot",
+        )
+        # Content changes must still be detected through the real path.
+        srt.write_text("1\n00:00:00,000 --> 00:00:02,000\nEdited\n", encoding="utf-8")
+        self.assertFalse(tc.external_srt_snapshot_matches(record))
+
+    def test_live_remux_with_sdh_only_sidecar_completes(self) -> None:
+        """End-to-end: the post-remux snapshot gate must accept a stable sidecar."""
+        (self.folder / "Film (2020).eng.sdh.srt").write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\nEnglish SDH dialogue\n", encoding="utf-8",
+        )
+        source = {
+            "container": {"recognized": True, "supported": True,
+                          "properties": {"duration": 6_000_000_000_000}},
+            "tracks": [
+                {"id": 0, "type": "video", "codec": "AVC/H.264/MPEG-4p10", "properties": {
+                    "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
+                    "display_dimensions": "1920x1080", "tag_number_of_frames": "144000",
+                    "flag_default": True}},
+                {"id": 1, "type": "audio", "codec": "AC-3", "properties": {
+                    "codec_id": "A_AC3", "language": "eng", "language_ietf": "en",
+                    "track_name": "English 5.1", "audio_channels": 6,
+                    "audio_sampling_frequency": 48000, "flag_default": True}},
+                {"id": 2, "type": "subtitles", "codec": "HDMV PGS", "properties": {
+                    "codec_id": "S_HDMV/PGS", "language": "eng", "flag_default": False}},
+            ],
+            "attachments": [], "chapters": [],
+        }
+        output = json.loads(json.dumps(source))
+        output["tracks"] = [t for t in output["tracks"] if t["id"] in (0, 1)]
+
+        def fake_mkvmerge(cmd, on_progress=None):
+            cmd = [str(part) for part in cmd]
+            if "-J" in cmd:
+                target = pathlib.Path(cmd[cmd.index("-J") + 1])
+                info = output if target.name.startswith(tc.TEMP_PREFIX) else source
+                return 0, json.dumps(info), ""
+            out = pathlib.Path(cmd[cmd.index("-o") + 1])
+            out.write_bytes(b"z" * 3000)
+            return 0, "", ""
+
+        real = tc._run_mkvmerge
+        real_root = tc._target_root
+        tc._run_mkvmerge = fake_mkvmerge
+        tc._target_root = None
+        self.addCleanup(self._restore_state, real, real_root)
+        stats = {"cleaned": [], "already_clean": [], "skipped_no_english": [],
+                 "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
+                 "remux_without_srt": [], "total_scanned": 1, "total_space_saved_bytes": 0}
+        with contextlib.redirect_stdout(io.StringIO()):
+            tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=False, log_file_path=None)
+        self.assertEqual(
+            stats["errors"], [],
+            "an untouched validated sidecar must never block the atomic swap",
+        )
+        self.assertEqual([item["name"] for item in stats["cleaned"]], ["Film (2020).mkv"])
+        self.assertEqual(self.movie.stat().st_size, 3000, "the remux must have been swapped in")
+
+    def _restore_state(self, real, real_root) -> None:
+        tc._run_mkvmerge = real
+        tc._target_root = real_root
+
+
 if __name__ == "__main__":
     unittest.main()
