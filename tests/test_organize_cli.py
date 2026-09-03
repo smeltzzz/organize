@@ -120,8 +120,11 @@ class OrganizeCliTests(unittest.TestCase):
             with redirect_stdout(buf):
                 organize.run_doctor()
             output = buf.getvalue()
-            self.assertIn("/env/library", output)
-            self.assertIn("/env/source", output)
+            # The doctor prints str(Path(...)), which is drive-relative
+            # ("\\env\\library") on Windows and POSIX-style on Linux/macOS.
+            # Assert on the Path-formatted value so this test runs everywhere.
+            self.assertIn(str(Path("/env/library")), output)
+            self.assertIn(str(Path("/env/source")), output)
             self.assertNotIn(r"E:\torrents", output)
         finally:
             for var, value in saved.items():
