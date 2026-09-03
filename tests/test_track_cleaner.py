@@ -914,5 +914,242 @@ class CleanupPlanTests(unittest.TestCase):
         self.assertEqual([t["id"] for t in plan.removed_audio], [1])
 
 
+def _video(track_id: int, *, frames: int | None = None,
+           dimensions: str = "1920x1080", name: str = "") -> dict:
+    props = {"pixel_dimensions": dimensions, "display_dimensions": dimensions}
+    if frames is not None:
+        props["tag_number_of_frames"] = frames
+    if name:
+        props["track_name"] = name
+    return {"id": track_id, "type": "video", "codec": "HEVC", "properties": props}
+
+
+class FingerprintAndVerificationTests(unittest.TestCase):
+    """The fail-closed verifier contract: wrong streams can never be swapped in."""
+
+    def _info(self, *tracks: dict) -> dict:
+        return {"container": {"recognized": True, "supported": True}, "tracks": list(tracks)}
+
+    def test_audio_fingerprint_normalizes_flags_and_language(self) -> None:
+        fp = tc.track_fingerprint(_audio(1, name="Atmos", channels=8))
+        self.assertEqual(fp["type"], "audio")
+        self.assertEqual(fp["codec"], "AAC")
+        self.assertEqual(fp["codec_id"], "A_AAC")
+        self.assertEqual(fp["language"], "eng")
+        # A BCP-47 tag is materialized from the legacy ISO-639 code.
+        # A legacy ISO-639 tag that is explicitly present is preserved as-is.
+        self.assertEqual(fp["language_ietf"], "eng")
+        self.assertEqual(fp["channels"], 8)
+        self.assertIn("flag_default", fp["flags"])
+        self.assertFalse(fp["flags"]["flag_default"])
+
+    def test_video_fingerprint_includes_dimensions(self) -> None:
+        fp = tc.track_fingerprint(_video(1, frames=12345, dimensions="3840x2160"))
+        self.assertEqual(fp["type"], "video")
+        self.assertEqual(fp["pixel_dimensions"], "3840x2160")
+        self.assertEqual(fp["default_duration"], None)
+
+    def test_flag_aliases_and_overrides(self) -> None:
+        track = {"id": 3, "type": "subtitles",
+                 "properties": {"language": "eng", "default_track": True, "forced_track": True}}
+        fp = tc.track_fingerprint(
+            track, default_override=False, forced_override=False,
+        )
+        self.assertFalse(fp["flags"]["flag_default"])
+        self.assertFalse(fp["flags"]["flag_forced"])
+
+    def test_aac_7_to_8_channels_is_tolerated(self) -> None:
+        expected = tc.track_fingerprint(
+            {"id": 1, "type": "audio", "codec": "AAC",
+             "properties": {"codec_id": "A_AAC", "audio_channels": 7, "language": "eng"}},
+            default_override=True,
+        )
+        actual = dict(expected)
+        actual["channels"] = 8
+        self.assertTrue(tc.retained_audio_fingerprint_matches(actual, expected))
+
+        actual["codec_id"] = "A_MPEG/L3"
+        self.assertFalse(tc.retained_audio_fingerprint_matches(actual, expected))
+
+    def test_verification_plan_contract(self) -> None:
+        info = self._info(
+            _video(1, frames=100),
+            _audio(2, name="Atmos", channels=8),
+            _sub(3, name="English SDH"),
+            {"id": 4, "type": "buttons", "properties": {}},
+        )
+        plan = tc.build_verification_plan(
+            info, _audio(2, name="Atmos", channels=8), [_sub(3, name="English SDH")], source_size=5000,
+        )
+        self.assertEqual(plan["source_size"], 5000)
+        self.assertEqual(plan["attachment_count"], 0)
+        self.assertEqual(plan["chapter_entries"], 0)
+        self.assertEqual(plan["video_frame_counts"], [100])
+        self.assertEqual([t["type"] for t in plan["preserved_tracks"]["video"]], ["video"])
+        self.assertEqual([t["type"] for t in plan["preserved_tracks"]["buttons"]], ["buttons"])
+        self.assertGreaterEqual(len(plan["audio"]), 8)
+        self.assertEqual(len(plan["subtitles"]), 1)
+
+    def test_verify_remux_info_accepts_identical_output(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="verify_ok_") as td:
+            out = Path(td) / "remuxed.mkv"
+            out.write_bytes(b"x" * 3000)
+            # The output an mkvmerge remux of this source would produce: the
+            # retained audio is marked default; the subtitle keeps its flags.
+            source_audio = _audio(2, name="Atmos", channels=8)
+            kept_sub = _sub(3, name="English SDH")
+            source = self._info(source_audio, kept_sub)
+            output_audio = dict(source_audio)
+            output_audio["properties"] = dict(source_audio["properties"])
+            output_audio["properties"]["default_track"] = True
+            output_sub = dict(kept_sub)
+            output_sub["properties"] = dict(kept_sub["properties"])
+            output_info = self._info(output_audio, output_sub)
+            plan = tc.build_verification_plan(
+                source, source_audio, [kept_sub], source_size=3000,
+            )
+            ok, reason = tc._verify_remux_info(out, output_info, plan)
+            self.assertTrue(ok, f"identical remux rejected: {reason}")
+
+    def test_verify_remux_info_rejects_tiny_output(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="verify_tiny_") as td:
+            out = Path(td) / "tiny.mkv"
+            out.write_bytes(b"x" * 100)
+            plan = {"source_size": 3000, "audio": {}, "subtitles": [],
+                    "preserved_tracks": {}, "attachment_count": 0, "chapter_entries": 0,
+                    "video_frame_counts": [], "source_duration_ns": None}
+            ok, reason = tc._verify_remux_info(
+                out,
+                {"container": {"recognized": True, "supported": True}, "tracks": []},
+                plan,
+            )
+            self.assertFalse(ok)
+            self.assertIn("tiny", reason)
+
+    def test_verify_remux_info_rejects_missing_audio_track(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="verify_noaudio_") as td:
+            out = Path(td) / "no-audio.mkv"
+            out.write_bytes(b"x" * 3000)
+            plan = {"source_size": 3000, "audio": {}, "subtitles": [],
+                    "preserved_tracks": {}, "attachment_count": 0, "chapter_entries": 0,
+                    "video_frame_counts": [], "source_duration_ns": None}
+            ok, reason = tc._verify_remux_info(
+                out,
+                {"container": {"recognized": True, "supported": True}, "tracks": []},
+                plan,
+            )
+            self.assertFalse(ok)
+            self.assertIn("audio track", reason)
+
+    def test_verify_remux_info_rejects_wrong_subtitles(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="verify_sub_") as td:
+            out = Path(td) / "subs.mkv"
+            out.write_bytes(b"x" * 3000)
+            audio = _audio(1)
+            audio["properties"]["default_track"] = True
+            plan = tc.build_verification_plan(self._info(audio), _audio(1), [], source_size=3000)
+            # Output carries an extra Spanish subtitle the plan did not retain.
+            output_audio = _audio(1)
+            output_audio["properties"] = dict(output_audio["properties"])
+            output_audio["properties"]["default_track"] = True
+            output_info = self._info(
+                output_audio,
+                _sub(9, language="spa", name="Español"),
+            )
+            ok, reason = tc._verify_remux_info(out, output_info, plan)
+            self.assertFalse(ok)
+            self.assertIn("subtitle", reason)
+
+    def test_diagnostic_records_reason_and_fingerprints(self) -> None:
+        source = self._info(_audio(1), _video(2))
+        output = {"tracks": [_audio(1)]}
+        diag = tc.build_verification_diagnostic(
+            source, output, {"audio": {"x": 1}}, "retained audio fingerprint differs",
+        )
+        self.assertEqual(diag["reason"], "retained audio fingerprint differs")
+        self.assertEqual(diag["expected_audio_fingerprint"], {"x": 1})
+        self.assertEqual(len(diag["source_video_tracks"]), 1)
+        self.assertIn("normalized_fingerprint", diag["output_audio_tracks"][0])
+
+
+class TransactionAndCleanupTests(unittest.TestCase):
+    """The crash-recovery journal: evidence is durable before any swap."""
+
+    def test_new_transaction_paths_recover_the_journal_path(self) -> None:
+        original = Path("/media/Film (2020).mkv")
+        temp, journal, token = tc.new_transaction_paths(original)
+        self.assertEqual(temp.parent, original.parent)
+        self.assertEqual(journal.parent, original.parent)
+        self.assertTrue(journal.name.startswith(tc.TRANSACTION_MARKER))
+        self.assertTrue(journal.name.endswith(tc.TRANSACTION_JOURNAL_SUFFIX))
+        self.assertEqual(tc._transaction_token_from_temp_name(temp.name), token)
+        self.assertEqual(tc._transaction_journal_path(original.parent, token), journal)
+
+    def test_transaction_roundtrip_and_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="txn_") as td:
+            root = Path(td)
+            movie = root / "Film (2020).mkv"
+            movie.write_bytes(b"m")
+            temp, journal, _token = tc.new_transaction_paths(movie)
+            temp.write_bytes(b"staged")
+            payload = tc.create_transaction(movie, temp, _token, movie.stat())
+            tc.write_transaction(journal, payload)
+            loaded = tc.read_transaction(journal)
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded["phase"], "remuxing")
+            self.assertEqual(loaded["source_name"], movie.name)
+            self.assertEqual(loaded["source_snapshot"]["size"], 1)
+
+            tc.cleanup_transaction_artifacts(temp, journal)
+            self.assertFalse(temp.exists())
+            self.assertFalse(journal.exists())
+
+    def test_read_transaction_rejects_wrong_schema(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="txn_bad_") as td:
+            journal = Path(td) / "txn.json"
+            journal.write_text("{\"schema\": \"wrong\"}", encoding="utf-8")
+            self.assertIsNone(tc.read_transaction(journal))
+            journal.write_text("not json", encoding="utf-8")
+            self.assertIsNone(tc.read_transaction(journal))
+
+    def test_safe_replace_and_safe_delete(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="replace_") as td:
+            root = Path(td)
+            src, dst = root / "src.mkv", root / "dst.mkv"
+            src.write_bytes(b"new")
+            dst.write_bytes(b"old")
+            self.assertTrue(tc.safe_replace(src, dst, max_retries=1))
+            self.assertEqual(dst.read_bytes(), b"new")
+            self.assertFalse(src.exists())
+            tc.safe_delete(dst, max_retries=1)
+            self.assertFalse(dst.exists())
+
+    def test_describe_track_includes_channels_and_name(self) -> None:
+        desc = tc.describe_track(_audio(7, channels=6, name="Atmos"))
+        self.assertIn("ID 7", desc)
+        self.assertIn("6ch", desc)
+        self.assertIn("'Atmos'", desc)
+        bare = tc.describe_track(_audio(1))
+        self.assertIn("[eng]", bare)
+
+
+class LayoutAndCountTests(unittest.TestCase):
+    def test_chapter_and_video_frame_counts(self) -> None:
+        info = {"chapters": [{"num_entries": 3}, {"other": 1}], "tracks": []}
+        self.assertEqual(tc._chapter_entry_count(info), 3)
+        tracks = [_video(1, frames=None), _video(2, frames=100), _video(3, frames=50)]
+        # None sorts below every real count (container may count only some).
+        self.assertEqual(tc._video_frame_counts(tracks), [None, 50, 100])
+
+    def test_bool_flag_and_normal_int_parsing(self) -> None:
+        self.assertTrue(tc._bool_flag("1"))
+        self.assertTrue(tc._bool_flag("true"))
+        self.assertFalse(tc._bool_flag("0"))
+        self.assertFalse(tc._bool_flag(""))
+        self.assertEqual(tc._normal_int("42"), 42)
+        self.assertEqual(tc._normal_int("nope"), None)
+        self.assertEqual(tc._normal_int(None), None)
+
+
 if __name__ == "__main__":
     unittest.main()
