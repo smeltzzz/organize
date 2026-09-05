@@ -1,5 +1,13 @@
 # Overhaul Plan — `organize`
 
+> **Status: Phases 1 and 2 are landed** on `arena/01a07259-organize` — the
+> shared core (`organizekit/`) replaced 4,325 lines of vendored copies, and the
+> tools' 2,229 lines of self-test code moved to `tests/selftests/`. Production
+> Python is down from 26,458 to 19,953 lines (−25%), coverage is up from 58% to
+> 67% with no new assertions, and the suite is green at 556 tests. Phases 3–8
+> below are still open; the numbers in the tables are the pre-work baseline
+> unless marked otherwise.
+>
 > A ground-up plan for what this repo should become, written after reading all
 > 26,458 production lines and measuring the codebase rather than eyeballing it.
 > Companion to [`REVIEW.md`](REVIEW.md), which fixed the defects. This document
@@ -368,8 +376,8 @@ Each phase is independently shippable and leaves the repo green.
 
 | Phase | Work | Lines | Risk | Days |
 | :--- | :--- | ---: | :--- | ---: |
-| **1** | W1 core extraction + generator + CI gate | −4,325 | Med | 2–3 |
-| **2** | W5 self-tests → `tests/`, thin smoke checks remain | −2,000 | Low | 1 |
+| ~~**1**~~ | ~~W1 core extraction + CI gate~~ **done** | −4,663 | Med | ✅ |
+| ~~**2**~~ | ~~self-tests → `tests/`, thin smoke checks remain~~ **done** | −1,842 | Low | ✅ |
 | **3** | W3 one Step registry; one-shot = convergence loop | −1,400 | Med | 2–3 |
 | **4** | W4 workers + token bucket + HTTP keep-alive | +400 | Med | 3–4 |
 | **5** | W2 SQLite state + single scan + `organize status` | +900 | Med-High | 3–4 |
