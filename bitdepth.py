@@ -40,7 +40,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from threading import Lock
 from typing import Any
 
 # Shared implementation: everything imported here is defined exactly once,
@@ -52,13 +51,13 @@ from organizekit.core import (
     LockUnavailable,
     MediaProbeCache,
     Report,
+    RunLog,
     atomic_write_text,
     default_tool_dir,
     enable_utf8_stdio,
     iter_completed,
     open_state,
     path_is_within,
-    print_text,
     resolve_library,
     resolve_workers,
     run_field_smoke_test,
@@ -234,24 +233,9 @@ class ProbeResult:
     error: str = ""
 
 CFG = Config()
-PRINT_LOCK = Lock()
-_ACTIVE_LOG_FILE: Path | None = None
-
-def log(msg: str, level: str = "INFO", log_file: Path | None = None) -> None:
-    """Print a timestamped event and append the identical event to this script's log."""
-    line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{level}] {msg}"
-    target = log_file if log_file is not None else _ACTIVE_LOG_FILE
-    with PRINT_LOCK:
-        print_text(line)
-        if target is None:
-            return
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("a", encoding="utf-8", errors="replace") as fh:
-                fh.write(line + "\n")
-        except OSError:
-            # Logging must never make this read-only inspector alter or abandon media work.
-            pass
+# The console/file logger every tool shares: see organizekit/core/runlog.py
+# for why a logging failure is never allowed to end a run.
+log = RunLog()
 
 # =============================================================================
 # FFPROBE LOCATION
@@ -1167,8 +1151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             for error in errors:
                 log(f"Configuration error: {error}", level="CRITICAL", log_file=None)
             return 2
-        global _ACTIVE_LOG_FILE
-        _ACTIVE_LOG_FILE = cfg.log_file
+        log.file = cfg.log_file
         log(f"Starting read-only 10-bit inspection; source={cfg.source_dir}")
         binary = find_ffprobe(args.ffprobe)
         if not binary or not ffprobe_works(binary):

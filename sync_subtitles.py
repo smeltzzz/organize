@@ -104,6 +104,7 @@ from organizekit.core import (
     CoordinationLock,
     LockTimeoutError,
     Report,
+    RunLog,
     atomic_write_text,
     default_tool_dir,
     describe_workers,
@@ -128,24 +129,9 @@ from organizekit.core import (
 
 JUNK_SUFFIXES = (".!qb", ".parts", ".part", ".crdownload", ".tmp", ".temp")
 
-PRINT_LOCK = Lock()
-
-_ACTIVE_LOG_FILE: Path | None = None
-
-def log(message: str, level: str = "INFO", log_file: Path | None = None) -> None:
-    """Print a timestamped event and append the identical event to this script's log."""
-    line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{level}] {message}"
-    target = log_file if log_file is not None else _ACTIVE_LOG_FILE
-    with PRINT_LOCK:
-        print_text(line)
-        if target is None:
-            return
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("a", encoding="utf-8", errors="replace") as fh:
-                fh.write(line + "\n")
-        except OSError:
-            pass
+# The console/file logger every tool shares: see organizekit/core/runlog.py
+# for why a logging failure is never allowed to end a run.
+log = RunLog()
 
 def is_junk_filename(name: str) -> bool:
     lower = name.casefold()
@@ -1237,8 +1223,7 @@ def run(cfg: Config) -> int:
     log(f"Memory   : {cfg.sync_ledger}")
     log("")
 
-    global _ACTIVE_LOG_FILE
-    _ACTIVE_LOG_FILE = cfg.log_file
+    log.file = cfg.log_file
 
     results: list[SyncResult] = []
     video_count = 0

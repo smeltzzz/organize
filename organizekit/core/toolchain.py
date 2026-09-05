@@ -183,7 +183,8 @@ def api_key_present() -> bool:
     """A subtitle provider key from either source, env or config file."""
     try:
         import subtitle_fetcher as sf
-    except Exception:
+    except Exception:  # noqa: BLE001 - a sibling tool that will not import
+        # must degrade to the plain PATH lookup, not take the caller down.
         return bool(str(os.environ.get("OPENSUBTITLES_API_KEY") or "").strip()
                     or str(os.environ.get("SUBDL_API_KEY") or "").strip())
     keys = (
@@ -201,7 +202,8 @@ def mkvmerge_installed() -> bool:
         import mkv_track_cleaner as tc
         tc.resolve_mkvmerge_path()
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - a sibling tool that will not import
+        # must degrade to the plain PATH lookup, not take the caller down.
         return shutil.which("mkvmerge") is not None
 
 
@@ -210,7 +212,8 @@ def ffprobe_installed() -> bool:
     try:
         import bitdepth
         return bitdepth.find_ffprobe() is not None
-    except Exception:
+    except Exception:  # noqa: BLE001 - a sibling tool that will not import
+        # must degrade to the plain PATH lookup, not take the caller down.
         return shutil.which("ffprobe") is not None
 
 
@@ -223,7 +226,8 @@ def ffsubsync_installed() -> bool:
     try:
         import sync_subtitles as ss
         return ss.find_ffsubsync() is not None
-    except Exception:
+    except Exception:  # noqa: BLE001 - a sibling tool that will not import
+        # must degrade to the plain PATH lookup, not take the caller down.
         return any(shutil.which(name) for name in ("ffsubsync", "ffs", "subsync"))
 
 
@@ -267,7 +271,8 @@ def prerequisite_issue(step: Step, script_dir: Path | None = None) -> str | None
     try:
         if not check():
             return reason
-    except Exception:
+    except Exception:  # noqa: BLE001 - check() is an arbitrary caller-supplied
+        # probe; whatever it raises, the answer is "cannot run this step".
         return reason or "prerequisite check failed"
     return None
 

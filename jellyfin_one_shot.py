@@ -101,6 +101,7 @@ from organizekit.core import (  # noqa: F401  (SCRAPING_DAILY_CAP, TOOL_SCRIPTS:
     STEP_ORDER,
     STEPS,
     TOOL_SCRIPTS,
+    RunLog,
     Step,
     build_step_args,
     describe_library_origin,
@@ -202,29 +203,19 @@ def setup_logging(log_dir: Path) -> Path:
     return runtime_log
 
 
+# The orchestrator writes the bracketed transcript form; the body, the lock and
+# the never-fail-a-run-over-logging rule are shared (organizekit/core/runlog.py).
+_RUN_LOG = RunLog(brackets=True)
+
+
 def log(runtime_log: Path, level: str, message: str) -> None:
     """Write a timestamped log line to both console and file."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{timestamp}] [{level}] {message}"
-    print(line, flush=True)
-    try:
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        with runtime_log.open("a", encoding="utf-8", errors="replace") as f:
-            f.write(line + "\n")
-    except OSError:
-        pass
+    _RUN_LOG(message, level, log_file=runtime_log)
 
 
 def log_to_file(runtime_log: Path, level: str, message: str) -> None:
     """Write a log line the console has already shown (or should not show)."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{timestamp}] [{level}] {message}"
-    try:
-        runtime_log.parent.mkdir(parents=True, exist_ok=True)
-        with runtime_log.open("a", encoding="utf-8", errors="replace") as f:
-            f.write(line + "\n")
-    except OSError:
-        pass
+    _RUN_LOG.to_file(message, level, log_file=runtime_log)
 
 
 def log_info(runtime_log: Path, message: str) -> None:
@@ -254,15 +245,15 @@ def tail_to_file(path: Path, text: str, max_lines: int = TOOL_TRANSCRIPT_MAX_LIN
 # Tool execution
 # ---------------------------------------------------------------------------
 # The console is a single stream shared by several reader threads, so printing
-# is serialised: two tools' lines must never interleave mid-line.
-_PRINT_LOCK = threading.Lock()
+# is serialised: two tools' lines must never interleave mid-line. The run log
+# takes the same lock, so a status line cannot split a child's output either.
 
 
 def _echo_line(line: str, kind: str, tag: str) -> None:
     """Print one line of a child tool's output, tagged with the step it came from."""
     prefix = f"[{tag}] " if tag else "  "
     suffix = "  (stderr)" if kind == "err" else ""
-    with _PRINT_LOCK:
+    with _RUN_LOG.lock:
         try:
             print(f"{prefix}{line}{suffix}", flush=True)
         except UnicodeEncodeError:  # a console that cannot encode the line

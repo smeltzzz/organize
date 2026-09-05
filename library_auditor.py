@@ -27,7 +27,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from threading import Lock
 
 # Shared implementation: everything imported here is defined exactly once,
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
@@ -41,6 +40,7 @@ from organizekit.core import (
     ExclusiveRunLock,
     LockUnavailable,
     Report,
+    RunLog,
     atomic_write_text,
     default_tool_dir,
     enable_utf8_stdio,
@@ -107,8 +107,6 @@ DEFECT_STATES = frozenset({
     "INACCESSIBLE",
 })
 
-PRINT_LOCK = Lock()
-
 # The audit is I/O bound, so more workers than CPUs still helps - it is waiting
 # on the filesystem, not computing. The ceiling keeps a network share from
 # being hammered by an unbounded fan-out.
@@ -145,22 +143,9 @@ class Audit:
     folders: list[FolderAudit]
     elapsed_sec: float = 0.0
 
-_ACTIVE_LOG_FILE: Path | None = None
-
-def log(message: str, level: str = "INFO", log_file: Path | None = None) -> None:
-    """Print a timestamped event and append the identical event to this script's log."""
-    line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{level}] {message}"
-    target = log_file if log_file is not None else _ACTIVE_LOG_FILE
-    with PRINT_LOCK:
-        print_text(line)
-        if target is None:
-            return
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("a", encoding="utf-8", errors="replace") as fh:
-                fh.write(line + "\n")
-        except OSError:
-            pass
+# The console/file logger every tool shares: see organizekit/core/runlog.py
+# for why a logging failure is never allowed to end a run.
+log = RunLog()
 
 def is_junk_filename(name: str) -> bool:
     lower = name.casefold()
@@ -593,8 +578,7 @@ def run(cfg: Config) -> int:
         for error in errors:
             log(error, level="ERROR", log_file=None)
         return 2
-    global _ACTIVE_LOG_FILE
-    _ACTIVE_LOG_FILE = cfg.log_file
+    log.file = cfg.log_file
     log(f"Starting read-only library audit; source={cfg.source_dir}")
     log(f"Log={cfg.log_file}; report={cfg.report_file}")
     try:

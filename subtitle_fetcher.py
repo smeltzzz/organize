@@ -125,6 +125,7 @@ from organizekit.core import (
     BucketRegistry,
     CoordinationLock,
     Report,
+    RunLog,
     atomic_write_text,
     default_tool_dir,
     enable_utf8_stdio,
@@ -1508,18 +1509,10 @@ class VideoSnapshot:
 class ConcurrentSidecarError(RuntimeError):
     """Raised when another actor safely created the requested sidecar first."""
 
-def log(msg: str, level: str = "INFO", log_file: Path | None = None) -> None:
-    line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{level}] {msg}"
-    # Never let a console encoding abort a run: the progress lines carry an em
-    # dash and the report carries box-drawing characters.
-    print_text(line)
-    if log_file:
-        try:
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-            with log_file.open("a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
-        except OSError:
-            pass
+# The console/file logger every tool shares: see organizekit/core/runlog.py
+# for why a logging failure is never allowed to end a run. The fetcher passes
+# cfg.log_file explicitly at every call site, so no default file is set here.
+log = RunLog()
 
 def video_snapshot(path: Path) -> VideoSnapshot:
     """Capture a no-follow video identity before an external-provider transaction."""

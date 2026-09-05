@@ -42,6 +42,7 @@ from .parallel import (
 from .probecache import MediaProbeCache
 from .ratelimit import BucketRegistry, TokenBucket, host_key
 from .report import Report
+from .runlog import RunLog
 from .smoke import run_field_smoke_test
 from .state import (
     KIND_BITDEPTH,
@@ -168,6 +169,7 @@ __all__ = [
     "TokenBucket",
     "host_key",
     "Report",
+    "RunLog",
     "atomic_write_text",
     "clip_text",
     "decode_srt_bytes",

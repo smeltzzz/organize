@@ -460,7 +460,47 @@ Still open from this slice: the remaining tier orchestration inside
 tests — `hypothesis` cannot be assumed present in this offline environment, so
 those would need stdlib `random` with fixed seeds.
 
+> **Update — phase 6c (code health): one run log, and a lint ratchet.**
+>
+> The last verbatim duplicate in the toolkit was the logger. Four tools had
+> copied the same twenty lines — stamp, print, append, swallow the `OSError` —
+> and, as copies do, had drifted: three took a print lock and one did not; three
+> wrote the file with `errors="replace"` and the fetcher would have raised
+> `UnicodeEncodeError` on a lone surrogate in a filename; the orchestrator used
+> a bare `print`, so an unencodable line could have ended a five-hour run inside
+> the logging call. `organizekit/core/runlog.py` now defines it once
+> (`RunLog`), the tools hold an instance, and the differences that were real —
+> the orchestrator's bracketed transcript form, its three-argument signature,
+> the fetcher's deliberate lack of a default log file — are parameters or thin
+> wrappers rather than copies. −62 lines net.
+>
+> Two things got *better*, not just shorter. The lock is now public, and
+> `jellyfin_one_shot.py` echoes its child tools' output under the same one, so
+> a status line can no longer split a tool's line in half. And the guarantee
+> that used to be assumed is now tested: `tests/test_runlog.py` drives six
+> threads through a printer that deliberately emits each line in two pieces
+> with a yield between them, and asserts every line — console and file — comes
+> out whole. Without the lock that test fails, which is the only reason to
+> trust it (all six mutations of the module are caught).
+>
+> `mkv_track_cleaner.py` keeps its own logger and that is the right answer: it
+> holds the log file open for the length of a remux queue, routes lines through
+> the live console when one is attached, and suppresses `PROGRESS` from the
+> file. Those are three real behaviours, not drift.
+>
+> The `except Exception` audit started at the other end. `core/toolchain.py`
+> no longer has a file-wide `BLE001` exemption; its five broad catches carry
+> the justification on the line itself, so a *new* blind except in shared code
+> is now flagged. The nine tool files still have the blanket ignore — 84 sites,
+> most of them the per-item handlers that keep a sweep alive — and narrowing
+> them one at a time is the remaining code-health work.
+
 ### W6 · Close the product gaps
+
+**Out of scope by decision.** The owner's instruction for this stretch of work
+was code health only — no new product features. The gaps below are recorded
+because they are real, not because they are queued; behaviour stays exactly as
+it is, and the effort goes into size, speed and test rigour instead.
 
 Code quality aside, there are real functional gaps against the README's own
 promises:
@@ -527,7 +567,8 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**5**~~ | ~~W2 SQLite state cache + write-through + `organize status`~~ **done** (probe caches and the fetcher's quota ledger not yet moved in; `core/scan.py` rejected — see the W2 note) | +841 | Med-High | ✅ |
 | ~~**6a**~~ | ~~W5 fault-injection, end-to-end and destructive-path suites, coverage 69% → 75%, gate → 72~~ **done** | +1,240 | Low | ✅ |
 | ~~**6b**~~ | ~~W5 the fetcher's spending planners extracted from `queue_run` and tabled~~ **done** (the remaining tier orchestration and the property tests are still open — see the W5 update) | +460 | Low | ✅ |
-| **7** | W6 direct-play verification, HandBrake queue, multi-language | +1,500 | Med | 4–6 |
+| ~~**6c**~~ | ~~one shared `RunLog`, the last duplicated implementation; `core/toolchain.py` off the blanket `BLE001` ignore~~ **done** (the nine tool files' 84 broad catches are still blanket-ignored) | −62, +200 tests | Low | ✅ |
+| **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | **8** | W7 docs split, JSON output, PyPI + zipapp release | +300 | Low | 2 |
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
@@ -566,7 +607,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **76%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 9.6 s (845 tests) | ≤15 s (with property + fault-injection tests) |
+| Test runtime | 6.7 s | 10.8 s (867 tests) | ≤15 s (with property + fault-injection tests) |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
