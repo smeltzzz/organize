@@ -1203,7 +1203,8 @@ class ScrapeChain:
         except ScrapeSourceError as exc:
             self._note_hard_failure(key, str(exc))
             raise SourceUnavailable(str(exc)) from exc
-        except Exception as exc:  # structural surprises must not kill the run
+        except Exception as exc:  # noqa: BLE001 - a scraped page is untrusted input:
+            # any structural surprise disables that source, never the run.
             self._note_parse_failure(key, f"{type(exc).__name__}: {exc}")
             raise SourceUnavailable(f"unparseable response ({exc})") from exc
         self._note_success(key)
@@ -1223,7 +1224,7 @@ class ScrapeChain:
         except ScrapeSourceError as exc:
             self._note_hard_failure(key, str(exc))
             raise SourceUnavailable(str(exc)) from exc
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - same rule for the download leg
             self._note_parse_failure(key, f"{type(exc).__name__}: {exc}")
             raise SourceUnavailable(f"unparseable response ({exc})") from exc
         self._note_success(key)
@@ -5293,7 +5294,8 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                         on_reason=lambda key, why, _reasons=pool_reasons: _reasons.append(
                             f"{scrape_provider_label(key)}: {why}"),
                     )
-                except Exception as exc:  # a scraping-tier bug must not kill the run
+                except Exception as exc:  # noqa: BLE001 - a bug in the scraping tier
+                    # costs this movie its free sources, not the queue its run.
                     pool_reasons.append(f"scraping sources failed: {type(exc).__name__}: {exc}")
                     scrape_cand, scrape_key, scrape_raw = None, "", None
                 if scrape_cand is not None and scrape_raw is not None:
@@ -6119,7 +6121,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted", file=sys.stderr)
         return 130
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - last resort: whatever went wrong, this run
+        # leaves through one exit code instead of an unhandled traceback.
         print(f"Subtitle fetcher failure: {exc}", file=sys.stderr)
         traceback.print_exc()
         return 1

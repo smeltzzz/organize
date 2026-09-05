@@ -339,7 +339,8 @@ def run_tool(
     except FileNotFoundError:
         log_error(runtime_log, f"Script not found: {script_path}")
         return -1, "", f"Script not found: {script_path}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - a child that will not start is a
+        # failed step, reported as such; it is never this runner's own crash.
         log_error(runtime_log, f"Failed to run {tool_name}: {e}")
         return -1, "", str(e)
 
@@ -364,8 +365,8 @@ def run_tool(
         finally:
             try:
                 stream.close()
-            except Exception:
-                pass
+            except (OSError, ValueError):
+                pass  # already closed, or the pipe died with the child
 
     threads = [
         threading.Thread(target=reader, args=(proc.stdout, "out"), daemon=True),
@@ -1637,7 +1638,8 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         log_warning(runtime_log, "Interrupted by user. Partial results may be available.")
         return 130
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - last resort: whatever went wrong, this run
+        # leaves through one exit code instead of an unhandled traceback.
         log_error(runtime_log, f"Unexpected error: {e}")
         import traceback
         traceback.print_exc()

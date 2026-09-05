@@ -58,8 +58,8 @@ _SUPPORTS_UNICODE = False
 try:
     _encoding = (sys.stdout.encoding or "").casefold()
     _SUPPORTS_UNICODE = "utf-8" in _encoding or "utf8" in _encoding
-except Exception:
-    pass
+except (AttributeError, ValueError):
+    pass  # a replaced stream with no .encoding, or a detached one
 
 # On Windows 10/11, enable VT mode for ANSI color support in cmd/powershell
 if os.name == "nt" and _SUPPORTS_COLOR:
@@ -68,7 +68,9 @@ if os.name == "nt" and _SUPPORTS_COLOR:
         windll = getattr(ctypes, "windll", None)
         if windll:
             windll.kernel32.SetConsoleMode(windll.kernel32.GetStdHandle(-11), 7)
-    except Exception:
+    except Exception:  # noqa: BLE001 - ctypes reports a bad call as ArgumentError,
+        # OSError or AttributeError depending on where it fails, and colour is
+        # optional: a console that refuses VT mode simply does not get it.
         pass
 
 
@@ -210,7 +212,9 @@ def get_binary_version(binary_path: str, flag: str = "-version") -> str:
         )
         first_line = (proc.stdout or proc.stderr or "").strip().splitlines()
         return first_line[0] if first_line else ""
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
+        # Missing, unrunnable, hung past the timeout, or answering with bytes
+        # that are not text: the version string is cosmetic either way.
         return ""
 
 
@@ -229,7 +233,8 @@ def _resolve_library_path(explicit: Path | None) -> Path:
     try:
         import bitdepth as probe_mod
         return probe_mod.resolve_library(None)
-    except Exception:
+    except Exception:  # noqa: BLE001 - a sibling that will not import must not stop
+        # the CLI; fall through to the environment and the documented default.
         pass
     for value in (os.environ.get("ORGANIZE_LIBRARY"), os.environ.get("MOVIE_STD_TARGET")):
         if value and value.strip():
@@ -251,7 +256,7 @@ def _resolve_source_path(explicit: Path | None) -> Path:
     try:
         import movie_standardizer as standardizer
         return standardizer.resolve_source_root(None)
-    except Exception:
+    except Exception:  # noqa: BLE001 - as above: the CLI still has a default
         pass
     value = os.environ.get("MOVIE_STD_SOURCE")
     if value and value.strip():
@@ -306,7 +311,8 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             message=f"Found: {mkvmerge_ver or 'mkvmerge'}",
             detail=mkvmerge_bin,
         ))
-    except Exception:
+    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
+        # probe that raises anything at all is the "not usable here" answer.
         remedy_msg = (
             "Windows: winget install MKVToolNix.MKVToolNix or https://mkvtoolnix.download/\n"
             "Debian/Ubuntu: sudo apt install -y mkvtoolnix\n"
@@ -334,7 +340,8 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
             ))
         else:
             raise FileNotFoundError("ffprobe not found or not working")
-    except Exception:
+    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
+        # probe that raises anything at all is the "not usable here" answer.
         remedy_msg = (
             "Windows: winget install Gyan.FFmpeg or drop ffprobe.exe in C:\\ffmpeg\\bin\\\n"
             "Debian/Ubuntu: sudo apt install -y ffmpeg\n"
@@ -375,7 +382,8 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
     try:
         import sync_subtitles as ss_sync
         ffsubsync_bin = ss_sync.find_ffsubsync()
-    except Exception:
+    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
+        # probe that raises anything at all is the "not usable here" answer.
         ffsubsync_bin = None
     if ffsubsync_bin:
         ffsubsync_ver = get_binary_version(ffsubsync_bin, "--version")
@@ -403,7 +411,8 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
         import subtitle_fetcher as sf_extract
         mkvmerge_bin = sf_extract.find_mkvtoolnix_binary("mkvmerge")
         mkvextract_bin = sf_extract.find_mkvtoolnix_binary("mkvextract")
-    except Exception:
+    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
+        # probe that raises anything at all is the "not usable here" answer.
         mkvmerge_bin = None
         mkvextract_bin = None
     if mkvmerge_bin and mkvextract_bin:
@@ -431,7 +440,8 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
     try:
         import subtitle_fetcher as sf_ocr
         ocr_backend, ocr_note = sf_ocr.detect_ocr_backend(sf_ocr.OCR_BACKEND_AUTO)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - a doctor check reports what is wrong; a
+        # probe that raises anything at all is the "not usable here" answer.
         ocr_backend, ocr_note = None, f"subtitle_fetcher is unavailable ({exc})"
     if ocr_backend is not None:
         checks.append(DiagnosticCheck(
@@ -465,7 +475,8 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
         import subtitle_fetcher as sf
         opensubtitles_key = (os.environ.get("OPENSUBTITLES_API_KEY") or sf.OPENSUBTITLES_API_KEY).strip()
         subdl_key = (os.environ.get("SUBDL_API_KEY") or sf.SUBDL_API_KEY).strip()
-    except Exception:
+    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
+        # probe that raises anything at all is the "not usable here" answer.
         opensubtitles_key = None
         subdl_key = None
 
@@ -560,7 +571,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
                         "Configure qBittorrent downloads to reside on the same drive/volume as your library."
                     ),
                 ))
-        except Exception as exc:
+        except OSError as exc:
             checks.append(DiagnosticCheck(
                 name="Hardlink Compatibility",
                 status="warn",
@@ -774,7 +785,7 @@ def _subtitle_states() -> dict[str, str]:
     try:
         import library_auditor
         return dict(library_auditor.SUBTITLE_STATE_FOR_AUDIT)
-    except Exception:
+    except Exception:  # noqa: BLE001 - without the auditor there are no states to map
         return {}
 
 
@@ -867,7 +878,8 @@ def run_status(
         # or if the scan fails, so `status` stays one screen.
         with redirect_stdout(scan_log):
             audit = library_auditor.audit_library(cfg)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - the scan is the whole command: any
+        # failure is reported on stderr with the captured log, then exit 2.
         print(scan_log.getvalue(), end="")
         print(f"{SYM_FAIL} {red('Scan failed:')} {exc}", file=sys.stderr)
         return 2
@@ -1088,7 +1100,7 @@ def _reconfigure_stdio_for_windows() -> None:
             continue
         try:
             reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
+        except (ValueError, OSError):  # closed or detached stream
             pass
 
 

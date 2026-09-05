@@ -491,9 +491,36 @@ those would need stdlib `random` with fixed seeds.
 > The `except Exception` audit started at the other end. `core/toolchain.py`
 > no longer has a file-wide `BLE001` exemption; its five broad catches carry
 > the justification on the line itself, so a *new* blind except in shared code
-> is now flagged. The nine tool files still have the blanket ignore — 84 sites,
+> is now flagged. The nine tool files still have the blanket ignore — 72 sites,
 > most of them the per-item handlers that keep a sweep alive — and narrowing
 > them one at a time is the remaining code-health work.
+
+> **Update — phase 6d (code health): no blind excepts left.** All 80 of them
+> were read. 27 turned out to be guarding something with bounded failure modes
+> and now name it — `socket.gethostname()` raises `OSError`, `shutil.disk_usage`
+> raises `OSError`, `subprocess.run` raises `OSError`/`SubprocessError`/
+> `ValueError`, `str.encode` on an unknown codec raises `LookupError`, a closed
+> stdout raises `OSError`/`ValueError`. The other 53 stay broad and say why on
+> the line, and they fall into four honest kinds:
+>
+> | Kind | Rule | Example |
+> | :--- | :--- | :--- |
+> | per-item | one bad movie is an error row, never the end of a sweep | `process_mkv`, the ffprobe wrapper |
+> | fail-closed | anything unexpected means *do not proceed* | `verify_remux_output`, the journal write, `acquire_lock` |
+> | last resort | `main()` leaves through one exit code, not a traceback | every tool |
+> | foreign | ctypes, a sibling tool's import, a scraped page, a display callback | the Windows probes, `doctor` |
+>
+> No file has a blanket exemption any more, in the tools or in the core, so a
+> *new* blind except anywhere in the toolkit fails the lint job.
+>
+> A narrowed `except` is only an improvement if it still catches what actually
+> happens, so `tests/test_error_boundaries.py` (27 tests) injects the real
+> failure at each narrowed boundary and asserts the documented degradation: a
+> hostname that will not resolve, a volume that will not report free space, a
+> `Path.unlink` that keeps raising, a log file on a read-only share, a version
+> probe that hangs past its timeout, a console closed under a run in progress.
+> Six mutations that make a clause *too* narrow are each caught by a named
+> test. `mkv_track_cleaner.py` 75% → 77%.
 
 ### W6 · Close the product gaps
 
@@ -568,6 +595,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6a**~~ | ~~W5 fault-injection, end-to-end and destructive-path suites, coverage 69% → 75%, gate → 72~~ **done** | +1,240 | Low | ✅ |
 | ~~**6b**~~ | ~~W5 the fetcher's spending planners extracted from `queue_run` and tabled~~ **done** (the remaining tier orchestration and the property tests are still open — see the W5 update) | +460 | Low | ✅ |
 | ~~**6c**~~ | ~~one shared `RunLog`, the last duplicated implementation; `core/toolchain.py` off the blanket `BLE001` ignore~~ **done** (the nine tool files' 84 broad catches are still blanket-ignored) | −62, +200 tests | Low | ✅ |
+| ~~**6d**~~ | ~~every `except Exception` in the toolkit narrowed or justified in place; no file-wide `BLE001` exemption left~~ **done** | 27 narrowed, +290 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | **8** | W7 docs split, JSON output, PyPI + zipapp release | +300 | Low | 2 |
 
@@ -607,7 +635,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **76%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 10.8 s (867 tests) | ≤15 s (with property + fault-injection tests) |
+| Test runtime | 6.7 s | 10.5 s (894 tests) | ≤15 s (with property + fault-injection tests) |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

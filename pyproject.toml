@@ -96,20 +96,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# The tools are long-running batch jobs over a whole media library. A single
-# unexpected exception on one movie must never abort a sweep that has already
-# done real work, so the top-level per-item and main() handlers are broad on
-# purpose - each one logs the failure and continues. New blind excepts outside
-# these files are flagged.
-"bitdepth.py" = ["BLE001"]
-"jellyfin_one_shot.py" = ["BLE001"]
-"library_auditor.py" = ["BLE001"]
-"mkv_track_cleaner.py" = ["BLE001"]
-"movie_standardizer.py" = ["BLE001"]
-"organize.py" = ["BLE001"]
-"pipeline.py" = ["BLE001"]
-"subtitle_fetcher.py" = ["BLE001"]
-"sync_subtitles.py" = ["BLE001"]
+# No tool has a blanket exemption from BLE001 any more. These are long-running
+# batch jobs over a whole media library, and a single unexpected exception on
+# one movie must never abort a sweep that has already done real work - so some
+# handlers really are broad on purpose. Each one now argues for itself on the
+# line (`# noqa: BLE001 - <why>`), and every other catch names the failures it
+# expects, so a *new* blind except anywhere in the toolkit is flagged.
 
 # The moved self-tests deliberately resolve their names in the *tool's* module
 # namespace at call time (tests/selftests/__init__.py rebinds each function's

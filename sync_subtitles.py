@@ -562,7 +562,8 @@ def _extracted_sidecar_record(srt: Path, sha256: str) -> dict[str, Any] | None:
         return None
     try:
         record = find_extracted_record(srt, sha256)
-    except Exception:
+    except Exception:  # noqa: BLE001 - reaching into another tool's ledger: any
+        # failure at all means "no provenance record", which is the safe answer.
         return None
     return record if isinstance(record, dict) else None
 
@@ -1404,7 +1405,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted", file=sys.stderr)
         return 130
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - last resort: whatever went wrong, this run
+        # leaves through one exit code instead of an unhandled traceback.
         print(f"Subtitle sync failure: {exc}", file=sys.stderr)
         traceback.print_exc()
         return 1

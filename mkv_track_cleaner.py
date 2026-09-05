@@ -242,7 +242,7 @@ def get_mkvmerge_version(mkvmerge_bin: str) -> str:
         return (banner[0] if banner else "unknown version").strip()
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return "unknown version"
 
 def format_size(bytes_val: int) -> str:
@@ -275,7 +275,7 @@ def format_duration(seconds: float) -> str:
 def _this_hostname() -> str:
     try:
         return (socket.gethostname() or "").strip() or "unknown"
-    except Exception:
+    except OSError:
         return "unknown"
 
 def _eta_seconds(elapsed: float, done_bytes: int, total_bytes: int, done_files: int, total_files: int) -> float | None:
@@ -293,7 +293,7 @@ def check_free_space(target_dir: Path, source_size: int) -> tuple[bool, int, int
     required = int(max(0, source_size) * (1.0 + _DISK_SLACK_RATIO)) + _DISK_SLACK_BYTES
     try:
         free = int(shutil.disk_usage(str(target_dir)).free)
-    except Exception as e:
+    except OSError as e:
         return True, 0, required, f"could not query free space: {e}"
     if free < required:
         return False, free, required, None
@@ -331,7 +331,9 @@ def _restore_windows_ctime(path: Path, orig_stat: os.stat_result) -> None:
             kernel32.SetFileTime(handle, ctypes.byref(creation), None, None)
         finally:
             kernel32.CloseHandle(handle)
-    except Exception:
+    except Exception:  # noqa: BLE001 - ctypes reports a bad call as ArgumentError,
+        # OSError or AttributeError depending on where it fails, and a creation
+        # timestamp nobody can restore is cosmetic. Windows-only, untestable here.
         pass
 
 def restore_file_times(path: Path, orig_stat: os.stat_result) -> None:
@@ -342,8 +344,8 @@ def restore_file_times(path: Path, orig_stat: os.stat_result) -> None:
             os.utime(path, ns=(int(ns), int(ms)))
         else:
             os.utime(path, (orig_stat.st_atime, orig_stat.st_mtime))
-    except Exception:
-        pass
+    except (OSError, OverflowError, ValueError):
+        pass  # a timestamp the filesystem will not take is not worth a failed remux
     _restore_windows_ctime(path, orig_stat)
 
 def apply_low_priority() -> str:
@@ -369,14 +371,15 @@ def apply_low_priority() -> str:
                     return "thread below-normal (Windows)"
                 get_err = getattr(ctypes, "get_last_error", lambda: 0)
                 return f"unchanged (Windows error {get_err()})"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - ctypes again; the run continues at
+            # whatever priority it already has, and says so in the banner.
             return f"unchanged ({e})"
     try:
         os.nice(10)
         return "nice +10"
     except PermissionError:
         return "unchanged (nice: permission denied)"
-    except Exception as e:
+    except (OSError, AttributeError) as e:
         return f"unchanged ({e})"
 
 def _print_safe(msg: str) -> None:
@@ -387,17 +390,17 @@ def _print_safe(msg: str) -> None:
             enc = sys.stdout.encoding or "utf-8"
             sys.stdout.buffer.write((msg + "\n").encode(enc, errors="replace"))
             sys.stdout.buffer.flush()
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except (OSError, ValueError, AttributeError, UnicodeError):
+            pass  # no usable byte stream either: the line is simply lost
+    except (OSError, ValueError):
+        pass  # a closed or broken stdout must not end a remux queue
 
 def _write_raw(text: str) -> None:
     try:
         sys.stdout.write(text)
         sys.stdout.flush()
-    except Exception:
-        pass
+    except (OSError, ValueError):
+        pass  # a closed or broken stdout must not end a remux queue
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
 
@@ -430,7 +433,8 @@ def _enable_windows_vt() -> bool:
             if mode.value & 0x0004:
                 return True
             return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
-    except Exception:
+    except Exception:  # noqa: BLE001 - ctypes; a console that will not take VT mode
+        # just gets the plain renderer.
         return False
     return False
 
@@ -496,7 +500,7 @@ class LiveConsole:
         self.is_tty = False
         try:
             self.is_tty = bool(sys.stdout and sys.stdout.isatty())
-        except Exception:
+        except (OSError, ValueError, AttributeError):
             self.is_tty = False
         env_no_color = bool(os.environ.get("NO_COLOR"))
         env_force = os.environ.get("FORCE_COLOR", "").strip() not in ("", "0")
@@ -520,7 +524,7 @@ class LiveConsole:
             enc = getattr(sys.stdout, "encoding", None) or "utf-8"
             "█░".encode(enc)
             self._bar_fill, self._bar_empty = "█", "░"
-        except Exception:
+        except (LookupError, UnicodeError, AttributeError):
             self._bar_fill, self._bar_empty = "#", "-"
         self.target_root: Path | None = None
         self._detail_indent = "           "
@@ -542,7 +546,7 @@ class LiveConsole:
     def _cols(self) -> int:
         try:
             return max(40, int(shutil.get_terminal_size((100, 24)).columns))
-        except Exception:
+        except (OSError, ValueError):
             return 100
 
     def _compose_file_line(self, suffix_plain: str = "", suffix_styled: str = "") -> tuple[str, str]:
@@ -570,7 +574,7 @@ class LiveConsole:
                 _write_raw("\r" + text + "\033[K")
             else:
                 _write_raw("\r" + text + (" " * max(0, cols - 1 - len(visible))))
-        except Exception:
+        except (OSError, ValueError):
             _print_safe(_strip_ansi(text))
 
     def _commit_open_line(self) -> None:
@@ -578,7 +582,7 @@ class LiveConsole:
             try:
                 if self.is_tty:
                     _write_raw("\n")
-            except Exception:
+            except (OSError, ValueError):
                 pass
         self._file_line_pending = False
         self._progress_active = False
@@ -730,7 +734,7 @@ def _open_log_fp(log_file_path: str) -> IO[str] | None:
         _log_fp = open(log_file_path, "a", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115 - module-level append log, closed at exit
         _log_fp_path = log_file_path
         return _log_fp
-    except Exception:
+    except OSError:
         _log_fp = None
         _log_fp_path = None
         return None
@@ -744,7 +748,7 @@ def close_log_fp() -> None:
         try:
             fp.flush()
             fp.close()
-        except Exception:
+        except (OSError, ValueError):
             pass
 
 def log(msg: str, level: str = "INFO", to_console: bool = True, log_file_path: str | None = LOG_FILE):
@@ -761,7 +765,7 @@ def log(msg: str, level: str = "INFO", to_console: bool = True, log_file_path: s
             if fp is not None:
                 fp.write(formatted + "\n")
                 fp.flush()
-        except Exception:
+        except (OSError, ValueError):
             pass
 
 def _log_detail(msg: str, log_file_path: str | None, kind: str = "info", level: str = "INFO") -> None:
@@ -1148,7 +1152,7 @@ def safe_delete(file_path: Path, max_retries: int = 6, delay: float = 0.5):
             if file_path.exists():
                 file_path.unlink(missing_ok=True)
             return
-        except Exception:
+        except OSError:
             time.sleep(delay)
 
 def describe_track(track: dict[str, Any]) -> str:
@@ -1169,7 +1173,7 @@ def _kill_active_child() -> None:
     try:
         if proc.poll() is None:
             proc.kill()
-    except Exception:
+    except (OSError, ValueError):
         pass
 
 def request_interrupt() -> None:
@@ -1181,17 +1185,18 @@ def request_interrupt() -> None:
         try:
             if _active_temp_file is not None:
                 safe_delete(_active_temp_file)
-        except Exception:
+        except Exception:  # noqa: BLE001 - second Ctrl-C: this is the last code that
+            # runs before os._exit, so every cleanup is attempted and none may raise.
             pass
         try:
             close_log_fp()
-        except Exception:
+        except Exception:  # noqa: BLE001 - as above
             pass
         os._exit(1)
     if _console is not None:
         try:
             _console.finish_progress()
-        except Exception:
+        except Exception:  # noqa: BLE001 - tidying the display during an interrupt
             pass
 
 def _run_mkvmerge(cmd: list[str], on_progress: Callable[[int], None] | None = None) -> tuple[int, str, str]:
@@ -1239,7 +1244,8 @@ def _run_mkvmerge(cmd: list[str], on_progress: Callable[[int], None] | None = No
             if pct is not None and on_progress is not None:
                 try:
                     on_progress(pct)
-                except Exception:
+                except Exception:  # noqa: BLE001 - a display callback may not
+                    # interrupt the remux it is describing.
                     pass
 
         carry = ""
@@ -1265,11 +1271,12 @@ def _run_mkvmerge(cmd: list[str], on_progress: Callable[[int], None] | None = No
         try:
             if proc.poll() is None:
                 proc.kill()
-        except Exception:
+        except Exception:  # noqa: BLE001 - an exception is already propagating; a
+            # failure to kill the child must not replace it with a different one.
             pass
         try:
             proc.wait()
-        except Exception:
+        except Exception:  # noqa: BLE001 - as above
             pass
         raise
     finally:
@@ -1568,7 +1575,8 @@ def verify_remux_output(
         rc, out, err = _run_mkvmerge([mkvmerge_bin, "-J", str(temp_path)])
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - fail closed: a verification that could
+        # not run is a verification that did not pass, whatever stopped it.
         return False, f"could not re-inspect remuxed file: {exc}", None
     if rc not in (0, 1):
         return False, f"remuxed file inspection failed (code {rc}): {(err or '').strip()[:300]}", None
@@ -1597,7 +1605,8 @@ def _pid_alive(pid: int) -> bool:
                     return False
                 kernel32.CloseHandle(handle)
                 return True
-        except Exception:
+        except Exception:  # noqa: BLE001 - ctypes; fail safe by assuming the other
+            # process is alive, which costs a skipped run rather than two writers.
             return True
     try:
         os.kill(pid, 0)
@@ -1653,15 +1662,16 @@ def acquire_lock(lock_path: Path, log_file_path: str | None = LOG_FILE) -> bool:
                     level="ERROR", log_file_path=log_file_path)
                 return False
         return False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - fail closed: anything unexpected while
+        # taking the single-instance lock means this run does not start.
         log(f"Lock acquisition error: {e}", level="ERROR", log_file_path=log_file_path)
         return False
 
 def release_lock(lock_path: Path):
     try:
         lock_path.unlink(missing_ok=True)
-    except Exception:
-        pass
+    except OSError:
+        pass  # a lock we cannot remove is handled as stale by the next run
 
 def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: str | None = LOG_FILE) -> int:
     """Resolve only journal-proven, fully verified interrupted transactions.
@@ -1766,7 +1776,8 @@ def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: st
                 handled += 1
             except (KeyboardInterrupt, SystemExit):
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - one unrecoverable orphan is
+                # left on disk for a human; the rest of the sweep still runs.
                 log(f"Could not recover verified temp '{filename}': {exc}; leaving it",
                     level="WARNING", log_file_path=log_file_path)
                 preserved += 1
@@ -2074,7 +2085,7 @@ def process_mkv(
     try:
         orig_stat = mkv_path.stat()
         size_before = orig_stat.st_size
-    except Exception:
+    except OSError:
         size_before = 0
 
     if _console is not None:
@@ -2156,7 +2167,8 @@ def process_mkv(
         return
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - per-movie: an unreadable file is an
+        # error row in the report, never the end of the queue.
         err_msg = f"Metadata inspection exception: {e}"
         if _console is not None:
             _console.end_file_inline(f"ERROR: {err_msg}", kind="error")
@@ -2295,7 +2307,8 @@ def process_mkv(
         transaction["external_srt"] = external_srt
     try:
         write_transaction(journal_path, transaction)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - fail closed: without a journal there
+        # is no crash recovery for this movie, so it is skipped rather than remuxed.
         err_msg = f"could not create remux transaction journal: {exc}"
         log(f"{tag}{err_msg}", level="ERROR", log_file_path=log_file_path)
         stats["errors"].append({"name": movie_name, "error": err_msg})
@@ -2433,7 +2446,8 @@ def process_mkv(
         raise
     except SystemExit:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - per-movie: one bad movie is reported
+        # and the queue moves on. The finally block below still cleans up.
         log(f"Exception processing '{display_name}': {exc}", level="ERROR", log_file_path=log_file_path)
         stats["errors"].append({"name": movie_name, "error": str(exc)})
         if temp_output is not None:
@@ -2692,7 +2706,7 @@ def generate_and_save_report(
             except OSError:
                 pass
         log(f"Detailed summary report saved to: '{destination}'", log_file_path=log_file_path)
-    except Exception as e:
+    except OSError as e:
         log(f"Failed to save summary report: {e}", level="ERROR", log_file_path=log_file_path)
     return report_text
 
@@ -2779,7 +2793,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         if hasattr(sys.stderr, "reconfigure"):
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
+    except (ValueError, OSError):
         pass
 
     _console = LiveConsole(use_color=False if args.no_color else None)
@@ -2946,7 +2960,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
             except SystemExit:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - per-movie, as above
                 log(f"Unexpected error processing '{file_path.name}': {e}",
                     level="ERROR", log_file_path=args.log)
                 stats["errors"].append({"name": file_path.name, "error": str(e)})
@@ -2960,7 +2974,8 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         _interrupt_requested = True
         _kill_active_child()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - last resort: the report is still
+        # written and the run leaves through one exit code.
         log(f"Fatal unexpected error: {e}", level="ERROR", log_file_path=args.log)
         stats["errors"].append({"name": "<fatal>", "error": str(e)})
         generate_and_save_report(stats, dry_run=args.dry_run, report_file=args.report,

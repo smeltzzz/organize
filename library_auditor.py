@@ -658,7 +658,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         log("Interrupted")
         return 130
-    except Exception:
+    except Exception:  # noqa: BLE001 - last resort: whatever went wrong, this run
+        # leaves through one exit code instead of an unhandled traceback.
         traceback.print_exc()
         return 1
 

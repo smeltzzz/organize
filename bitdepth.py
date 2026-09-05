@@ -724,7 +724,8 @@ def inspect_movie(
             if cache is not None:
                 cache.put(file_path, size, file_stat.st_mtime_ns, payload)
         return result_from_probe(str(file_path), payload, size_bytes=size)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - per-movie: one unreadable file becomes
+        # an ERROR row in the report, never the end of a sweep over a library.
         # Failures are deliberately not cached: a transient ffprobe problem
         # must not become a sticky verdict for that movie.
         return ProbeResult(
@@ -1172,7 +1173,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         log("Interrupted")
         return 130
-    except Exception:
+    except Exception:  # noqa: BLE001 - last resort: whatever went wrong, this run
+        # leaves through one exit code instead of an unhandled traceback.
         traceback.print_exc()
         return 1
 
