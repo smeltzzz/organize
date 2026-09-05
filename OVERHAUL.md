@@ -626,6 +626,23 @@ promises:
 > `docs/ci-workflow.patch` along with the coverage floor moving 55 → 74:
 > the bot that pushes this branch may not edit workflow files.
 
+> **Update — phase 8b (W7): the front page is a front page again.** The README
+> had reached 780 lines, which is where a reader stops. It is now 340: the
+> pitch, the quickstart, the repo map, one line per tool, the single-file
+> build and the safety invariants — everything else moved verbatim into
+> `docs/tools.md`, `docs/pipeline.md`, `docs/configuration.md` and
+> `docs/development.md`, each linked from the front page and each linking
+> back. No prose was cut; a check confirms every line of the old page still
+> exists somewhere.
+>
+> Splitting a document is how link rot starts, so `tests/test_docs.py` walks
+> every Markdown file and resolves every relative link and every `#anchor`
+> against the real headings, using GitHub's slug rules (an emoji heading is
+> reached as `#-quickstart`; a test that missed that would have passed on
+> links a reader cannot follow). The front page also has a size budget now —
+> 450 lines, asserted — so "does this belong on the front page?" has an
+> answer rather than a default. 927 → 934 tests.
+
 ### W7 · Ops, UX, distribution
 
 - **`organize status`** (W2) — the missing verb.
@@ -637,9 +654,10 @@ promises:
 - **Distribution:** publish to PyPI (`pipx install organize` / `uvx organize`),
   attach `organize.pyz` and the generated standalone scripts to each GitHub
   release, and ship systemd-timer and Task-Scheduler templates in `docs/`.
-- **Docs:** the 585-line README becomes a ~120-line front door plus
-  `docs/{install,tools,pipeline,troubleshooting,design}.md`. The *why* prose is
-  the repo's best asset — it deserves to be findable, not scrolled past.
+- ~~**Docs:** the 585-line README becomes a ~120-line front door plus
+  `docs/{install,tools,pipeline,troubleshooting,design}.md`.~~ **done** — see
+  the phase 8b note below. The *why* prose is the repo's best asset — it
+  deserves to be findable, not scrolled past.
 - **CI:** add CodeQL, Dependabot for actions, a `--fail-under` ratchet, the
   standalone-build diff gate, and one job that runs the suite against the
   *generated* single-file tools. Drop `unittest discover` in favour of the
@@ -666,7 +684,8 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6d**~~ | ~~every `except Exception` in the toolkit narrowed or justified in place; no file-wide `BLE001` exemption left~~ **done** | 27 narrowed, +290 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
-| **8b** | W7 docs split, JSON/JSONL output, PyPI release | +300 | Low | 2 |
+| ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
+| **8c** | W7 JSON/JSONL output, PyPI release | +300 | Low | 2 |
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run
@@ -704,7 +723,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **76%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 13.0 s (927 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) |
+| Test runtime | 6.7 s | 13.0 s (934 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
