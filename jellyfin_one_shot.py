@@ -86,6 +86,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -94,13 +95,28 @@ from typing import IO
 # Shared implementation: everything imported here is defined exactly once,
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
 # keeps it that way.
-from organizekit.core import (
+from organizekit.core import (  # noqa: F401  (SCRAPING_DAILY_CAP, TOOL_SCRIPTS: re-exported for callers and tests)
     REPORT_WIDTH,
+    SCRAPING_DAILY_CAP,
+    STEP_ORDER,
+    STEPS,
+    TOOL_SCRIPTS,
+    Step,
+    build_step_args,
     describe_library_origin,
+    detect_tools,
     enable_utf8_stdio,
+    missing_tool_scripts,
     resolve_library,
     run_field_smoke_test,
+    step_skip_reason,
 )
+
+# The binary probes, under the names this runner has always used. Re-exported
+# rather than wrapped: patching one here patches the one that actually runs.
+from organizekit.core import ffprobe_installed as _ffprobe_available  # noqa: F401
+from organizekit.core import ffsubsync_installed as _ffsubsync_available  # noqa: F401
+from organizekit.core import mkvmerge_installed as _mkvmerge_available  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -116,7 +132,6 @@ VERSION = "1.3.1"
 DEFAULT_LIBRARY = str(resolve_library())
 
 DEFAULT_LOG_DIR = Path(__file__).parent / "logs"
-SCRAPING_DAILY_CAP = 20  # per source, matches subtitle_fetcher.py default
 MAX_FETCH_RETRIES = 10   # per pass, before giving up and moving on
 
 # Auditor resilience: a single audit attempt can be blocked (another process
@@ -136,16 +151,6 @@ STAGNATION_PASSES_BEFORE_ROLLOVER = 2
 # Full stdout/stderr transcripts are kept per tool (bounded) so a failed
 # multi-day run can be debugged after the fact.
 TOOL_TRANSCRIPT_MAX_LINES = 2000
-
-# The toolchain scripts, in the one correct order. bitdepth.py and
-# mkv_track_cleaner.py additionally take a --cache flag; the rest do not.
-TOOL_SCRIPTS = (
-    "subtitle_fetcher.py",
-    "mkv_track_cleaner.py",
-    "bitdepth.py",
-    "sync_subtitles.py",
-    "library_auditor.py",
-)
 
 # A run produces exactly two artifacts. Every tool's --log points at the same
 # file, so the whole run tells one continuous story in one place, and every
@@ -168,63 +173,9 @@ FETCHER_LEDGER_NAME = "subtitle_fetcher_ledger.log"
 # "working" instead of "hung".
 DEFAULT_HEARTBEAT_SECONDS = 60.0
 
-# Step keys, in pipeline order. One entry per tool the runner can call.
-STEP_ORDER = ("fetcher", "cleaner", "10bit", "sync", "auditor")
-
-
-@dataclass(frozen=True)
-class StepPlan:
-    """One toolchain step, described for the person watching the terminal.
-
-    The narratives are the point of this class: a five-tool run that lasts
-    hours has to explain itself while it runs, not only in the report it
-    leaves behind.
-    """
-
-    script: str
-    title: str
-    purpose: str
-    why_here: str
-    idle: str
-
-
-STEP_PLANS: dict[str, StepPlan] = {
-    "fetcher": StepPlan(
-        script="subtitle_fetcher.py",
-        title="Fetch subtitles",
-        purpose="Put a validated English <movie>.eng.srt beside every movie that does not have one.",
-        why_here="First, on purpose: it searches by the release's exact OpenSubtitles moviehash, and any remux would destroy that hash forever.",
-        idle="Movies that already have a validated sidecar are counted and skipped without spending a provider request.",
-    ),
-    "cleaner": StepPlan(
-        script="mkv_track_cleaner.py",
-        title="Clean tracks (lossless remux)",
-        purpose="Rebuild MKVs that still carry extra audio tracks or embedded subtitles: one best English audio, no embedded subs.",
-        why_here="After fetching, because a remux rewrites the bytes the subtitle moviehash is computed from.",
-        idle="Already-clean movies are answered from the metadata cache and skipped without re-reading the file.",
-    ),
-    "10bit": StepPlan(
-        script="bitdepth.py",
-        title="Inspect 10-bit / HDR",
-        purpose="Record whether each movie is 8-bit, 10-bit or HDR, so a client that cannot play it is flagged in advance.",
-        why_here="After the remux, so it inspects the bytes Jellyfin will actually serve.",
-        idle="Movies whose size and mtime are unchanged are answered from the probe cache.",
-    ),
-    "sync": StepPlan(
-        script="sync_subtitles.py",
-        title="Sync subtitle timing (ffsubsync)",
-        purpose="Measure every sidecar against the movie's real audio and correct the timing when the drift is real and trustworthy.",
-        why_here="Last of the content steps: it rewrites subtitle bytes only, so the audit that follows validates finished sidecars.",
-        idle="Sidecars measured in sync on an earlier run are skipped while the subtitle and the movie are unchanged.",
-    ),
-    "auditor": StepPlan(
-        script="library_auditor.py",
-        title="Audit the library",
-        purpose="Decide whether every movie folder is canonical: right layout, right file name, a validated English sidecar.",
-        why_here="Last, because its verdict is the only thing that decides whether another pass is needed.",
-        idle="Nothing to do - the audit is a read-only walk of the library.",
-    ),
-}
+# The step table - what runs, in what order, with which flags and which
+# narrative - lives in organizekit.core.toolchain, because pipeline.py runs the
+# same five tools and the two must not be able to disagree.
 
 
 # ---------------------------------------------------------------------------
@@ -501,75 +452,20 @@ def run_tool(
     return returncode, stdout_text, stderr_text
 
 
-def _mkvmerge_available() -> bool:
-    """Delegate to the track cleaner's own resolver.
-
-    A bare ``shutil.which("mkvmerge")`` is not the same question: the standard
-    Windows MKVToolNix installer does not put itself on PATH, and the cleaner
-    therefore also searches its known install locations. Asking the weaker
-    question here made a fully-provisioned Windows box report mkvmerge as
-    missing and skip the remux, while ``organize.py doctor`` on the same
-    machine printed a green tick and the version string.
-    """
-    try:
-        import mkv_track_cleaner as tc
-
-        tc.resolve_mkvmerge_path()
-        return True
-    except Exception:
-        return shutil.which("mkvmerge") is not None
-
-
-def _ffprobe_available() -> bool:
-    """Delegate to the inspector's resolver (PATH plus known install dirs)."""
-    try:
-        import bitdepth
-
-        return bitdepth.find_ffprobe() is not None
-    except Exception:
-        return shutil.which("ffprobe") is not None
-
-
-def _ffsubsync_available() -> bool:
-    """Delegate to the sync tool's resolver.
-
-    ffsubsync ships three interchangeable entry points (``ffsubsync``, ``ffs``,
-    ``subsync``); only checking the first reports a working install as missing.
-    """
-    try:
-        import sync_subtitles as ss
-
-        return ss.find_ffsubsync() is not None
-    except Exception:
-        return any(shutil.which(name) for name in ("ffsubsync", "ffs", "subsync"))
-
-
 def check_prerequisites(runtime_log: Path) -> dict[str, bool]:
-    """Check which required tools are available.
+    """Which external binaries this machine has, written into the run log.
 
-    Each answer comes from the tool that actually has to run the binary, so
-    this runner and ``organize.py doctor`` can never disagree about whether a
-    machine is provisioned.
+    The answers come from ``organizekit.core.toolchain``, which asks the tool
+    that actually has to run each binary, so this runner and ``organize.py
+    doctor`` can never disagree about whether a machine is provisioned.
     """
-    tools = {
-        "mkvmerge": _mkvmerge_available(),
-        "ffprobe": _ffprobe_available(),
-        "ffsubsync": _ffsubsync_available(),
-        "ffmpeg": shutil.which("ffmpeg") is not None,
-    }
-
+    tools = detect_tools()
     for tool, available in tools.items():
         if available:
             log_info(runtime_log, f"  {tool}: found")
         else:
             log_warning(runtime_log, f"  {tool}: NOT FOUND")
-
     return tools
-
-
-def missing_tool_scripts(script_dir: Path) -> list[str]:
-    """Names of the toolchain scripts that are absent from ``script_dir``."""
-    return [name for name in TOOL_SCRIPTS if not (script_dir / name).is_file()]
 
 
 def log_dir_inside_source(log_dir: Path, source: Path) -> bool:
@@ -745,7 +641,7 @@ class StepRecord:
 
     number: int
     key: str
-    plan: StepPlan
+    plan: Step
     label: str = ""  # overrides the plan's title for one-off steps
     status: str = "running"  # running | done | failed | skipped | timed out
     returncode: int | None = None
@@ -902,7 +798,7 @@ def _render_pass(record: PassRecord) -> list[str]:
         lines.extend([
             "",
             _rule("-", REPORT_WIDTH),
-            f"{where} — {(step.label or step.plan.title).upper()}  ({step.plan.script})",
+            f"{where} — {(step.label or step.plan.label).upper()}  ({step.plan.script})",
             _rule("-", REPORT_WIDTH),
             f"  Outcome : {step.outcome}",
             f"  Does    : {_step_text(step, 'purpose')}",
@@ -938,7 +834,7 @@ def log_step_banner(runtime_log: Path, step: StepRecord, total: int) -> None:
     where = "PRE-FLIGHT" if step.number == 0 else f"STEP {step.number}/{total}"
     log_info(runtime_log, "")
     log_info(runtime_log, _rule("-", 68))
-    log_info(runtime_log, f"{where} — {(step.label or step.plan.title).upper()} "
+    log_info(runtime_log, f"{where} — {(step.label or step.plan.label).upper()} "
                           f"({step.plan.script})")
     if step.number == 0:
         purpose, why_here, idle = PREFLIGHT_PURPOSE, PREFLIGHT_WHY_HERE, PREFLIGHT_IDLE
@@ -950,32 +846,16 @@ def log_step_banner(runtime_log: Path, step: StepRecord, total: int) -> None:
     log_info(runtime_log, _rule("-", 68))
 
 
-def step_skip_reason(key: str, tools: dict[str, bool]) -> str | None:
-    """Why a step cannot run here, or None when it can.
-
-    Mirrors the checks in the pass loop so the startup plan and the run agree.
-    """
-    if key == "cleaner" and not tools.get("mkvmerge", False):
-        return "mkvmerge is not installed"
-    if key == "10bit" and not tools.get("ffprobe", False):
-        return "ffprobe is not installed"
-    if key == "sync":
-        missing = [name for name in ("ffsubsync", "ffmpeg") if not tools.get(name, False)]
-        if missing:
-            return f"{' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} not installed"
-    return None
-
-
 def log_run_plan(runtime_log: Path, state: RunState) -> None:
     """Print the plan before the first step: what will run, what will not."""
     log_info(runtime_log, "PLAN FOR THIS RUN")
     for index, key in enumerate(STEP_ORDER, start=1):
-        plan = STEP_PLANS[key]
+        plan = STEPS[key]
         reason = step_skip_reason(key, state.tools)
         if reason is None:
-            log_info(runtime_log, f"  {index}. RUN  {plan.title} ({plan.script})")
+            log_info(runtime_log, f"  {index}. RUN  {plan.label} ({plan.script})")
         else:
-            log_info(runtime_log, f"  {index}. SKIP {plan.title} ({plan.script}) — {reason}")
+            log_info(runtime_log, f"  {index}. SKIP {plan.label} ({plan.script}) — {reason}")
     log_info(runtime_log, f"  Report: {state.report_path}")
     log_info(runtime_log, f"  Log   : {state.runtime_log}  (every step writes here)")
 
@@ -1008,10 +888,6 @@ def _discard_dir(path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
     except OSError:
         pass
-
-
-def _step_command(script_dir: Path, script: str, args: list[str]) -> str:
-    return " ".join([sys.executable, str(script_dir / script), *args])
 
 
 def run_one_shot(
@@ -1135,9 +1011,54 @@ def run_one_shot(
 
     log_info(runtime_log, "")
 
-    def shared_log_args() -> list[str]:
-        """Every tool writes into the one log, so the run reads as one story."""
-        return ["--log", str(runtime_log)]
+    def begin_step(key: str, number: int, target: PassRecord, note: str = "") -> StepRecord:
+        step = StepRecord(number=number, key=key, plan=STEPS[key], note=note)
+        target.steps.append(step)
+        log_step_banner(runtime_log, step, 5)
+        return step
+
+    def finish_step(step: StepRecord, code: int, report_path: Path) -> None:
+        """Fold the tool's report in, log the outcome, refresh the run report."""
+        step.returncode = code
+        step.status = "done" if code == 0 else "failed"
+        step.elapsed = (datetime.now() - step.started).total_seconds()
+        step.report_text = _fold_artifact(report_path)
+        step.console_tail = _fold_artifact(stage / f"{step.key}.console.log")
+        log_info(runtime_log, f"  STEP {step.number}/5 {step.label or step.plan.label}: {step.outcome}")
+        if step.report_text.strip():
+            log_info(runtime_log, f"  Full detail folded into {state.report_path.name}")
+        write_run_report(state)
+
+    def launch(
+        plan: Step,
+        report: Path,
+        *,
+        label: str = "",
+        extra: Sequence[str] = (),
+        transcript: str = "",
+        console_tag: str = "",
+    ) -> tuple[int, str, str]:
+        """Run one tool exactly as the step table describes it.
+
+        Every difference between the five tools - which flag names the library
+        root, which of them keeps a cache between passes, which cannot share
+        the run log, how long a pass may take - is data on the ``Step``, so
+        there is one call site instead of six near-identical ones that drifted
+        apart every time a flag was added.
+        """
+        return run_tool(
+            runtime_log,
+            script_dir / plan.script,
+            build_step_args(plan, library=library, report=report,
+                            run_log=runtime_log, log_dir=log_dir,
+                            dry_run=dry_run, nice=nice, extra=extra),
+            label or plan.tool_name,
+            timeout=scaled(plan.timeout_seconds),
+            transcript=stage / f"{transcript or plan.key}.console.log",
+            console_tag=console_tag or plan.console_tag,
+            echo=not quiet,
+            heartbeat_seconds=heartbeat_seconds,
+        )
 
     # -----------------------------------------------------------------------
     # Pre-flight: is the library already complete?
@@ -1149,7 +1070,7 @@ def run_one_shot(
     # seconds instead of hours. --force-pass skips the question, because the
     # verdict deliberately does not cover the MKV's own tracks.
     if not dry_run and not force_pass:
-        plan = STEP_PLANS["auditor"]
+        plan = STEPS["auditor"]
         step = StepRecord(number=0, key="auditor", plan=plan)
         preflight = PassRecord(number=0)
         preflight.steps.append(step)
@@ -1157,18 +1078,10 @@ def run_one_shot(
         log_step_banner(runtime_log, step, 5)
 
         preflight_report = stage / "auditor-preflight.txt"
-        preflight_code, _stdout, _stderr = run_tool(
-            runtime_log,
-            script_dir / plan.script,
-            ["--source", str(library),
-             "--report", str(preflight_report),
-             *shared_log_args()],
-            "library_auditor (pre-flight)",
-            timeout=scaled(600),
-            transcript=stage / "auditor-preflight.console.log",
-            console_tag="audit",
-            echo=not quiet,
-            heartbeat_seconds=heartbeat_seconds,
+        preflight_code, _stdout, _stderr = launch(
+            plan, preflight_report,
+            label="library_auditor (pre-flight)",
+            transcript="auditor-preflight",
         )
         # The verdict is read before the report is folded: folding deletes the
         # staged file, and coverage is the one thing the runner decides on.
@@ -1220,24 +1133,6 @@ def run_one_shot(
         write_run_report(state)
         log_info(runtime_log, "")
 
-    def begin_step(key: str, number: int, target: PassRecord, note: str = "") -> StepRecord:
-        step = StepRecord(number=number, key=key, plan=STEP_PLANS[key], note=note)
-        target.steps.append(step)
-        log_step_banner(runtime_log, step, 5)
-        return step
-
-    def finish_step(step: StepRecord, code: int, report_path: Path) -> None:
-        """Fold the tool's report in, log the outcome, refresh the run report."""
-        step.returncode = code
-        step.status = "done" if code == 0 else "failed"
-        step.elapsed = (datetime.now() - step.started).total_seconds()
-        step.report_text = _fold_artifact(report_path)
-        step.console_tail = _fold_artifact(stage / f"{step.key}.console.log")
-        log_info(runtime_log, f"  STEP {step.number}/5 {step.label or step.plan.title}: {step.outcome}")
-        if step.report_text.strip():
-            log_info(runtime_log, f"  Full detail folded into {state.report_path.name}")
-        write_run_report(state)
-
     # Main pass loop
     while True:
         pass_number += 1
@@ -1270,18 +1165,6 @@ def run_one_shot(
         while not fetch_success and fetch_retries < MAX_FETCH_RETRIES:
             log_info(runtime_log, f"  Subtitle fetch attempt {fetch_retries + 1}/{MAX_FETCH_RETRIES}")
 
-            args = [
-                "--source", str(library),
-                "--report", str(stage / "fetcher.report.txt"),
-                # Not the shared log: this file is the fetcher's durable quota
-                # ledger, which it parses back to meter the daily caps.
-                "--log", str(log_dir / FETCHER_LEDGER_NAME),
-                "--scrape-daily-cap", str(SCRAPING_DAILY_CAP),
-                "--allow-missing",  # Don't fail the whole run if some movies miss
-            ]
-            if dry_run:
-                args.append("--dry-run")
-
             # Check if we have API keys and pass them through
             if os.environ.get("OPENSUBTITLES_API_KEY"):
                 log_info(runtime_log, "  Using OpenSubtitles API key (configured)")
@@ -1293,17 +1176,7 @@ def run_one_shot(
             else:
                 log_info(runtime_log, "  SubDL API key: not set")
 
-            returncode, stdout, stderr = run_tool(
-                runtime_log,
-                script_dir / step.plan.script,
-                args,
-                "subtitle_fetcher",
-                timeout=scaled(3600),  # 1 hour per fetch attempt
-                transcript=stage / "fetcher.console.log",
-                console_tag="fetch",
-                echo=not quiet,
-                heartbeat_seconds=heartbeat_seconds,
-            )
+            returncode, stdout, stderr = launch(step.plan, stage / "fetcher.report.txt")
             last_fetch_code = returncode
 
             if returncode == 0:
@@ -1338,125 +1211,31 @@ def run_one_shot(
         log_info(runtime_log, "")
 
         # -------------------------------------------------------------------
-        # Step 2: Track cleaning (lossless remux)
+        # Steps 2-4: clean tracks, inspect bit depth, sync subtitle timing
         # -------------------------------------------------------------------
-        step = begin_step("cleaner", 2, record)
-        if tools.get("mkvmerge", False):
-            args = [
-                "--dir", str(library),
-                *shared_log_args(),
-                "--report", str(stage / "cleaner.report.txt"),
-                "--cache", str(log_dir / "mkv_track_cleaner_probe_cache.json"),
-            ]
-            if dry_run:
-                args.append("--dry-run")
-            if nice:
-                args.append("--nice")
-
-            returncode, _stdout, _stderr = run_tool(
-                runtime_log,
-                script_dir / step.plan.script,
-                args,
-                "mkv_track_cleaner",
-                timeout=scaled(7200),  # 2 hours per pass
-                transcript=stage / "cleaner.console.log",
-                console_tag="clean",
-                echo=not quiet,
-                heartbeat_seconds=heartbeat_seconds,
-            )
-            if returncode != 0:
-                log_warning(runtime_log, f"  Track cleaner exited with code {returncode}")
+        # One loop, because these three steps differ only in data: the tool to
+        # run, the binary it needs, and the words for what it was doing. Each
+        # is skipped with a reason when its binary is missing - a machine
+        # without mkvmerge still gets its subtitles fetched and audited.
+        for number, key in enumerate(("cleaner", "10bit", "sync"), start=2):
+            step = begin_step(key, number, record)
+            plan = step.plan
+            reason = step_skip_reason(key, tools)
+            if reason is None:
+                report_path = stage / f"{key}.report.txt"
+                returncode, _stdout, _stderr = launch(plan, report_path)
+                if returncode != 0:
+                    log_warning(runtime_log, f"  {plan.agent_name} exited with code {returncode}")
+                else:
+                    log_info(runtime_log, f"  {plan.activity.capitalize()} completed.")
+                finish_step(step, returncode, report_path)
             else:
-                log_info(runtime_log, "  Track cleaning completed.")
-            finish_step(step, returncode, stage / "cleaner.report.txt")
-        else:
-            reason = step_skip_reason("cleaner", tools) or "mkvmerge not available"
-            step.status, step.note = "skipped", reason
-            state.notes.append(f"track cleaning skipped: {reason}")
-            log_warning(runtime_log, f"  {reason} — skipping track cleaning")
-            write_run_report(state)
+                step.status, step.note = "skipped", reason
+                state.notes.append(f"{plan.activity} skipped: {reason}")
+                log_warning(runtime_log, f"  {reason} — skipping {plan.activity}")
+                write_run_report(state)
 
-        log_info(runtime_log, "")
-
-        # -------------------------------------------------------------------
-        # Step 3: 10-bit inspection
-        # -------------------------------------------------------------------
-        step = begin_step("10bit", 3, record)
-        if tools.get("ffprobe", False):
-            args = [
-                "--source", str(library),
-                *shared_log_args(),
-                "--report", str(stage / "10bit.report.txt"),
-                "--cache", str(log_dir / "10bit_probe_cache.json"),
-            ]
-            if dry_run:
-                args.append("--dry-run")
-
-            returncode, _stdout, _stderr = run_tool(
-                runtime_log,
-                script_dir / step.plan.script,
-                args,
-                "10bit",
-                timeout=scaled(3600),
-                transcript=stage / "10bit.console.log",
-                console_tag="10bit",
-                echo=not quiet,
-                heartbeat_seconds=heartbeat_seconds,
-            )
-            if returncode != 0:
-                log_warning(runtime_log, f"  10-bit inspector exited with code {returncode}")
-            else:
-                log_info(runtime_log, "  10-bit inspection completed.")
-            finish_step(step, returncode, stage / "10bit.report.txt")
-        else:
-            reason = step_skip_reason("10bit", tools) or "ffprobe not available"
-            step.status, step.note = "skipped", reason
-            state.notes.append(f"10-bit inspection skipped: {reason}")
-            log_warning(runtime_log, f"  {reason} — skipping 10-bit inspection")
-            write_run_report(state)
-
-        log_info(runtime_log, "")
-
-        # -------------------------------------------------------------------
-        # Step 4: Subtitle sync (ffsubsync)
-        # -------------------------------------------------------------------
-        step = begin_step("sync", 4, record)
-        if tools.get("ffsubsync", False) and tools.get("ffmpeg", False):
-            args = [
-                "--source", str(library),
-                "--report", str(stage / "sync.report.txt"),
-                *shared_log_args(),
-                # Remembered verdicts live with the rest of the run's state,
-                # so a one-shot run is self-contained under --log-dir.
-                "--sync-ledger", str(log_dir / "sync_state.json"),
-            ]
-            if dry_run:
-                args.append("--dry-run")
-
-            returncode, _stdout, _stderr = run_tool(
-                runtime_log,
-                script_dir / step.plan.script,
-                args,
-                "sync_subtitles",
-                timeout=scaled(7200),
-                transcript=stage / "sync.console.log",
-                console_tag="sync",
-                echo=not quiet,
-                heartbeat_seconds=heartbeat_seconds,
-            )
-            if returncode != 0:
-                log_warning(runtime_log, f"  Subtitle sync exited with code {returncode}")
-            else:
-                log_info(runtime_log, "  Subtitle sync completed.")
-            finish_step(step, returncode, stage / "sync.report.txt")
-        else:
-            reason = step_skip_reason("sync", tools) or "ffsubsync/ffmpeg not available"
-            step.status, step.note = "skipped", reason
-            state.notes.append(f"subtitle sync skipped: {reason}")
-            log_warning(runtime_log, f"  {reason} — skipping subtitle sync")
-            write_run_report(state)
-
-        log_info(runtime_log, "")
+            log_info(runtime_log, "")
 
         # -------------------------------------------------------------------
         # Step 5: Library audit (with retries - the only step that decides)
@@ -1465,21 +1244,9 @@ def run_one_shot(
         audit_report = stage / "auditor.report.txt"
         returncode = -1
         for attempt in range(1, AUDIT_ATTEMPTS_PER_PASS + 1):
-            args = [
-                "--source", str(library),
-                "--report", str(audit_report),
-                *shared_log_args(),
-            ]
-            returncode, stdout, stderr = run_tool(
-                runtime_log,
-                script_dir / step.plan.script,
-                args,
-                f"library_auditor (attempt {attempt}/{AUDIT_ATTEMPTS_PER_PASS})",
-                timeout=scaled(600),
-                transcript=stage / "auditor.console.log",
-                console_tag="audit",
-                echo=not quiet,
-                heartbeat_seconds=heartbeat_seconds,
+            returncode, stdout, stderr = launch(
+                step.plan, audit_report,
+                label=f"library_auditor (attempt {attempt}/{AUDIT_ATTEMPTS_PER_PASS})",
             )
             if returncode == 0:
                 break
@@ -1604,7 +1371,7 @@ def run_one_shot(
     log_info(runtime_log, "=" * 60)
 
     final_report = stage / "auditor-final.report.txt"
-    step = StepRecord(number=5, key="auditor", plan=STEP_PLANS["auditor"],
+    step = StepRecord(number=5, key="auditor", plan=STEPS["auditor"],
                       label="Audit the library (final verdict)",
                       note="final audit with the fail gate")
     if state.passes:
@@ -1613,22 +1380,12 @@ def run_one_shot(
         state.passes.append(PassRecord(number=1, steps=[step]))
     returncode = -1
     for attempt in range(1, AUDIT_ATTEMPTS_PER_PASS + 1):
-        args = [
-            "--source", str(library),
-            "--report", str(final_report),
-            *shared_log_args(),
-            "--fail-on-findings",
-        ]
-        returncode, stdout, stderr = run_tool(
-            runtime_log,
-            script_dir / step.plan.script,
-            args,
-            f"library_auditor (final, attempt {attempt}/{AUDIT_ATTEMPTS_PER_PASS})",
-            timeout=scaled(600),
-            transcript=stage / "auditor.console.log",
+        returncode, stdout, stderr = launch(
+            step.plan, final_report,
+            label=f"library_auditor (final, attempt {attempt}/{AUDIT_ATTEMPTS_PER_PASS})",
+            extra=("--fail-on-findings",),
+            transcript="auditor",
             console_tag="final audit",
-            echo=not quiet,
-            heartbeat_seconds=heartbeat_seconds,
         )
         if returncode == 0 or returncode == 1:
             # 1 = findings with --fail-on-findings: the report is still valid.
@@ -1743,6 +1500,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not stream each tool's output to the console. Step banners, "
              "'still working' heartbeats, step summaries and every decision are "
              "still printed; the full output still goes to the log and the report.",
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Accepted and ignored. Every tool's output is streamed by default, "
+             "so the old verbose mode is now the normal one; the flag is kept so "
+             "existing cron and Task Scheduler call sites keep working.",
     )
 
     parser.add_argument(

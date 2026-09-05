@@ -11,6 +11,8 @@ affects the tool exactly as it did when it lived there.
 
 from __future__ import annotations
 
+import os
+
 import pipeline as tool
 from organizekit.core import default_library_root
 from tests.selftests import bind_to_tool
@@ -20,6 +22,7 @@ from tests.selftests import bind_to_tool
 # and dead imports do not belong in a shipped file — so they are supplied from
 # here, where the dependency is visible.
 tool.default_library_root = default_library_root
+tool.os = os
 
 
 def run_self_tests() -> int:

@@ -1,12 +1,26 @@
 # Overhaul Plan — `organize`
 
-> **Status: Phases 1 and 2 are landed** on `arena/01a07259-organize` — the
-> shared core (`organizekit/`) replaced 4,325 lines of vendored copies, and the
-> tools' 2,229 lines of self-test code moved to `tests/selftests/`. Production
-> Python is down from 26,458 to 19,953 lines (−25%), coverage is up from 58% to
-> 67% with no new assertions, and the suite is green at 556 tests. Phases 3–8
-> below are still open; the numbers in the tables are the pre-work baseline
-> unless marked otherwise.
+> **Status: Phases 1, 2 and 3 are landed** on `arena/01a07259-organize` — the
+> shared core (`organizekit/`) replaced 4,325 lines of vendored copies, the
+> tools' 2,229 lines of self-test code moved to `tests/selftests/`, and the
+> toolchain is now described exactly once in `organizekit/core/toolchain.py`
+> instead of once per orchestrator. Production Python is down from 26,458 to
+> 20,011 lines (−24%), coverage is up from 58% to 67%, and the suite is green
+> at 576 tests. Phases 4–8 below are still open; the numbers in the tables are
+> the pre-work baseline unless marked otherwise.
+>
+> **Phase 3 came in flat on line count, and that is the honest result.** The
+> −1,400 estimate below assumed `jellyfin_one_shot.py` was largely a
+> reimplementation of `pipeline.py`. Reading it properly, the duplication was
+> the *description* of the toolchain (two step tables, two sets of binary
+> probes, two skip-reason functions, six hand-written argv lists) — about 450
+> lines, now replaced by a 352-line shared module that carries more per step
+> than either copy did. What the runner does *around* those calls — streaming a
+> subprocess with heartbeats, folding each tool's report into one narrative
+> document, the convergence and UTC-rollover policy — is not duplicated
+> anywhere, so there was nothing there to delete. The win is that a flag,
+> a binary check or a step can no longer exist in one runner and not the other;
+> see the drift bug in W3 for what that cost in practice.
 >
 > A ground-up plan for what this repo should become, written after reading all
 > 26,458 production lines and measuring the codebase rather than eyeballing it.
@@ -94,6 +108,10 @@ Plus:
   step table, argv construction, and prerequisite checks. It never imports
   `pipeline`. Both files independently define
   `STEP_ORDER = ("fetcher", "cleaner", "10bit", "sync", "auditor")`.
+  *(Corrected while doing the work: the genuinely duplicated description is
+  ~450 lines, not 1,400 — the rest of that file is the streaming runner, the
+  narrative report and the convergence policy, none of which exists twice. See
+  the status note at the top.)*
 
 **Removable without losing a single behaviour: ~7,950 lines (30%).**
 
@@ -216,7 +234,7 @@ everything five times.
   authority" and a `--no-state` flag that bypasses it entirely.
 - **Effort:** 3–4 days including tests.
 
-### W3 · One orchestration model
+### W3 · One orchestration model — **landed (partly; see the status note)**
 
 **Problem.** Four places know the step order and how to build argv:
 `pipeline.py`, `jellyfin_one_shot.py`, `organize.py`, and `jellyfin_completer.sh`.
@@ -256,6 +274,23 @@ Two further wins in the same move:
 - **Risk:** medium. The convergence logic is good and must be preserved verbatim
   in behaviour — port it with its tests first, then delete the old file.
 - **Effort:** 2–3 days.
+
+**What actually shipped.** The step table, the binary probes, the skip reasons
+and the argv builder are one module (`organizekit/core/toolchain.py`); both
+orchestrators bind the same object and `tests/test_shared_core.py` asserts
+identity, so a second table cannot be written. `run_one_shot` is 542 lines
+instead of 661 (the three "clean / inspect / sync" blocks are one loop),
+`pipeline.py` is 349 instead of 448, and `jellyfin_completer.sh` is a single
+`exec`. Behaviour was verified by replaying a full completer run before and
+after and diffing every subprocess argv, the run log and the rendered report.
+
+**Deliberately not done, and why.** In-process step execution was dropped from
+this phase: each tool currently owns its own run lock, log file, report and
+exit code, and a shared process would have to reproduce all four *and* give up
+the crash isolation that makes a multi-day unattended run safe. It belongs with
+W2's single scan and shared probe cache, where it pays for itself; on its own it
+is risk without reward. The prerequisite-divergence bug — the thing W3 was
+really for — is fixed either way.
 
 ### W4 · Concurrency and connection reuse
 
@@ -378,14 +413,15 @@ Each phase is independently shippable and leaves the repo green.
 | :--- | :--- | ---: | :--- | ---: |
 | ~~**1**~~ | ~~W1 core extraction + CI gate~~ **done** | −4,663 | Med | ✅ |
 | ~~**2**~~ | ~~self-tests → `tests/`, thin smoke checks remain~~ **done** | −1,842 | Low | ✅ |
-| **3** | W3 one Step registry; one-shot = convergence loop | −1,400 | Med | 2–3 |
+| ~~**3**~~ | ~~W3 one Step registry; one argv builder; `.sh` → one `exec`~~ **done** | +58 (see note) | Med | ✅ |
 | **4** | W4 workers + token bucket + HTTP keep-alive | +400 | Med | 3–4 |
 | **5** | W2 SQLite state + single scan + `organize status` | +900 | Med-High | 3–4 |
 | **6** | W5 planners split, property + fault-injection tests, gate → 75% | +1,200 | Low | 3–5 |
 | **7** | W6 direct-play verification, HandBrake queue, multi-language | +1,500 | Med | 4–6 |
 | **8** | W7 docs split, JSON output, PyPI + zipapp release | +300 | Low | 2 |
 
-**Net: ~26,500 → ~23,000 production lines** that do substantially more, run
+**Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
+20,011) that do substantially more, run
 several times faster, and are provably rather than rhetorically safe.
 
 Phases 1–3 are pure deletion and are worth doing even if nothing else is. Phase

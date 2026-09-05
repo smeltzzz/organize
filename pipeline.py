@@ -36,12 +36,10 @@ Stdlib only. No Python packages required.
 from __future__ import annotations
 
 import argparse
-import os
-import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,55 +47,27 @@ from pathlib import Path
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
 # keeps it that way.
 from organizekit.core import (
+    STEP_ORDER,
+    STEPS,
     Report,
+    Step,
     enable_utf8_stdio,
+    prerequisite_issue,
     print_text,
     resolve_library,
     run_field_smoke_test,
 )
 
+# The binary probes, under the names this module has always used for them.
+# They are re-exported rather than wrapped so that patching one here patches
+# the one the prerequisite table actually calls.
+from organizekit.core import api_key_present as _api_key_present  # noqa: F401
+from organizekit.core import ffsubsync_ready as _ffsubsync_present  # noqa: F401
+
 VERSION = "1.0.0"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_LIBRARY = str(resolve_library())
-
-# The canonical order. Index order is the execution order; do not reorder
-# without re-reading the moviehash note in the module docstring.
-STEP_ORDER = ("fetcher", "cleaner", "10bit", "sync", "auditor")
-
-@dataclass(frozen=True)
-class Step:
-    key: str
-    script: str
-    title: str
-    # The flag each tool uses for the movie-library root; they are not uniform.
-    root_flag: str
-    supports_dry_run: bool = True
-    supports_limit: bool = True
-    supports_nice: bool = False
-
-STEPS: dict[str, Step] = {
-    "fetcher": Step(
-        key="fetcher", script="subtitle_fetcher.py", title="Fetch English SRT subtitles",
-        root_flag="--source",
-    ),
-    "cleaner": Step(
-        key="cleaner", script="mkv_track_cleaner.py", title="Clean MKV tracks (remux)",
-        root_flag="--dir", supports_nice=True,
-    ),
-    "10bit": Step(
-        key="10bit", script="bitdepth.py", title="Check 8-bit vs 10-bit / HDR",
-        root_flag="--source",
-    ),
-    "sync": Step(
-        key="sync", script="sync_subtitles.py", title="Sync subtitle timing (ffsubsync)",
-        root_flag="--source",
-    ),
-    "auditor": Step(
-        key="auditor", script="library_auditor.py", title="Audit library layout",
-        root_flag="--source", supports_dry_run=False, supports_limit=False,
-    ),
-}
 
 @dataclass
 class Config:
@@ -147,81 +117,12 @@ class Run:
     elapsed: float = 0.0
 
 # ---------------------------------------------------------------------------
-# Prerequisites
+# Calling a step
+#
+# The step table, the prerequisite checks and the long-run argv builder all
+# live in organizekit.core.toolchain: jellyfin_one_shot.py runs the same five
+# tools and must not be able to disagree with this file about any of it.
 # ---------------------------------------------------------------------------
-
-def _api_key_present() -> bool:
-    """Return whether at least one supported subtitle provider is configured."""
-    try:
-        import subtitle_fetcher as sf
-    except Exception:
-        return False
-    keys = (
-        os.environ.get("OPENSUBTITLES_API_KEY"),
-        sf.OPENSUBTITLES_API_KEY,
-        os.environ.get("SUBDL_API_KEY"),
-        sf.SUBDL_API_KEY,
-    )
-    return any(str(key or "").strip() for key in keys)
-
-def _mkvmerge_present() -> bool:
-    try:
-        import mkv_track_cleaner as tc
-        tc.resolve_mkvmerge_path()
-        return True
-    except Exception:
-        return shutil.which("mkvmerge") is not None
-
-def _ffprobe_present() -> bool:
-    try:
-        import bitdepth
-        return bitdepth.find_ffprobe() is not None
-    except Exception:
-        return shutil.which("ffprobe") is not None
-
-def _ffsubsync_present() -> bool:
-    """ffsubsync (any entry point) on PATH, plus the ffmpeg it shells out to."""
-    try:
-        import sync_subtitles as ss
-        if ss.find_ffsubsync() is None:
-            return False
-    except Exception:
-        if not any(shutil.which(name) for name in ("ffsubsync", "ffs", "subsync")):
-            return False
-    return shutil.which("ffmpeg") is not None
-
-PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
-    "fetcher": (
-        _api_key_present,
-        "no subtitle-provider key; set OPENSUBTITLES_API_KEY and/or SUBDL_API_KEY to enable fetching",
-    ),
-    "cleaner": (
-        _mkvmerge_present,
-        "mkvmerge (MKVToolNix) not found on PATH or in the standard install locations",
-    ),
-    "10bit": (
-        _ffprobe_present,
-        "ffprobe (FFmpeg) not found on PATH or in the standard install locations",
-    ),
-    "sync": (
-        _ffsubsync_present,
-        "ffsubsync not found on PATH (install it with `pip install ffsubsync`) or ffmpeg "
-        "missing; ffsubsync needs both to sync subtitles",
-    ),
-}
-
-def prerequisite_issue(step: Step) -> str | None:
-    """Return a reason to skip ``step``, or ``None`` when it can run."""
-    script_path = HERE / step.script
-    if not script_path.is_file():
-        return f"{step.script} is missing from this directory"
-    check, reason = PREREQUISITES.get(step.key, (lambda: True, ""))
-    try:
-        if not check():
-            return reason
-    except Exception:
-        return reason or "prerequisite check failed"
-    return None
 
 def build_command(step: Step, cfg: Config) -> list[str]:
     """Build the argv for one step, mirroring what you would type by hand."""

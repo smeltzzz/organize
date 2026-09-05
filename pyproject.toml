@@ -111,6 +111,11 @@ ignore = [
 "subtitle_fetcher.py" = ["BLE001"]
 "sync_subtitles.py" = ["BLE001"]
 
+# The binary probes there import a sibling tool to ask it where its own binary
+# lives. A tool that fails to import - or a resolver that raises something new
+# - must degrade to the plain PATH lookup, never take the caller down.
+"organizekit/core/toolchain.py" = ["BLE001"]
+
 # The moved self-tests deliberately resolve their names in the *tool's* module
 # namespace at call time (tests/selftests/__init__.py rebinds each function's
 # __globals__), which is exactly the semantics they had when they lived inside

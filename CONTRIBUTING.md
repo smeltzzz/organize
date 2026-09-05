@@ -19,13 +19,15 @@ To maintain its bulletproof stability, all contributions must respect the projec
 
    The tools remain ordinary scripts — `python3 bitdepth.py` works straight out of a clone with no install and no `PYTHONPATH`, because `organizekit/` sits beside them at the repository root.
 
+   The toolchain itself is one of those shared things. What the five steps are, in what order, with which flag each tool spells the library root, which binary each needs and how long a pass may take is the table in `organizekit/core/toolchain.py`. Both orchestrators (`pipeline.py` and `jellyfin_one_shot.py`) bind that table, and `tests/test_shared_core.py` asserts identity, not equality — a second step table cannot be written. Add a flag to a step there and both runners get it.
+
    This replaces an older rule that said the opposite: every tool used to carry its own copy of all of it, and contributors were asked to keep the copies byte-identical by hand. That failed exactly as you would expect. `atomic_write_text` drifted into two versions and the safer one (which `fsync`s before publishing, so a report survives a power cut and not merely a process crash) existed only in `subtitle_fetcher.py` — the tool that rewrites your movie files had the weakest writer in the repo. 4,325 lines of duplication bought that bug. A helper that must behave identically everywhere should exist in one place.
 
 4. **Hardlink-Only Ingest (Zero Extra Disk Usage)**
    Ingestion into the organized library uses `os.link()`. It never silently degrades to a copy or move. Completed torrents remain fully seedable on their original filesystem without taking twice the space.
 
 5. **Strict Order: Subtitles BEFORE Remux**
-   `subtitle_fetcher.py` queries OpenSubtitles using release OSHash (`moviehash_match=only`). Remuxing rewrites the MKV headers, permanently invalidating the OSHash. Subtitles must always be fetched before track cleaning.
+   `subtitle_fetcher.py` queries OpenSubtitles using release OSHash (`moviehash_match=only`). Remuxing rewrites the MKV headers, permanently invalidating the OSHash. Subtitles must always be fetched before track cleaning. The order is `organizekit.core.toolchain.STEP_ORDER`, stated once and asserted by `tests/test_shared_core.py`.
 
 6. **Fail-Closed Concurrency Locks**
    All tools coordinate across processes and schedulers via advisory locks (`organizekit.core.CoordinationLock`). A tool refuses to touch a file rather than risk racing another process.

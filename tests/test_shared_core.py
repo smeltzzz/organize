@@ -223,15 +223,29 @@ class PipelineOrderIsLoadBearing(unittest.TestCase):
         )
 
     def test_one_shot_agrees_with_the_pipeline_order(self) -> None:
-        """The two orchestrators must not disagree about the running order."""
+        """The two orchestrators must not disagree about the running order.
+
+        They no longer *can*: the order, the scripts, the flags and the
+        prerequisites are one table in organizekit.core.toolchain, and both
+        orchestrators bind that object rather than a copy of it. Asserting
+        identity (not equality) is what makes drift unrepresentable.
+        """
         import jellyfin_one_shot
         import pipeline
 
+        self.assertIs(pipeline.STEP_ORDER, core.STEP_ORDER)
+        self.assertIs(jellyfin_one_shot.STEP_ORDER, core.STEP_ORDER)
+        self.assertIs(pipeline.STEPS, core.STEPS)
+        self.assertIs(jellyfin_one_shot.STEPS, core.STEPS)
+
+    def test_the_step_table_is_the_only_list_of_the_tools(self) -> None:
+        """Every script named in the table exists, and nothing else runs."""
+        for key in core.STEP_ORDER:
+            with self.subTest(step=key):
+                self.assertTrue((REPO / core.STEPS[key].script).is_file())
         self.assertEqual(
-            tuple(pipeline.STEP_ORDER),
-            tuple(jellyfin_one_shot.STEP_ORDER),
-            "jellyfin_one_shot.py and pipeline.py define the toolchain order "
-            "separately; they have drifted apart.",
+            tuple(core.STEPS[key].script for key in core.STEP_ORDER),
+            core.TOOL_SCRIPTS,
         )
 
 
