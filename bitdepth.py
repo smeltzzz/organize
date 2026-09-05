@@ -61,6 +61,7 @@ from organizekit.core import (
     resolve_library,
     resolve_workers,
     run_field_smoke_test,
+    tools_home,
 )
 
 
@@ -248,7 +249,7 @@ def find_ffprobe(explicit: str | None = None) -> str | None:
     which = shutil.which("ffprobe") or shutil.which("ffprobe.exe")
     if which:
         candidates.append(which)
-    here = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+    here = tools_home()  # beside the checkout, or beside the .pyz
     candidates.extend([
         str(here / "ffprobe.exe"),
         str(here / "ffprobe"),

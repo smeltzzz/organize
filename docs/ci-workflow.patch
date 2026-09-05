@@ -1,5 +1,29 @@
+# Unapplied CI changes for .github/workflows/ci.yml
+#
+# The Arena GitHub App that pushes this branch has no `workflows` permission,
+# so a commit that edits .github/workflows/ci.yml is rejected outright. The
+# changes therefore live here until someone with the right token applies them:
+#
+#     git apply docs/ci-workflow.patch && git add .github && git commit
+#
+# What they add, in the order they appear:
+#
+#   * byte-compile the organizekit package too, not only the nine scripts;
+#   * assert that a bare clone imports with no install and no PYTHONPATH, and
+#     that a tool binds the core implementation itself rather than a copy;
+#   * raise the coverage floor from 55 to 74 (the real figure is 77%; the
+#     floor is a ratchet, not a target);
+#   * a `single-file` job on Linux and Windows that builds dist/organize.pyz,
+#     runs it from OUTSIDE the source tree (--version, doctor, test - which
+#     starts all nine tools as child processes out of the archive) and uploads
+#     it as a build artifact. The offline suite already builds and exercises
+#     the archive; this job is the cross-platform half of that.
+#
+# Verified with `git apply --check` against the ci.yml at the tip of this
+# branch.
+
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 5b752f0..9454844 100644
+index 5b752f0..a58f773 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -37,13 +37,16 @@ jobs:
@@ -34,16 +58,16 @@ index 5b752f0..9454844 100644
      name: Coverage gate
      runs-on: ubuntu-latest
      steps:
-@@ -80,7 +86,7 @@ jobs:
+@@ -80,7 +89,7 @@ jobs:
        - name: Report and enforce the floor
          run: |
            python -m coverage report
 -          python -m coverage report --fail-under=55
-+          python -m coverage report --fail-under=72
++          python -m coverage report --fail-under=74
  
    packaging:
      # Regression guard for the broken console entry point: pyproject declared
-@@ -111,12 +117,16 @@ jobs:
+@@ -111,17 +120,54 @@ jobs:
            organize doctor
            organize audit --help
          shell: bash
@@ -63,23 +87,41 @@ index 5b752f0..9454844 100644
            print(f'wheel={wheel} source={src}')
            sys.exit(0 if wheel == src else 1)
            "
-
-# ---------------------------------------------------------------------------
-# Why this is a patch file and not a committed workflow change
-#
-# The Arena GitHub App is not permitted to create or update files under
-# .github/workflows/, so these CI changes cannot be pushed directly. Apply them
-# with:
-#
-#     git apply docs/ci-workflow.patch && git add .github/workflows/ci.yml
-#
-# What they do:
-#   * byte-compile the organizekit package alongside the tool scripts;
-#   * assert a clone runs with no install and no PYTHONPATH, and that a tool
-#     binds the shared core object itself (bitdepth.Report is core.Report);
-#   * assert the shared core is importable from the built wheel;
-#   * read the wheel-vs-source version check from organizekit.VERSION;
-#   * raise the coverage floor 55 -> 65, which the suite now clears at 67%
-#     because the tools' self-tests moved into tests/selftests/ and are
-#     executed by the unit run instead of sitting uncovered in shipped files.
-# ---------------------------------------------------------------------------
+         shell: bash
+ 
++  single-file:
++    # The other install path: one file copied to a machine with nothing on it
++    # but Python. The archive has no script files in it, so this is also the
++    # regression guard for the launcher - a step that cannot start is the
++    # failure mode, and only a real archive shows it.
++    name: Single-file build (organize.pyz)
++    runs-on: ${{ matrix.os }}
++    strategy:
++      fail-fast: false
++      matrix:
++        os: [ubuntu-latest, windows-latest]
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-python@v5
++        with:
++          python-version: "3.11"
++      - name: Build the archive
++        run: python scripts/build_pyz.py
++        shell: bash
++      - name: It must work from OUTSIDE the source tree
++        run: |
++          cp dist/organize.pyz "${{ runner.temp }}/organize.pyz"
++          cd "${{ runner.temp }}"
++          python organize.pyz --version
++          python organize.pyz doctor
++          python organize.pyz test
++        shell: bash
++      - uses: actions/upload-artifact@v4
++        if: matrix.os == 'ubuntu-latest'
++        with:
++          name: organize-pyz
++          path: dist/organize.pyz
++
+   doctor-smoke:
+     # Verifies the unified CLI boots and the diagnostic doctor runs green-box
+     # on a pristine machine (no binaries, no API key — warnings, not crashes).

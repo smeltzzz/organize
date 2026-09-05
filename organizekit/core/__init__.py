@@ -86,6 +86,7 @@ from .text import (
 )
 from .toolchain import (
     PREREQUISITES,
+    RUN_TOOL_VERB,
     SCRAPING_DAILY_CAP,
     STEP_BINARIES,
     STEP_ORDER,
@@ -95,6 +96,7 @@ from .toolchain import (
     Step,
     api_key_present,
     build_step_args,
+    child_cwd,
     detect_tools,
     ffmpeg_installed,
     ffprobe_installed,
@@ -104,6 +106,11 @@ from .toolchain import (
     mkvmerge_installed,
     prerequisite_issue,
     step_skip_reason,
+    tool_command,
+    tool_is_available,
+    tool_module_name,
+    tools_home,
+    zipapp_path,
 )
 
 __all__ = [
@@ -129,6 +136,7 @@ __all__ = [
     "map_ordered",
     "resolve_workers",
     "PREREQUISITES",
+    "RUN_TOOL_VERB",
     "SCRAPING_DAILY_CAP",
     "STEPS",
     "STEP_BINARIES",
@@ -171,6 +179,7 @@ __all__ = [
     "Report",
     "RunLog",
     "atomic_write_text",
+    "child_cwd",
     "clip_text",
     "decode_srt_bytes",
     "default_library_root",
@@ -190,6 +199,11 @@ __all__ = [
     "run_field_smoke_test",
     "sha256_file",
     "srt_looks_valid",
+    "tool_command",
+    "tool_is_available",
+    "tool_module_name",
+    "tools_home",
+    "zipapp_path",
     "try_file_lock",
     "validate_srt_sidecar",
     "wrap_path_text",

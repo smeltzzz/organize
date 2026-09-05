@@ -19,15 +19,28 @@ The order is load-bearing and is documented at ``STEP_ORDER``.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 # The tools are scripts next to the package, not modules inside it: they are
 # launched as subprocesses so each keeps its own locks, logs and reports.
+#
+# In a checkout this is the directory holding them. In the zipapp build it is
+# the archive itself - ``__file__`` is then ``.../organize.pyz/organizekit/
+# core/toolchain.py`` - which is why nothing below joins a script name onto it
+# without going through ``tool_command`` or ``tool_is_available``.
 TOOLS_DIR = Path(__file__).resolve().parents[2]
+
+# The hidden verb the zipapp's entry point answers to when the toolkit needs to
+# run one of its own tools as a child process. Steps stay separate processes in
+# every deployment: each tool keeps its own locks, logs, reports and exit code,
+# and a crash in one cannot take the run down with it.
+RUN_TOOL_VERB = "run-tool"
 
 # The fetcher's per-source scrape budget for a long unattended run. It matches
 # subtitle_fetcher.py's own default; it is stated here because the completer
@@ -263,9 +276,7 @@ PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
 
 def prerequisite_issue(step: Step, script_dir: Path | None = None) -> str | None:
     """Return a reason to skip ``step``, or ``None`` when it can run."""
-    base = TOOLS_DIR if script_dir is None else script_dir
-    script_path = base / step.script
-    if not script_path.is_file():
+    if not tool_is_available(step.script, script_dir=script_dir):
         return f"{step.script} is missing from this directory"
     check, reason = PREREQUISITES.get(step.key, (lambda: True, ""))
     try:
@@ -313,9 +324,88 @@ def step_skip_reason(key: str, tools: dict[str, bool]) -> str | None:
     return f"{' and '.join(missing)} {verb} not installed"
 
 
-def missing_tool_scripts(script_dir: Path) -> list[str]:
-    """Names of the toolchain scripts that are absent from ``script_dir``."""
-    return [name for name in TOOL_SCRIPTS if not (script_dir / name).is_file()]
+def missing_tool_scripts(script_dir: Path | None = None) -> list[str]:
+    """Names of the toolchain scripts this deployment cannot run."""
+    return [name for name in TOOL_SCRIPTS if not tool_is_available(name, script_dir=script_dir)]
+
+
+# ---------------------------------------------------------------------------
+# Where the tools are, and how to start one
+#
+# There are two deployments and they answer these questions differently: a
+# checkout, where each tool is a file you can point an interpreter at, and the
+# single-file zipapp, where the same tools are modules inside an archive and
+# the way to run one is to re-enter the archive. Everything that starts a tool
+# goes through here so that difference is stated once.
+# ---------------------------------------------------------------------------
+
+def zipapp_path() -> Path | None:
+    """The ``.pyz`` this toolkit is running from, or None in a checkout."""
+    return TOOLS_DIR if TOOLS_DIR.is_file() else None
+
+
+def tools_home() -> Path:
+    """A real directory to run children in, in either deployment."""
+    archive = zipapp_path()
+    return archive.parent if archive is not None else TOOLS_DIR
+
+
+def tool_module_name(script: str) -> str:
+    """``bitdepth.py`` -> ``bitdepth``."""
+    return script[:-3] if script.endswith(".py") else script
+
+
+def _tool_dir(script_dir: Path | None) -> Path | None:
+    """The directory holding the tools, or None when they are inside the archive.
+
+    ``jellyfin_one_shot.py`` takes a ``--script-dir`` that defaults to "next to
+    me", which inside the archive *is* the archive. Normalising that here means
+    the orchestrators keep their existing option and neither has to know that
+    the single-file build exists.
+    """
+    if script_dir is None:
+        return None
+    archive = zipapp_path()
+    if archive is not None and Path(script_dir) == archive:
+        return None
+    return Path(script_dir)
+
+
+def child_cwd(script_dir: Path | None = None) -> Path:
+    """A real working directory for a child tool, in either deployment."""
+    resolved = _tool_dir(script_dir)
+    return tools_home() if resolved is None else resolved
+
+
+def tool_is_available(script: str, *, script_dir: Path | None = None) -> bool:
+    """Can this deployment run ``script``?
+
+    A missing tool is a skipped step, not a crash, so both orchestrators and
+    ``doctor`` ask this instead of testing for a file that only exists in one
+    of the two layouts.
+    """
+    base = _tool_dir(script_dir)
+    if base is None and zipapp_path() is not None:
+        try:
+            return importlib.util.find_spec(tool_module_name(script)) is not None
+        except (ImportError, ValueError):  # a name that is not importable at all
+            return False
+    return ((TOOLS_DIR if base is None else base) / script).is_file()
+
+
+def tool_command(script: str, args: Sequence[str] = (),
+                 *, script_dir: Path | None = None) -> list[str]:
+    """The full command that runs one tool as a child process.
+
+    ``[interpreter, script, *args]`` out of a checkout; out of the zipapp,
+    ``[interpreter, archive, "run-tool", script, *args]`` - the archive is the
+    only file there is, so it re-enters itself and dispatches by module name.
+    """
+    base = _tool_dir(script_dir)
+    archive = zipapp_path() if base is None else None
+    if archive is not None:
+        return [sys.executable, str(archive), RUN_TOOL_VERB, script, *args]
+    return [sys.executable, str((TOOLS_DIR if base is None else base) / script), *args]
 
 
 # ---------------------------------------------------------------------------

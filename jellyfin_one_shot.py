@@ -104,6 +104,7 @@ from organizekit.core import (  # noqa: F401  (SCRAPING_DAILY_CAP, TOOL_SCRIPTS:
     RunLog,
     Step,
     build_step_args,
+    child_cwd,
     describe_library_origin,
     detect_tools,
     enable_utf8_stdio,
@@ -111,6 +112,8 @@ from organizekit.core import (  # noqa: F401  (SCRAPING_DAILY_CAP, TOOL_SCRIPTS:
     resolve_library,
     run_field_smoke_test,
     step_skip_reason,
+    tool_command,
+    tools_home,
 )
 
 # The binary probes, under the names this runner has always used. Re-exported
@@ -132,7 +135,10 @@ VERSION = "1.3.1"
 # scripts maintain. MOVIE_STD_TARGET overrides it; an explicit --source wins.
 DEFAULT_LIBRARY = str(resolve_library())
 
-DEFAULT_LOG_DIR = Path(__file__).parent / "logs"
+# Beside the toolkit: the checkout directory, or the folder holding the
+# single-file build. Never *inside* it - a zipapp is a file, not a place to
+# write logs.
+DEFAULT_LOG_DIR = tools_home() / "logs"
 MAX_FETCH_RETRIES = 10   # per pass, before giving up and moving on
 
 # Auditor resilience: a single audit attempt can be blocked (another process
@@ -313,7 +319,7 @@ def run_tool(
     Returns:
         Tuple of (returncode, stdout_text, stderr_text).
     """
-    cmd = [sys.executable, str(script_path)] + args
+    cmd = tool_command(script_path.name, args, script_dir=script_path.parent)
     log_info(runtime_log, f"Running: {' '.join(cmd)}")
 
     # The children are Python, and a pipe makes their stdout block-buffered:
@@ -333,7 +339,7 @@ def run_tool(
             text=True,
             encoding="utf-8",
             errors="replace",
-            cwd=script_path.parent,
+            cwd=child_cwd(script_path.parent),
             env=child_env,
         )
     except FileNotFoundError:

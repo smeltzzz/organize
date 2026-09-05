@@ -123,6 +123,7 @@ from organizekit.core import (
     print_text,
     resolve_library,
     run_field_smoke_test,
+    tools_home,
 )
 
 # ---------------------------------------------------------------------------
@@ -1816,7 +1817,7 @@ def find_ffprobe(explicit: str = "ffprobe") -> str | None:
     located = shutil.which("ffprobe") or shutil.which("ffprobe.exe")
     if located:
         candidates.append(located)
-    here = Path(__file__).resolve().parent
+    here = tools_home()  # beside the checkout, or beside the .pyz
     candidates.extend([
         str(here / "ffprobe.exe"),
         str(here / "ffprobe"),

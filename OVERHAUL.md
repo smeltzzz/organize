@@ -559,6 +559,39 @@ promises:
    "17 movies unblock when seeding completes" instead of silently deferring
    every pass.
 
+> **Update — phase 8a (W7): the single file, built and tested.**
+>
+> The distribution question from §6 is settled the way the owner chose: a
+> normal package *plus* a stdlib-only `organize.pyz`, and no standalone-file
+> generator. `scripts/build_pyz.py` reads the module list out of
+> `pyproject.toml` — the same list the wheel ships — stages it and writes a
+> ~270 KiB archive with sorted entries and pinned timestamps, so two builds of
+> one source are the same bytes.
+>
+> The interesting part was not the packaging; it was that **a zipapp has no
+> script files in it**, and this toolkit runs its five steps as child
+> processes on purpose (own locks, own log, own report, own exit code — one
+> tool's crash cannot take the run with it). Making the archive run them
+> in-process would have been simpler and would have quietly given up that
+> property. Instead the launch rule moved into `core/toolchain.py` —
+> `tool_command()`, `tool_is_available()`, `tools_home()`, `child_cwd()` — and
+> the archive re-enters itself: `python organize.pyz run-tool bitdepth.py …`.
+> Four hand-rolled `[sys.executable, script_path]` sites collapsed into it.
+>
+> Three paths were resolving *inside* the file rather than beside it (the
+> completer's log directory, the fetcher's extraction ledger, the "is ffprobe
+> next to the script?" probe). Same behaviour in a checkout; the difference
+> between working and `NotADirectoryError` in the archive.
+>
+> `tests/test_zipapp.py` builds it and uses it: nine field smoke tests run out
+> of the archive, `pipeline.py` launches a real auditor pass from inside it,
+> and an AST walk asserts that every import in every shipped file resolves to
+> the standard library or to another member — the zero-dependency claim,
+> checked. 894 → 909 tests. The cross-platform half (build and run the
+> archive on Windows too, and publish it as an artifact) is in
+> `docs/ci-workflow.patch` along with the coverage floor moving 55 → 74:
+> the bot that pushes this branch may not edit workflow files.
+
 ### W7 · Ops, UX, distribution
 
 - **`organize status`** (W2) — the missing verb.
@@ -597,7 +630,8 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6c**~~ | ~~one shared `RunLog`, the last duplicated implementation; `core/toolchain.py` off the blanket `BLE001` ignore~~ **done** (the nine tool files' 84 broad catches are still blanket-ignored) | −62, +200 tests | Low | ✅ |
 | ~~**6d**~~ | ~~every `except Exception` in the toolkit narrowed or justified in place; no file-wide `BLE001` exemption left~~ **done** | 27 narrowed, +290 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
-| **8** | W7 docs split, JSON output, PyPI + zipapp release | +300 | Low | 2 |
+| ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
+| **8b** | W7 docs split, JSON/JSONL output, PyPI release | +300 | Low | 2 |
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run
@@ -635,7 +669,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **76%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 10.5 s (894 tests) | ≤15 s (with property + fault-injection tests) |
+| Test runtime | 6.7 s | 14.6 s (909 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

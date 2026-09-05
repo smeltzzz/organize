@@ -51,11 +51,14 @@ from organizekit.core import (
     STEPS,
     Report,
     Step,
+    child_cwd,
     enable_utf8_stdio,
     prerequisite_issue,
     print_text,
     resolve_library,
     run_field_smoke_test,
+    tool_command,
+    tool_is_available,
 )
 
 # The binary probes, under the names this module has always used for them.
@@ -126,7 +129,7 @@ class Run:
 
 def build_command(step: Step, cfg: Config) -> list[str]:
     """Build the argv for one step, mirroring what you would type by hand."""
-    command = [sys.executable, str(HERE / step.script), step.root_flag, str(cfg.library)]
+    command = tool_command(step.script, [step.root_flag, str(cfg.library)])
     if cfg.dry_run and step.supports_dry_run:
         command.append("--dry-run")
     if cfg.limit and step.supports_limit:
@@ -157,7 +160,7 @@ def run_step(step: Step, cfg: Config, dry_run_pipeline: bool = False) -> StepRes
     print("  " + " ".join(f'"{part}"' if " " in part else part for part in command), flush=True)
     started = time.monotonic()
     try:
-        completed = subprocess.run(command, cwd=str(HERE), check=False)
+        completed = subprocess.run(command, cwd=str(child_cwd()), check=False)
         code: int | None = completed.returncode
     except OSError as exc:
         return StepResult(step.key, step.title, "missing", detail=f"could not launch: {exc}")
@@ -336,7 +339,7 @@ def run_self_tests() -> int:
         return set(STEPS) == set(STEP_ORDER)
 
     def the_tools_are_present() -> bool:
-        return all((HERE / STEPS[key].script).is_file() for key in STEP_ORDER)
+        return all(tool_is_available(STEPS[key].script) for key in STEP_ORDER)
 
     return run_field_smoke_test("pipeline.py", [
         ("subtitles are fetched before the remux", fetch_precedes_remux),

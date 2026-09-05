@@ -138,6 +138,7 @@ from organizekit.core import (
     resolve_library,
     run_field_smoke_test,
     srt_looks_valid,
+    tools_home,
     validate_srt_sidecar,
 )
 
@@ -3759,7 +3760,7 @@ def extracted_ledger_path() -> Path:
     override = os.environ.get(EXTRACTED_LEDGER_ENV, "").strip()
     if override:
         return Path(override).expanduser()
-    return Path(__file__).resolve().parent / "ReportsAndLogs" / EXTRACTED_LEDGER_NAME
+    return tools_home() / "ReportsAndLogs" / EXTRACTED_LEDGER_NAME
 
 
 def load_extracted_ledger(path: Path | None = None) -> dict[str, Any]:

@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-894%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-909%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -92,9 +92,11 @@ One file, one purpose. Nothing else.
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
 | `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided, and `ratelimit.py`, the per-host token buckets that keep every provider inside its published rate. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock. |
-| `tests/` | Fully offline unit tests (894), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — and `fake_mkvmerge.py`, a stand-in multiplexer real enough to drive an end-to-end remux. |
+| `tests/` | Fully offline unit tests (909), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — and `fake_mkvmerge.py`, a stand-in multiplexer real enough to drive an end-to-end remux. |
 | `.env.example` | Every supported environment variable, annotated. |
-| `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. |
+| `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. It is also the single source for what the single-file build ships. |
+| `scripts/build_pyz.py` | Builds `dist/organize.pyz` — the entire toolkit as one stdlib-only file you can copy to a NAS. |
+| `__main__.py` | The archive's entry point: the CLI, plus the hidden `run-tool` verb it uses to start its own tools as child processes. |
 
 **How the files relate** (this is the whole architecture):
 
@@ -115,6 +117,13 @@ One file, one purpose. Nothing else.
 - `organize.py` never reimplements anything — it launches the tool scripts as
   subprocesses.
 - `pipeline.py` does the same, but hard-codes the safe execution order.
+- **One toolkit, two deployments.** Everything above also builds into a single
+  `organize.pyz` you can copy to a NAS that has nothing on it but Python. The
+  archive runs the *same* modules and still starts each step as its own
+  process — inside it there is no `bitdepth.py` to point an interpreter at, so
+  it re-enters itself (`python organize.pyz run-tool bitdepth.py …`). That is
+  the only difference between the two, and it is stated once, in
+  `organizekit/core/toolchain.py`.
 
 ---
 
@@ -673,7 +682,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 894 unit tests, ~11 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 909 unit tests, ~15 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -685,6 +694,29 @@ works from any directory:
 pip install .
 organize doctor
 ```
+
+### One file, no install
+
+For the machine this toolkit is actually for — a NAS or a home server with
+Python and nothing else — build the whole thing into one file and copy it
+across:
+
+```bash
+python3 scripts/build_pyz.py          # writes dist/organize.pyz (~270 KiB)
+scp dist/organize.pyz nas:/volume1/
+ssh nas 'cd /volume1 && python3 organize.pyz doctor'
+```
+
+It is the same toolkit, not a cut-down one: `organize.pyz test` runs all nine
+field smoke tests, `organize.pyz run-tool pipeline.py --source …` runs the full
+five-step pass, and each step is still its own process with its own locks, log,
+report and exit code. Logs and reports land *beside* the archive, never inside
+it. The module list comes from `pyproject.toml`, so the archive and the wheel
+cannot drift apart, and the build is reproducible — the same source always
+produces the same bytes. A test (`tests/test_zipapp.py`) builds the archive,
+runs real work out of it, and asserts that every import inside it resolves to
+the standard library or to another file in the archive, which is the "zero
+runtime dependencies" claim checked rather than repeated.
 
 Every tool also carries a `--self-test` **field smoke test** — it answers "does
 this copy work on this machine?" in under a second, without the repository, a

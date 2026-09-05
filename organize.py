@@ -930,15 +930,22 @@ def run_status(
 
 
 def delegate_to_script(script_name: str, args: Sequence[str]) -> int:
-    """Execute a standalone toolkit script via subprocess preserving arguments."""
-    script_path = HERE / script_name
-    if not script_path.is_file():
-        print(f"Error: {script_name} not found at {script_path}", file=sys.stderr)
+    """Execute a standalone toolkit script via subprocess preserving arguments.
+
+    A step is always its own process - it keeps its own locks, log, report and
+    exit code - and how one is started differs between a checkout and the
+    single-file build, so the command comes from the toolchain rather than
+    being assembled here.
+    """
+    from organizekit.core import tool_command, tool_is_available, tools_home
+
+    if not tool_is_available(script_name):
+        print(f"Error: {script_name} not found at {HERE}", file=sys.stderr)
         return 2
 
-    cmd = [sys.executable, str(script_path)] + list(args)
+    cmd = tool_command(script_name, list(args))
     try:
-        proc = subprocess.run(cmd, cwd=str(HERE), check=False)
+        proc = subprocess.run(cmd, cwd=str(tools_home()), check=False)
         return proc.returncode
     except KeyboardInterrupt:
         print("\nInterrupted by user.")
@@ -969,16 +976,17 @@ def run_all_self_tests() -> int:
     failed = 0
     started = time.monotonic()
 
+    from organizekit.core import tool_command, tool_is_available, tools_home
+
     for script, test_args in scripts:
-        script_path = HERE / script
-        if not script_path.is_file():
+        if not tool_is_available(script):
             print(f"  {SYM_FAIL} {script:<24} Missing file!")
             failed += 1
             continue
 
-        cmd = [sys.executable, str(script_path)] + test_args
+        cmd = tool_command(script, test_args)
         sub_start = time.monotonic()
-        proc = subprocess.run(cmd, cwd=str(HERE), capture_output=True, check=False,
+        proc = subprocess.run(cmd, cwd=str(tools_home()), capture_output=True, check=False,
                               encoding="utf-8", errors="replace")
         elapsed = time.monotonic() - sub_start
 
@@ -1007,8 +1015,16 @@ def run_unit_tests() -> int:
     """Run python3 -m unittest discover -s tests."""
     print(bold("  RUNNING REPOSITORY UNIT TESTS"))
     print("  " + HRULE * 68)
+    from organizekit.core import tools_home, zipapp_path
+
+    if zipapp_path() is not None:
+        # The offline suite is developer equipment: it is not in the archive,
+        # and shipping it there would mean shipping its fixtures too.
+        print("  The unit test suite is not part of the single-file build.")
+        print("  Clone the repository and run: python3 -m unittest discover -s tests")
+        return 0
     cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
-    proc = subprocess.run(cmd, cwd=str(HERE), check=False)
+    proc = subprocess.run(cmd, cwd=str(tools_home()), check=False)
     return proc.returncode
 
 
@@ -1111,7 +1127,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Handle internal self-test flag
     if "--internal-self-test" in raw_args:
         # Run verify of organize itself
-        assert (HERE / "pipeline.py").is_file(), "pipeline.py missing"
+        from organizekit.core import tool_is_available
+        assert tool_is_available("pipeline.py"), "pipeline.py missing"
         print("organize.py internal self-test: OK")
         return 0
 
