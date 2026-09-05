@@ -14,18 +14,19 @@ from unittest import mock
 from reporttext import scorecard, section
 
 import subtitle_fetcher as sf
+from organizekit import core
 
 srt_looks_valid = sf.srt_looks_valid
 validate_srt_sidecar = sf.validate_srt_sidecar
 normalize_srt_newlines = sf.normalize_srt_newlines
-decode_srt_bytes = sf.decode_srt_bytes
+decode_srt_bytes = core.decode_srt_bytes
 EXTERNAL_SRT_ENCODINGS = sf.EXTERNAL_SRT_ENCODINGS
 EXTERNAL_SRT_MAX_BYTES = sf.EXTERNAL_SRT_MAX_BYTES
-EXTERNAL_SRT_CUE_RE = sf.EXTERNAL_SRT_CUE_RE
+EXTERNAL_SRT_CUE_RE = core.EXTERNAL_SRT_CUE_RE
 EXTERNAL_SRT_SUFFIX = sf.EXTERNAL_SRT_SUFFIX
-LEGACY_EXTERNAL_SRT_SUFFIX = sf.LEGACY_EXTERNAL_SRT_SUFFIX
+LEGACY_EXTERNAL_SRT_SUFFIX = core.LEGACY_EXTERNAL_SRT_SUFFIX
 CoordinationLock = sf.CoordinationLock
-LockTimeoutError = sf.LockTimeoutError
+LockTimeoutError = core.LockTimeoutError
 promote_legacy_external_english_srt = sf.promote_legacy_external_english_srt
 exact_external_english_srt_path = sf.exact_external_english_srt_path
 
@@ -266,7 +267,6 @@ class SingleSourceContractTests(unittest.TestCase):
         import library_auditor  # noqa: F401  (imported so a break there is caught)
         import mkv_track_cleaner as tc
         import movie_standardizer as ms
-        import sync_subtitles as ss
 
         normalized = normalize_srt_newlines(text)
         return {
@@ -274,7 +274,7 @@ class SingleSourceContractTests(unittest.TestCase):
             "mkv_track_cleaner": tc.EXTERNAL_SRT_CUE_RE.search(normalized) is not None,
             "subtitle_fetcher": sf.looks_like_srt(normalized),
             "subtitle_fetcher (shared helper)": sf.srt_looks_valid(normalized),
-            "sync_subtitles": ss.srt_looks_valid(normalized),
+            "sync_subtitles": core.srt_looks_valid(normalized),
         }
 
     def test_every_tool_agrees_on_a_plain_cue(self) -> None:
@@ -296,21 +296,19 @@ class SingleSourceContractTests(unittest.TestCase):
     def test_no_tool_keeps_a_divergent_size_limit(self) -> None:
         import mkv_track_cleaner as tc
         import movie_standardizer as ms
-        import sync_subtitles as ss
 
         self.assertEqual(ms.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
         self.assertEqual(tc.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
         self.assertEqual(sf.MAX_SUBTITLE_BYTES, EXTERNAL_SRT_MAX_BYTES)
-        self.assertEqual(ss.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
+        self.assertEqual(core.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
 
     def test_no_tool_keeps_a_divergent_cue_pattern(self) -> None:
         import mkv_track_cleaner as tc
         import movie_standardizer as ms
-        import sync_subtitles as ss
 
         self.assertEqual(ms.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
         self.assertEqual(tc.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
-        self.assertEqual(ss.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
+        self.assertEqual(core.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
 
     def test_no_tool_keeps_a_divergent_encoding_list(self) -> None:
         self.assertEqual(EXTERNAL_SRT_ENCODINGS, ("utf-8-sig", "utf-8", "cp1252"))

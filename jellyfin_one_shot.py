@@ -91,6 +91,17 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
 
+# Shared implementation: everything imported here is defined exactly once,
+# in organizekit/core/. See tests/test_shared_core.py for the rule that
+# keeps it that way.
+from organizekit.core import (
+    REPORT_WIDTH,
+    describe_library_origin,
+    enable_utf8_stdio,
+    resolve_library,
+    run_field_smoke_test,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -102,125 +113,6 @@ VERSION = "1.3.1"
 # library_auditor.py's SOURCE_DIR and pipeline.py's DEFAULT_LIBRARY). Keeping
 # the value identical means a bare run finishes the same library the other
 # scripts maintain. MOVIE_STD_TARGET overrides it; an explicit --source wins.
-# ---------------------------------------------------------------------------
-# Library-root resolution (vendored inline; keep every copy identical)
-#
-# The movie-library root used to be a bare literal repeated in six files, with
-# only two of them honouring MOVIE_STD_TARGET. On a non-Windows host the tools
-# that ignored it happily defaulted to a Windows drive letter, wrote reports to
-# a literal path like `E:\torrents\...` in the current directory, and .gitignore
-# grew an `E:*` rule to catch the debris. One resolver, used by every tool,
-# removes that whole class of problem.
-#
-# Precedence: explicit --flag > ORGANIZE_LIBRARY > MOVIE_STD_TARGET > platform
-# default. A `.env` beside the scripts is loaded first, but never overrides a
-# variable already exported in the environment.
-# ---------------------------------------------------------------------------
-
-ENV_FILE_NAME = ".env"
-LIBRARY_ENV_VAR = "ORGANIZE_LIBRARY"
-LEGACY_LIBRARY_ENV_VAR = "MOVIE_STD_TARGET"
-
-
-def load_dotenv(path: Path | None = None) -> dict[str, str]:
-    """Load ``KEY=value`` pairs from a .env file next to the scripts.
-
-    The repo ships a fully documented ``.env.example`` telling users to copy it
-    to ``.env``, but nothing ever read that file: every documented variable
-    silently did nothing unless separately exported. This closes that gap.
-
-    Real environment variables always win, so an explicit export still beats a
-    stale file. Blank lines, ``#`` comments, a leading ``export``, and single or
-    double quotes around the value are all accepted. Malformed lines are
-    skipped rather than raising: a typo in a config file must not stop a
-    maintenance run that would otherwise work.
-    """
-    env_path = path or (Path(__file__).resolve().parent / ENV_FILE_NAME)
-    loaded: dict[str, str] = {}
-    try:
-        raw = env_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return loaded
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        if stripped.startswith("export "):
-            stripped = stripped[len("export "):].lstrip()
-        key, _, value = stripped.partition("=")
-        key = key.strip()
-        if not key:
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        loaded[key] = value
-        os.environ.setdefault(key, value)
-    return loaded
-
-
-def default_library_root() -> Path:
-    """The platform's documented library root when nothing else is configured.
-
-    The Windows default is the layout the README documents. Pointing a POSIX
-    host at ``E:\\torrents\\final_organized`` only ever produced a confusing
-    "does not exist" (or worse, a literal ``E:...`` directory in the CWD), so
-    those hosts get a sensible home-relative default instead.
-    """
-    if os.name == "nt":
-        return Path(r"E:\torrents\final_organized")
-    return Path.home() / "Media" / "Movies"
-
-
-def resolve_library(explicit: Path | str | None = None) -> Path:
-    """Resolve the movie-library root that every tool in the toolchain shares.
-
-    Precedence: an explicit flag, then ORGANIZE_LIBRARY, then the legacy
-    MOVIE_STD_TARGET, then the platform default.
-    """
-    load_dotenv()
-    if explicit is not None and str(explicit).strip():
-        return Path(explicit).expanduser()
-    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
-        value = (os.environ.get(var) or "").strip()
-        if value:
-            return Path(value).expanduser()
-    return default_library_root()
-
-
-def describe_library_origin(explicit: Path | str | None = None) -> str:
-    """Human-readable provenance of the resolved root, for error messages."""
-    load_dotenv()
-    if explicit is not None and str(explicit).strip():
-        return "--source"
-    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
-        if (os.environ.get(var) or "").strip():
-            return var
-    return f"the default library root ({default_library_root()})"
-
-
-def default_reports_root() -> Path:
-    r"""Where logs, reports and probe caches go when nothing is configured.
-
-    These must live OUTSIDE the media library (the auditor would otherwise
-    count a log folder at the library root as a movie folder). On Windows that
-    is the documented tools directory; elsewhere it follows the XDG state
-    convention. Hardcoding the Windows path for every platform is what made a
-    POSIX run scatter literal `E:\torrents\...` filenames into the current
-    working directory.
-    """
-    if os.name == "nt":
-        return Path(r"E:\torrents\tools\ReportsAndLogs")
-    state_home = (os.environ.get("XDG_STATE_HOME") or "").strip()
-    base = Path(state_home) if state_home else Path.home() / ".local" / "state"
-    return base / "organize"
-
-
-def default_tool_dir(tool_name: str) -> Path:
-    """The per-tool subdirectory of :func:`default_reports_root`."""
-    return default_reports_root() / tool_name
-
-
 DEFAULT_LIBRARY = str(resolve_library())
 
 DEFAULT_LOG_DIR = Path(__file__).parent / "logs"
@@ -333,28 +225,6 @@ STEP_PLANS: dict[str, StepPlan] = {
         idle="Nothing to do - the audit is a read-only walk of the library.",
     ),
 }
-
-
-# ---------------------------------------------------------------------------
-# Console encoding
-# ---------------------------------------------------------------------------
-def enable_utf8_stdio() -> None:
-    """Pin this process's console streams to UTF-8 with replacement errors.
-
-    The banners below (and the tool transcripts we echo) contain box-drawing
-    characters and check marks that a cp1252 Windows console cannot encode;
-    without this, ``print`` raises UnicodeEncodeError on exactly the success
-    banner. ``errors="replace"`` degrades a limited console to ``?`` instead
-    of aborting.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is None:  # a replaced stream, e.g. under redirect_stdout
-            continue
-        try:
-            reconfigure(encoding="utf-8", errors="replace")
-        except (ValueError, OSError):  # closed or detached stream
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -848,12 +718,6 @@ def wait_for_utc_midnight(runtime_log: Path) -> None:
             return
 
     log_info(runtime_log, "UTC day has rolled over. Resuming.")
-
-
-# ---------------------------------------------------------------------------
-# Run report: one file, everything in it
-# ---------------------------------------------------------------------------
-REPORT_WIDTH = 100
 
 
 # The pre-flight is the auditor run *before* the sweep, so it borrows the
@@ -2024,149 +1888,28 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
-# ---------------------------------------------------------------------------
-# Self-tests
-# ---------------------------------------------------------------------------
 def run_self_tests() -> int:
-    """Run offline self-tests for the one-shot completer."""
-    errors = []
+    """Field smoke test: can the completer read an audit and pace itself?
 
-    def check(condition: bool, message: str) -> None:
-        if not condition:
-            errors.append(message)
+    The convergence policy, the transcript folding and the quota-rollover
+    waits are covered in ``tests/selftests/``. Here we check that this copy
+    can still tell a finished library from an unfinished one, which is the
+    condition the whole loop terminates on.
+    """
+    def a_complete_library_is_recognised() -> bool:
+        return is_library_complete(10, 10) and not is_library_complete(9, 10)
 
-    import tempfile
+    def the_step_order_matches_the_pipeline() -> bool:
+        return STEP_ORDER == ("fetcher", "cleaner", "10bit", "sync", "auditor")
 
-    with tempfile.TemporaryDirectory(prefix="one_shot_test_") as tmpdir:
-        tmp_path = Path(tmpdir)
+    def the_tool_scripts_are_present() -> bool:
+        return not missing_tool_scripts(Path(__file__).resolve().parent)
 
-        # Create a dummy runtime_log for testing
-        test_runtime_log = tmp_path / "test.log"
-        test_runtime_log.touch()
-
-        # Test 1: machine-readable summary line (current auditor format)
-        report0 = tmp_path / "report0.txt"
-        report0.write_text("""\
-╔═ JELLYFIN MOVIE LIBRARY AUDIT ═╗
-  ────────────────────────────────
-     7   Canonical MKV            one MKV + a validated .eng.srt
-     0   Missing Eng SRT          run subtitle_fetcher.py
-     7   Folders checked          every top-level folder in the library
-  ────────────────────────────────
-  AUDIT SUMMARY: canonical=7; total=7; pct=100.0%
-""", encoding="utf-8")
-        covered, total = parse_auditor_coverage(test_runtime_log, report0)
-        check(covered == 7 and total == 7, f"Summary-line parsing: got {covered}/{total}")
-
-        # Test 2: Parse scorecard format (older auditor reports)
-        report1 = tmp_path / "report1.txt"
-        report1.write_text("""
-   42/42 (100.0%)  COVERAGE: movies with a validated English SRT
-   42  Already have .eng.srt
-   42  Movies in the library
-""")
-        covered, total = parse_auditor_coverage(test_runtime_log, report1)
-        check(covered == 42 and total == 42, f"Percentage line parsing: got {covered}/{total}")
-
-        # Test 3: Parse "Canonical MKV" scorecard format
-        report2 = tmp_path / "report2.txt"
-        report2.write_text("""
-   42  Canonical MKV
-   42  Folders checked
-""")
-        covered, total = parse_auditor_coverage(test_runtime_log, report2)
-        check(covered == 42 and total == 42, f"Canonical MKV parsing: got {covered}/{total}")
-
-        # Test 4: Parse fetcher-style coverage line
-        report3 = tmp_path / "report3.txt"
-        report3.write_text("Coverage this run: 5 of 9 movie(s) (55.6%) end with a validated external English SRT.")
-        covered, total = parse_auditor_coverage(test_runtime_log, report3)
-        check(covered == 5 and total == 9, f"Coverage-line parsing: got {covered}/{total}")
-
-        # Test 5: Non-existent report
-        covered, total = parse_auditor_coverage(test_runtime_log, tmp_path / "nonexistent.txt")
-        check(covered is None and total is None, "Non-existent report should return None")
-
-        # Test 6: Unparseable report
-        report4 = tmp_path / "report4.txt"
-        report4.write_text("nothing in here looks like a report\n")
-        covered, total = parse_auditor_coverage(test_runtime_log, report4)
-        check(covered is None and total is None, "Unparseable report should return None")
-
-        # Test 7: Library complete check
-        check(is_library_complete(42, 42), "42/42 should be complete")
-        check(not is_library_complete(41, 42), "41/42 should not be complete")
-        check(not is_library_complete(None, 42), "None coverage should not be complete")
-        check(not is_library_complete(0, 0), "0/0 should not be complete (empty library)")
-
-        # Test 8: Log dir inside source detection
-        source = tmp_path / "library"
-        source.mkdir()
-        check(log_dir_inside_source(source / "logs", source), "log dir inside library detected")
-        check(log_dir_inside_source(source, source), "log dir equal to library detected")
-        check(not log_dir_inside_source(tmp_path / "elsewhere", source), "sibling log dir accepted")
-
-        # Test 9: Missing tool script detection
-        check(
-            "subtitle_fetcher.py" in missing_tool_scripts(tmp_path),
-            "missing tool script detected",
-        )
-
-        # Test 10: Bounded transcript tailing
-        transcript = tmp_path / "transcript.log"
-        for i in range(5):
-            tail_to_file(transcript, "\n".join(f"line {i}-{j}" for j in range(10)), max_lines=15)
-        lines = transcript.read_text(encoding="utf-8").splitlines()
-        check(len(lines) == 15, f"transcript bounded to {max(0, 15)} lines, got {len(lines)}")
-        check(lines[-1] == "line 4-9", "transcript keeps the newest lines")
-
-        # Test 11: UTC midnight wait (just check it doesn't crash)
-        # We don't actually wait in tests
-        check(callable(wait_for_utc_midnight), "UTC wait function exists and is callable")
-
-        # Test 12: Library root resolution — flag > MOVIE_STD_TARGET > default,
-        # the same ladder every sibling tool walks.
-        saved_env = {var: os.environ.pop(var, None)
-                     for var in ("ORGANIZE_LIBRARY", "MOVIE_STD_TARGET")}
-        try:
-            check(resolve_library(None) == default_library_root(),
-                  "library falls back to the platform default")
-            check(describe_library_origin(None) == f"the default library root ({default_library_root()})",
-                  "default provenance is reported")
-
-            os.environ["MOVIE_STD_TARGET"] = str(tmp_path / "env_library")
-            check(resolve_library(None) == tmp_path / "env_library",
-                  "MOVIE_STD_TARGET overrides the default")
-            check(describe_library_origin(None) == "MOVIE_STD_TARGET",
-                  "MOVIE_STD_TARGET provenance is reported")
-
-            os.environ["ORGANIZE_LIBRARY"] = str(tmp_path / "current_library")
-            check(resolve_library(None) == tmp_path / "current_library",
-                  "ORGANIZE_LIBRARY takes precedence over the legacy variable")
-            check(describe_library_origin(None) == "ORGANIZE_LIBRARY",
-                  "ORGANIZE_LIBRARY provenance is reported")
-
-            explicit = tmp_path / "explicit_library"
-            check(resolve_library(explicit) == explicit,
-                  "--source beats the environment")
-            check(describe_library_origin(explicit) == "--source",
-                  "--source provenance is reported")
-        finally:
-            for var, value in saved_env.items():
-                if value is not None:
-                    os.environ[var] = value
-                else:
-                    os.environ.pop(var, None)
-
-    if errors:
-        print("SELF-TEST FAILED:")
-        for error in errors:
-            print(f"  - {error}")
-        return 1
-
-    print("SELF-TEST PASSED (coverage parsing, completeness check, validation, library resolution)")
-    return 0
-
+    return run_field_smoke_test("jellyfin_one_shot.py", [
+        ("a 100% library is recognised as done", a_complete_library_is_recognised),
+        ("the step order matches the pipeline", the_step_order_matches_the_pipeline),
+        ("every tool script is present", the_tool_scripts_are_present),
+    ])
 
 if __name__ == "__main__":
     raise SystemExit(main())

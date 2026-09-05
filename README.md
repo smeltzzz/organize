@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-549%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-556%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -88,17 +88,25 @@ One file, one purpose. Nothing else.
 | `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. Sidecars extracted from the movie itself are skipped (they are already frame-accurate). |
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
-| `tests/` | Fully offline unit tests (549) + per-tool built-in self-tests. |
+| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution. |
+| `tests/` | Fully offline unit tests (556), including `tests/selftests/` — each tool's own suite, moved out of the shipped file. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. |
 
 **How the files relate** (this is the whole architecture):
 
-- Each tool is **self-contained**. The small amount of shared plumbing (report
-  rendering, file locking, subtitle validation) is copied into every tool that
-  needs it, in a clearly marked `Shared helpers (vendored inline)` section at
-  the top of the file. That is deliberate: it is what lets you copy *one* file
-  into your own setup and run it.
+- **One shared core, imported — never copied.** Everything more than one tool
+  needs (report rendering, atomic writes, locking, the subtitle contract,
+  library-root resolution) lives exactly once in `organizekit/core/`. The tools
+  import it. Until recently each tool carried its own copy of all of it: 4,325
+  lines of literal duplication that had already drifted — `atomic_write_text`
+  existed in a durable `fsync`ing version *and* a weaker one, and the tool that
+  rewrites your movie files had the weaker one. A test
+  (`tests/test_shared_core.py`) now fails the build if a tool redefines
+  anything the core already provides.
+- **The tools are still plain scripts.** `python3 bitdepth.py` out of a clone
+  needs no install, no PYTHONPATH and no virtualenv — the package sits beside
+  them at the repository root.
 - `organize.py` never reimplements anything — it launches the tool scripts as
   subprocesses.
 - `pipeline.py` does the same, but hard-codes the safe execution order.
@@ -195,9 +203,9 @@ Prerequisites per tool:
 | `sync_subtitles.py` | `ffsubsync` (`pip install ffsubsync`) + `ffmpeg` (FFmpeg) | — |
 | `jellyfin_one_shot.py` | whatever the tools it runs need (missing binaries are skipped, not fatal) | optional |
 
-If you ever modify a vendored helper in one tool, keep the copies in the
-other tools byte-identical — the test suite compares them against each other
-and fails if they drift.
+Shared behaviour belongs in `organizekit/core/` and is imported, not copied.
+The test suite fails the build if a tool defines a helper the core already
+provides.
 
 ---
 
@@ -597,7 +605,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 549 unit tests
+python3 -m unittest discover -s tests -p "test_*.py"   # 556 unit tests
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -610,8 +618,16 @@ pip install .
 organize doctor
 ```
 
-Every tool also carries its own `--self-test`, so a single copied file can
-verify itself anywhere: `python3 library_auditor.py --self-test`.
+Every tool also carries a `--self-test` **field smoke test** — it answers "does
+this copy work on this machine?" in under a second, without the repository, a
+media library, or a network: `python3 library_auditor.py --self-test`. It
+checks the shared report renderer, the atomic writer and the library-root
+resolution, plus a few of that tool's own decisions (the auditor audits a
+temporary library; `bitdepth` confirms 8-bit SDR is queued and Dolby Vision is
+protected; the standardizer verifies this filesystem actually supports
+hardlinks). The exhaustive suites those flags used to run now live in
+`tests/selftests/`, where they are part of the offline unit run and count
+towards coverage.
 
 Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: see
 [SECURITY.md](SECURITY.md).

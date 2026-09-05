@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "organize"
-# Single-sourced from organize.py's VERSION constant so the wheel, the console
-# script's --version and the dashboard banner can never disagree again.
+# Single-sourced from organizekit.VERSION so the wheel, the console script's
+# --version and the dashboard banner can never disagree again.
 dynamic = ["version"]
 description = "The Definitive Media Management Toolkit for Jellyfin & Plex"
 readme = "README.md"
@@ -38,13 +38,20 @@ Changelog = "https://github.com/smeltzzz/organize/blob/main/CHANGELOG.md"
 [project.scripts]
 organize = "organize:main"
 
-# The tools are standalone single-file scripts at the repository root, not a
-# package. They must be declared explicitly: setuptools' auto-discovery finds
-# no package here and would otherwise build a wheel containing nothing at all,
-# leaving the `organize` console script pointing at a module that is not
-# installed. `bitdepth` was named `10bit.py` until it was renamed for exactly
-# this reason - a module name cannot begin with a digit.
+# Layout: one shared package plus the tool entry points.
+#
+# `organizekit/` holds every implementation that more than one tool needs —
+# report rendering, atomic writes, locking, the subtitle contract, library-root
+# resolution. It is deliberately NOT named `organize`, because `organize.py`
+# (the CLI front door) sits beside it at the repository root and a package with
+# the same name would shadow it depending on sys.path order.
+#
+# The tools themselves are still importable top-level modules, so
+# `python3 bitdepth.py` out of a clone works with no install and no PYTHONPATH.
+# `bitdepth` was named `10bit.py` until it was renamed because a module name
+# cannot begin with a digit.
 [tool.setuptools]
+packages = ["organizekit", "organizekit.core"]
 py-modules = [
     "organize",
     "pipeline",
@@ -58,7 +65,7 @@ py-modules = [
 ]
 
 [tool.setuptools.dynamic]
-version = { attr = "organize.VERSION" }
+version = { attr = "organizekit.VERSION" }
 
 [project.optional-dependencies]
 # Development only (running the test suite). The runtime tools have no
@@ -103,6 +110,13 @@ ignore = [
 "pipeline.py" = ["BLE001"]
 "subtitle_fetcher.py" = ["BLE001"]
 "sync_subtitles.py" = ["BLE001"]
+
+# The moved self-tests deliberately resolve their names in the *tool's* module
+# namespace at call time (tests/selftests/__init__.py rebinds each function's
+# __globals__), which is exactly the semantics they had when they lived inside
+# the tool. Statically they therefore reference names this file does not
+# import, and blind excepts are part of the assertions they make.
+"tests/selftests/*.py" = ["F821", "BLE001", "E402"]
 
 [tool.coverage.run]
 # Measure the tools, not the tests: including tests/ inflates the number with

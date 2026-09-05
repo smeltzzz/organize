@@ -21,6 +21,7 @@ from unittest import mock
 
 import jellyfin_one_shot as js
 import library_auditor as la
+from organizekit import core
 
 
 # ---------------------------------------------------------------------------
@@ -717,22 +718,31 @@ class LibraryResolutionTests(unittest.TestCase):
                 os.environ.pop(var, None)
 
     def test_no_flag_no_env_uses_the_platform_default(self) -> None:
-        self.assertEqual(js.resolve_library(None), js.default_library_root())
+        self.assertEqual(js.resolve_library(None), core.default_library_root())
 
     def test_every_tool_agrees_on_the_default(self) -> None:
-        """The whole point of the shared resolver: no tool may disagree."""
+        """The whole point of the shared resolver: no tool may disagree.
+
+        This used to compare each tool's own copy of ``resolve_library`` for
+        equal *answers*, because there were eight copies. There is now exactly
+        one implementation in ``organizekit.core``, so the test asserts the
+        stronger property directly: every tool holds a reference to that one
+        function rather than a re-implementation that happens to agree today.
+        """
         import bitdepth
+        import jellyfin_one_shot
         import library_auditor
         import mkv_track_cleaner
         import movie_standardizer
         import pipeline
         import sync_subtitles
 
-        expected = js.default_library_root()
-        for module in (bitdepth, library_auditor, mkv_track_cleaner,
-                       movie_standardizer, pipeline, sync_subtitles):
+        expected = core.default_library_root()
+        for module in (bitdepth, jellyfin_one_shot, library_auditor,
+                       mkv_track_cleaner, movie_standardizer, pipeline,
+                       sync_subtitles):
             with self.subTest(tool=module.__name__):
-                self.assertEqual(expected, module.default_library_root())
+                self.assertIs(module.resolve_library, core.resolve_library)
                 self.assertEqual(expected, module.resolve_library(None))
 
     def test_new_env_var_is_honored_without_a_flag(self) -> None:
@@ -755,7 +765,7 @@ class LibraryResolutionTests(unittest.TestCase):
     def test_origin_is_reported_for_every_source(self) -> None:
         self.assertEqual(
             js.describe_library_origin(None),
-            f"the default library root ({js.default_library_root()})",
+            f"the default library root ({core.default_library_root()})",
         )
         os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"
         self.assertEqual(js.describe_library_origin(None), "MOVIE_STD_TARGET")
@@ -776,14 +786,14 @@ class LibraryResolutionTests(unittest.TestCase):
                 encoding="utf-8",
             )
             os.environ.pop("OPENSUBTITLES_API_KEY", None)
-            loaded = js.load_dotenv(env_file)
+            loaded = core.load_dotenv(env_file)
             self.assertEqual(loaded["ORGANIZE_LIBRARY"], "/from/dotenv")
             self.assertEqual(loaded["OPENSUBTITLES_API_KEY"], "quoted-key")
             self.assertEqual(os.environ["ORGANIZE_LIBRARY"], "/from/dotenv")
 
             # An exported value must win over the file.
             os.environ["ORGANIZE_LIBRARY"] = "/from/environment"
-            js.load_dotenv(env_file)
+            core.load_dotenv(env_file)
             self.assertEqual(os.environ["ORGANIZE_LIBRARY"], "/from/environment")
             os.environ.pop("OPENSUBTITLES_API_KEY", None)
 

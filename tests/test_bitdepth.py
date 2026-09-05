@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Any
 
 import bitdepth as tb
+from organizekit import core
 
 MediaProbeCache = tb.MediaProbeCache
 atomic_write_text = tb.atomic_write_text
-path_norm = tb.path_norm
+path_norm = core.path_norm
 format_bytes = tb.format_bytes
 format_duration = tb.format_duration
 

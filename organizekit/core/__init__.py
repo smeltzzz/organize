@@ -1,0 +1,107 @@
+"""Shared, single-source implementations used by every tool in the toolkit.
+
+Import from the submodules (``organize.core.report``) or from this package
+directly — the names re-exported here are the ones the tools actually use.
+
+Membership rule: a helper belongs here when more than one tool needs it *and*
+its behaviour must not differ between them. Anything a single tool owns stays
+in that tool.
+"""
+
+from __future__ import annotations
+
+from .config import (
+    ENV_FILE_NAME,
+    LEGACY_LIBRARY_ENV_VAR,
+    LIBRARY_ENV_VAR,
+    default_library_root,
+    default_reports_root,
+    default_tool_dir,
+    describe_library_origin,
+    load_dotenv,
+    resolve_library,
+)
+from .console import enable_utf8_stdio, print_text
+from .fsio import atomic_write_text, path_is_within, path_norm, sha256_file
+from .locking import (
+    STANDARDIZER_LOCK_NAME,
+    CoordinationLock,
+    ExclusiveRunLock,
+    LockTimeoutError,
+    LockUnavailable,
+    try_file_lock,
+)
+from .probecache import MediaProbeCache
+from .report import Report
+from .smoke import run_field_smoke_test
+from .subtitles import (
+    COVERING_ENGLISH_SRT_SUFFIXES,
+    EXTERNAL_SRT_CUE_RE,
+    EXTERNAL_SRT_ENCODINGS,
+    EXTERNAL_SRT_LANG,
+    EXTERNAL_SRT_MAX_BYTES,
+    EXTERNAL_SRT_SUFFIX,
+    LEGACY_EXTERNAL_SRT_SUFFIX,
+    decode_srt_bytes,
+    exact_external_english_srt_path,
+    legacy_external_english_srt_path,
+    normalize_srt_newlines,
+    promote_legacy_external_english_srt,
+    srt_looks_valid,
+    validate_srt_sidecar,
+)
+from .text import (
+    REPORT_INDENT,
+    REPORT_MIN_WIDTH,
+    REPORT_WIDTH,
+    clip_text,
+    wrap_path_text,
+    wrap_text,
+)
+
+__all__ = [
+    "COVERING_ENGLISH_SRT_SUFFIXES",
+    "ENV_FILE_NAME",
+    "EXTERNAL_SRT_CUE_RE",
+    "EXTERNAL_SRT_ENCODINGS",
+    "EXTERNAL_SRT_LANG",
+    "EXTERNAL_SRT_MAX_BYTES",
+    "EXTERNAL_SRT_SUFFIX",
+    "LEGACY_EXTERNAL_SRT_SUFFIX",
+    "LEGACY_LIBRARY_ENV_VAR",
+    "LIBRARY_ENV_VAR",
+    "REPORT_INDENT",
+    "REPORT_MIN_WIDTH",
+    "REPORT_WIDTH",
+    "STANDARDIZER_LOCK_NAME",
+    "CoordinationLock",
+    "ExclusiveRunLock",
+    "LockTimeoutError",
+    "LockUnavailable",
+    "MediaProbeCache",
+    "Report",
+    "atomic_write_text",
+    "clip_text",
+    "decode_srt_bytes",
+    "default_library_root",
+    "default_reports_root",
+    "default_tool_dir",
+    "describe_library_origin",
+    "enable_utf8_stdio",
+    "exact_external_english_srt_path",
+    "legacy_external_english_srt_path",
+    "load_dotenv",
+    "normalize_srt_newlines",
+    "path_is_within",
+    "path_norm",
+    "print_text",
+    "promote_legacy_external_english_srt",
+    "resolve_library",
+    "run_field_smoke_test",
+    "sha256_file",
+    "srt_looks_valid",
+    "try_file_lock",
+    "validate_srt_sidecar",
+    "wrap_path_text",
+    "wrap_text",
+]

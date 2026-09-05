@@ -1,0 +1,82 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 5b752f0..9454844 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -37,13 +37,16 @@ jobs:
+         with:
+           python-version: ${{ matrix.python-version }}
+ 
+-      - name: Byte-compile every script (syntax gate)
++      - name: Byte-compile the package and every script (syntax gate)
+         run: >-
+-          python -m compileall -q
++          python -m compileall -q organizekit
+           organize.py pipeline.py jellyfin_one_shot.py bitdepth.py
+           library_auditor.py mkv_track_cleaner.py movie_standardizer.py
+           subtitle_fetcher.py sync_subtitles.py
+ 
++      - name: A clone must run with no install and no PYTHONPATH
++        run: python -c "import bitdepth, organizekit.core; assert bitdepth.Report is organizekit.core.Report"
++
+       - name: Built-in self-tests (one per tool)
+         run: python organize.py test
+ 
+@@ -67,6 +70,9 @@ jobs:
+   coverage:
+     # A floor, not a target. Raise `--fail-under` whenever the real number
+     # comfortably clears it so coverage can only ratchet upwards.
++    # 55 -> 65 when the tools' self-tests moved into tests/selftests/: they had
++    # always been production lines that the unit suite never executed, which
++    # depressed the number by ~9 points while testing nothing extra.
+     name: Coverage gate
+     runs-on: ubuntu-latest
+     steps:
+@@ -80,7 +86,7 @@ jobs:
+       - name: Report and enforce the floor
+         run: |
+           python -m coverage report
+-          python -m coverage report --fail-under=55
++          python -m coverage report --fail-under=65
+ 
+   packaging:
+     # Regression guard for the broken console entry point: pyproject declared
+@@ -111,12 +117,16 @@ jobs:
+           organize doctor
+           organize audit --help
+         shell: bash
+-      - name: The wheel's version must match organize.VERSION
++      - name: The shared core must be importable from the wheel
++        working-directory: ${{ runner.temp }}
++        run: python -c "import organizekit.core as c; assert c.Report and c.atomic_write_text"
++        shell: bash
++      - name: The wheel's version must match organizekit.VERSION
+         working-directory: ${{ runner.temp }}
+         run: |
+           python -c "
+-          import importlib.metadata as m, organize, sys
+-          wheel, src = m.version('organize'), organize.VERSION
++          import importlib.metadata as m, organizekit, sys
++          wheel, src = m.version('organize'), organizekit.VERSION
+           print(f'wheel={wheel} source={src}')
+           sys.exit(0 if wheel == src else 1)
+           "
+
+# ---------------------------------------------------------------------------
+# Why this is a patch file and not a committed workflow change
+#
+# The Arena GitHub App is not permitted to create or update files under
+# .github/workflows/, so these CI changes cannot be pushed directly. Apply them
+# with:
+#
+#     git apply docs/ci-workflow.patch && git add .github/workflows/ci.yml
+#
+# What they do:
+#   * byte-compile the organizekit package alongside the tool scripts;
+#   * assert a clone runs with no install and no PYTHONPATH, and that a tool
+#     binds the shared core object itself (bitdepth.Report is core.Report);
+#   * assert the shared core is importable from the built wheel;
+#   * read the wheel-vs-source version check from organizekit.VERSION;
+#   * raise the coverage floor 55 -> 65, which the suite now clears at 67%
+#     because the tools' self-tests moved into tests/selftests/ and are
+#     executed by the unit run instead of sitting uncovered in shipped files.
+# ---------------------------------------------------------------------------

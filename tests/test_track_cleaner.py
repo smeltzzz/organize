@@ -15,6 +15,7 @@ from pathlib import Path
 from reporttext import scorecard
 
 import mkv_track_cleaner as tc
+from organizekit import core
 
 MediaProbeCache = tc.MediaProbeCache
 
@@ -643,7 +644,7 @@ class ProbeCacheAfterRemuxTests(unittest.TestCase):
 
     def test_cache_holds_the_post_remux_size(self) -> None:
         self._run()
-        key = tc.path_norm(self.movie)
+        key = core.path_norm(self.movie)
         entry = self.cache._entries[key]
         self.assertEqual(entry["size"], 3000)
         self.assertEqual(entry["mtime_ns"], self.movie.stat().st_mtime_ns)

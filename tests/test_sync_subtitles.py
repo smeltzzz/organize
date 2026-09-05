@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 import sync_subtitles as ss
+from organizekit import core
 
 # A valid SRT the shared contract accepts.
 GOOD_SRT = "1\n00:00:01,000 --> 00:00:02,000\nHello.\n\n2\n00:00:04,000 --> 00:00:05,000\nWorld.\n"
@@ -783,10 +784,10 @@ class VendoredContractTests(unittest.TestCase):
     """The subtitle contract vendored here must match the other tools."""
 
     def test_constants(self) -> None:
-        self.assertEqual(ss.EXTERNAL_SRT_SUFFIX, ".eng.srt")
-        self.assertEqual(ss.LEGACY_EXTERNAL_SRT_SUFFIX, ".en.srt")
-        self.assertEqual(ss.EXTERNAL_SRT_MAX_BYTES, 4 * 1024 * 1024)
-        self.assertEqual(ss.EXTERNAL_SRT_ENCODINGS, ("utf-8-sig", "utf-8", "cp1252"))
+        self.assertEqual(core.EXTERNAL_SRT_SUFFIX, ".eng.srt")
+        self.assertEqual(core.LEGACY_EXTERNAL_SRT_SUFFIX, ".en.srt")
+        self.assertEqual(core.EXTERNAL_SRT_MAX_BYTES, 4 * 1024 * 1024)
+        self.assertEqual(core.EXTERNAL_SRT_ENCODINGS, ("utf-8-sig", "utf-8", "cp1252"))
 
     def test_lock_shares_the_standardizer_key(self) -> None:
         import hashlib

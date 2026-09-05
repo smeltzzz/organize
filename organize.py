@@ -44,7 +44,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-VERSION = "3.5.0"
+from organizekit import VERSION  # noqa: E402  (needs the sys.path bootstrap above)
 
 # ANSI styling helpers (with safe fallbacks)
 _SUPPORTS_COLOR = (

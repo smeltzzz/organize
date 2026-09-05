@@ -11,26 +11,29 @@ To maintain its bulletproof stability, all contributions must respect the projec
 1. **Zero Runtime Third-Party Dependencies (Stdlib Only)**
    Every runtime script must use **only the Python 3.11+ standard library** — no PyPI packages at runtime. Development-only tooling (e.g. `pytest`) lives in the `dev` extra.
 
-2. **Each Tool Is a Self-Contained Script**
-   Any single tool (`subtitle_fetcher.py`, `mkv_track_cleaner.py`, `bitdepth.py`, `movie_standardizer.py`, `library_auditor.py`) must stay runnable on its own: the shared helpers it relies on (report rendering, file locking, subtitle validation, library-root resolution) are **vendored inline** in a clearly marked section at the top of the file, not imported from a shared module. That is what lets a user copy one file into another project and run it.
+2. **Tests Live in `tests/`, Not in the Shipped Tool**
+   A tool's `--self-test` is a *field smoke test*: a handful of checks that answer "does this copy work on this machine?" in under a second (see `organizekit/core/smoke.py`). Exhaustive assertions belong in `tests/` — either as ordinary unit tests, or in `tests/selftests/` for the suites that were lifted out of the tools verbatim. Self-test code inside a production file is production code that the unit suite never runs: it inflated the shipped files by 2,229 lines and depressed measured coverage by about nine points while testing nothing extra.
 
-   If you change a vendored helper, **change every copy**. This is no longer an honour-system rule: `tests/test_vendored_helpers.py` compares the copies by AST and fails the build on any divergence. Docstrings are excluded from the comparison, so a helper may still explain itself in terms of the tool it lives in, but behaviour must be identical.
+3. **Shared Behaviour Lives in `organizekit/core/`, Exactly Once**
+   Report rendering, atomic writes, locking, the subtitle contract and library-root resolution are defined once and imported by every tool. Do not copy them back into a tool: `tests/test_shared_core.py` fails the build if a tool defines a top-level name that the core already provides.
 
-   This rule used to be enforced by hand, and hand-enforcement failed: `atomic_write_text` had drifted into two versions, and the safer one (which `fsync`s before publishing, so a report survives power loss and not merely a process crash) existed only in `subtitle_fetcher.py`. The tool that rewrites your movie files had the weakest writer in the repo. Hence the test.
+   The tools remain ordinary scripts — `python3 bitdepth.py` works straight out of a clone with no install and no `PYTHONPATH`, because `organizekit/` sits beside them at the repository root.
 
-3. **Hardlink-Only Ingest (Zero Extra Disk Usage)**
+   This replaces an older rule that said the opposite: every tool used to carry its own copy of all of it, and contributors were asked to keep the copies byte-identical by hand. That failed exactly as you would expect. `atomic_write_text` drifted into two versions and the safer one (which `fsync`s before publishing, so a report survives a power cut and not merely a process crash) existed only in `subtitle_fetcher.py` — the tool that rewrites your movie files had the weakest writer in the repo. 4,325 lines of duplication bought that bug. A helper that must behave identically everywhere should exist in one place.
+
+4. **Hardlink-Only Ingest (Zero Extra Disk Usage)**
    Ingestion into the organized library uses `os.link()`. It never silently degrades to a copy or move. Completed torrents remain fully seedable on their original filesystem without taking twice the space.
 
-4. **Strict Order: Subtitles BEFORE Remux**
+5. **Strict Order: Subtitles BEFORE Remux**
    `subtitle_fetcher.py` queries OpenSubtitles using release OSHash (`moviehash_match=only`). Remuxing rewrites the MKV headers, permanently invalidating the OSHash. Subtitles must always be fetched before track cleaning.
 
-5. **Fail-Closed Concurrency Locks**
-   All tools coordinate across processes and schedulers via advisory locks (`CoordinationLock`, vendored into each tool). A tool refuses to touch a file rather than risk racing another process.
+6. **Fail-Closed Concurrency Locks**
+   All tools coordinate across processes and schedulers via advisory locks (`organizekit.core.CoordinationLock`). A tool refuses to touch a file rather than risk racing another process.
 
-6. **Atomic Staging and Verification**
+7. **Atomic Staging and Verification**
    Reports, journals, manifests, and remuxed MKVs are written to sibling temporary files and atomically swapped (`os.replace` / `os.link`). Mid-operation crashes or power outages never corrupt existing media.
 
-7. **100% Offline Testability**
+8. **100% Offline Testability**
    The test suite must run completely offline without internet connectivity, without OpenSubtitles or SubDL API keys, and without requiring external binaries (`mkvmerge` or `ffprobe`).
 
 ---
@@ -43,7 +46,7 @@ Clone the repository and run the test suite:
 git clone https://github.com/smeltzzz/organize.git
 cd organize
 
-# Run every tool's built-in self-test
+# Run every tool's field smoke test (fast; verifies this machine)
 python3 organize.py test
 
 # Run the unit test suite

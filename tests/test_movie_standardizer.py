@@ -11,12 +11,13 @@ from typing import Any, cast
 from reporttext import scorecard, section
 
 import movie_standardizer as ms
+from organizekit import core
 
 path_is_within = ms.path_is_within
 path_norm = ms.path_norm
 paths_equal = ms.paths_equal
 CoordinationLock = ms.CoordinationLock
-STANDARDIZER_LOCK_NAME = ms.STANDARDIZER_LOCK_NAME
+STANDARDIZER_LOCK_NAME = core.STANDARDIZER_LOCK_NAME
 
 
 class ParseMovieNameTests(unittest.TestCase):
