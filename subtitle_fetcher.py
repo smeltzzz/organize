@@ -4616,6 +4616,187 @@ def build_scrape_chain(cfg: QueueConfig, ledger: dict[str, int],
         reserve_cb=reserve_search,
     )
 
+# =============================================================================
+# QUEUE PLANNING  (pure decisions, no I/O)
+# =============================================================================
+#
+# Two questions decide whether a movie costs anything before a single request
+# leaves this process: what its own ledger record already proved, and which
+# sources still have local quota. Both used to be inline in ``queue_run``'s
+# per-movie loop, where they could only be exercised by running the whole
+# fetcher against live providers. They are ordinary functions of their inputs,
+# so they are here, and tested as a table.
+
+
+def has_new_provider(
+    record: dict[str, Any],
+    *,
+    active_providers: Sequence[str],
+    scrape_keys: Sequence[str],
+) -> bool:
+    """True if this run can offer a movie a source its record never saw."""
+    prior = record.get("providers_checked")
+    if not isinstance(prior, list):
+        # A pre-SubDL ledger cannot say which sources it queried. Preserve
+        # its intentional OpenSubtitles review hold unless the newly added
+        # provider is actually enabled, then revisit once for that source.
+        # The new scraping tier counts as a new source for such records.
+        if scrape_keys and not record.get("scrape_checked"):
+            return True
+        return PROVIDER_SUBDL in active_providers
+    previous = {str(provider) for provider in prior}
+    if any(provider not in previous for provider in active_providers):
+        return True
+    # Legacy records predate the scraping tier: offer it to them once so
+    # every previously-held movie is re-checked against all nine sources.
+    return bool(scrape_keys and not record.get("scrape_checked"))
+
+
+@dataclass(frozen=True)
+class HistoryPlan:
+    """What a movie's own ledger record says before any provider is asked.
+
+    ``action`` is ``"fetch"`` when the movie is still worth spending requests
+    on; otherwise it is the terminal verdict for this run, and ``detail`` and
+    ``reason`` are the ones the report will show. The two scraping flags are
+    facts the tier selection below needs, not decisions.
+    """
+
+    action: str = "fetch"
+    detail: str = ""
+    reason: str = ""
+    scrape_tried_today: bool = False
+    scrape_retry_today: bool = False
+
+    @property
+    def fetch(self) -> bool:
+        return self.action == "fetch"
+
+
+def plan_from_history(
+    record: dict[str, Any],
+    *,
+    today: str,
+    retry_no_match: bool,
+    identity_fallback: bool,
+    scrape_keys: Sequence[str],
+    active_providers: Sequence[str],
+) -> HistoryPlan:
+    """Decide from the durable record alone whether to spend requests today.
+
+    The economy this encodes: a movie the scraping tier exhausted *today* is
+    not offered to it twice, one that exhausted it on an earlier day goes
+    straight back to scraping (the API tiers are already known to miss for
+    it), a deliberate manual-review hold is honoured until something changes,
+    and a download reserved today is left for the next UTC day rather than
+    reserved twice.
+    """
+    status = str(record.get("status") or "pending")
+    scrape_failed = bool(record.get("scrape_failed"))
+    scrape_failed_day = str(record.get("scrape_failed_utc_day") or "")
+    tried_today = scrape_failed and scrape_failed_day == today
+    retry_today = (
+        scrape_failed
+        and identity_fallback
+        and bool(scrape_keys)
+        and scrape_failed_day != today
+    )
+    flags = {"scrape_tried_today": tried_today, "scrape_retry_today": retry_today}
+
+    if tried_today and status in ("manual_review", "no_match"):
+        return HistoryPlan(
+            "skip",
+            "scraping sources were already exhausted for this movie today; "
+            "retrying on the next UTC day",
+            REASON_QUOTA, **flags,
+        )
+    if status == "no_match" and not (retry_no_match or identity_fallback):
+        return HistoryPlan(
+            "skip", "previous strict moviehash search had no match",
+            REASON_NO_MATCH, **flags,
+        )
+    if (
+        status == "manual_review"
+        and not retry_no_match
+        and not retry_today
+        and not has_new_provider(record, active_providers=active_providers,
+                                 scrape_keys=scrape_keys)
+    ):
+        return HistoryPlan(
+            "review", "previous identity fallback was intentionally held for review",
+            REASON_REVIEW, **flags,
+        )
+    if status == "reserved" and str(record.get("updated_utc") or "").startswith(today):
+        return HistoryPlan(
+            "skip",
+            "a provider download was already reserved today; waiting for next UTC day",
+            REASON_QUOTA, **flags,
+        )
+    return HistoryPlan(**flags)
+
+
+@dataclass(frozen=True)
+class SourcePlan:
+    """Which sources may be asked about one movie, and which are merely funded.
+
+    ``*_available`` means "configured and still inside its local daily cap";
+    ``*_tier`` additionally means "worth asking for *this* movie". They differ
+    on a scraping retry, where the API tiers are known to miss and are not
+    re-queried, but are still counted as funded so the quota-exhausted break
+    below does not mistake a retry for an empty wallet.
+    """
+
+    open_available: bool = False
+    subdl_available: bool = False
+    scrape_available: bool = False
+    api_tiers_allowed: bool = True
+
+    @property
+    def open_tier(self) -> bool:
+        return self.open_available and self.api_tiers_allowed
+
+    @property
+    def subdl_tier(self) -> bool:
+        return self.subdl_available and self.api_tiers_allowed
+
+    @property
+    def exhausted(self) -> bool:
+        """No configured source with an enabled mode has local capacity left."""
+        return not (self.open_available or self.subdl_available or self.scrape_available)
+
+
+def plan_sources(
+    cfg: QueueConfig,
+    ledger: dict[str, int],
+    history: HistoryPlan,
+    *,
+    has_open: bool,
+    has_subdl: bool,
+    has_scrape_chain: bool,
+    scrape_keys: Sequence[str],
+) -> SourcePlan:
+    """Decide which tiers this movie may be offered, spending nothing."""
+    return SourcePlan(
+        open_available=has_open and provider_has_quota(cfg, ledger, PROVIDER_OPENSUBTITLES),
+        # SubDL has no byte-exact release hash, so --no-identity-fallback also
+        # intentionally disables its release-aware/title-year lookup.
+        subdl_available=(
+            has_subdl
+            and cfg.identity_fallback
+            and provider_has_quota(cfg, ledger, PROVIDER_SUBDL)
+            and subdl_search_has_quota(cfg, ledger)
+        ),
+        scrape_available=(
+            has_scrape_chain
+            and cfg.identity_fallback
+            and any(provider_has_quota(cfg, ledger, key) for key in scrape_keys)
+        ),
+        # On a scraping retry the API tiers are already known to miss for this
+        # movie, so they are not asked again; the scraping tier is.
+        api_tiers_allowed=not (history.scrape_retry_today and not history.scrape_tried_today),
+    )
+
+
 def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     """Process one daily batch with independent provider quotas.
 
@@ -4682,23 +4863,6 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             log_file=cfg.log_file,
         )
 
-    def has_new_provider(record: dict[str, Any]) -> bool:
-        prior = record.get("providers_checked")
-        if not isinstance(prior, list):
-            # A pre-SubDL ledger cannot say which sources it queried. Preserve
-            # its intentional OpenSubtitles review hold unless the newly added
-            # provider is actually enabled, then revisit once for that source.
-            # The new scraping tier counts as a new source for such records.
-            if scrape_keys and not record.get("scrape_checked"):
-                return True
-            return PROVIDER_SUBDL in active_providers
-        previous = {str(provider) for provider in prior}
-        if any(provider not in previous for provider in active_providers):
-            return True
-        # Legacy records predate the scraping tier: offer it to them once so
-        # every previously-held movie is re-checked against all nine sources.
-        return bool(scrape_keys and not record.get("scrape_checked"))
-
     for index, video in enumerate(videos, start=1):
         layout_issue = canonical_movie_layout_issue(video, cfg.library)
         if layout_issue:
@@ -4729,7 +4893,6 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             emit(index, "ERROR", video, str(exc))
             continue
         record = state_movie(state, key, video)
-        old_status = str(record.get("status") or "pending")
 
         # Embedded-subtitle extraction. A movie's own English track is exact
         # for this release, costs no provider request, and needs no timing
@@ -4771,69 +4934,31 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 if "not installed" in outcome.unavailable_reason or "OCR" in outcome.unavailable_reason:
                     log(outcome.unavailable_reason, level="WARNING", log_file=cfg.log_file)
 
-        # Scraping retry economy: a movie the scraping tier already exhausted
-        # today is not offered to it twice, and a movie that exhausted it on
-        # an earlier day goes straight back to the scraping tier (the API
-        # tiers already miss for it, so re-spending their quota is wasted).
-        scrape_failed_day = str(record.get("scrape_failed_utc_day") or "")
-        scrape_tried_today = bool(record.get("scrape_failed")) and scrape_failed_day == today
-        scrape_retry_today = (
-            bool(record.get("scrape_failed"))
-            and cfg.identity_fallback
-            and bool(scrape_keys)
-            and scrape_failed_day != today
+        # Scraping retry economy and the ledger holds: see plan_from_history.
+        history = plan_from_history(
+            record, today=today, retry_no_match=cfg.retry_no_match,
+            identity_fallback=cfg.identity_fallback, scrape_keys=scrape_keys,
+            active_providers=active_providers,
         )
-        if scrape_tried_today and old_status in ("manual_review", "no_match"):
-            result = JobResult(
-                video, "skip",
-                "scraping sources were already exhausted for this movie today; retrying on the next UTC day",
-                reason=REASON_QUOTA)
+        if not history.fetch:
+            result = JobResult(video, history.action, history.detail, reason=history.reason)
             results.append(result)
-            emit(index, "SKIP", video, result.detail)
-            continue
-        if old_status == "no_match" and not (cfg.retry_no_match or cfg.identity_fallback):
-            result = JobResult(video, "skip", "previous strict moviehash search had no match",
-                               reason=REASON_NO_MATCH)
-            results.append(result)
-            emit(index, "SKIP", video, result.detail)
-            continue
-        if (old_status == "manual_review" and not cfg.retry_no_match
-                and not scrape_retry_today and not has_new_provider(record)):
-            result = JobResult(video, "review", "previous identity fallback was intentionally held for review",
-                               reason=REASON_REVIEW)
-            results.append(result)
-            emit(index, "REVIEW", video, result.detail)
-            continue
-        if old_status == "reserved" and str(record.get("updated_utc") or "").startswith(today):
-            result = JobResult(video, "skip", "a provider download was already reserved today; waiting for next UTC day",
-                               reason=REASON_QUOTA)
-            results.append(result)
-            emit(index, "SKIP", video, result.detail)
+            emit(index, "REVIEW" if history.action == "review" else "SKIP", video, history.detail)
             continue
 
-        open_available = (
-            open_client is not None
-            and provider_has_quota(cfg, ledger, PROVIDER_OPENSUBTITLES)
+        sources = plan_sources(
+            cfg, ledger, history,
+            has_open=open_client is not None,
+            has_subdl=subdl_client is not None,
+            has_scrape_chain=scrape_chain is not None,
+            scrape_keys=scrape_keys,
         )
-        # SubDL has no byte-exact release hash, so --no-identity-fallback also
-        # intentionally disables its release-aware/title-year lookup.
-        subdl_available = (
-            subdl_client is not None
-            and cfg.identity_fallback
-            and provider_has_quota(cfg, ledger, PROVIDER_SUBDL)
-            and subdl_search_has_quota(cfg, ledger)
-        )
-        # On a scraping retry the API tiers are already known to miss for
-        # this movie, so they are not asked again; the scraping tier is.
-        api_tiers_allowed = not (scrape_retry_today and not scrape_tried_today)
-        open_tier_available = open_available and api_tiers_allowed
-        subdl_tier_available = subdl_available and api_tiers_allowed
-        scrape_available = (
-            scrape_chain is not None
-            and cfg.identity_fallback
-            and any(provider_has_quota(cfg, ledger, key) for key in scrape_keys)
-        )
-        if not open_available and not subdl_available and not scrape_available:
+        open_available = sources.open_available
+        subdl_available = sources.subdl_available
+        api_tiers_allowed = sources.api_tiers_allowed
+        open_tier_available = sources.open_tier
+        subdl_tier_available = sources.subdl_tier
+        if sources.exhausted:
             deferred_remaining = total - index + 1
             deferred_videos = list(videos[index - 1:])
             log(

@@ -442,12 +442,23 @@ Two decisions worth recording:
   would fail the tamper check for the wrong reason and hide what the recovery
   logic would really have done.
 
-Still open from this slice: the `queue_run` → `plan_fetch`/`execute_fetch`
-split (`subtitle_fetcher.py` is now the worst-covered large file at 73%, with
-`queue_run` accounting for 143 of its missed lines), the `run_doctor` check
-table, and the property-based tests — `hypothesis` cannot be assumed present
-in this offline environment, so those would need stdlib `random` with fixed
-seeds.
+**Then the planner split, in the form that was actually worth doing.** A full
+`plan_fetch`/`execute_fetch` decomposition of `queue_run` would move ~600
+lines of provider-tier orchestration that is inseparable from its I/O — high
+risk, on the tool that spends money. The two decisions that are genuinely pure
+came out instead, and they are the ones that matter: `plan_from_history`
+(what a movie's durable record says before any provider is asked) and
+`plan_sources` (which tiers may be offered it, given the day's reservations).
+Together they are the fetcher's spending policy, they were untestable except
+by running the whole fetcher, and they are now a 37-case table. A further 29
+tests cover the OpenSubtitles transport and download safety rules against a
+fake `urlopen`. 779 → 845 tests, coverage 75% → **76%**, `subtitle_fetcher.py`
+74% → 77%.
+
+Still open from this slice: the remaining tier orchestration inside
+`queue_run` (712 lines), the `run_doctor` check table, and the property-based
+tests — `hypothesis` cannot be assumed present in this offline environment, so
+those would need stdlib `random` with fixed seeds.
 
 ### W6 · Close the product gaps
 
@@ -514,7 +525,8 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**4a**~~ | ~~W4 shared worker pool; `sync_subtitles` + `library_auditor` parallel~~ **done** | +330 | Med | ✅ |
 | ~~**4b**~~ | ~~W4 per-source token buckets for the fetcher~~ **done** (concurrent fetching and HTTP keep-alive still open) | +230 | Med | ✅ |
 | ~~**5**~~ | ~~W2 SQLite state cache + write-through + `organize status`~~ **done** (probe caches and the fetcher's quota ledger not yet moved in; `core/scan.py` rejected — see the W2 note) | +841 | Med-High | ✅ |
-| ~~**6a**~~ | ~~W5 fault-injection, end-to-end and destructive-path suites, coverage 69% → 75%, gate → 72~~ **done** (the `queue_run` planner split and the property tests are still open — see the W5 update) | +1,240 | Low | ✅ |
+| ~~**6a**~~ | ~~W5 fault-injection, end-to-end and destructive-path suites, coverage 69% → 75%, gate → 72~~ **done** | +1,240 | Low | ✅ |
+| ~~**6b**~~ | ~~W5 the fetcher's spending planners extracted from `queue_run` and tabled~~ **done** (the remaining tier orchestration and the property tests are still open — see the W5 update) | +460 | Low | ✅ |
 | **7** | W6 direct-play verification, HandBrake queue, multi-language | +1,500 | Med | 4–6 |
 | **8** | W7 docs split, JSON output, PyPI + zipapp release | +300 | Low | 2 |
 
@@ -553,8 +565,8 @@ state in one sentence, it is the wrong change.*
 | :--- | ---: | ---: | ---: |
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
-| Coverage | 58% | **75%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 9.5 s (779 tests) | ≤15 s (with property + fault-injection tests) |
+| Coverage | 58% | **76%** (cleaner 75%) | ≥75%, cleaner ≥80% |
+| Test runtime | 6.7 s | 9.6 s (845 tests) | ≤15 s (with property + fault-injection tests) |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
