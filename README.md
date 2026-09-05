@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-697%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-779%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -92,7 +92,7 @@ One file, one purpose. Nothing else.
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
 | `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided, and `ratelimit.py`, the per-host token buckets that keep every provider inside its published rate. |
-| `tests/` | Fully offline unit tests (697), including `tests/selftests/` — each tool's own suite, moved out of the shipped file. |
+| `tests/` | Fully offline unit tests (779), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — and `fake_mkvmerge.py`, a stand-in multiplexer real enough to drive an end-to-end remux. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. |
 
@@ -671,7 +671,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 697 unit tests
+python3 -m unittest discover -s tests -p "test_*.py"   # 779 unit tests, ~10 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -694,6 +694,26 @@ protected; the standardizer verifies this filesystem actually supports
 hardlinks). The exhaustive suites those flags used to run now live in
 `tests/selftests/`, where they are part of the offline unit run and count
 towards coverage.
+
+### The crash tests
+
+The claim these tools live or die by is that a power cut cannot cost you a
+movie. `tests/test_crash_safety.py` executes it rather than asserting it in
+prose: it kills the remux at each step of its transaction — after the journal
+is written, after mkvmerge finishes, after verification, between the staging
+file and `os.replace` — and then checks the filesystem. The original must be
+byte-identical or already fully replaced, with no third state, and the *next*
+run must clean up whatever debris was left, without ever promoting a file that
+was not verified. The same treatment is applied to the subtitle sync, to the
+durable writers themselves, and to a hand-planted hostile recovery journal
+pointing at `../precious.mkv`.
+
+`tests/test_track_cleaner_e2e.py` runs the cleaner end to end against
+`tests/fake_mkvmerge.py` — a real executable that speaks enough of the
+mkvmerge command line to be driven by the unmodified tool, so the subprocess
+launch, progress parsing, verification, atomic swap, locking and report are
+all the real ones. `tests/test_standardizer_destructive.py` does the same for
+the only tool that deletes folders, in all three maintenance modes.
 
 Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: see
 [SECURITY.md](SECURITY.md).

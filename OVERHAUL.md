@@ -417,6 +417,38 @@ Then raise the floor with tests that match the risk:
 - **Risk:** low. Pure refactor plus new tests.
 - **Effort:** 3–5 days.
 
+#### W5 update — the tests landed; the planner split did not (yet)
+
+Shipped: the fault-injection suite (`tests/test_crash_safety.py`), an
+end-to-end remux suite driven by a real fake mkvmerge binary
+(`tests/fake_mkvmerge.py` + `tests/test_track_cleaner_e2e.py`), and a
+destructive-path suite for the only tool that deletes folders
+(`tests/test_standardizer_destructive.py`). 697 → 779 tests, coverage 69% →
+**75%**, `mkv_track_cleaner.py` 47% → **75%**, `movie_standardizer.py` 56% →
+67%. The CI floor moves 65 → 72 (a few points of slack because the end-to-end
+remux tests are skipped off POSIX, where the fake binary's shebang does not
+work).
+
+Two decisions worth recording:
+
+- **The crash is a `BaseException`.** Every tool wraps per-movie work in
+  `except Exception` so one bad file cannot kill a run — which means an
+  ordinary exception exercises the tidy-up path and never the state a power
+  cut actually leaves on disk. The suite raises something `except Exception`
+  cannot catch, and keeps separate tests for the two handled cases (`Ctrl-C`,
+  which does get to clean up, and an in-process error, which is reported).
+- **Staging files are aged by moving the clock, not the file.** Orphan
+  recovery fingerprints the temp by mtime, so back-dating it with `utime`
+  would fail the tamper check for the wrong reason and hide what the recovery
+  logic would really have done.
+
+Still open from this slice: the `queue_run` → `plan_fetch`/`execute_fetch`
+split (`subtitle_fetcher.py` is now the worst-covered large file at 73%, with
+`queue_run` accounting for 143 of its missed lines), the `run_doctor` check
+table, and the property-based tests — `hypothesis` cannot be assumed present
+in this offline environment, so those would need stdlib `random` with fixed
+seeds.
+
 ### W6 · Close the product gaps
 
 Code quality aside, there are real functional gaps against the README's own
@@ -482,7 +514,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**4a**~~ | ~~W4 shared worker pool; `sync_subtitles` + `library_auditor` parallel~~ **done** | +330 | Med | ✅ |
 | ~~**4b**~~ | ~~W4 per-source token buckets for the fetcher~~ **done** (concurrent fetching and HTTP keep-alive still open) | +230 | Med | ✅ |
 | ~~**5**~~ | ~~W2 SQLite state cache + write-through + `organize status`~~ **done** (probe caches and the fetcher's quota ledger not yet moved in; `core/scan.py` rejected — see the W2 note) | +841 | Med-High | ✅ |
-| **6** | W5 planners split, property + fault-injection tests, gate → 75% | +1,200 | Low | 3–5 |
+| ~~**6a**~~ | ~~W5 fault-injection, end-to-end and destructive-path suites, coverage 69% → 75%, gate → 72~~ **done** (the `queue_run` planner split and the property tests are still open — see the W5 update) | +1,240 | Low | ✅ |
 | **7** | W6 direct-play verification, HandBrake queue, multi-language | +1,500 | Med | 4–6 |
 | **8** | W7 docs split, JSON output, PyPI + zipapp release | +300 | Low | 2 |
 
@@ -517,16 +549,16 @@ state in one sentence, it is the wrong change.*
 
 ## 5. Success metrics
 
-| | Today | Target |
-| :--- | ---: | ---: |
-| Production lines | 26,458 | ~23,000 |
-| Duplicated lines | 4,325 | **0** (generated) |
-| Coverage | 58% | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | ≤15 s (with property + fault-injection tests) |
-| 500-movie cold pass | hours | **≤ 1/4 of today** |
-| 500-movie no-op pass | full 5-tool sweep | **< 5 s** (DB query) |
-| Sources of truth for step order | 4 | 1 |
-| Direct-play claim | documented | **verified per file** |
+| | Today | Now | Target |
+| :--- | ---: | ---: | ---: |
+| Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
+| Duplicated lines | 4,325 | ~0 | **0** (generated) |
+| Coverage | 58% | **75%** (cleaner 75%) | ≥75%, cleaner ≥80% |
+| Test runtime | 6.7 s | 9.5 s (779 tests) | ≤15 s (with property + fault-injection tests) |
+| 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
+| 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
+| Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
+| Direct-play claim | documented | documented | **verified per file** |
 
 ---
 

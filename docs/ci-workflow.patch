@@ -21,13 +21,16 @@ index 5b752f0..9454844 100644
        - name: Built-in self-tests (one per tool)
          run: python organize.py test
  
-@@ -67,6 +70,9 @@ jobs:
+@@ -67,6 +70,12 @@ jobs:
    coverage:
      # A floor, not a target. Raise `--fail-under` whenever the real number
      # comfortably clears it so coverage can only ratchet upwards.
 +    # 55 -> 65 when the tools' self-tests moved into tests/selftests/: they had
 +    # always been production lines that the unit suite never executed, which
 +    # depressed the number by ~9 points while testing nothing extra.
++    # 65 -> 72 with the crash-safety, end-to-end and destructive-path suites.
++    # The suite measures 75% on this runner; the floor keeps a few points of
++    # slack because the end-to-end remux tests are skipped off POSIX.
      name: Coverage gate
      runs-on: ubuntu-latest
      steps:
@@ -36,7 +39,7 @@ index 5b752f0..9454844 100644
          run: |
            python -m coverage report
 -          python -m coverage report --fail-under=55
-+          python -m coverage report --fail-under=65
++          python -m coverage report --fail-under=72
  
    packaging:
      # Regression guard for the broken console entry point: pyproject declared
