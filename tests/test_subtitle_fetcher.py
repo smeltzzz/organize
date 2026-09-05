@@ -1776,7 +1776,7 @@ class ScrapeFallbackWiringTests(unittest.TestCase):
                 dry_run=False, retry_review=False, identity_fallback=True,
                 extract_embedded=True, extract_min_cues=sf.DEFAULT_EXTRACT_MIN_CUES,
                 ocr_backend=sf.OCR_BACKEND_AUTO, ocr_bin="", ocr_args="",
-                ocr_timeout=sf.DEFAULT_OCR_TIMEOUT_SEC, ocr_limit=0,
+                ocr_timeout=sf.DEFAULT_OCR_TIMEOUT_SEC, ocr_limit=0, workers=0,
             )
             with mock.patch.dict("os.environ", {"OPENSUBTITLES_API_KEY": "", "SUBDL_API_KEY": ""}):
                 cfg = sf.compact_config_from_args(args)

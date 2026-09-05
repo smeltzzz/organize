@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-909%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-927%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -92,7 +92,7 @@ One file, one purpose. Nothing else.
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
 | `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided, and `ratelimit.py`, the per-host token buckets that keep every provider inside its published rate. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock. |
-| `tests/` | Fully offline unit tests (909), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — and `fake_mkvmerge.py`, a stand-in multiplexer real enough to drive an end-to-end remux. |
+| `tests/` | Fully offline unit tests (927), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — and `fake_mkvmerge.py`, a stand-in multiplexer real enough to drive an end-to-end remux. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. It is also the single source for what the single-file build ships. |
 | `scripts/build_pyz.py` | Builds `dist/organize.pyz` — the entire toolkit as one stdlib-only file you can copy to a NAS. |
@@ -312,7 +312,28 @@ python3 subtitle_fetcher.py --source /path/to/movies --limit 10  # first 10
 python3 subtitle_fetcher.py --source /path/to/movies --skip-source subf2me   # drop one site
 python3 subtitle_fetcher.py --source /path/to/movies --no-extract            # never use embedded tracks
 python3 subtitle_fetcher.py --source /path/to/movies --ocr-limit 5           # OCR at most 5 movies per run
+python3 subtitle_fetcher.py --source /path/to/movies --workers 8             # library on a NAS
 ```
+
+**Parallel triage, serial spending.** Before a movie can cost a provider
+request the fetcher answers three local questions about it — is the folder
+canonical, is there already a usable English sidecar, what is the file's
+identity — and on a mostly-covered library that pre-flight *is* the run: one
+directory listing and a couple of small reads per movie. Those reads happen in
+a worker pool (`--workers`, default half the CPUs capped at 8; `1` restores the
+exact serial run). Measured on 600 movies
+(`benchmarks/bench_triage_workers.py`): from a warm page cache the threads cost
+more than they save (0.06 s → 0.23 s, and it is 0.23 s); with a 5 ms round trip
+per folder — an HDD seek, or a library on SMB/NFS — it is **3.2 s serial →
+0.50 s at 8 workers (6.3×)**.
+
+Everything downstream of triage stays on the single main thread: the quota
+ledger, the provider tiers, every download, every state checkpoint. A worker
+never spends a request, and the pool works at most 32 movies ahead of the loop,
+so a run that stops on an exhausted quota has not read the whole library. The
+verdicts come back in input order, so the console, the log and the report are
+byte-identical to the serial run — the tests assert exactly that, by running
+the same library both ways and diffing.
 
 **Embedded extraction in detail.** It is on by default and always attempted
 first; it is skipped only when it cannot help, and the report names the
@@ -682,7 +703,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 909 unit tests, ~15 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 927 unit tests, ~13 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```

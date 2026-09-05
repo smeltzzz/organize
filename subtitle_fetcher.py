@@ -108,7 +108,7 @@ import urllib.request
 import uuid
 import zipfile
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -124,18 +124,22 @@ from organizekit.core import (
     REPORT_WIDTH,
     BucketRegistry,
     CoordinationLock,
+    JobOutcome,
     Report,
     RunLog,
     atomic_write_text,
     default_tool_dir,
+    describe_workers,
     enable_utf8_stdio,
     exact_external_english_srt_path,
     host_key,
+    map_ordered,
     normalize_srt_newlines,
     path_norm,
     print_text,
     promote_legacy_external_english_srt,
     resolve_library,
+    resolve_workers,
     run_field_smoke_test,
     srt_looks_valid,
     tools_home,
@@ -4181,6 +4185,10 @@ class QueueConfig:
     ocr_timeout_seconds: float = DEFAULT_OCR_TIMEOUT_SEC
     # 0 = no per-run cap on OCR jobs (they are local work, not provider quota)
     ocr_limit: int = 0
+    # Workers for the local pre-flight only (layout, existing sidecars,
+    # identity). 0 = decide from the CPU count. Provider requests, the quota
+    # ledger and every write stay on the single main thread whatever this says.
+    workers: int = 0
 
     def extract_options(self, *, ocr_allowed: bool = True, dry_run: bool = False) -> ExtractOptions:
         return ExtractOptions(
@@ -4792,6 +4800,142 @@ def plan_sources(
     )
 
 
+# ---------------------------------------------------------------------------
+# Local triage: what a movie needs, decided without asking anybody
+# ---------------------------------------------------------------------------
+# Before a movie can cost a provider request it has to get past three purely
+# local questions: is its folder laid out canonically, does it already have a
+# usable English sidecar, and what is its identity (device/inode/size/mtime and
+# the derived state key)? On a real library the great majority of movies stop
+# at question two - they are already covered - and answering it means listing
+# the movie's folder and decoding every candidate SRT in it. That is thousands
+# of small reads against a NAS, done one movie at a time, before the run has
+# spent a single request.
+#
+# ``triage_movie`` is that pre-flight for one movie, pulled out whole so it can
+# run in a worker pool. It asks no provider, spends no quota and touches no run
+# state; the only thing it may write is the in-place legacy ``.en.srt`` ->
+# ``.eng.srt`` rename that ``inspect_existing_sidecars`` has always done, and
+# that is confined to the one movie's own folder.
+#
+# What stays strictly serial is everything downstream of triage: the quota
+# ledger, the provider tiers, the downloads, the state checkpoints. Money is
+# spent by exactly one thread, in library order, exactly as before.
+
+
+# Triage is filesystem-bound - one directory listing and a few small reads per
+# movie - rather than CPU-bound, so several workers mostly hide the per-call
+# latency of a network share. The cap keeps a spinning NAS from being turned
+# into a queue of competing seeks.
+MAX_TRIAGE_WORKERS = 8
+
+
+@dataclass(frozen=True)
+class Triage:
+    """One movie's local verdict, decided before any provider is involved."""
+
+    video: Path
+    layout_issue: str = ""
+    sidecar_status: str = ""
+    existing: Path | None = None
+    sidecar_detail: str = ""
+    sidecar_reason: str = ""
+    snapshot: VideoSnapshot | None = None
+    key: str = ""
+    error: str = ""
+
+    @property
+    def fetchable(self) -> bool:
+        """True when nothing local settled this movie and it may be offered out."""
+        return not self.layout_issue and not self.error and self.snapshot is not None
+
+
+def triage_movie(video: Path, library: Path) -> Triage:
+    """Answer every local question about one movie, in the run's own order.
+
+    The order matters and matches the sequential run exactly: a non-canonical
+    folder is skipped before its sidecars are read, an existing sidecar settles
+    the movie before its identity is captured, and an identity error is only
+    reported for a movie that would otherwise have been fetched.
+    """
+    layout_issue = canonical_movie_layout_issue(video, library)
+    if layout_issue:
+        return Triage(video, layout_issue=layout_issue)
+    status, existing, detail, reason = inspect_existing_sidecars(video)
+    settled = Triage(
+        video, sidecar_status=status, existing=existing,
+        sidecar_detail=detail, sidecar_reason=reason,
+    )
+    if status in {"covered", "review"}:
+        return settled
+    try:
+        snapshot = video_snapshot(video)
+        key = movie_key(video, snapshot)
+    except OSError as exc:
+        return replace(settled, error=str(exc) or exc.__class__.__name__)
+    return replace(settled, snapshot=snapshot, key=key)
+
+
+# How far ahead of the sequential loop the triage pool is allowed to work. A
+# run stops the moment the last provider quota is gone, so an unbounded
+# pre-pass would read every folder in a 900-movie library to serve a run that
+# only got to movie 40. One chunk is the whole waste, and it is local reads.
+TRIAGE_LOOKAHEAD = 32
+
+
+class TriageQueue:
+    """Triage movies a chunk at a time, in parallel, handed back in order."""
+
+    def __init__(
+        self,
+        videos: Sequence[Path],
+        library: Path,
+        *,
+        workers: int = 1,
+        chunk: int = TRIAGE_LOOKAHEAD,
+    ) -> None:
+        self._videos = list(videos)
+        self._library = library
+        self._workers = max(1, int(workers))
+        self._chunk = max(1, int(chunk))
+        self._ready: dict[int, Triage] = {}
+
+    @property
+    def workers(self) -> int:
+        return self._workers
+
+    def at(self, index: int) -> Triage:
+        """Return the verdict for the 1-based ``index``-th movie."""
+        if index not in self._ready:
+            self._fill(index)
+        return self._ready[index]
+
+    def _fill(self, index: int) -> None:
+        start = index - 1
+        batch = self._videos[start:start + self._chunk]
+        outcomes = map_ordered(
+            batch,
+            lambda video: triage_movie(video, self._library),
+            workers=min(self._workers, max(1, len(batch))),
+        )
+        # Only the current window is kept: access is sequential, so an entry
+        # behind the cursor is dead weight on a large library.
+        self._ready = {
+            start + 1 + outcome.index: self._verdict(outcome)
+            for outcome in outcomes
+        }
+
+    @staticmethod
+    def _verdict(outcome: JobOutcome[Path, Triage]) -> Triage:
+        if outcome.value is not None:
+            return outcome.value
+        # An unexpected failure while reading one movie's folder becomes that
+        # movie's error rather than the end of a run that may already have
+        # downloaded subtitles. KeyboardInterrupt is re-raised by the pool.
+        detail = str(outcome.error) or outcome.error.__class__.__name__
+        return Triage(outcome.item, error=detail)
+
+
 def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     """Process one daily batch with independent provider quotas.
 
@@ -4858,35 +5002,46 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             log_file=cfg.log_file,
         )
 
+    triage_queue = TriageQueue(
+        videos, cfg.library,
+        workers=resolve_workers(cfg.workers, items=len(videos), cap=MAX_TRIAGE_WORKERS),
+    )
+    if triage_queue.workers > 1:
+        log(
+            f"Inspecting existing sidecars with {triage_queue.workers} workers "
+            f"(--workers 1 for the serial run); every provider request stays serial.",
+            log_file=cfg.log_file,
+        )
+
     for index, video in enumerate(videos, start=1):
-        layout_issue = canonical_movie_layout_issue(video, cfg.library)
-        if layout_issue:
-            result = JobResult(video, "skip", layout_issue, reason=REASON_LAYOUT)
+        triage = triage_queue.at(index)
+        if triage.layout_issue:
+            result = JobResult(video, "skip", triage.layout_issue, reason=REASON_LAYOUT)
             results.append(result)
-            emit(index, "SKIP", video, layout_issue)
+            emit(index, "SKIP", video, triage.layout_issue)
             continue
-        sidecar_status, existing, sidecar_detail, sidecar_reason = inspect_existing_sidecars(video)
-        if sidecar_status == "covered" and existing is not None:
+        sidecar_detail = triage.sidecar_detail
+        if triage.sidecar_status == "covered" and triage.existing is not None:
             ledger["already_have"] += 1
-            result = JobResult(video, "have", sidecar_detail, existing, reason=REASON_COVERED)
+            result = JobResult(video, "have", sidecar_detail, triage.existing, reason=REASON_COVERED)
             results.append(result)
             emit(index, "HAVE", video, sidecar_detail)
             continue
-        if sidecar_status == "review":
-            result = JobResult(video, "review", sidecar_detail, existing, reason=sidecar_reason)
+        if triage.sidecar_status == "review":
+            result = JobResult(video, "review", sidecar_detail, triage.existing,
+                               reason=triage.sidecar_reason)
             results.append(result)
             emit(index, "REVIEW", video, sidecar_detail)
             continue
 
-        try:
-            snapshot = video_snapshot(video)
-            key = movie_key(video, snapshot)
-        except OSError as exc:
+        if not triage.fetchable or triage.snapshot is None:
             ledger["errors"] += 1
-            result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
+            result = JobResult(video, "error", triage.error, reason=REASON_ERROR)
             results.append(result)
-            emit(index, "ERROR", video, str(exc))
+            emit(index, "ERROR", video, triage.error)
             continue
+        snapshot = triage.snapshot
+        key = triage.key
         record = state_movie(state, key, video)
 
         # Embedded-subtitle extraction. A movie's own English track is exact
@@ -5936,6 +6091,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lock-timeout", type=float, default=60.0, metavar="SEC")
     parser.add_argument("--limit", type=int, default=0, metavar="N",
                         help="Process at most N movies (0 means all eligible movies)")
+    parser.add_argument("--workers", type=int, default=0, metavar="N",
+                        help=f"Inspect N movies' existing sidecars at once (0 = half the CPUs, "
+                             f"capped at {MAX_TRIAGE_WORKERS}; 1 = the serial run). Provider "
+                             f"requests and downloads are never parallel.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Preview candidates; searches still run, but no download request or SRT write")
     parser.add_argument("--no-identity-fallback", dest="identity_fallback", action="store_false",
@@ -6031,6 +6190,7 @@ def compact_config_from_args(args: argparse.Namespace) -> QueueConfig:
         ocr_args=str(args.ocr_args),
         ocr_timeout_seconds=max(0.0, float(args.ocr_timeout)),
         ocr_limit=max(0, int(args.ocr_limit)),
+        workers=int(args.workers),
         min_movie_size_mb=float(args.min_size),
         lock_timeout_seconds=max(0.0, float(args.lock_timeout)),
         retry_no_match=bool(args.retry_review),
@@ -6069,6 +6229,8 @@ def validate_compact_config(cfg: QueueConfig) -> list[str]:
         errors.append("--ocr-timeout must be zero (no limit) or greater")
     if cfg.ocr_limit < 0:
         errors.append("--ocr-limit must be zero (no cap) or greater")
+    if cfg.workers < 0:
+        errors.append("--workers must be non-negative (0 = decide from the CPU count)")
     if cfg.min_movie_size_mb < 0 or cfg.lock_timeout_seconds < 0 or cfg.limit < 0:
         errors.append("--min-size, --lock-timeout, and --limit must be non-negative")
     if cfg.report_file == cfg.library or cfg.report_file.is_relative_to(cfg.library):
@@ -6101,6 +6263,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ("Ledger", cfg.log_file),
                 ("Report", cfg.report_file),
                 ("Embedded tracks", extract_banner_text(cfg)),
+                ("Triage", describe_workers(
+                    resolve_workers(cfg.workers, cap=MAX_TRIAGE_WORKERS), "movie")
+                    + "  \u00b7  provider requests stay serial"),
             ],
         ))
         with CoordinationLock(cfg.library, timeout_seconds=cfg.lock_timeout_seconds):

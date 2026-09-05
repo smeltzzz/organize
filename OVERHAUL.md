@@ -332,7 +332,7 @@ W2's single scan and shared probe cache, where it pays for itself; on its own it
 is risk without reward. The prerequisite-divergence bug — the thing W3 was
 really for — is fixed either way.
 
-### W4 · Concurrency and connection reuse — **landed for sync, audit and rate limiting**
+### W4 · Concurrency and connection reuse — **landed for sync, audit, rate limiting and the fetcher's local triage**
 
 > **W4b update — the pacing half shipped, the threading half did not, and the
 > measurement says that was the right order.** The fetcher's scraping tier put
@@ -354,11 +354,45 @@ really for — is fixed either way.
 > worth 100–300 ms per request) is also still open and is now the cheapest
 > remaining item in this section.
 
+> **Update — phase 4c: the fetcher's parallel half, and where it stops.**
+> Reading the code to move the quota ledger into the state store showed the
+> plan below was wrong on one point, and it is worth writing down. The
+> fetcher's durable quota ledger **is the append-only log**: state is rebuilt
+> by replaying ledger events (`recover_state_from_log`) and checkpointed with
+> `fsync` before each spend. `core/state.py` is the opposite kind of thing — a
+> derived cache that fails *open* (`--no-state`, `ORGANIZE_NO_STATE=1`, an
+> unwritable directory all give you a null store). A spend guard must fail
+> *closed*, so moving quota into SQLite would trade a correct guarantee for a
+> convenient one. Cross-process exclusion is already the `CoordinationLock`;
+> what threading the loop actually needs is an in-process lock, not a table.
+>
+> So the fetcher was parallelised where there is nothing to overspend. Every
+> movie starts with three local questions — canonical folder? usable sidecar
+> already? what is its identity? — and on a mostly-covered library that
+> pre-flight *is* the run: a directory listing and a couple of small reads per
+> movie, thousands of round trips before a single request is spent.
+> `triage_movie()` answers all three for one movie and `TriageQueue` runs them
+> in the shared pool (`--workers`, default half the CPUs capped at 8), handing
+> verdicts back in input order. Measured on 600 movies
+> (`benchmarks/bench_triage_workers.py`): 3.16 s → 0.50 s at 8 workers
+> (**6.3×**) with a 5 ms-per-folder round trip; on tmpfs the threads cost
+> 0.17 s and the README says so.
+>
+> The line is drawn at the money: the quota ledger, the provider tiers, every
+> download and every checkpoint stay on the single main thread, and a test
+> asserts no transport call is ever made from a worker. The pool works at most
+> `TRIAGE_LOOKAHEAD = 32` movies ahead, so a run that stops on an exhausted
+> quota has not read the library it never got to. Equivalence is tested by
+> running the same library at 1 and 8 workers and diffing the results *and*
+> the log lines. Running the *providers* concurrently remains open, and now
+> reads as a smaller prize than it did: the per-host token buckets already took
+> the 3.2×, and this took the local sweep.
+
 **Problem.** Only `bitdepth.py` has `--workers`. The two slowest steps are serial.
 
 | Step | Bound by | Today | Proposed default | Expected wall-clock |
 | :--- | :--- | :--- | :--- | :--- |
-| `subtitle_fetcher` | ~~network RTT~~ **provider rate limit** | ✅ per-host token buckets; still serial | + concurrency once the quota ledger moves to the DB | ~~5–8×~~ **3.2× measured on the scraping tier** |
+| `subtitle_fetcher` | ~~network RTT~~ **provider rate limit** | ✅ per-host token buckets; ✅ parallel local triage; provider tiers serial | keep spending serial; the ledger stays in the log, not the DB | **3.2×** on the scraping tier, **6.3×** on triage (5 ms/folder) |
 | `sync_subtitles` | CPU (`ffsubsync`) | ✅ `cpu_count//2`, cap 4 | done | **3.6× measured** |
 | `mkv_track_cleaner` | disk throughput | serial | 2 (opt-in higher) | 1.3–2× (not done: it rewrites movies) |
 | `library_auditor` | `stat()` | ✅ threaded, cap 8 | done | **7.7× measured** at 5 ms/folder; ~1× locally |
@@ -624,6 +658,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**3**~~ | ~~W3 one Step registry; one argv builder; `.sh` → one `exec`~~ **done** | +58 (see note) | Med | ✅ |
 | ~~**4a**~~ | ~~W4 shared worker pool; `sync_subtitles` + `library_auditor` parallel~~ **done** | +330 | Med | ✅ |
 | ~~**4b**~~ | ~~W4 per-source token buckets for the fetcher~~ **done** (concurrent fetching and HTTP keep-alive still open) | +230 | Med | ✅ |
+| ~~**4c**~~ | ~~W4 the fetcher's local pre-flight parallelised (`triage_movie` + `TriageQueue`, `--workers`)~~ **done**; the quota ledger stays in the log — spending is still serial, by decision | +300, +18 tests | Low | ✅ |
 | ~~**5**~~ | ~~W2 SQLite state cache + write-through + `organize status`~~ **done** (probe caches and the fetcher's quota ledger not yet moved in; `core/scan.py` rejected — see the W2 note) | +841 | Med-High | ✅ |
 | ~~**6a**~~ | ~~W5 fault-injection, end-to-end and destructive-path suites, coverage 69% → 75%, gate → 72~~ **done** | +1,240 | Low | ✅ |
 | ~~**6b**~~ | ~~W5 the fetcher's spending planners extracted from `queue_run` and tabled~~ **done** (the remaining tier orchestration and the property tests are still open — see the W5 update) | +460 | Low | ✅ |
@@ -669,7 +704,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **76%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 14.6 s (909 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) |
+| Test runtime | 6.7 s | 13.0 s (927 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
