@@ -122,12 +122,14 @@ from organizekit.core import (
     EXTERNAL_SRT_MAX_BYTES,
     EXTERNAL_SRT_SUFFIX,
     REPORT_WIDTH,
+    BucketRegistry,
     CoordinationLock,
     Report,
     atomic_write_text,
     default_tool_dir,
     enable_utf8_stdio,
     exact_external_english_srt_path,
+    host_key,
     normalize_srt_newlines,
     path_norm,
     print_text,
@@ -328,22 +330,29 @@ class ScrapeTransport:
 
     ``get``/``post`` return raw bytes and raise :class:`ScrapeSourceError`
     for anything that is not a clean 2xx response within the size limit.
-    A per-instance throttle keeps request rates under the polite gap.
+
+    **The polite gap is per host, not per transport.** One instance drives all
+    seven scraped sources, and they are seven different servers: making a
+    request to subf2m wait a second because the previous request went to
+    podnapisi protected nobody and, over a large library, cost roughly a second
+    per source per movie. Each host now has its own token bucket, so every site
+    still sees at most one request per ``gap`` seconds and unrelated sites do
+    not queue behind each other.
     """
 
     def __init__(self, *, timeout: float = SCRAPE_HTTP_TIMEOUT_SEC,
                  gap: float = SCRAPE_REQUEST_GAP_SEC,
-                 sleep: Callable[[float], None] = time.sleep) -> None:
+                 sleep: Callable[[float], None] | None = None,
+                 clock: Callable[[], float] | None = None) -> None:
         self.timeout = timeout
         self.gap = gap
-        self._sleep = sleep
-        self._last = 0.0
+        # ``sleep``/``clock`` are the test seam: pacing is arithmetic, and a
+        # test should be able to prove it without spending the seconds.
+        self.buckets = BucketRegistry(gap=gap, sleep=sleep, clock=clock)
 
-    def _throttle(self) -> None:
-        wait = self.gap - (time.monotonic() - self._last)
-        if wait > 0:
-            self._sleep(wait)
-        self._last = time.monotonic()
+    def _throttle(self, url: str) -> float:
+        """Wait until ``url``'s host may be asked again. Returns seconds slept."""
+        return self.buckets.take(host_key(url))
 
     def _open(self, url: str, data: bytes | None, headers: dict[str, str]) -> bytes:
         base = {
@@ -374,14 +383,14 @@ class ScrapeTransport:
         return raw
 
     def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
-        self._throttle()
+        self._throttle(url)
         return self._open(url, None, headers or {})
 
     def post(self, url: str, form: dict[str, str], *, headers: dict[str, str] | None = None) -> bytes:
         data = urllib.parse.urlencode(form).encode("utf-8")
         hdrs = {"Content-Type": "application/x-www-form-urlencoded"}
         hdrs.update(headers or {})
-        self._throttle()
+        self._throttle(url)
         return self._open(url, data, hdrs)
 
 
@@ -1570,7 +1579,10 @@ class OpenSubtitlesClient:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.token: str | None = None
-        self._last_call = 0.0
+        # One bucket per host: the API and the download host it hands back are
+        # different servers with separate limits, and a 429 from one of them
+        # says nothing about the other.
+        self.buckets = BucketRegistry(gap=REQUEST_GAP_SEC)
 
     def _headers(self, *, auth: bool = False) -> dict[str, str]:
         h = {
@@ -1583,11 +1595,9 @@ class OpenSubtitlesClient:
             h["Authorization"] = f"Bearer {self.token}"
         return h
 
-    def _throttle(self) -> None:
-        wait = REQUEST_GAP_SEC - (time.monotonic() - self._last_call)
-        if wait > 0:
-            time.sleep(wait)
-        self._last_call = time.monotonic()
+    def _throttle(self, url: str) -> float:
+        """Wait until ``url``'s host may be asked again. Returns seconds slept."""
+        return self.buckets.take(host_key(url))
 
     def _request(
         self,
@@ -1606,7 +1616,7 @@ class OpenSubtitlesClient:
 
         last_err: Exception | None = None
         for attempt in range(4):
-            self._throttle()
+            self._throttle(url)
             req = urllib.request.Request(
                 url, data=data, method=method, headers=self._headers(auth=auth),
             )
@@ -1631,7 +1641,10 @@ class OpenSubtitlesClient:
                         delay = min(30.0, float(retry_after)) if retry_after else 2.0 * (attempt + 1)
                     except ValueError:
                         delay = 2.0 * (attempt + 1)
-                    time.sleep(delay)
+                    # "Slow down" is about this host, not about this request:
+                    # hold the whole bucket back so the retry - and anything
+                    # else aimed at that host - waits it out exactly once.
+                    self.buckets.penalize(host_key(url), delay)
                     last_err = RuntimeError(f"HTTP {exc.code} {path}: {err_body}")
                     continue
                 raise RuntimeError(f"HTTP {exc.code} {path}: {err_body}") from exc
@@ -1742,7 +1755,7 @@ class OpenSubtitlesClient:
         # and downgrade links cannot be dereferenced by urllib.
         if parsed_link.scheme.lower() != "https" or not parsed_link.netloc:
             raise RuntimeError("download endpoint returned an invalid non-HTTPS subtitle link")
-        self._throttle()
+        self._throttle(download_url)
         req = urllib.request.Request(
             download_url, method="GET", headers={"User-Agent": APP_USER_AGENT, "Accept": "text/plain, */*;q=0.1"},
         )
@@ -2089,7 +2102,9 @@ class SubdlClient:
         # Queue mode supplies a durable reservation callback. Keep it optional
         # so this small client remains usable on its own and in focused tests.
         self._before_search_request = before_search_request
-        self._last_call = 0.0
+        # Per host, for the same reason as OpenSubtitles: the API lives on one
+        # server and the subtitle payloads on another.
+        self.buckets = BucketRegistry(gap=REQUEST_GAP_SEC)
 
     def _headers(self, accept: str) -> dict[str, str]:
         headers = {"User-Agent": APP_USER_AGENT, "Accept": accept}
@@ -2099,11 +2114,9 @@ class SubdlClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    def _throttle(self) -> None:
-        wait = REQUEST_GAP_SEC - (time.monotonic() - self._last_call)
-        if wait > 0:
-            time.sleep(wait)
-        self._last_call = time.monotonic()
+    def _throttle(self, url: str) -> float:
+        """Wait until ``url``'s host may be asked again. Returns seconds slept."""
+        return self.buckets.take(host_key(url))
 
     @staticmethod
     def _read_limited(response: Any, max_bytes: int, label: str) -> bytes:
@@ -2131,7 +2144,7 @@ class SubdlClient:
             # to reject a request that will never be sent.
             if self._before_search_request is not None:
                 self._before_search_request()
-            self._throttle()
+            self._throttle(url)
             request = urllib.request.Request(url, headers=self._headers("application/json"))
             try:
                 with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - fixed provider API endpoint
@@ -2146,7 +2159,9 @@ class SubdlClient:
                         delay = min(30.0, float(retry_after)) if retry_after else 2.0 * (attempt + 1)
                     except ValueError:
                         delay = 2.0 * (attempt + 1)
-                    time.sleep(delay)
+                    # Hold the host back rather than this one request (see the
+                    # OpenSubtitles client for why).
+                    self.buckets.penalize(host_key(url), delay)
                     continue
                 raise last_error from exc
             except urllib.error.URLError as exc:
@@ -2301,7 +2316,7 @@ class SubdlClient:
         return self._parse_search_payload(payload, identity)
 
     def _download_bytes(self, url: str, max_bytes: int) -> bytes:
-        self._throttle()
+        self._throttle(url)
         request = urllib.request.Request(url, headers=self._headers("application/octet-stream, */*;q=0.1"))
         try:
             with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310 - URL is provider-host validated or locally built

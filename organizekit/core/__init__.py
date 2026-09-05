@@ -40,6 +40,7 @@ from .parallel import (
     resolve_workers,
 )
 from .probecache import MediaProbeCache
+from .ratelimit import BucketRegistry, TokenBucket, host_key
 from .report import Report
 from .smoke import run_field_smoke_test
 from .state import (
@@ -162,7 +163,10 @@ __all__ = [
     "ExclusiveRunLock",
     "LockTimeoutError",
     "LockUnavailable",
+    "BucketRegistry",
     "MediaProbeCache",
+    "TokenBucket",
+    "host_key",
     "Report",
     "atomic_write_text",
     "clip_text",

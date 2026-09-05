@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-664%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-697%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -91,8 +91,8 @@ One file, one purpose. Nothing else.
 | `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. Sidecars extracted from the movie itself are skipped (they are already frame-accurate). |
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
-| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — and `state.py`, the rebuildable SQLite cache of what each tool last decided. |
-| `tests/` | Fully offline unit tests (664), including `tests/selftests/` — each tool's own suite, moved out of the shipped file. |
+| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided, and `ratelimit.py`, the per-host token buckets that keep every provider inside its published rate. |
+| `tests/` | Fully offline unit tests (697), including `tests/selftests/` — each tool's own suite, moved out of the shipped file. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. |
 
@@ -266,6 +266,15 @@ Fetches one external `.eng.srt` per movie, and the goal is a subtitle beside
    parse failures disable it for the rest of the run) and a UTC daily search
    cap (20 by source, `--scrape-daily-cap`), metered in the same durable
    ledger as the API quotas.
+
+   **Politeness is metered per host, not per run.** Every provider gets its own
+   token bucket (one request per second per site, the documented limit), so
+   asking Subf2m never waits on the request that just went to Podnapisi. On a
+   200-movie pass across the seven sources that is 30 minutes of sleeping
+   reduced to 9.5 — with every individual site still paced exactly as before
+   (`benchmarks/bench_scrape_gaps.py`). When a provider answers `429
+   Retry-After`, the whole bucket for that host is held back, because that
+   header is about the server, not about the one unlucky request.
 
 **Before any of that, it looks inside the movie.** A Jellyfin MKV very often
 already carries the English subtitle as an embedded track, and that track is
@@ -662,7 +671,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 664 unit tests
+python3 -m unittest discover -s tests -p "test_*.py"   # 697 unit tests
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```

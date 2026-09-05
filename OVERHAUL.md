@@ -1,12 +1,12 @@
 # Overhaul Plan — `organize`
 
-> **Status: Phases 1–4 are landed, and W2 has landed in part** on `arena/01a07259-organize` — the
+> **Status: Phases 1–5 are landed (W2 in part), and W4b's rate limiting with them** on `arena/01a07259-organize` — the
 > shared core (`organizekit/`) replaced 4,325 lines of vendored copies, the
 > tools' 2,229 lines of self-test code moved to `tests/selftests/`, and the
 > toolchain is now described exactly once in `organizekit/core/toolchain.py`
 > instead of once per orchestrator. Production Python is down from 26,458 to
 > 20,011 lines (−24%), coverage is up from 58% to 67%, the suite is green at
-> 664 tests, and the two slowest read paths now run in parallel
+> 697 tests, and the two slowest read paths now run in parallel
 > (`sync_subtitles.py` 3.6×, `library_auditor.py` up to 7.7× on network
 > storage). Phases 5–8 below
 > are still open; the numbers in the tables are the pre-work baseline unless
@@ -332,13 +332,33 @@ W2's single scan and shared probe cache, where it pays for itself; on its own it
 is risk without reward. The prerequisite-divergence bug — the thing W3 was
 really for — is fixed either way.
 
-### W4 · Concurrency and connection reuse — **landed for sync and audit**
+### W4 · Concurrency and connection reuse — **landed for sync, audit and rate limiting**
+
+> **W4b update — the pacing half shipped, the threading half did not, and the
+> measurement says that was the right order.** The fetcher's scraping tier put
+> seven different sites behind *one* "last request" timestamp, so a request to
+> Subf2m waited a second because the previous one went to Podnapisi. Per-host
+> token buckets (`organizekit/core/ratelimit.py`) remove exactly that wait and
+> nothing else: measured over a 200-movie pass (1,800 requests) the throttling
+> drops from 1,800 s to 571 s — **3.2×** — while the busiest single host is
+> still paced to its full 257 s of gaps, which `benchmarks/bench_scrape_gaps.py`
+> asserts before it prints. A `Retry-After` now penalises the host's bucket
+> rather than one request.
+>
+> **Still open:** running the providers *concurrently*. The bucket is the piece
+> that makes it safe (taking a token is atomic; waits are reserved, so N
+> workers cannot overspend a rate the way N readers of a timestamp can), but
+> the fetcher's per-movie loop persists a durable ledger after every step, and
+> that ledger — not the pacing — is what has to move into the state store
+> first. HTTP keep-alive (a pooled `http.client.HTTPSConnection` per host,
+> worth 100–300 ms per request) is also still open and is now the cheapest
+> remaining item in this section.
 
 **Problem.** Only `bitdepth.py` has `--workers`. The two slowest steps are serial.
 
 | Step | Bound by | Today | Proposed default | Expected wall-clock |
 | :--- | :--- | :--- | :--- | :--- |
-| `subtitle_fetcher` | ~~network RTT~~ **provider rate limit** | serial | per-source token buckets (needs W2) | ~~5–8×~~ **~1.2× from threads alone** |
+| `subtitle_fetcher` | ~~network RTT~~ **provider rate limit** | ✅ per-host token buckets; still serial | + concurrency once the quota ledger moves to the DB | ~~5–8×~~ **3.2× measured on the scraping tier** |
 | `sync_subtitles` | CPU (`ffsubsync`) | ✅ `cpu_count//2`, cap 4 | done | **3.6× measured** |
 | `mkv_track_cleaner` | disk throughput | serial | 2 (opt-in higher) | 1.3–2× (not done: it rewrites movies) |
 | `library_auditor` | `stat()` | ✅ threaded, cap 8 | done | **7.7× measured** at 5 ms/folder; ~1× locally |
@@ -460,7 +480,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**2**~~ | ~~self-tests → `tests/`, thin smoke checks remain~~ **done** | −1,842 | Low | ✅ |
 | ~~**3**~~ | ~~W3 one Step registry; one argv builder; `.sh` → one `exec`~~ **done** | +58 (see note) | Med | ✅ |
 | ~~**4a**~~ | ~~W4 shared worker pool; `sync_subtitles` + `library_auditor` parallel~~ **done** | +330 | Med | ✅ |
-| **4b** | W4 per-source token buckets for the fetcher (after W2) | +200 | Med | 2 |
+| ~~**4b**~~ | ~~W4 per-source token buckets for the fetcher~~ **done** (concurrent fetching and HTTP keep-alive still open) | +230 | Med | ✅ |
 | ~~**5**~~ | ~~W2 SQLite state cache + write-through + `organize status`~~ **done** (probe caches and the fetcher's quota ledger not yet moved in; `core/scan.py` rejected — see the W2 note) | +841 | Med-High | ✅ |
 | **6** | W5 planners split, property + fault-injection tests, gate → 75% | +1,200 | Low | 3–5 |
 | **7** | W6 direct-play verification, HandBrake queue, multi-language | +1,500 | Med | 4–6 |
