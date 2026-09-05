@@ -27,11 +27,31 @@ GOOD_SRT = "1\n00:00:01,000 --> 00:00:02,000\nHello.\n\n2\n00:00:04,000 --> 00:0
 SHIFTED_SRT = "1\n00:00:05,000 --> 00:00:06,000\nHello.\n\n2\n00:00:08,000 --> 00:00:09,000\nWorld.\n"
 
 
+# The tool publishes its verdicts to the shared state cache, whose default
+# location is the developer's real state directory. A test suite must never
+# write there, so the whole module is pointed at a temp database - which also
+# means the write-through path is exercised rather than switched off.
+_STATE_DIR: tempfile.TemporaryDirectory | None = None
+
+
+def setUpModule() -> None:
+    global _STATE_DIR
+    _STATE_DIR = tempfile.TemporaryDirectory(prefix="sync_state_")
+    os.environ["ORGANIZE_STATE_DB"] = str(Path(_STATE_DIR.name) / "state.db")
+
+
+def tearDownModule() -> None:
+    os.environ.pop("ORGANIZE_STATE_DB", None)
+    if _STATE_DIR is not None:
+        _STATE_DIR.cleanup()
+
+
 def _cfg(tmp: Path, **overrides: object) -> ss.Config:
     base: dict = {
         "library": tmp / "lib",
         "log_file": tmp / "out" / "sync_subtitles.log",
         "report_file": tmp / "out" / "sync_subtitles_report.txt",
+        "state_db": tmp / "out" / "state.db",
     }
     base.update(overrides)
     return ss.Config(**base)
@@ -632,10 +652,12 @@ class EndToEndTests(unittest.TestCase):
             self.mkv.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
-class SyncStateTests(unittest.TestCase):
-    """Remembered verdicts: a library that has already been synced must not
-    pay for another ffsubsync run, and any change to either file must send
-    the sidecar back through ffsubsync."""
+class _SyncedLibraryFixture(unittest.TestCase):
+    """One movie, one good sidecar, a fake ffsubsync: the shared end-to-end bed.
+
+    Holds no tests of its own - the suites below inherit it so that "run the
+    tool over a real library" is written once.
+    """
 
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory(prefix="sync_state_")
@@ -679,6 +701,12 @@ class SyncStateTests(unittest.TestCase):
         second = FakeFfsubsync(offset=-4.0)
         self.assertEqual(self._run(second, *extra), 0)
         return len(second.calls)
+
+
+class SyncStateTests(_SyncedLibraryFixture):
+    """Remembered verdicts: a library that has already been synced must not
+    pay for another ffsubsync run, and any change to either file must send
+    the sidecar back through ffsubsync."""
 
     def test_second_run_does_not_remeasure(self) -> None:
         """The whole point: an unchanged, already-synced library costs nothing."""
@@ -763,6 +791,65 @@ class SyncStateTests(unittest.TestCase):
         self.assertEqual(len(fake.calls), 1, "a new sidecar is measured")
         saved = json.loads(self.ledger.read_text(encoding="utf-8"))
         self.assertNotIn(ss.sync_state_key(self.srt), saved["entries"])
+
+
+class StateCacheTests(_SyncedLibraryFixture):
+    """The verdicts this tool publishes for ``organize status`` to read.
+
+    Inherits the end-to-end fixture above: the sync ledger stays the authority
+    for "must I re-measure?", and this cache is only ever a summary.
+    """
+
+    def _verdicts(self) -> dict:
+        store = core.open_state(self.tmp / "out" / "state.db", tool="tests")
+        try:
+            return store.verdicts(core.KIND_SYNC)
+        finally:
+            store.close()
+
+    def _run(self, fake: FakeFfsubsync, *extra: str) -> int:  # noqa: D102 - see parent
+        return super()._run(fake, "--state-db", str(self.tmp / "out" / "state.db"), *extra)
+
+    def test_a_measured_sidecar_is_published(self) -> None:
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0)), 0)
+        verdict = self._verdicts()[(core.path_norm(self.mkv), core.KIND_SYNC)]
+        self.assertEqual(verdict.verdict, ss.STATUS_SYNCED)
+        self.assertIn("Film (2000).eng.srt", verdict.detail)
+        info = self.mkv.stat()
+        self.assertTrue(verdict.is_current_for(info.st_size, info.st_mtime_ns))
+
+    def test_a_held_sidecar_is_published_as_review(self) -> None:
+        self.assertEqual(self._run(FakeFfsubsync(offset=45.0)), 0)
+        verdict = self._verdicts()[(core.path_norm(self.mkv), core.KIND_SYNC)]
+        self.assertEqual(verdict.verdict, ss.STATUS_REVIEW)
+
+    def test_an_orphan_sidecar_publishes_nothing_and_breaks_nothing(self) -> None:
+        # A .srt with no movie beside it has nothing to key a verdict on; the
+        # rest of the run must still be published.
+        (self.movie_dir.parent / "Orphan (1999)").mkdir()
+        (self.movie_dir.parent / "Orphan (1999)" / "Orphan (1999).eng.srt").write_text(
+            GOOD_SRT, encoding="utf-8")
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0)), 0)
+        self.assertEqual(list(self._verdicts()), [(core.path_norm(self.mkv), core.KIND_SYNC)])
+
+    def test_a_dry_run_publishes_nothing(self) -> None:
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0), "--dry-run"), 0)
+        self.assertEqual(self._verdicts(), {})
+
+    def test_no_state_publishes_nothing(self) -> None:
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0), "--no-state"), 0)
+        self.assertEqual(self._verdicts(), {})
+
+    def test_the_run_survives_an_unwritable_cache(self) -> None:
+        # A cache is a convenience; it can never turn a good sync into a bad run.
+        (self.tmp / "out").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "out" / "state.db").write_bytes(b"not a database" * 50)
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0)), 0)
+        self.assertEqual(self.srt.read_text(encoding="utf-8"), SHIFTED_SRT)
+
+    def test_a_state_db_inside_the_library_is_refused(self) -> None:
+        code = self._run(FakeFfsubsync(offset=-4.0), "--state-db", str(self.lib / "state.db"))
+        self.assertEqual(code, 2)
 
 
 class ExitCodeTests(unittest.TestCase):

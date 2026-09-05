@@ -42,6 +42,22 @@ from .parallel import (
 from .probecache import MediaProbeCache
 from .report import Report
 from .smoke import run_field_smoke_test
+from .state import (
+    KIND_BITDEPTH,
+    KIND_LAYOUT,
+    KIND_REMUX,
+    KIND_SUBTITLE,
+    KIND_SYNC,
+    KINDS,
+    STATE_DB_NAME,
+    NullStateStore,
+    StateStore,
+    StoredMovie,
+    Verdict,
+    default_state_db,
+    open_state,
+    state_disabled_by_env,
+)
 from .subtitles import (
     COVERING_ENGLISH_SRT_SUFFIXES,
     EXTERNAL_SRT_CUE_RE,
@@ -90,6 +106,20 @@ from .toolchain import (
 
 __all__ = [
     "COVERING_ENGLISH_SRT_SUFFIXES",
+    "KINDS",
+    "KIND_BITDEPTH",
+    "KIND_LAYOUT",
+    "KIND_REMUX",
+    "KIND_SUBTITLE",
+    "KIND_SYNC",
+    "STATE_DB_NAME",
+    "NullStateStore",
+    "StateStore",
+    "StoredMovie",
+    "Verdict",
+    "default_state_db",
+    "open_state",
+    "state_disabled_by_env",
     "DEFAULT_WORKER_CAP",
     "JobOutcome",
     "describe_workers",

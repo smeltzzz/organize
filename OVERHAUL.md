@@ -1,12 +1,12 @@
 # Overhaul Plan — `organize`
 
-> **Status: Phases 1–4 are landed** on `arena/01a07259-organize` — the
+> **Status: Phases 1–4 are landed, and W2 has landed in part** on `arena/01a07259-organize` — the
 > shared core (`organizekit/`) replaced 4,325 lines of vendored copies, the
 > tools' 2,229 lines of self-test code moved to `tests/selftests/`, and the
 > toolchain is now described exactly once in `organizekit/core/toolchain.py`
 > instead of once per orchestrator. Production Python is down from 26,458 to
 > 20,011 lines (−24%), coverage is up from 58% to 67%, the suite is green at
-> 602 tests, and the two slowest read paths now run in parallel
+> 664 tests, and the two slowest read paths now run in parallel
 > (`sync_subtitles.py` 3.6×, `library_auditor.py` up to 7.7× on network
 > storage). Phases 5–8 below
 > are still open; the numbers in the tables are the pre-work baseline unless
@@ -188,7 +188,33 @@ copying `subtitle_fetcher.py` around.
   existing 549 tests plus the generated-output diff gate.
 - **Effort:** 2–3 days.
 
-### W2 · One state store, one scan (the highest-leverage new idea)
+### W2 · One state store, one scan — **landed in part (see the status note)**
+
+> **What shipped:** `organizekit/core/state.py` (stdlib `sqlite3`, WAL,
+> `BEGIN IMMEDIATE` writes), write-through from `library_auditor.py`,
+> `bitdepth.py` and `sync_subtitles.py`, and the `organize status` command the
+> store exists to make possible. `--no-state` / `ORGANIZE_NO_STATE` / a
+> corrupt database all downgrade to a null store with the same API, so a cache
+> problem cannot fail a run.
+>
+> **One deliberate deviation from the schema below: verdicts are one row per
+> `(movie, kind)`, not columns on a wide `movie` row.** Each verdict carries
+> its own `(size, mtime_ns)`. A movie's bit depth can be current while its
+> sync verdict is stale — a single wide row with one stamp would have to call
+> the stale one fresh, which is the precise failure mode "derived cache, never
+> authority" exists to prevent.
+>
+> **Still open from this section:** the two JSON probe caches are not yet
+> folded into the DB; the fetcher still rebuilds its quota ledger by re-parsing
+> its own log (`reserve_quota` is written and tested, ready for it, and is what
+> W4b needs); `core/scan.py` was **rejected** rather than deferred — once
+> `organize status` delegates to `library_auditor.audit_library`, the one
+> parallel sweep already exists on top of `core/parallel.py`, and a second scan
+> module would be exactly the duplication this repo's tests forbid. One scan
+> shared across all five steps therefore stays a `pipeline.py` question, not a
+> new module. `mkv_track_cleaner.py` does not publish verdicts yet, so
+> `organize status` prints `Remux  not recorded yet` and leaves that step out
+> of the "nothing to do" tally instead of quietly counting it.
 
 **Problem.** Five independent library walks per pass; two JSON probe caches with
 different schemas; `sync_state.json`; a ledger reconstructed by re-parsing an
@@ -435,7 +461,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**3**~~ | ~~W3 one Step registry; one argv builder; `.sh` → one `exec`~~ **done** | +58 (see note) | Med | ✅ |
 | ~~**4a**~~ | ~~W4 shared worker pool; `sync_subtitles` + `library_auditor` parallel~~ **done** | +330 | Med | ✅ |
 | **4b** | W4 per-source token buckets for the fetcher (after W2) | +200 | Med | 2 |
-| **5** | W2 SQLite state + single scan + `organize status` | +900 | Med-High | 3–4 |
+| ~~**5**~~ | ~~W2 SQLite state cache + write-through + `organize status`~~ **done** (probe caches and the fetcher's quota ledger not yet moved in; `core/scan.py` rejected — see the W2 note) | +841 | Med-High | ✅ |
 | **6** | W5 planners split, property + fault-injection tests, gate → 75% | +1,200 | Low | 3–5 |
 | **7** | W6 direct-play verification, HandBrake queue, multi-language | +1,500 | Med | 4–6 |
 | **8** | W7 docs split, JSON output, PyPI + zipapp release | +300 | Low | 2 |

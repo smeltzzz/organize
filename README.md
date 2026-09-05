@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-602%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-664%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -66,9 +66,12 @@ you want any of the following, which the usual containers do not give you:
 - **HDR is protected fail-closed.** Anything uncertain is never queued for
   re-encoding — the tool would rather do nothing than turn your Dolby Vision
   master into a green-and-purple mess.
-- **No Docker, no daemon, no database.** Nine files, the standard library, and
-  binaries you already have. Every run is stateless, idempotent, and safe to
-  Ctrl-C at any point.
+- **No Docker, no daemon, no database you have to keep.** Nine files, the
+  standard library, and binaries you already have. Every run is stateless,
+  idempotent, and safe to Ctrl-C at any point. There is a SQLite *cache* of
+  what each tool last decided (stdlib `sqlite3`, so still zero dependencies),
+  but every tool re-derives its verdict from the live filesystem: delete
+  `state.db` and you lose one fast summary, never correctness.
 | 🛡 **Safety invariants** | Advisory locks, atomic staging, and crash recovery — engineered so a power cut can never corrupt your library. |
 
 ---
@@ -79,7 +82,7 @@ One file, one purpose. Nothing else.
 
 | File | What it is |
 | :--- | :--- |
-| `organize.py` | **The front door.** Unified CLI, system doctor, and test runner: `organize.py doctor`, `organize.py run`, `organize.py test`, plus one subcommand per tool. |
+| `organize.py` | **The front door.** Unified CLI, system doctor, progress summary, and test runner: `organize.py doctor`, `organize.py status`, `organize.py run`, `organize.py test`, plus one subcommand per tool. |
 | `subtitle_fetcher.py` | Tool 1 — one validated English `.eng.srt` per movie: extract the movie's own embedded track first, else OpenSubtitles + SubDL + 7 scraping fallbacks. |
 | `mkv_track_cleaner.py` | Tool 2 — lossless remux: keep one best audio, strip commentary/dubs/embedded subs. |
 | `bitdepth.py` | Tool 3 — ffprobe sweep: queue 8-bit SDR for HandBrake, protect HDR. |
@@ -88,8 +91,8 @@ One file, one purpose. Nothing else.
 | `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. Sidecars extracted from the movie itself are skipped (they are already frame-accurate). |
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
-| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, and `toolchain.py` — the one table describing what the five steps are and how to call them. |
-| `tests/` | Fully offline unit tests (602), including `tests/selftests/` — each tool's own suite, moved out of the shipped file. |
+| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — and `state.py`, the rebuildable SQLite cache of what each tool last decided. |
+| `tests/` | Fully offline unit tests (664), including `tests/selftests/` — each tool's own suite, moved out of the shipped file. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. |
 
@@ -163,7 +166,33 @@ elsewhere). An explicit `--source` always wins.
 All logs, per-tool reports, and full output transcripts land in one place
 (`--log-dir`, default `./logs`, which must be outside the library).
 
-### 4 · Point Jellyfin at the organized folder
+### 4 · Ask what is left
+
+```bash
+python3 organize.py status                        # one screen: done vs. remaining
+python3 organize.py status --library /path/to/movies
+```
+
+`status` re-scans layout and subtitles live (they are cheap, and they are the
+two things you can change by moving a file), then joins the expensive verdicts
+— bit depth, sync, remux — from the shared state cache each tool writes as it
+runs. A cached verdict is shown **only while it still describes the bytes on
+disk**: replace a movie and its old verdict is reported as `stale`, never as an
+answer. `--no-state` ignores the cache entirely and shows just the live half.
+
+```console
+Library   /srv/media/Movies
+          412 movie(s), 3.1 TiB
+Layout    408 CANONICAL_MKV   4 MISSING_SIDECAR
+Subtitles 408 present   4 missing
+Remux     not recorded yet
+Bit depth 388 SKIP_HDR   21 QUEUE_FOR_HANDBRAKE   3 stale
+Sync      401 synced   1 review   10 unmeasured
+
+Nothing to do for 388 movie(s) - the next pass will touch 24.
+```
+
+### 5 · Point Jellyfin at the organized folder
 
 Done — every movie is canonically named, subtitle-complete, and direct-play
 safe. For the fully automatic flow (torrent finishes → standardized →
@@ -459,7 +488,8 @@ python3 jellyfin_one_shot.py --source /path/to/movies --quiet          # no live
 > beside them, which is what makes the next run cheap and keeps the provider
 > quotas honest: `subtitle_fetcher_ledger.log` (the fetcher's daily-quota
 > ledger — that tool parses its own log back, so it cannot share a file with
-> anything else), the two probe caches, and `sync_state.json`.
+> anything else), the two probe caches, `sync_state.json`, and `state.db` —
+> the rebuildable cache of verdicts that `organize status` reads.
 
 `--source` is the Jellyfin movie-library root. Every tool in the repo resolves
 it through one shared resolver — `--source`, then `ORGANIZE_LIBRARY`, then the
@@ -608,6 +638,8 @@ Everything is overridable per run with CLI flags (see each tool's
 | `MOVIE_STD_TARGET` | every tool (legacy) | Older name for `ORGANIZE_LIBRARY`; still honoured, lower precedence |
 | `MOVIE_STD_LOCK_TIMEOUT` | movie_standardizer | Coordination-lock wait (default 60 s) |
 | `MOVIE_STD_MAINTENANCE_MODE` | movie_standardizer | `REPORT` (default) / `QUARANTINE` / `DELETE` for duplicates |
+| `ORGANIZE_STATE_DB` | auditor / 10-bit / sync / `status` | Where the shared state cache lives (default: beside the logs and reports, never inside the library) |
+| `ORGANIZE_NO_STATE` | the same tools | Set to `1` to turn the cache off everywhere at once (equivalent to passing `--no-state`) |
 
 A `.env` file next to the scripts is read automatically at startup by every
 tool; anything already exported in the environment wins over the file.
@@ -630,7 +662,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 602 unit tests
+python3 -m unittest discover -s tests -p "test_*.py"   # 664 unit tests
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```

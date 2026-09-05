@@ -47,6 +47,7 @@ from typing import Any
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
 # keeps it that way.
 from organizekit.core import (
+    KIND_BITDEPTH,
     ExclusiveRunLock,
     LockUnavailable,
     MediaProbeCache,
@@ -55,6 +56,7 @@ from organizekit.core import (
     default_tool_dir,
     enable_utf8_stdio,
     iter_completed,
+    open_state,
     path_is_within,
     print_text,
     resolve_library,
@@ -204,6 +206,8 @@ class Config:
     fail_if_queue: bool = False
     fail_if_review: bool = False
     fail_if_error: bool = False
+    use_state: bool = True        # publish verdicts to the shared state cache
+    state_db: Path | None = None  # None = the documented default location
 
     @property
     def min_bytes(self) -> int:
@@ -908,6 +912,33 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
     ])
     return report.render()
 
+def publish_state(results: list[ProbeResult], cfg: Config) -> int:
+    """Record each movie's bit-depth verdict in the shared state cache.
+
+    Separate from the probe cache next door, and for a different reader: the
+    probe cache stores ffprobe's raw payload so *this* tool can skip work, while
+    this stores the verdict so ``organize status`` can answer "how many movies
+    are queued for HandBrake?" without probing anything. Both are keyed to the
+    file's size and mtime, and neither is ever consulted as authority.
+    """
+    store = open_state(cfg.state_db, enabled=cfg.use_state, tool="bitdepth")
+    if not store.enabled:
+        return 0
+    published = 0
+    try:
+        for result in results:
+            movie = Path(result.path)
+            detail = result.info or result.category
+            store.record(movie, KIND_BITDEPTH, result.status, detail)
+            published += 1
+        store.note("bitdepth", f"{published} movie(s) inspected")
+    except Exception as exc:  # noqa: BLE001 - a cache write can never fail a run
+        log(f"state cache not updated: {exc}", level="WARNING")
+    finally:
+        store.close()
+    return published
+
+
 def write_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) -> bool:
     """Publish the sole inspector artifact as a complete atomic text report."""
     try:
@@ -941,6 +972,8 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append(f"Log path must be outside --source: {cfg.log_file}")
     if cfg.use_cache and path_is_within(cfg.cache_file, cfg.source_dir):
         errors.append(f"Cache path must be outside --source: {cfg.cache_file}")
+    if cfg.state_db is not None and path_is_within(cfg.state_db, cfg.source_dir):
+        errors.append(f"State cache must be outside --source: {cfg.state_db}")
     if os.path.normcase(os.path.normpath(str(cfg.log_file))) == os.path.normcase(os.path.normpath(str(cfg.report_file))):
         errors.append("--log and --report must be different files")
     return errors
@@ -1023,6 +1056,7 @@ def scan(cfg: Config) -> int:
     cache.save()
     if cfg.use_cache:
         log(f"Probe cache: {cache.hits} reused, {cache.misses} probed.")
+    publish_state(results, cfg)
 
     elapsed = time.perf_counter() - started
     if not write_report(results, cfg, elapsed):
@@ -1079,6 +1113,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Reusable ffprobe output for unchanged files, outside the media library")
     p.add_argument("--no-cache", dest="use_cache", action="store_false",
                    help="Probe every movie again and do not read or write the cache")
+    p.add_argument("--no-state", action="store_true",
+                   help="Do not record these verdicts in the shared state cache "
+                        "that `organize status` reads (the probe cache is unaffected)")
+    p.add_argument("--state-db", type=Path, default=None, metavar="PATH",
+                   help="Where that cache lives (default: beside the logs and reports)")
     p.set_defaults(use_cache=True)
     p.add_argument("--fail-if-queue", action="store_true", help="Exit non-zero if known 8-bit SDR movies are queued")
     p.add_argument("--fail-if-review", action="store_true", help="Exit non-zero if a movie requires metadata review")
@@ -1106,6 +1145,8 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         ffprobe=args.ffprobe,
         cache_file=args.cache,
         use_cache=bool(args.use_cache),
+        use_state=not bool(args.no_state),
+        state_db=args.state_db,
     )
 
 # =============================================================================

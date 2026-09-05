@@ -266,6 +266,69 @@ class ProbeCacheWiringTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 2)
 
 
+class StateCacheTests(unittest.TestCase):
+    """The verdicts this tool publishes for ``organize status`` to read.
+
+    Distinct from the probe cache next door: that one stores ffprobe's payload
+    so this tool can skip work, this one stores the answer so the summary needs
+    no ffprobe at all.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="tbit_state_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.library = self.root / "lib"
+        self.library.mkdir()
+        self.movie = self.library / "Film (2020).mkv"
+        self.movie.write_bytes(b"x" * 4096)
+        self.db = self.root / "state.db"
+
+    def _cfg(self, **overrides: Any) -> tb.Config:
+        settings: dict[str, Any] = {"source_dir": self.library, "state_db": self.db}
+        settings.update(overrides)
+        return tb.Config(**settings)
+
+    def _result(self, status: str = tb.STATUS_QUEUE) -> tb.ProbeResult:
+        return tb.ProbeResult(path=str(self.movie), status=status,
+                              category=tb.CATEGORY_LABELS[status], info="8-bit SDR h264")
+
+    def _verdicts(self) -> dict:
+        store = core.open_state(self.db, tool="tests")
+        try:
+            return store.verdicts(core.KIND_BITDEPTH)
+        finally:
+            store.close()
+
+    def test_a_verdict_is_published_with_the_bytes_it_describes(self) -> None:
+        self.assertEqual(tb.publish_state([self._result()], self._cfg()), 1)
+        stored = self._verdicts()[(path_norm(self.movie), core.KIND_BITDEPTH)]
+        info = self.movie.stat()
+        self.assertEqual(stored.verdict, tb.STATUS_QUEUE)
+        self.assertEqual(stored.detail, "8-bit SDR h264")
+        self.assertTrue(stored.is_current_for(info.st_size, info.st_mtime_ns))
+
+    def test_a_later_run_replaces_the_earlier_verdict(self) -> None:
+        tb.publish_state([self._result(tb.STATUS_QUEUE)], self._cfg())
+        tb.publish_state([self._result(tb.STATUS_SKIP_HDR)], self._cfg())
+        rows = self._verdicts()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[(path_norm(self.movie), core.KIND_BITDEPTH)].verdict,
+                         tb.STATUS_SKIP_HDR)
+
+    def test_no_state_publishes_nothing(self) -> None:
+        self.assertEqual(tb.publish_state([self._result()], self._cfg(use_state=False)), 0)
+        self.assertFalse(self.db.exists())
+
+    def test_an_unusable_cache_never_fails_the_run(self) -> None:
+        self.db.write_bytes(b"not a database" * 50)
+        self.assertEqual(tb.publish_state([self._result()], self._cfg()), 0)
+
+    def test_a_state_db_inside_the_library_is_a_config_error(self) -> None:
+        errors = tb.validate_config(self._cfg(state_db=self.library / "state.db"))
+        self.assertTrue(any("State cache must be outside" in error for error in errors))
+
+
 class AtomicWriteTextTests(unittest.TestCase):
     def test_writes_and_replaces(self) -> None:
         with tempfile.TemporaryDirectory() as td:

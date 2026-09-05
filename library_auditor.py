@@ -35,6 +35,8 @@ from threading import Lock
 from organizekit.core import (
     COVERING_ENGLISH_SRT_SUFFIXES,
     EXTERNAL_SRT_SUFFIX,
+    KIND_LAYOUT,
+    KIND_SUBTITLE,
     LEGACY_EXTERNAL_SRT_SUFFIX,
     ExclusiveRunLock,
     LockUnavailable,
@@ -43,6 +45,7 @@ from organizekit.core import (
     default_tool_dir,
     enable_utf8_stdio,
     map_ordered,
+    open_state,
     path_is_within,
     print_text,
     promote_legacy_external_english_srt,
@@ -120,6 +123,8 @@ class Config:
     fail_on_findings: bool = False
     fail_on_defects: bool = False
     workers: int = 0  # 0 = decide from the CPU count; 1 = walk folders one by one
+    use_state: bool = True       # publish the verdicts to the shared state cache
+    state_db: Path | None = None  # None = the documented default location
 
 @dataclass(frozen=True)
 class MovieFile:
@@ -291,6 +296,54 @@ def audit_library(cfg: Config) -> Audit:
         elif index == len(folders) or index % 25 == 0:
             log(f"[{index}/{len(folders)}] audited: {folder.name}")
     return Audit(cfg.source_dir, audited)
+
+# What the audit's own vocabulary means to everything else. The audit decides
+# two separate things about a folder - is the layout canonical, and is there a
+# usable English sidecar - and reports them as one state, because a folder with
+# no movie file cannot have a sidecar problem worth naming. `organize status`
+# needs them apart, so the split is stated here, by the tool that owns the
+# vocabulary, rather than being re-derived by a reader that would guess.
+SUBTITLE_STATE_FOR_AUDIT = {
+    "CANONICAL_MKV": "present",
+    "MISSING_SIDECAR": "missing",
+    "INVALID_SIDECAR": "invalid",
+    "NONCANONICAL_SIDECAR": "noncanonical",
+}
+
+
+def publish_state(audit: Audit, cfg: Config) -> int:
+    """Record this audit's verdicts in the shared state cache.
+
+    Best effort by construction: the cache is a convenience for
+    ``organize status`` and for skipping settled movies on a later pass. It is
+    never read back as authority, and a failure to write it must not affect the
+    audit's report, its exit code, or anything a scheduler keys on.
+    """
+    store = open_state(cfg.state_db, enabled=cfg.use_state, tool="library_auditor")
+    if not store.enabled:
+        return 0
+    published = 0
+    try:
+        seen: list[str] = []
+        for item in audit.folders:
+            if len(item.movie_files) != 1:
+                continue  # no single movie file: nothing to key a verdict on
+            movie = item.folder / item.movie_files[0].name
+            seen.append(store.see_movie(movie, folder=item.folder))
+            store.record(movie, KIND_LAYOUT, item.state, item.detail)
+            subtitle_state = SUBTITLE_STATE_FOR_AUDIT.get(item.state)
+            if subtitle_state is not None:
+                store.record(movie, KIND_SUBTITLE, subtitle_state, item.detail)
+            published += 1
+        store.forget_missing(seen)
+        store.note("audit", f"{published} movie(s) audited")
+        store.prune_events()
+    except Exception as exc:  # noqa: BLE001 - a cache write can never fail a run
+        log(f"state cache not updated: {exc}", level="WARNING")
+    finally:
+        store.close()
+    return published
+
 
 # =============================================================================
 # REPORT
@@ -512,6 +565,8 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append("--log and --report must be different files")
     if cfg.workers < 0:
         errors.append("--workers must be non-negative (0 = decide from the CPU count)")
+    if cfg.state_db is not None and path_is_within(cfg.state_db, cfg.source_dir):
+        errors.append(f"--state-db must be outside --source: {cfg.state_db}")
     return errors
 
 def exit_code_for(counts: Counter, cfg: Config) -> int:
@@ -549,6 +604,7 @@ def run(cfg: Config) -> int:
             started = time.perf_counter()
             audit = audit_library(cfg)
             audit.elapsed_sec = time.perf_counter() - started
+            publish_state(audit, cfg)
             report = build_report(audit, cfg)
             atomic_write_text(cfg.report_file, report)
             counts = Counter(item.state for item in audit.folders)
@@ -573,6 +629,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log", type=Path, default=Path(LOG_FILE), help="Append-only execution log outside the media library")
     parser.add_argument("--report", type=Path, default=Path(REPORT_FILE), help="The sole replaceable plain-text output report")
     parser.add_argument("--lock-timeout", type=float, default=60.0, metavar="SECONDS", help="Maximum wait for another audit run")
+    parser.add_argument("--no-state", action="store_true",
+                        help="Do not record this audit in the shared state cache "
+                             "that `organize status` reads. The audit itself is "
+                             "unaffected: the cache is never read as authority.")
+    parser.add_argument("--state-db", type=Path, default=None, metavar="PATH",
+                        help="Where that cache lives (default: beside the logs and reports)")
     parser.add_argument("--workers", type=int, default=0, metavar="N",
                         help=f"Read N movie folders at once (0 = decide from the CPU count, "
                              f"capped at {MAX_AUDIT_WORKERS}; 1 = one folder at a time). The "
@@ -593,6 +655,8 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         fail_on_findings=bool(args.fail_on_findings),
         fail_on_defects=bool(args.fail_on_defects),
         workers=int(args.workers),
+        use_state=not bool(args.no_state),
+        state_db=args.state_db,
     )
 
 # =============================================================================

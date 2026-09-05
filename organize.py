@@ -7,6 +7,7 @@ Python 3.11+ Jellyfin movie library toolkit.
 
 Commands:
     doctor       Diagnose environment, external binaries, paths, and hardlink capability
+    status       Summarise what is done and what the next pass will touch (read-only)
     run          Run the automated maintenance pipeline (subtitles -> remux -> 10-bit -> sync -> audit)
     standardize  Rename and hardlink completed downloads into Title (Year)/Title (Year).mkv
     subtitles    Fetch validated English human UTF-8 SRT sidecars (OpenSubtitles + SubDL)
@@ -19,6 +20,7 @@ Commands:
 
 Quickstart:
     python organize.py doctor           # Check if your system is ready
+    python organize.py status           # See what is left to do
     python organize.py run --dry-run    # Preview the pipeline commands
     python organize.py run              # Run the full pipeline
 
@@ -166,6 +168,7 @@ def print_dashboard() -> None:
 
     print(bold("  QUICK COMMANDS:"))
     print(f"    {green('python organize.py doctor')}             Run comprehensive environment & prerequisite diagnostics")
+    print(f"    {green('python organize.py status')}             Summarise progress: what is done, what the next pass touches")
     print(f"    {green('python organize.py run')}                Run manual maintenance pipeline (steps 2 -> 3 -> 4 -> 5 -> 6)")
     print(f"    {green('python organize.py run --dry-run')}      Preview pipeline commands without executing")
     print(f"    {green('python organize.py standardize [PATH]')} Standardize a specific torrent download or batch scan")
@@ -603,6 +606,313 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
 
 
 # =============================================================================
+# STATUS
+# =============================================================================
+
+# What each step calls "settled". A movie is only counted as needing nothing
+# when every step has an answer about *these exact bytes* and that answer is in
+# the settled set; anything else - never measured, measured before the file
+# changed, queued, failed, held for review - is work the next pass will do.
+# The vocabularies are imported from the tools that own them rather than
+# re-spelled here, so a renamed status can never silently stop matching.
+SETTLED_LAYOUT = frozenset({"CANONICAL_MKV"})
+SETTLED_SUBTITLE = frozenset({"present"})
+
+
+@dataclass(frozen=True)
+class StepStatus:
+    """One step's answer for the whole library.
+
+    ``stale`` and ``unmeasured`` are kept apart on purpose: "measured, then the
+    file changed" and "never measured" both mean the next pass will do the
+    work, but only the first says the cache is being kept honest.
+    """
+
+    label: str
+    counts: dict[str, int]
+    settled: int
+    stale: int = 0
+    unmeasured: int = 0
+
+    @property
+    def recorded(self) -> bool:
+        """Has this step ever published a verdict about this library?"""
+        return bool(self.counts) or self.stale > 0
+
+
+@dataclass(frozen=True)
+class LibraryStatus:
+    library: Path
+    movies: int
+    total_bytes: int
+    steps: tuple[StepStatus, ...]
+    settled: int
+    elapsed_sec: float = 0.0
+
+    @property
+    def pending(self) -> int:
+        return max(0, self.movies - self.settled)
+
+
+def human_bytes(size: int) -> str:
+    """1 TiB as ``1.0 TiB``; the report style the tools already print."""
+    value = float(size)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024.0 or unit == "TiB":
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024.0
+    return f"{value:.1f} TiB"
+
+
+def _tally(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
+
+
+def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
+    """Join a live audit with the stored verdicts into one summary.
+
+    ``audit`` is authoritative and fresh - it was just measured from the
+    filesystem - so layout and subtitles are read straight from it. Bit depth
+    and sync cost an ffprobe and an ffsubsync run respectively, so those come
+    from the cache, and each stored answer is checked against the movie's
+    current ``(size, mtime_ns)``: an answer about bytes that have since changed
+    is reported as unknown, never as a verdict.
+
+    A cached step with no usable answer anywhere in the library is treated as
+    "not recorded yet" and left out of the settled tally rather than marking
+    every movie pending. Otherwise a step that nobody has ever run - or that
+    does not publish verdicts at all - would permanently report a library of
+    zero finished movies, which is the sort of always-red number people learn
+    to ignore. Which steps were left out is printed, so the figure is never
+    quietly optimistic.
+    """
+    import bitdepth as probe_mod
+    import sync_subtitles as sync_mod
+    from organizekit.core import KIND_BITDEPTH, KIND_REMUX, KIND_SYNC, path_norm
+
+    settled_verdicts: dict[str, frozenset[str] | None] = {
+        KIND_REMUX: None,  # any current answer means the remux question is closed
+        KIND_BITDEPTH: frozenset({probe_mod.STATUS_SKIP_SDR, probe_mod.STATUS_SKIP_HDR}),
+        KIND_SYNC: frozenset({sync_mod.STATUS_SYNCED, sync_mod.STATUS_IN_SYNC,
+                              sync_mod.STATUS_REMEMBERED}),
+    }
+    cached_kinds = tuple(settled_verdicts)
+
+    layout: dict[str, int] = {}
+    subtitle: dict[str, int] = {}
+    cached: dict[str, dict[str, int]] = {kind: {} for kind in cached_kinds}
+    stale: dict[str, int] = dict.fromkeys(cached_kinds, 0)
+    unmeasured: dict[str, int] = dict.fromkeys(cached_kinds, 0)
+    settled: dict[str, int] = {"layout": 0, "subtitle": 0, **dict.fromkeys(cached_kinds, 0)}
+    per_movie: list[dict[str, bool]] = []
+
+    movies = 0
+    total_bytes = 0
+    subtitle_states = _subtitle_states()
+
+    for item in audit.folders:
+        if len(item.movie_files) != 1:
+            # No single feature file: a layout defect, and nothing to key a
+            # per-movie verdict on. Counted in the layout line only.
+            _tally(layout, item.state)
+            continue
+        movies += 1
+        total_bytes += item.movie_files[0].size_bytes
+        key = path_norm(item.folder / item.movie_files[0].name)
+        size, mtime_ns = stamps.get(key, (None, None))
+
+        _tally(layout, item.state)
+        sub_state = subtitle_states.get(item.state)
+        if sub_state is not None:
+            _tally(subtitle, sub_state)
+
+        step_ok = {
+            "layout": item.state in SETTLED_LAYOUT,
+            "subtitle": sub_state in SETTLED_SUBTITLE,
+        }
+        for kind in cached_kinds:
+            stored = verdicts.get((key, kind))
+            if stored is None:
+                unmeasured[kind] += 1
+                step_ok[kind] = False
+                continue
+            if not stored.is_current_for(size, mtime_ns):
+                stale[kind] += 1
+                step_ok[kind] = False
+                continue
+            _tally(cached[kind], stored.verdict)
+            allowed = settled_verdicts[kind]
+            step_ok[kind] = True if allowed is None else stored.verdict in allowed
+        for name, ok in step_ok.items():
+            settled[name] += int(ok)
+        per_movie.append(step_ok)
+
+    counted = {"layout", "subtitle"} | {
+        kind for kind in cached_kinds if cached[kind] or stale[kind]
+    }
+    fully_settled = sum(
+        1 for step_ok in per_movie if all(ok for name, ok in step_ok.items() if name in counted)
+    )
+
+    steps = (
+        StepStatus("Layout", layout, settled["layout"]),
+        StepStatus("Subtitles", subtitle, settled["subtitle"]),
+        *(
+            StepStatus(label, cached[kind], settled[kind], stale[kind], unmeasured[kind])
+            for label, kind in (("Remux", KIND_REMUX), ("Bit depth", KIND_BITDEPTH),
+                                ("Sync", KIND_SYNC))
+        ),
+    )
+    return LibraryStatus(
+        library=audit.source_dir, movies=movies, total_bytes=total_bytes,
+        steps=steps, settled=fully_settled, elapsed_sec=getattr(audit, "elapsed_sec", 0.0),
+    )
+
+
+def _subtitle_states() -> dict[str, str]:
+    """The auditor's own mapping from folder state to subtitle state."""
+    try:
+        import library_auditor
+        return dict(library_auditor.SUBTITLE_STATE_FOR_AUDIT)
+    except Exception:
+        return {}
+
+
+def format_status(status: LibraryStatus) -> list[str]:
+    """Render the summary as plain lines (no colour): what `status` prints."""
+    lines = [
+        f"{'Library':<10}{status.library}",
+        f"{'':<10}{status.movies} movie(s), {human_bytes(status.total_bytes)}",
+    ]
+    for step in status.steps:
+        if not step.recorded:
+            lines.append(f"{step.label:<10}not recorded yet")
+            continue
+        parts = [f"{count} {name}" for name, count in
+                 sorted(step.counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+        if step.stale:
+            parts.append(f"{step.stale} stale")
+        if step.unmeasured:
+            parts.append(f"{step.unmeasured} unmeasured")
+        lines.append(f"{step.label:<10}" + "   ".join(parts))
+    lines.append("")
+    lines.append(
+        f"Nothing to do for {status.settled} movie(s) - "
+        f"the next pass will touch {status.pending}."
+    )
+    missing = [step.label for step in status.steps if not step.recorded]
+    if missing:
+        lines.append(
+            f"({' and '.join(missing)} not counted: no cached verdicts to count.)"
+        )
+    return lines
+
+
+def add_status_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """Define `status`'s flags in one place, for both parsers that offer them."""
+    parser.add_argument("--library", type=Path, default=None, metavar="PATH",
+                        help="Library root to summarise (default: the one every tool resolves)")
+    parser.add_argument("--state-db", type=Path, default=None, metavar="PATH",
+                        help="Where the shared state cache lives (default: beside the logs)")
+    parser.add_argument("--no-state", action="store_true",
+                        help="Ignore the cache: show only the live layout and subtitle scan")
+    parser.add_argument("--workers", type=int, default=0, metavar="N",
+                        help="Folder scan workers (0 = decide from the CPU count, 1 = serial)")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Also print the scan log the summary is built from")
+    return parser
+
+
+def run_status(
+    library_path: Path | None = None,
+    *,
+    state_db: Path | None = None,
+    use_state: bool = True,
+    workers: int = 0,
+    verbose: bool = False,
+) -> int:
+    """Answer "what is left to do?" with one live scan and the state cache.
+
+    Layout and subtitles are re-measured here rather than read back from the
+    cache: they are cheap (a stat per file) and they are the two things a user
+    can change behind the toolkit's back by moving a file. The expensive
+    verdicts - bit depth, sync, remux - are read from the cache and shown only
+    while they still describe the bytes on disk.
+
+    This runs the auditor itself rather than a second, subtly different scan,
+    so it inherits exactly one side effect: a validated legacy ``Title.en.srt``
+    is renamed to the canonical ``Title.eng.srt``, as ``organize audit`` does.
+    No movie file is ever touched.
+    """
+    import io
+    from contextlib import redirect_stdout
+
+    import library_auditor
+    from organizekit.core import open_state, path_norm
+
+    library = _resolve_library_path(library_path)
+    if not library.is_dir():
+        print(f"{SYM_FAIL} {red('Library not found:')} {library}", file=sys.stderr)
+        return 2
+
+    cfg = library_auditor.Config(
+        source_dir=library, workers=workers, use_state=use_state, state_db=state_db,
+    )
+    print(f"{SYM_ARROW} Scanning {cyan(str(library))} ...")
+    scan_log = io.StringIO()
+    started = time.perf_counter()
+    try:
+        # The audit narrates every non-canonical folder, which is the auditor's
+        # job and not this summary's. Keep the log, print it only on --verbose
+        # or if the scan fails, so `status` stays one screen.
+        with redirect_stdout(scan_log):
+            audit = library_auditor.audit_library(cfg)
+    except Exception as exc:
+        print(scan_log.getvalue(), end="")
+        print(f"{SYM_FAIL} {red('Scan failed:')} {exc}", file=sys.stderr)
+        return 2
+    audit.elapsed_sec = time.perf_counter() - started
+    if verbose:
+        print(scan_log.getvalue(), end="")
+
+    # Publishing here is the same write-through the auditor performs, reusing
+    # its function so there is exactly one definition of what an audit means to
+    # the cache - and it prunes rows for movies that have since been deleted.
+    with redirect_stdout(scan_log):
+        library_auditor.publish_state(audit, cfg)
+
+    stamps: dict[str, tuple[int | None, int | None]] = {}
+    for item in audit.folders:
+        if len(item.movie_files) != 1:
+            continue
+        movie = item.folder / item.movie_files[0].name
+        try:
+            info = movie.stat()
+            stamps[path_norm(movie)] = (info.st_size, info.st_mtime_ns)
+        except OSError:
+            stamps[path_norm(movie)] = (None, None)
+
+    store = open_state(state_db, enabled=use_state, tool="organize status")
+    try:
+        verdicts = store.verdicts()
+    finally:
+        store.close()
+
+    status = collect_status(audit, verdicts, stamps)
+    print()
+    for line in format_status(status):
+        print(f"  {line}".rstrip())
+    measured = any(step.recorded for step in status.steps[2:])
+    if not store.enabled:
+        print(f"\n  {SYM_WARN} {yellow('State cache disabled')} - only layout and subtitles are live.")
+    elif not measured:
+        print(f"\n  {SYM_BULLET} No cached verdicts yet: run {cyan('organize 10bit')} and "
+              f"{cyan('organize sync')} to fill in the remaining rows.")
+    print(f"  {dim(f'Scanned in {status.elapsed_sec:.2f}s. No movie file was modified.')}")
+    return 0
+
+
+# =============================================================================
 # SUBCOMMAND DELEGATIONS
 # =============================================================================
 
@@ -706,6 +1016,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python organize.py run --dry-run          # Dry-run the pipeline\n"
             "  python organize.py run                    # Run full pipeline\n"
             "  python organize.py standardize '%F'       # qBittorrent post-torrent hook\n"
+            "  python organize.py status                 # What is done and what is left\n"
             "  python organize.py audit                  # Read-only health check\n"
             "  python organize.py test                   # Run all self-tests\n"
         ),
@@ -720,6 +1031,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_doc = subparsers.add_parser("doctor", aliases=["check"], help="Diagnose environment, binaries, and hardlink compatibility")
     p_doc.add_argument("--source", type=Path, help="Override source download directory")
     p_doc.add_argument("--target", type=Path, help="Override target library directory")
+
+    # status
+    add_status_arguments(subparsers.add_parser(
+        "status", help="Summarise library progress: what is done, what the next pass will touch"))
 
     # run / pipeline
     subparsers.add_parser("run", aliases=["pipeline"], help="Run the automated maintenance pipeline", add_help=False)
@@ -806,6 +1121,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         p.add_argument("--target", type=Path, default=None)
         parsed = p.parse_args(sub_args)
         return run_doctor(library_path=parsed.target, source_path=parsed.source)
+
+    if command == "status":
+        # Same definition the top-level parser advertises, so `organize --help`
+        # and `organize status --help` can never describe different flags.
+        parsed = add_status_arguments(
+            argparse.ArgumentParser(prog="organize status",
+                                    description="What is done, and what the next pass will touch.")
+        ).parse_args(sub_args)
+        return run_status(
+            parsed.library,
+            state_db=parsed.state_db,
+            use_state=not parsed.no_state,
+            workers=int(parsed.workers),
+            verbose=bool(parsed.verbose),
+        )
 
     if command in {"run", "pipeline"}:
         return delegate_to_script("pipeline.py", sub_args)

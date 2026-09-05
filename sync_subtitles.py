@@ -100,6 +100,7 @@ from typing import Any
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
 # keeps it that way.
 from organizekit.core import (
+    KIND_SYNC,
     CoordinationLock,
     LockTimeoutError,
     Report,
@@ -108,6 +109,7 @@ from organizekit.core import (
     describe_workers,
     enable_utf8_stdio,
     iter_completed,
+    open_state,
     path_is_within,
     print_text,
     resolve_library,
@@ -919,6 +921,8 @@ class Config:
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS
     limit: int = 0
     workers: int = 0  # 0 = decide from the CPU count, capped at MAX_SYNC_WORKERS
+    use_state: bool = True        # publish verdicts to the shared state cache
+    state_db: Path | None = None  # None = the documented default location
     dry_run: bool = False
     fail_on_review: bool = False
     ffsubsync_binary: str = ""
@@ -945,6 +949,8 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append("--limit must be non-negative")
     if cfg.workers < 0:
         errors.append("--workers must be non-negative (0 = decide from the CPU count)")
+    if cfg.state_db is not None and path_is_within(cfg.state_db, cfg.library):
+        errors.append("--state-db must be outside the Jellyfin media library")
     return errors
 
 
@@ -1131,6 +1137,36 @@ def write_report(text: str, cfg: Config) -> None:
 # Run
 # =============================================================================
 
+def publish_state(results: list[SyncResult], cfg: Config) -> int:
+    """Record each sidecar's timing verdict in the shared state cache.
+
+    The sync ledger (``--sync-ledger``) remains the authority for "do I need to
+    re-measure this?" - it is keyed by the subtitle's SHA-256 *and* the movie's
+    size and mtime, which is a stricter question than this cache asks. What
+    goes here is the answer ``organize status`` displays, and losing it costs a
+    line of a summary, nothing more.
+    """
+    if cfg.dry_run:
+        return 0  # a dry run measured nothing; it has nothing to publish
+    store = open_state(cfg.state_db, enabled=cfg.use_state, tool="sync_subtitles")
+    if not store.enabled:
+        return 0
+    published = 0
+    try:
+        for result in results:
+            if result.video is None:
+                continue  # an orphan sidecar: no movie to key a verdict on
+            detail = f"{result.srt.name}: {result.detail}" if result.detail else result.srt.name
+            store.record(result.video, KIND_SYNC, result.status, detail)
+            published += 1
+        store.note("sync", f"{published} sidecar(s) measured")
+    except Exception as exc:  # noqa: BLE001 - a cache write can never fail a run
+        log(f"state cache not updated: {exc}", level="WARNING")
+    finally:
+        store.close()
+    return published
+
+
 def exit_code_for(results: Sequence[SyncResult], cfg: Config) -> int:
     """Scheduler-friendly exit code: failures dominate reviews, reviews need the flag."""
     if any(r.status == STATUS_FAILED for r in results):
@@ -1268,6 +1304,7 @@ def run(cfg: Config) -> int:
         if not cfg.dry_run:
             # A dry run measured nothing, so it has nothing new to remember.
             save_sync_state(cfg.sync_ledger, sync_state)
+        publish_state(results, cfg)
 
     review = sum(1 for r in results if r.status == STATUS_REVIEW)
     failed = sum(1 for r in results if r.status == STATUS_FAILED)
@@ -1328,6 +1365,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Maximum wait for the cross-tool coordination lock")
     parser.add_argument("--limit", type=int, default=0, metavar="N",
                         help="Check at most N sidecars (0 means all)")
+    parser.add_argument("--no-state", action="store_true",
+                        help="Do not record these verdicts in the shared state cache "
+                             "that `organize status` reads (the sync ledger is unaffected)")
+    parser.add_argument("--state-db", type=Path, default=None, metavar="PATH",
+                        help="Where that cache lives (default: beside the logs and reports)")
     parser.add_argument("--workers", type=int, default=0, metavar="N",
                         help=f"Measure N sidecars at once (0 = half the CPUs, capped at "
                              f"{MAX_SYNC_WORKERS}; 1 = the serial run)")
@@ -1353,6 +1395,8 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         lock_timeout_seconds=float(args.lock_timeout),
         limit=max(0, int(args.limit)),
         workers=int(args.workers),
+        use_state=not bool(args.no_state),
+        state_db=args.state_db,
         dry_run=bool(args.dry_run),
         fail_on_review=bool(args.fail_on_review),
         ffsubsync_binary=str(args.ffsubsync or ""),
