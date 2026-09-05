@@ -37,7 +37,6 @@ import tempfile
 import time
 import traceback
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -55,9 +54,11 @@ from organizekit.core import (
     atomic_write_text,
     default_tool_dir,
     enable_utf8_stdio,
+    iter_completed,
     path_is_within,
     print_text,
     resolve_library,
+    resolve_workers,
     run_field_smoke_test,
 )
 
@@ -990,33 +991,32 @@ def scan(cfg: Config) -> int:
         log(f"Probe cache: {cfg.cache_file} ({len(cache)} entries loaded)")
 
     if files:
-        workers = max(1, min(cfg.workers, len(files)))
+        workers = resolve_workers(cfg.workers, items=len(files), cap=MAX_CPU_WORKERS)
         try:
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="probe") as pool:
-                futs = {pool.submit(inspect_movie, p, cfg, cache): p for p in files}
-                for fut in as_completed(futs):
-                    path = futs[fut]
-                    try:
-                        res = fut.result()
-                    except Exception as exc:
-                        res = ProbeResult(
-                            path=str(path),
-                            status=STATUS_ERROR,
-                            category=CATEGORY_LABELS[STATUS_ERROR],
-                            info=str(exc),
-                            error=str(exc),
-                        )
-                    _store(res)
-                    done += 1
-                    tag = {
-                        STATUS_QUEUE: "QUEUE",
-                        STATUS_SKIP_SDR: "SKIP-SDR",
-                        STATUS_SKIP_HDR: "KEEP-HDR",
-                        STATUS_REVIEW_8BIT_HDR: "REVIEW-HDR",
-                        STATUS_REVIEW_UNKNOWN_DEPTH: "REVIEW-DEPTH",
-                        STATUS_ERROR: "ERROR",
-                    }.get(res.status, res.status)
-                    log(f"[{done}/{total}] {tag:<9} {path.name}")
+            for outcome in iter_completed(files, lambda p: inspect_movie(p, cfg, cache),
+                                          workers=workers):
+                path = outcome.item
+                if outcome.error is not None:
+                    res = ProbeResult(
+                        path=str(path),
+                        status=STATUS_ERROR,
+                        category=CATEGORY_LABELS[STATUS_ERROR],
+                        info=str(outcome.error),
+                        error=str(outcome.error),
+                    )
+                else:
+                    res = outcome.value
+                _store(res)
+                done += 1
+                tag = {
+                    STATUS_QUEUE: "QUEUE",
+                    STATUS_SKIP_SDR: "SKIP-SDR",
+                    STATUS_SKIP_HDR: "KEEP-HDR",
+                    STATUS_REVIEW_8BIT_HDR: "REVIEW-HDR",
+                    STATUS_REVIEW_UNKNOWN_DEPTH: "REVIEW-DEPTH",
+                    STATUS_ERROR: "ERROR",
+                }.get(res.status, res.status)
+                log(f"[{done}/{total}] {tag:<9} {path.name}")
         except KeyboardInterrupt:
             log("\nInterrupted — writing partial results.")
 

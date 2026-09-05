@@ -35,7 +35,10 @@ To maintain its bulletproof stability, all contributions must respect the projec
 7. **Atomic Staging and Verification**
    Reports, journals, manifests, and remuxed MKVs are written to sibling temporary files and atomically swapped (`os.replace` / `os.link`). Mid-operation crashes or power outages never corrupt existing media.
 
-8. **100% Offline Testability**
+8. **Parallelism Must Have an Off Switch, and Must Not Change the Answer**
+   The tools that read the library in parallel (`sync_subtitles.py`, `library_auditor.py`, `bitdepth.py`) all go through `organizekit.core.parallel`. Two rules come with it: `--workers 1` runs the work inline in the calling thread, so it is a real escape hatch rather than a one-worker pool; and anything whose output is a numbered list or an official verdict uses `map_ordered`, which returns results in input order, so the worker count cannot change a character of the report. Shared mutable state (the sync ledger) is mutated in exactly one locked function.
+
+9. **100% Offline Testability**
    The test suite must run completely offline without internet connectivity, without OpenSubtitles or SubDL API keys, and without requiring external binaries (`mkvmerge` or `ffprobe`).
 
 ---

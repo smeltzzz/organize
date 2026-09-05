@@ -844,7 +844,7 @@ class ReportShapeTests(unittest.TestCase):
         lines = text.splitlines()
         self.assertTrue(text.endswith("\n"))
         self.assertTrue(all(not line.endswith(" ") for line in lines))
-        self.assertTrue(all(len(line) <= ss.REPORT_WIDTH for line in lines))
+        self.assertTrue(all(len(line) <= core.REPORT_WIDTH for line in lines))
         self.assertIn("JELLYFIN SUBTITLE SYNCHRONIZER", text)
         for title in ("SUBTITLES HELD FOR REVIEW", "FAILED SYNC ATTEMPTS",
                       "SUBTITLES SYNCED (TIMING CORRECTED)", "SKIPPED (NOTHING SYNCED)",
@@ -862,6 +862,102 @@ class ReportShapeTests(unittest.TestCase):
                                elapsed_sec=0.1, truncated=False)
         self.assertIn("NOTHING FOUND", text)
         self.assertIn("subtitle_fetcher.py", text)
+
+
+class ParallelMeasurementTests(unittest.TestCase):
+    """ffsubsync is the slowest thing the toolchain does, and each sidecar is
+    an independent measurement, so they run in parallel. Two things must
+    survive that: every sidecar is still measured exactly once, and the shared
+    remembered-verdict ledger does not lose an entry to a lost update.
+    """
+
+    MOVIES = 12
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="sync_parallel_")
+        self.tmp = Path(self._td.name).resolve()
+        self.addCleanup(self._td.cleanup)
+        self.lib = self.tmp / "lib"
+        for index in range(self.MOVIES):
+            name = f"Film {index:02d} (2000)"
+            folder = self.lib / name
+            folder.mkdir(parents=True)
+            (folder / f"{name}.mkv").write_bytes(b"fake video")
+            (folder / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8")
+        self.log = self.tmp / "out" / "sync.log"
+        self.report = self.tmp / "out" / "sync_report.txt"
+        self.ledger = self.tmp / "out" / "sync_state.json"
+
+    def _reset_library(self) -> None:
+        """Put the library back exactly as setUp left it, in place.
+
+        Rebuilding it in a *new* temporary directory would make the two
+        reports differ by path, which is not the difference under test.
+        """
+        for index in range(self.MOVIES):
+            name = f"Film {index:02d} (2000)"
+            (self.lib / name / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8")
+        self.ledger.unlink(missing_ok=True)
+
+    def _run(self, workers: int) -> int:
+        real_which = shutil.which
+
+        def which(name: str) -> str | None:
+            return "/usr/bin/ffmpeg" if name == "ffmpeg" else real_which(name)
+
+        fake = FakeFfsubsync()
+        with mock.patch.object(ss, "run_ffsubsync", fake), \
+                mock.patch.object(ss, "find_ffsubsync", lambda explicit=None: "fake-ffsubsync"), \
+                mock.patch.object(ss, "ffsubsync_version", lambda binary: "ffsubsync 9.9.9"), \
+                mock.patch.object(ss, "detect_ffsubsync_features",
+                                  lambda binary: ss.FfsubsyncFeatures(True, True, True)), \
+                mock.patch("shutil.which", side_effect=which):
+            code = ss.main([
+                "--source", str(self.lib),
+                "--log", str(self.log),
+                "--report", str(self.report),
+                "--sync-ledger", str(self.ledger),
+                "--workers", str(workers),
+            ])
+        self.calls = fake.calls
+        return code
+
+    def test_every_sidecar_is_measured_exactly_once(self) -> None:
+        self.assertEqual(0, self._run(workers=4))
+        self.assertEqual(self.MOVIES, len(self.calls),
+                         "a sidecar was measured twice or not at all")
+        for index in range(self.MOVIES):
+            name = f"Film {index:02d} (2000)"
+            self.assertEqual(
+                SHIFTED_SRT,
+                (self.lib / name / f"{name}.eng.srt").read_text(encoding="utf-8"),
+            )
+
+    def test_the_shared_ledger_keeps_every_verdict(self) -> None:
+        """The lost-update case: twelve workers writing one dict."""
+        self._run(workers=4)
+        entries = json.loads(self.ledger.read_text(encoding="utf-8"))["entries"]
+        self.assertEqual(self.MOVIES, len(entries))
+        self.assertTrue(all(entry["status"] == ss.STATUS_SYNCED for entry in entries.values()))
+
+    def test_the_report_is_the_same_whatever_the_worker_count(self) -> None:
+        """Results are sorted before rendering, so scheduling cannot show up."""
+        self._run(workers=1)
+        serial = self.report.read_text(encoding="utf-8")
+        self._reset_library()  # the first run rewrote every sidecar
+        self._run(workers=4)
+        parallel_text = self.report.read_text(encoding="utf-8")
+
+        def comparable(text: str) -> list[str]:
+            skip = ("Generated", "Elapsed", "Report", "Log", "Library", "Workers")
+            return [line for line in text.splitlines()
+                    if not any(f"{word} " in line for word in skip)]
+
+        self.assertEqual(comparable(serial), comparable(parallel_text))
+
+    def test_workers_must_not_be_negative(self) -> None:
+        cfg = _cfg(self.tmp, library=self.lib, workers=-2)
+        self.assertTrue(any("--workers" in error for error in ss.validate_config(cfg)))
 
 
 if __name__ == "__main__":

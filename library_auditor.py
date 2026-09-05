@@ -42,10 +42,12 @@ from organizekit.core import (
     atomic_write_text,
     default_tool_dir,
     enable_utf8_stdio,
+    map_ordered,
     path_is_within,
     print_text,
     promote_legacy_external_english_srt,
     resolve_library,
+    resolve_workers,
     run_field_smoke_test,
     validate_srt_sidecar,
 )
@@ -104,6 +106,11 @@ DEFECT_STATES = frozenset({
 
 PRINT_LOCK = Lock()
 
+# The audit is I/O bound, so more workers than CPUs still helps - it is waiting
+# on the filesystem, not computing. The ceiling keeps a network share from
+# being hammered by an unbounded fan-out.
+MAX_AUDIT_WORKERS = 8
+
 @dataclass
 class Config:
     source_dir: Path = field(default_factory=lambda: Path(SOURCE_DIR))
@@ -112,6 +119,7 @@ class Config:
     lock_timeout_seconds: float = 60.0
     fail_on_findings: bool = False
     fail_on_defects: bool = False
+    workers: int = 0  # 0 = decide from the CPU count; 1 = walk folders one by one
 
 @dataclass(frozen=True)
 class MovieFile:
@@ -253,9 +261,25 @@ def audit_library(cfg: Config) -> Audit:
         log(f"Cannot enumerate library: {exc}", level="ERROR")
         folders = []
     log(f"Found {len(folders)} top-level movie folder(s).")
+
+    # The audit is thousands of stat() calls and directory reads, and almost
+    # none of it is CPU: on a network share the round trip dominates, and even
+    # locally the process spends its time waiting on the filesystem. Folders
+    # are independent and nothing here writes, so they are classified in
+    # parallel - but the results come back in *input* order, so the numbered
+    # console output, the log and the report are identical to the serial run
+    # they replaced. --workers 1 is that serial run.
+    workers = resolve_workers(cfg.workers, items=len(folders), cap=MAX_AUDIT_WORKERS)
+    if workers > 1:
+        log(f"Reading {len(folders)} folder(s) with {workers} workers (read-only).")
     audited: list[FolderAudit] = []
-    for index, folder in enumerate(folders, 1):
-        result = classify_folder(folder)
+    for index, outcome in enumerate(map_ordered(folders, classify_folder, workers=workers), 1):
+        if outcome.error is not None:
+            # classify_folder swallows the filesystem errors it expects, so
+            # anything arriving here is a real defect in this tool. Re-raise it
+            # rather than quietly auditing a library that was never read.
+            raise outcome.error
+        folder, result = outcome.item, outcome.value
         audited.append(result)
         if result.state == "MISSING_SIDECAR":
             # Advisory, not a defect: the layout is correct, only the subtitle
@@ -486,6 +510,8 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append(f"--log must be outside --source: {cfg.log_file}")
     if os.path.normcase(os.path.normpath(str(cfg.log_file))) == os.path.normcase(os.path.normpath(str(cfg.report_file))):
         errors.append("--log and --report must be different files")
+    if cfg.workers < 0:
+        errors.append("--workers must be non-negative (0 = decide from the CPU count)")
     return errors
 
 def exit_code_for(counts: Counter, cfg: Config) -> int:
@@ -547,6 +573,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log", type=Path, default=Path(LOG_FILE), help="Append-only execution log outside the media library")
     parser.add_argument("--report", type=Path, default=Path(REPORT_FILE), help="The sole replaceable plain-text output report")
     parser.add_argument("--lock-timeout", type=float, default=60.0, metavar="SECONDS", help="Maximum wait for another audit run")
+    parser.add_argument("--workers", type=int, default=0, metavar="N",
+                        help=f"Read N movie folders at once (0 = decide from the CPU count, "
+                             f"capped at {MAX_AUDIT_WORKERS}; 1 = one folder at a time). The "
+                             f"output is identical either way.")
     parser.add_argument("--fail-on-findings", action="store_true",
                         help="Exit 1 when any folder is not CANONICAL_MKV (includes missing sidecars)")
     parser.add_argument("--fail-on-defects", action="store_true",
@@ -562,6 +592,7 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         lock_timeout_seconds=args.lock_timeout,
         fail_on_findings=bool(args.fail_on_findings),
         fail_on_defects=bool(args.fail_on_defects),
+        workers=int(args.workers),
     )
 
 # =============================================================================

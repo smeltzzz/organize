@@ -105,10 +105,13 @@ from organizekit.core import (
     Report,
     atomic_write_text,
     default_tool_dir,
+    describe_workers,
     enable_utf8_stdio,
+    iter_completed,
     path_is_within,
     print_text,
     resolve_library,
+    resolve_workers,
     run_field_smoke_test,
     sha256_file,
     validate_srt_sidecar,
@@ -205,6 +208,14 @@ DEFAULT_MAX_OFFSET_SECONDS = 30.0
 FRAMERATE_EPSILON = 0.001
 
 DEFAULT_TIMEOUT_SECONDS = 1800.0  # a feature film's audio, with margin
+
+# Sidecars are measured in parallel: ffsubsync decodes the movie's audio and
+# correlates it against the subtitle, which is the slowest step in the whole
+# toolchain and spends most of its time in ffmpeg rather than in Python. The
+# cap is deliberately low - each worker starts an ffmpeg that is itself
+# multi-threaded and reads a different movie file, so more workers than this
+# turns a CPU bound into a disk bound. --workers 1 restores the serial run.
+MAX_SYNC_WORKERS = 4
 DEFAULT_LOCK_TIMEOUT_SECONDS = 60.0
 
 # When ffsubsync cannot trust the current sidecar, download a different
@@ -624,6 +635,11 @@ def sync_state_matches(record: dict[str, Any], srt_sha: str, video: Path) -> boo
     )
 
 
+# The remembered-verdict ledger is one dict shared by every worker. Only this
+# one function mutates it, so one lock here is the whole story.
+_STATE_LOCK = Lock()
+
+
 def remember_sync_state(
     state: dict[str, Any],
     srt: Path,
@@ -637,14 +653,15 @@ def remember_sync_state(
     if not srt_sha or snapshot is None:
         return
     key = sync_state_key(srt)
-    state.pop(key, None)  # pop-then-insert refreshes recency
-    state[key] = {
-        "srt_sha256": srt_sha,
-        "video": snapshot,
-        "status": status,
-        "offset_seconds": offset_seconds,
-        "measured_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-    }
+    with _STATE_LOCK:
+        state.pop(key, None)  # pop-then-insert refreshes recency
+        state[key] = {
+            "srt_sha256": srt_sha,
+            "video": snapshot,
+            "status": status,
+            "offset_seconds": offset_seconds,
+            "measured_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
 
 
 def save_sync_state(path: Path, state: dict[str, Any]) -> None:
@@ -901,6 +918,7 @@ class Config:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS
     limit: int = 0
+    workers: int = 0  # 0 = decide from the CPU count, capped at MAX_SYNC_WORKERS
     dry_run: bool = False
     fail_on_review: bool = False
     ffsubsync_binary: str = ""
@@ -925,6 +943,8 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append("--lock-timeout must be non-negative")
     if cfg.limit < 0:
         errors.append("--limit must be non-negative")
+    if cfg.workers < 0:
+        errors.append("--workers must be non-negative (0 = decide from the CPU count)")
     return errors
 
 
@@ -966,6 +986,7 @@ def build_report(
         ("Quality gate", "on" if features.quality_gate
          else "off (older ffsubsync; client-side trust window still applies)"),
         ("Trust window", f"apply >= {cfg.min_offset_seconds:g}s drift, hold beyond +/-{cfg.max_offset_seconds:g}s"),
+        ("Workers", describe_workers(resolve_workers(cfg.workers, cap=MAX_SYNC_WORKERS), "sidecar")),
         ("Log", cfg.log_file),
         ("Report", cfg.report_file),
     ])
@@ -1159,6 +1180,7 @@ def run(cfg: Config) -> int:
         ("ffsubsync", ffsubsync_info or "not installed (dry-run only)"),
         ("Quality gate", "on" if features.quality_gate else "off (older ffsubsync)"),
         ("Trust window", f"apply >= {cfg.min_offset_seconds:g}s drift, hold beyond +/-{cfg.max_offset_seconds:g}s"),
+        ("Workers", describe_workers(resolve_workers(cfg.workers, cap=MAX_SYNC_WORKERS), "sidecar")),
         ("Log", cfg.log_file),
         ("Report", cfg.report_file),
     ])
@@ -1199,9 +1221,28 @@ def run(cfg: Config) -> int:
                 log(f"--limit {cfg.limit}: checking the first {cfg.limit} sidecar(s), "
                     f"{len(jobs) - cfg.limit} not yet checked.")
                 jobs = jobs[: cfg.limit]
-            for index, job in enumerate(jobs, 1):
+            workers = resolve_workers(cfg.workers, items=len(jobs), cap=MAX_SYNC_WORKERS)
+            if workers > 1:
+                log(f"Measuring {len(jobs)} sidecar(s) with {workers} workers; "
+                    f"each one is an independent ffsubsync run.")
+
+            def _measure(numbered: tuple[int, Job]) -> SyncResult:
+                # The "syncing" line is printed by the worker as it picks the
+                # job up, not by the dispatcher, so a parallel run still shows
+                # what is in flight rather than announcing everything at once.
+                index, job = numbered
                 log(f"[{index}/{len(jobs)}] syncing {job.srt.name} against {job.video.name}")
-                result = sync_one(job, cfg, binary or "", features, state=sync_state)
+                return sync_one(job, cfg, binary or "", features, state=sync_state)
+
+            for outcome in iter_completed(list(enumerate(jobs, 1)), _measure, workers=workers):
+                index, job = outcome.item
+                if outcome.error is not None:
+                    # A worker died on this sidecar. The sweep continues; the
+                    # movie is reported as failed rather than silently absent.
+                    result = SyncResult(srt=job.srt, video=job.video, status=STATUS_FAILED,
+                                        detail=f"unhandled error: {outcome.error}")
+                else:
+                    result = outcome.value
                 results.append(result)
                 suffix = f" ({result.detail})" if result.detail else ""
                 log(f"[{index}/{len(jobs)}] {result.status.upper():<8} {result.srt.name} "
@@ -1287,6 +1328,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Maximum wait for the cross-tool coordination lock")
     parser.add_argument("--limit", type=int, default=0, metavar="N",
                         help="Check at most N sidecars (0 means all)")
+    parser.add_argument("--workers", type=int, default=0, metavar="N",
+                        help=f"Measure N sidecars at once (0 = half the CPUs, capped at "
+                             f"{MAX_SYNC_WORKERS}; 1 = the serial run)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Discover and preview only; ffsubsync is never launched and nothing is written")
     parser.add_argument("--fail-on-review", action="store_true",
@@ -1308,6 +1352,7 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         timeout_seconds=float(args.timeout),
         lock_timeout_seconds=float(args.lock_timeout),
         limit=max(0, int(args.limit)),
+        workers=int(args.workers),
         dry_run=bool(args.dry_run),
         fail_on_review=bool(args.fail_on_review),
         ffsubsync_binary=str(args.ffsubsync or ""),

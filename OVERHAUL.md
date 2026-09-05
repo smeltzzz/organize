@@ -1,13 +1,27 @@
 # Overhaul Plan — `organize`
 
-> **Status: Phases 1, 2 and 3 are landed** on `arena/01a07259-organize` — the
+> **Status: Phases 1–4 are landed** on `arena/01a07259-organize` — the
 > shared core (`organizekit/`) replaced 4,325 lines of vendored copies, the
 > tools' 2,229 lines of self-test code moved to `tests/selftests/`, and the
 > toolchain is now described exactly once in `organizekit/core/toolchain.py`
 > instead of once per orchestrator. Production Python is down from 26,458 to
-> 20,011 lines (−24%), coverage is up from 58% to 67%, and the suite is green
-> at 576 tests. Phases 4–8 below are still open; the numbers in the tables are
-> the pre-work baseline unless marked otherwise.
+> 20,011 lines (−24%), coverage is up from 58% to 67%, the suite is green at
+> 602 tests, and the two slowest read paths now run in parallel
+> (`sync_subtitles.py` 3.6×, `library_auditor.py` up to 7.7× on network
+> storage). Phases 5–8 below
+> are still open; the numbers in the tables are the pre-work baseline unless
+> marked otherwise.
+>
+> **Phase 4 shipped for two of the four steps, and corrected the estimate for a
+> third.** The fetcher cannot be made 5–8× faster by threading it: every
+> provider client sleeps to a documented rate limit (1.0–1.1 s between
+> requests), so it is rate-limit bound, not RTT bound, and eight threads would
+> queue behind the same gap. Its real win is per-source token buckets - letting
+> OpenSubtitles, SubDL and the scraping tier each run at their own permitted
+> rate concurrently instead of one at a time - and that needs the
+> concurrency-safe quota ledger from W2. Parallel remuxing is also still not
+> done, deliberately: the track cleaner is the tool that rewrites movie files,
+> and disk throughput is the bound anyway.
 >
 > **Phase 3 came in flat on line count, and that is the honest result.** The
 > −1,400 estimate below assumed `jellyfin_one_shot.py` was largely a
@@ -292,17 +306,17 @@ W2's single scan and shared probe cache, where it pays for itself; on its own it
 is risk without reward. The prerequisite-divergence bug — the thing W3 was
 really for — is fixed either way.
 
-### W4 · Concurrency and connection reuse
+### W4 · Concurrency and connection reuse — **landed for sync and audit**
 
 **Problem.** Only `bitdepth.py` has `--workers`. The two slowest steps are serial.
 
 | Step | Bound by | Today | Proposed default | Expected wall-clock |
 | :--- | :--- | :--- | :--- | :--- |
-| `subtitle_fetcher` | network RTT | serial | 8 threads + shared token bucket | **5–8×** |
-| `sync_subtitles` | CPU (`ffsubsync`) | serial | `cpu_count//2` processes | **3–6×** |
-| `mkv_track_cleaner` | disk throughput | serial | 2 (opt-in higher) | 1.3–2× |
-| `library_auditor` | `stat()` | serial | threaded scandir | 2–4× |
-| `bitdepth` | `ffprobe` | ✅ threaded | unchanged | — |
+| `subtitle_fetcher` | ~~network RTT~~ **provider rate limit** | serial | per-source token buckets (needs W2) | ~~5–8×~~ **~1.2× from threads alone** |
+| `sync_subtitles` | CPU (`ffsubsync`) | ✅ `cpu_count//2`, cap 4 | done | **3.6× measured** |
+| `mkv_track_cleaner` | disk throughput | serial | 2 (opt-in higher) | 1.3–2× (not done: it rewrites movies) |
+| `library_auditor` | `stat()` | ✅ threaded, cap 8 | done | **7.7× measured** at 5 ms/folder; ~1× locally |
+| `bitdepth` | `ffprobe` | ✅ threaded | now uses the shared pool | — |
 
 Two details that matter:
 
@@ -310,6 +324,11 @@ Two details that matter:
   daily-quota accounting is the reason it is serial today. Move quota to the DB
   (W2) and gate requests through one `TokenBucket` per provider; parallelism
   then cannot overspend a quota, because reservation happens before dispatch.
+  *Measured correction:* the gain from threading the fetcher alone is ~1.2×,
+  not 5–8×, because `REQUEST_GAP_SEC = 1.1` already dominates the round trip.
+  The multiple comes from running the *sources* concurrently at their own
+  permitted rates, which is the token-bucket half of this item, not the thread
+  half - so this work is now sequenced after W2 rather than before it.
 - **HTTP keep-alive.** Every provider call is a bare `urllib.request.urlopen`,
   i.e. a fresh TCP + TLS handshake. A pooled `http.client.HTTPSConnection` per
   host (stdlib) removes 100–300 ms per request. On 400 movies × ~3 requests
@@ -414,7 +433,8 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**1**~~ | ~~W1 core extraction + CI gate~~ **done** | −4,663 | Med | ✅ |
 | ~~**2**~~ | ~~self-tests → `tests/`, thin smoke checks remain~~ **done** | −1,842 | Low | ✅ |
 | ~~**3**~~ | ~~W3 one Step registry; one argv builder; `.sh` → one `exec`~~ **done** | +58 (see note) | Med | ✅ |
-| **4** | W4 workers + token bucket + HTTP keep-alive | +400 | Med | 3–4 |
+| ~~**4a**~~ | ~~W4 shared worker pool; `sync_subtitles` + `library_auditor` parallel~~ **done** | +330 | Med | ✅ |
+| **4b** | W4 per-source token buckets for the fetcher (after W2) | +200 | Med | 2 |
 | **5** | W2 SQLite state + single scan + `organize status` | +900 | Med-High | 3–4 |
 | **6** | W5 planners split, property + fault-injection tests, gate → 75% | +1,200 | Low | 3–5 |
 | **7** | W6 direct-play verification, HandBrake queue, multi-language | +1,500 | Med | 4–6 |

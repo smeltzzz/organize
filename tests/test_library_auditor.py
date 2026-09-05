@@ -260,3 +260,54 @@ class ExitCodeGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ParallelAuditIsTheSameAudit(unittest.TestCase):
+    """The audit reads thousands of folders; on a network share that is a
+    round trip each. Folders are therefore classified in parallel - but the
+    audit is the library's official verdict, so the worker count must not be
+    able to change a single character of it.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="auditor_parallel_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        # A deliberately mixed library: canonical, missing sidecar, invalid
+        # sidecar, wrong container, and an empty folder.
+        for index in range(24):
+            name = f"Film {index:02d} (20{index:02d})"
+            folder = self.root / name
+            folder.mkdir()
+            if index % 5 == 4:
+                continue  # empty folder
+            extension = ".avi" if index % 7 == 6 else ".mkv"
+            (folder / f"{name}{extension}").write_bytes(b"x")
+            if index % 3 == 0:
+                (folder / f"{name}.eng.srt").write_text(VALID_SRT, encoding="utf-8")
+            elif index % 3 == 1:
+                (folder / f"{name}.eng.srt").write_text("not a subtitle", encoding="utf-8")
+
+    def _states(self, workers: int) -> list[tuple[str, str]]:
+        cfg = la.Config(source_dir=self.root, workers=workers)
+        audit = la.audit_library(cfg)
+        return [(item.folder.name, item.state) for item in audit.folders]
+
+    def test_worker_count_cannot_change_the_verdict(self) -> None:
+        serial = self._states(1)
+        self.assertEqual(24, len(serial))
+        for workers in (2, 4, 8):
+            with self.subTest(workers=workers):
+                self.assertEqual(serial, self._states(workers),
+                                 "the audit must not depend on how it was scheduled")
+
+    def test_results_stay_in_folder_order(self) -> None:
+        """The report is a numbered list; parallelism must not shuffle it."""
+        names = [name for name, _state in self._states(8)]
+        self.assertEqual(sorted(names, key=str.casefold), names)
+
+    def test_negative_workers_is_a_config_error(self) -> None:
+        cfg = la.Config(source_dir=self.root, workers=-1,
+                        log_file=self.root.parent / "a.log",
+                        report_file=self.root.parent / "a.txt")
+        self.assertTrue(any("--workers" in error for error in la.validate_config(cfg)))

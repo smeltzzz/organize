@@ -31,6 +31,14 @@ from .locking import (
     LockUnavailable,
     try_file_lock,
 )
+from .parallel import (
+    DEFAULT_WORKER_CAP,
+    JobOutcome,
+    describe_workers,
+    iter_completed,
+    map_ordered,
+    resolve_workers,
+)
 from .probecache import MediaProbeCache
 from .report import Report
 from .smoke import run_field_smoke_test
@@ -82,6 +90,12 @@ from .toolchain import (
 
 __all__ = [
     "COVERING_ENGLISH_SRT_SUFFIXES",
+    "DEFAULT_WORKER_CAP",
+    "JobOutcome",
+    "describe_workers",
+    "iter_completed",
+    "map_ordered",
+    "resolve_workers",
     "PREREQUISITES",
     "SCRAPING_DAILY_CAP",
     "STEPS",

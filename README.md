@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-576%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-602%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -89,7 +89,7 @@ One file, one purpose. Nothing else.
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
 | `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, and `toolchain.py` — the one table describing what the five steps are and how to call them. |
-| `tests/` | Fully offline unit tests (576), including `tests/selftests/` — each tool's own suite, moved out of the shipped file. |
+| `tests/` | Fully offline unit tests (602), including `tests/selftests/` — each tool's own suite, moved out of the shipped file. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. |
 
@@ -330,7 +330,17 @@ read-only; exit codes are designed for cron / Task Scheduler gating.
 
 ```bash
 python3 library_auditor.py --source /path/to/movies --fail-on-findings
+python3 library_auditor.py --source /path/to/movies --workers 8   # library on a NAS
 ```
+
+The audit is thousands of directory reads and almost no computation, so
+folders are read in parallel (`--workers`, `1` for one at a time). The win
+scales with how far away the storage is. Measured on 600 folders
+(`benchmarks/bench_audit_workers.py`): from a warm page cache the threads cost
+more than they save (0.05 s → 0.14 s, and it is 0.14 s); with a 5 ms round trip
+per folder — an HDD seek, or a library on SMB/NFS — it is **3.1 s serial → 0.40 s
+at 8 workers (7.8×)**. The audit itself is identical either way: results are
+returned in input order, so the report cannot tell how it was scheduled.
 
 ### 5 · `movie_standardizer.py` — the ingest hook
 
@@ -365,8 +375,20 @@ follows sees the finished sidecars.
 ```bash
 python3 sync_subtitles.py --source /path/to/movies --dry-run    # preview
 python3 sync_subtitles.py --source /path/to/movies --limit 10   # first 10
+python3 sync_subtitles.py --source /path/to/movies --workers 4  # measure 4 at once
 python3 sync_subtitles.py --source /path/to/movies --fail-on-review  # cron gating
 ```
+
+**Sidecars are measured in parallel.** ffsubsync is the slowest thing the
+toolchain does — it decodes the movie's audio and correlates it against the
+subtitle — and each sidecar is an independent measurement, so they run
+concurrently (`--workers`, default: half the CPUs capped at 4; `1` restores the
+serial run). Measured on 8 movies with a 0.5 s-per-sync stand-in
+(`benchmarks/bench_sync_workers.py`): **4.2 s serial → 1.2 s at 4 workers
+(3.6×)**, same outcome for every sidecar. The cap
+is low on purpose: each worker starts an ffmpeg that is itself multi-threaded
+and reads a different movie, so a bigger fan-out turns a CPU bound into a disk
+bound.
 
 **Re-running costs nothing.** A sidecar measured "in sync", or corrected and
 swapped in, is recorded outside the library (`sync_state.json`, override with
@@ -608,7 +630,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 576 unit tests
+python3 -m unittest discover -s tests -p "test_*.py"   # 602 unit tests
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
