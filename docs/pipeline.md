@@ -178,10 +178,73 @@ unwritable report: `error` is `{"kind", "message"}`, `exit_code` carries the
 process exit code (`2`, `3`, …) and every other field is present and empty. A
 caller never has to parse two formats.
 
-None of the three documents carries a **timestamp**, deliberately — nor does
+None of those three documents carries a **timestamp**, deliberately — nor does
 `status` report its scan duration or `audit` its elapsed time. Two runs over an
 unchanged library produce byte-identical output, so a nightly job can diff
 today's against yesterday's and alert only when something really changed.
+
+### Watching a run
+
+A run is the one thing here that is not a state. `doctor`, `status` and `audit`
+describe something that can be read in one shot; a full pipeline is an hour of
+work, and the questions worth asking about it — *which step is running now, how
+long did the remux take, what failed at 03:12* — cannot be answered by a file
+that only appears once it is over. It also cannot print to stdout: stdout
+belongs to the five tools the run launches. So the run reports to files, and it
+reports twice.
+
+```bash
+python3 pipeline.py --source /path/to/movies \
+    --events   /var/log/organize/run.jsonl \
+    --summary-json /var/log/organize/run_summary.json
+```
+
+**`--events PATH`** appends one JSON object per line ([JSONL][jsonl]) as the run
+happens — a tail-able stream, flushed line by line, so a dashboard sees a step
+start rather than learning about it an hour later:
+
+```bash
+tail -f run.jsonl | jq -r 'select(.event == "step_finished") | "\(.step)\t\(.status)\t\(.seconds)s"'
+jq -r 'select(.event == "step_finished" and .exit_code != 0) | .step' run.jsonl   # what broke
+jq -s 'map(select(.event == "step_finished")) | sort_by(-.seconds) | .[0]' run.jsonl  # slowest step
+```
+
+```json
+{"schema":1,"tool":"organize","version":"3.5.0","command":"run","event":"step_finished","time":"2026-09-06T03:12:44Z","step":"cleaner","status":"ran","exit_code":0,"seconds":812.4,"detail":""}
+```
+
+Every line carries the same envelope as the other commands, because a reader
+tailing the file may only ever see one line of it, plus `event` and a UTC
+`time`. The events, in order, are `run_started` (`library`, `steps`, `dry_run`,
+`limit`, `nice`, `continue_on_error`), then per step a `step_started` (`step`,
+`title`, `argv`) and a `step_finished` (`status`, `exit_code`, `seconds`,
+`detail`), then `run_finished` (`completed`, `failed`, `not_run`, `exit_code`,
+`elapsed_sec`). **Every step emits both**, including one skipped for a missing
+prerequisite — a skipped step still reports the `argv` it would have run — so a
+consumer can pair them without special cases. The file is append-only and never
+rewritten: a run killed halfway still says exactly how far it got, and the
+absence of `run_finished` is how you know it was killed.
+
+**`--summary-json PATH`** writes the closing scorecard once, at the end — the
+same numbers as the printed summary, as one document: `library`, `steps`,
+`dry_run`, `elapsed_sec`, `completed`, `failed`, `not_run`, `exit_code`, and
+`results`, one row per step with `step`, `title`, `status`, `exit_code`,
+`seconds` and `detail`.
+
+```bash
+jq -r 'if .exit_code == 0 then "ok" else "FAILED: \(.failed | join(", "))" end' run_summary.json
+```
+
+Both flags are off by default and neither changes a byte of the human output.
+Neither can fail a run, either: if the events file cannot be opened the stream
+switches itself off with one note on stderr and the run continues, and a summary
+that cannot be written is a warning, not a failure — by then the work is done,
+and a read-only log directory is not a reason to report an hour of successful
+remuxing as broken. This is also the one place a clock appears in this repo's
+JSON, for the reason the others avoid it: a run *is* an occurrence, and when it
+happened and how long it took are the point.
+
+[jsonl]: https://jsonlines.org/
 
 ---
 

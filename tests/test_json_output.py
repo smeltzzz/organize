@@ -1,10 +1,14 @@
-"""The contract three commands share: one envelope, one schema, one version.
+"""The contract four commands share: one envelope, one schema, one version.
 
-`doctor`, `status` and `audit` answer in JSON, and two of them live in a
-different file from the third. These tests are the reason that is safe: they
-compare the *documents*, so a command that quietly invents its own envelope -
-a different key, a different version, a stray timestamp - fails here rather
-than in somebody's parser six months from now.
+`doctor`, `status`, `audit` and `run` answer in JSON, and they live in four
+different files. These tests are the reason that is safe: they compare the
+*documents*, so a command that quietly invents its own envelope - a different
+key, a different version, a stray timestamp - fails here rather than in
+somebody's parser six months from now.
+
+`run` is the odd one: a run is an occurrence rather than a state, so its
+document is written to a file instead of stdout and it is the only one allowed
+to mention a clock.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from pathlib import Path
 
 import library_auditor as la
 import organize
+import pipeline as pl
 from organizekit import VERSION
 from organizekit.core import JSON_SCHEMA, json_document, print_json, slug_id
 
@@ -59,7 +64,7 @@ class EnvelopeTests(unittest.TestCase):
         self.assertEqual(slug_id("MKVToolNix (mkvmerge)"), "mkvtoolnix-mkvmerge")
 
 
-class ThreeCommandsOneShapeTests(unittest.TestCase):
+class FourCommandsOneShapeTests(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory(prefix="json_contract_")
         self.root = Path(self._td.name)
@@ -88,13 +93,22 @@ class ThreeCommandsOneShapeTests(unittest.TestCase):
                      "--state-db", str(self.root / "state.db")])
         return json.loads(out.getvalue())
 
-    def all_three(self) -> dict[str, dict]:
+    def _capture_run(self) -> dict:
+        """`run` reports to a file: stdout belongs to the tools it launches."""
+        summary = self.root / "run_summary.json"
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            pl.main(["--source", str(self.library), "--dry-run",
+                     "--summary-json", str(summary)])
+        return json.loads(summary.read_text(encoding="utf-8"))
+
+    def all_four(self) -> dict[str, dict]:
         return {
             "doctor": self._capture(["doctor", "--json", "--target", str(self.library),
                                      "--source", str(self.library)]),
             "status": self._capture(["status", "--json", "--library", str(self.library),
                                      "--state-db", str(self.root / "state.db")]),
             "audit": self._capture_audit(),
+            "run": self._capture_run(),
         }
 
     def test_organize_audit_passes_the_flag_through_to_the_tool(self) -> None:
@@ -113,8 +127,8 @@ class ThreeCommandsOneShapeTests(unittest.TestCase):
         self.assertEqual(document["canonical"], 1)
         self.assertIn("Starting read-only library audit", proc.stderr)
 
-    def test_all_three_open_with_the_same_envelope(self) -> None:
-        for command, document in self.all_three().items():
+    def test_all_four_open_with_the_same_envelope(self) -> None:
+        for command, document in self.all_four().items():
             with self.subTest(command=command):
                 self.assertEqual(tuple(document)[:4], ENVELOPE)
                 self.assertEqual(document["schema"], JSON_SCHEMA)
@@ -123,17 +137,19 @@ class ThreeCommandsOneShapeTests(unittest.TestCase):
 
     def test_one_install_reports_one_version(self) -> None:
         """A tool with its own version number must not leak it into the envelope."""
-        versions = {document["version"] for document in self.all_three().values()}
+        versions = {document["version"] for document in self.all_four().values()}
         self.assertEqual(versions, {VERSION})
 
     def test_every_document_carries_its_exit_code(self) -> None:
-        for command, document in self.all_three().items():
+        for command, document in self.all_four().items():
             with self.subTest(command=command):
                 self.assertEqual(document["exit_code"], 0)
 
-    def test_no_command_stamps_the_clock_into_its_document(self) -> None:
+    def test_no_state_document_stamps_the_clock(self) -> None:
         """The property that lets a scheduled job diff yesterday against today."""
-        for command, document in self.all_three().items():
+        documents = self.all_four()
+        del documents["run"]  # a run is an occurrence; its duration is the point
+        for command, document in documents.items():
             with self.subTest(command=command):
                 text = json.dumps(document)
                 for stamp in ("timestamp", "generated", "elapsed", "started_at"):

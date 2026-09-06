@@ -36,6 +36,7 @@ Stdlib only. No Python packages required.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import time
@@ -43,16 +44,25 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# The JSON envelope reports the *toolkit* release, not this script's own
+# version: every command ships together, and a consumer that saw four version
+# numbers from one install would have to learn which program produced which
+# document.
+from organizekit import VERSION as TOOLKIT_VERSION
+
 # Shared implementation: everything imported here is defined exactly once,
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
 # keeps it that way.
 from organizekit.core import (
     STEP_ORDER,
     STEPS,
+    EventStream,
     Report,
     Step,
+    atomic_write_text,
     child_cwd,
     enable_utf8_stdio,
+    json_document,
     prerequisite_issue,
     print_text,
     resolve_library,
@@ -80,6 +90,8 @@ class Config:
     limit: int = 0
     nice: bool = False
     continue_on_error: bool = True
+    events_file: Path | None = None   # append-only JSONL record of this run
+    summary_file: Path | None = None  # the summary as one JSON document
 
 # Shown before a step runs, because the failure mode is silent and easy to
 # misread as "nothing to do".
@@ -142,12 +154,22 @@ def build_command(step: Step, cfg: Config) -> list[str]:
 # Execution
 # ---------------------------------------------------------------------------
 
-def run_step(step: Step, cfg: Config, dry_run_pipeline: bool = False) -> StepResult:
+def run_step(step: Step, cfg: Config, dry_run_pipeline: bool = False,
+             events: EventStream | None = None) -> StepResult:
+    # Built before the prerequisite check so that every step - including one
+    # that is about to be skipped - reports the argv it would have run. The
+    # builder is pure, so this costs nothing and cannot change what happens.
+    command = build_command(step, cfg)
+    if events is not None:
+        # Emitted before the child starts, so a watcher can see which step a
+        # run is stuck in: the question a summary written at the end cannot
+        # answer. Every step emits one, so started and finished always pair.
+        events.emit("step_started", step=step.key, title=step.title, argv=command)
+
     issue = prerequisite_issue(step)
     if issue is not None:
         return StepResult(step.key, step.title, "skipped", detail=issue)
 
-    command = build_command(step, cfg)
     print(f"\n{'=' * 78}\nSTEP {step.key}: {step.title}\n{'=' * 78}", flush=True)
     hint = HINTS.get(step.key)
     if hint:
@@ -167,13 +189,22 @@ def run_step(step: Step, cfg: Config, dry_run_pipeline: bool = False) -> StepRes
     return StepResult(step.key, step.title, "ran", returncode=code,
                       seconds=time.monotonic() - started)
 
-def run_pipeline(cfg: Config, dry_run: bool = False) -> Run:
+def run_pipeline(cfg: Config, dry_run: bool = False,
+                 events: EventStream | None = None) -> Run:
     started = time.monotonic()
     run = Run()
+    if events is not None:
+        events.emit("run_started", library=str(cfg.library), steps=list(cfg.steps),
+                    dry_run=bool(dry_run), limit=cfg.limit, nice=cfg.nice,
+                    continue_on_error=cfg.continue_on_error)
     for key in cfg.steps:
         step = STEPS[key]
-        result = run_step(step, cfg, dry_run_pipeline=dry_run)
+        result = run_step(step, cfg, dry_run_pipeline=dry_run, events=events)
         run.results.append(result)
+        if events is not None:
+            events.emit("step_finished", step=result.key, status=result.status,
+                        exit_code=result.returncode, seconds=round(result.seconds, 3),
+                        detail=result.detail)
         if result.status == "ran" and result.returncode:
             print(f"\n  STEP {key} exited with code {result.returncode}.", flush=True)
             if not cfg.continue_on_error:
@@ -181,7 +212,59 @@ def run_pipeline(cfg: Config, dry_run: bool = False) -> Run:
                       flush=True)
                 break
     run.elapsed = time.monotonic() - started
+    if events is not None:
+        events.emit("run_finished", **run_outcome(run), elapsed_sec=round(run.elapsed, 3))
     return run
+
+
+def run_outcome(run: Run) -> dict[str, object]:
+    """Which steps worked, which did not, and the exit code that follows.
+
+    One definition, used by the printed summary, the JSON summary and the
+    closing event - the three of them disagreeing about whether a run failed
+    is exactly the sort of thing nobody notices until an alert does not fire.
+    """
+    failed = [r.key for r in run.results if r.status == "ran" and r.returncode]
+    return {
+        "completed": [r.key for r in run.results if r.status == "ran" and not r.returncode],
+        "failed": failed,
+        "not_run": [r.key for r in run.results if r.status != "ran"],
+        "exit_code": 1 if failed else 0,
+    }
+
+
+def summary_document(run: Run, cfg: Config) -> dict[str, object]:
+    """The printed summary as a JSON document, for whatever reads runs.
+
+    Written to a file rather than stdout, unlike every other ``--json`` in this
+    toolkit: a pipeline run's stdout belongs to the five tools it launches, and
+    interleaving a document with a remux's progress output would produce
+    neither a readable log nor parseable JSON.
+    """
+    outcome = run_outcome(run)
+    return json_document(
+        "run",
+        TOOLKIT_VERSION,
+        library=str(cfg.library),
+        steps=list(cfg.steps),
+        dry_run=cfg.dry_run,
+        elapsed_sec=round(run.elapsed, 3),
+        completed=outcome["completed"],
+        failed=outcome["failed"],
+        not_run=outcome["not_run"],
+        results=[
+            {
+                "step": result.key,
+                "title": result.title,
+                "status": result.status,
+                "exit_code": result.returncode,
+                "seconds": round(result.seconds, 3),
+                "detail": result.detail,
+            }
+            for result in run.results
+        ],
+        exit_code=outcome["exit_code"],
+    )
 
 def build_summary(run: Run, cfg: Config) -> str:
     """Render the pipeline summary with the same layout as every tool's report."""
@@ -235,6 +318,22 @@ def build_summary(run: Run, cfg: Config) -> str:
     report.footer(closing)
     return report.render()
 
+def write_summary_json(run: Run, cfg: Config) -> None:
+    """Write the JSON summary if one was asked for; never fail the run for it.
+
+    The work is finished by the time this is called. A read-only directory is
+    the operator's problem to fix, not a reason to report a pipeline that ran
+    correctly as having failed.
+    """
+    if cfg.summary_file is None:
+        return
+    try:
+        atomic_write_text(cfg.summary_file,
+                          json.dumps(summary_document(run, cfg), indent=2, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        print(f"  note: could not write {cfg.summary_file}: {exc}", file=sys.stderr, flush=True)
+
+
 def resolve_steps(requested: Sequence[str]) -> tuple[str, ...]:
     """Keep the canonical order regardless of the order flags were supplied in."""
     chosen = set(requested)
@@ -270,6 +369,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Keep going after a step fails instead of stopping (default)")
     parser.add_argument("--stop-on-error", dest="continue_on_error", action="store_false",
                         help="Stop the pipeline on the first step failure")
+    parser.add_argument("--events", type=Path, default=None, metavar="PATH",
+                        help="Append one JSON object per run event (JSONL) to PATH as the run "
+                             "progresses: tail it, ship it, or graph it")
+    parser.add_argument("--summary-json", type=Path, default=None, metavar="PATH",
+                        help="Write the run summary to PATH as one JSON document when the run ends")
     parser.add_argument("--list-steps", action="store_true",
                         help="Print the steps, what needs to be installed, and exit")
     parser.add_argument("--self-test", action="store_true")
@@ -306,15 +410,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         limit=max(0, int(args.limit)),
         nice=bool(args.nice),
         continue_on_error=bool(args.continue_on_error),
+        events_file=args.events,
+        summary_file=args.summary_json,
     )
     if not cfg.library.is_dir():
         print(f"Library directory does not exist: {cfg.library}", file=sys.stderr)
         return 2
 
-    run = run_pipeline(cfg, dry_run=cfg.dry_run)
+    events = EventStream(cfg.events_file, TOOLKIT_VERSION, "run")
+    run = run_pipeline(cfg, dry_run=cfg.dry_run, events=events)
     print()
     print_text(build_summary(run, cfg))
-    return 1 if any(r.status == "ran" and r.returncode for r in run.results) else 0
+    write_summary_json(run, cfg)
+    return int(run_outcome(run)["exit_code"])
 
 # ---------------------------------------------------------------------------
 # SELF-TEST  (offline; never launches a tool)

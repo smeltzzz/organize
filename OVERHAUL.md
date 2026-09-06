@@ -495,6 +495,42 @@ Still open from this slice: the remaining tier orchestration inside
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 8c (W7): a run reports as it happens.**
+>
+> The three `--json` commands describe states, and a run is not one. `doctor`,
+> `status` and `audit` answer a question that can be read in one shot; a full
+> pipeline is an hour of work across five child processes, and the questions
+> worth asking about it - which step is running now, how long did the remux
+> take, what failed at 03:12 - cannot be answered by a document that only
+> exists once it is over. A run also cannot print to stdout: stdout belongs to
+> the tools it launches. So it reports to files, and it reports twice.
+>
+> **`--events PATH`** appends one JSON object per line as the run happens
+> (`organizekit/core/events.py`, ~60 lines): `run_started`, then a
+> `step_started`/`step_finished` pair per step, then `run_finished`. Every line
+> carries the full shared envelope, because a reader tailing the file may only
+> ever see one of them. Two rules differ from `jsonout.py` and the module says
+> so: an event carries a UTC `time` - the one place a clock belongs, since a run
+> *is* an occurrence - and the stream is best-effort, so the first `OSError`
+> disables it with one note on stderr and the run continues. **Every step emits
+> both events**, including one skipped for a missing prerequisite, which meant
+> hoisting `build_command` above the prerequisite check so a skipped step can
+> still report the `argv` it would have run; a consumer pairs them with no
+> special cases. The file is append-only: a run killed halfway still says how
+> far it got, and the missing `run_finished` is how you know it was killed.
+>
+> **`--summary-json PATH`** writes the closing scorecard once. Its numbers and
+> the printed summary's now come from one `run_outcome()` - completed, failed,
+> not run, exit code - because three renderings of one run that each derive
+> "did it work" separately will eventually disagree, and the one that decides
+> the process exit code is the one you cannot afford to have wrong.
+>
+> Both flags are off by default and the human output is unchanged. The version
+> trap from 6i sprang again on the way past - `pipeline.py` has its own
+> `VERSION = "1.0.0"` and put it in the envelope - so the cross-command suite
+> now compares four documents rather than three. 1,101 -> 1,135 tests, ten
+> mutations checked.
+
 > **Update — phase 6i (W7): the audit answers in JSON, and the envelope moves
 > into the core.**
 >
@@ -866,7 +902,7 @@ Each phase is independently shippable and leaves the repo green.
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
-| **8c** | W7 the rest of the machine-readable output (a JSONL run stream, `run_summary.json`), PyPI release | +150 | Low | 2 |
+| **8c** | ~~W7 the rest of the machine-readable output (a JSONL run stream, `run_summary.json`)~~ **done**; PyPI release still open | +190, +34 tests | Low | 2 |
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run
@@ -904,7 +940,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **78%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 15.8 s (1,101 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 16.1 s (1,135 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
