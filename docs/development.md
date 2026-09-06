@@ -10,7 +10,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,525 unit tests, ~24 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,552 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```

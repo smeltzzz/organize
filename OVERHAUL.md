@@ -537,6 +537,39 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6r (W5): the one function allowed to overwrite a subtitle.**
+>
+> `refetch_english_srt` is the seam between the two tools: `sync_subtitles.py`
+> calls it when ffsubsync cannot trust the sidecar it was handed, and it is the
+> only code in this repo permitted to replace a subtitle file a user already
+> has. Everywhere else a sidecar is created or left alone. It was also the
+> largest completely uncovered block in the largest file — 84 lines, no
+> end-to-end test — because reaching it needs a library *and* a provider.
+>
+> Twenty-seven tests now drive the real function against the fake providers at
+> `urlopen`, and every one of them ends by asking what is in the movie folder
+> now. The live sidecar survives no key, no candidate, every candidate already
+> tried, a search outage, a download outage, an HTML error page served as a
+> subtitle, the movie changing mid-fetch, and a failure of the rename itself;
+> it is replaced only by bytes that arrived complete and validated, in one
+> atomic swap, with nothing left behind either way; a symlink is never
+> followed; and the refusals stay refusals.
+>
+> Two things the tests had to be taught. The provider-namespaced id
+> (`subdl:sub123`) is what makes the caller's "I already tried that one" list
+> work, so the exclusion tests use the id the caller was actually given. And a
+> same-size in-place edit of the movie inside one filesystem timestamp tick is
+> not detectable by a (device, inode, size, mtime) snapshot — the first version
+> of the concurrent-change test passed alone and failed in the full suite, which
+> is the flake that teaches you what the invariant really says.
+>
+> Ten deliberate mutations of the function, all killed. Two of them needed a
+> test that could only be written as fault injection: the staged-bytes
+> re-validation and the publish step are unreachable failures from outside, and
+> they are the last two things between a provider hiccup and a movie whose
+> subtitle is now an error page. 1,525 → 1,552 tests; `subtitle_fetcher.py`
+> 82% -> 84%, total 84% -> 85%.
+
 > **Update — phase 6q (W5): the fetcher's planners, against inputs nobody wrote.**
 >
 > Phase 6e gave the repo a property harness and pointed it at four areas; the
@@ -1362,6 +1395,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6p**~~ | ~~W5 the fetcher's other two tiers end to end: SubDL's two v2 routes, the seven scraped sites behind one `urlopen`, and the pooling, metering and failover rules between all three~~ **done** | +25 tests, fetcher 80% → 82% | Low | ✅ |
 | ~~**5c**~~ | ~~W2 the two JSON probe caches folded into `state.db`'s `probe` table, with the old files imported once and `--cache` still honoured~~ **done** | +38 tests, probecache 94% | Low | ✅ |
 | ~~**6q**~~ | ~~W5 property-based tests over the fetcher's planners: selection, pooling, the SubDL threshold, the download-URL guard and the quota arithmetic~~ **done** | +24 tests, 12 planner mutations killed | Low | ✅ |
+| ~~**6r**~~ | ~~W5 end-to-end tests for `refetch_english_srt`, the cross-tool seam that is the only code allowed to overwrite an existing sidecar~~ **done** | +27 tests, 10 mutations killed, fetcher 82% → 84% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1404,7 +1438,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 23.9 s (1,525 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 24.7 s (1,552 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
