@@ -490,10 +490,51 @@ fake `urlopen`. 779 → 845 tests, coverage 75% → **76%**, `subtitle_fetcher.p
 74% → 77%.
 
 Still open from this slice: the remaining tier orchestration inside
-`queue_run` (712 lines) and the `run_doctor` check table. ~~The property-based
-tests — `hypothesis` cannot be assumed present in this offline environment, so
-those would need stdlib `random` with fixed seeds.~~ **done in phase 6e; see
-the note below.**
+`queue_run` (712 lines). ~~The `run_doctor` check table.~~ **done in phase 6f.**
+~~The property-based tests — `hypothesis` cannot be assumed present in this
+offline environment, so those would need stdlib `random` with fixed seeds.~~
+**done in phase 6e.** Both notes follow.
+
+> **Update — phase 6f (W5): the doctor becomes a table.**
+>
+> `run_doctor` was 350 lines: twelve prerequisite checks inlined into one
+> function body, five copy-pasted broad-except justifications, and the printing
+> tangled into the probing. The cost was not ugliness. **A check could not be
+> run without running all twelve**, so in a suite of a thousand tests exactly
+> six touched the doctor and every one of them worked by grepping a printed
+> page — nothing asserted what any individual check *says* when the program it
+> looks for is missing.
+>
+> Each check is now a function from a `DoctorContext` (the two resolved roots,
+> and nothing else) to its verdicts, registered in a `DOCTOR_CHECKS` table that
+> is the single place naming which checks exist and in what order they report.
+> `run_doctor` is three lines of work: run the table, render, summarise. The
+> five duplicated except-blocks collapsed into one `probe_outcome()` whose
+> docstring explains — once — why an environment probe catches everything: the
+> ways of not finding a program are unbounded, and every one of them means
+> "not usable here".
+>
+> Two behaviours that were implicit are now guaranteed. A check that *itself*
+> raises becomes a failed row naming the exception, because doctor is the
+> command you run when the machine is in an unknown state and is the last one
+> that should die of one. And the exit rule is a named function
+> (`diagnostics_exit_code`) rather than three scattered `return`s: any failure
+> is 1, warnings alone are 0, since a warning is a step that will skip, not a
+> reason to refuse to start.
+>
+> **The output is byte-identical** — captured before the change and diffed
+> after, down to the column padding and the blank line before the scorecard.
+> What changed is testability: `tests/test_doctor.py` adds 56 tests that ask
+> each check the question it actually answers — a missing mkvmerge, an ffprobe
+> that exists but cannot answer, an unimportable sibling, an OCR detector that
+> raises, zero/one/both provider keys (and that a key is *never* printed
+> unmasked, because doctor output gets pasted into bug reports), a library that
+> is a file, cross-device roots, an unreadable device ID. Eight deliberate
+> mutations — lowering the Python floor to 3.10, unmasking the key, downgrading
+> the cross-device failure to a warning, hard-coding exit 0, accepting a broken
+> ffprobe, letting mkvextract pass on one binary of two, dropping multi-row
+> results — were each caught by the test named for that rule. `organize.py`
+> coverage 78% → **83%**, repo 77% → **78%**, 972 → 1,028 tests.
 
 > **Update — phase 6e (W5): the properties, and what they found.**
 >
@@ -714,6 +755,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6c**~~ | ~~one shared `RunLog`, the last duplicated implementation; `core/toolchain.py` off the blanket `BLE001` ignore~~ **done** (the nine tool files' 84 broad catches are still blanket-ignored) | −62, +200 tests | Low | ✅ |
 | ~~**6d**~~ | ~~every `except Exception` in the toolkit narrowed or justified in place; no file-wide `BLE001` exemption left~~ **done** | 27 narrowed, +290 tests | Low | ✅ |
 | ~~**6e**~~ | ~~W5 property-based tests on seeded stdlib `random`: a shrinking harness, 38 properties over the fail-closed, destructive and cross-tool rules, and mutation tests that prove they notice~~ **done** | +38 tests | Low | ✅ |
+| ~~**6f**~~ | ~~W5 `run_doctor` split into a table of twelve named check functions; `doctor`'s output byte-identical~~ **done** | +132 lines, +56 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -754,8 +796,8 @@ state in one sentence, it is the wrong change.*
 | :--- | ---: | ---: | ---: |
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
-| Coverage | 58% | **76%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 13.4 s (972 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ✅ |
+| Coverage | 58% | **78%** (cleaner 75%) | ≥75%, cleaner ≥80% |
+| Test runtime | 6.7 s | 14.4 s (1,028 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ✅ |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

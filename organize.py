@@ -36,9 +36,10 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, TypeVar
 
 HERE = Path(__file__).resolve().parent
 
@@ -266,223 +267,286 @@ def _resolve_source_path(explicit: Path | None) -> Path:
     return Path.home() / "torrents" / "final"
 
 
-def run_doctor(library_path: Path | None = None, source_path: Path | None = None) -> int:
-    """Run full system diagnostics and print a beautiful scorecard."""
-    print_hero_banner()
-    print(bold("  SYSTEM & PREREQUISITE DIAGNOSTICS (DOCTOR)"))
-    print("  " + HRULE * 68)
+# One row per thing this machine either has or does not. A check is a function
+# from "where are the two roots" to one or more verdicts, and the table below is
+# the only place that says which checks exist and in what order they report.
+#
+# This was a single 350-line function: twelve checks inlined into one body, five
+# copies of the same broad-except justification, and the printing tangled into
+# the probing. That shape cost two things. A check could not be exercised
+# without running all twelve - so none of them were tested individually - and
+# adding one meant editing the middle of the longest function in the file. Both
+# are gone. A check is now a small function that returns verdicts and touches
+# nothing else; `run_doctor` is the table, the renderer and the exit rule.
 
-    checks: list[DiagnosticCheck] = []
 
-    # 1. Python runtime
+@dataclass(frozen=True)
+class DoctorContext:
+    """What a check is allowed to know: the two roots, already resolved."""
+
+    library: Path
+    source: Path
+
+
+# A check answers with one verdict, several when a single probe settles more
+# than one question (the provider keys), or none when there is nothing to say.
+DoctorProbe = Callable[["DoctorContext"], "DiagnosticCheck | list[DiagnosticCheck]"]
+
+T = TypeVar("T")
+
+
+def probe_outcome(probe: Callable[[], T]) -> tuple[T | None, Exception | None]:
+    """Run an environment probe, returning either its answer or its failure.
+
+    Every probe here imports a sibling tool and asks it to find a program. The
+    interesting answers are "found it" and "did not", and the ways of not
+    finding a program are unbounded: a module that will not import, a
+    permission error, a Windows registry read, a program that hangs and is
+    killed past its timeout. This is the one place in the doctor that catches
+    everything, and it catches it into a reportable answer rather than into
+    silence - the five copies of this comment that used to be inlined in
+    run_doctor are all this function now.
+    """
+    try:
+        return probe(), None
+    except Exception as exc:  # noqa: BLE001 - see the docstring: any failure is "no"
+        return None, exc
+
+
+def probe_quietly(probe: Callable[[], T]) -> T | None:
+    """:func:`probe_outcome` for the checks that do not report *why*."""
+    return probe_outcome(probe)[0]
+
+
+def check_python_runtime(_ctx: DoctorContext) -> DiagnosticCheck:
     py_ver = sys.version_info
     py_ver_str = f"{py_ver.major}.{py_ver.minor}.{py_ver.micro}"
     if py_ver >= (3, 11):
-        checks.append(DiagnosticCheck(
+        return DiagnosticCheck(
             name="Python Runtime",
             status="ok",
             message=f"Python {py_ver_str} ({platform.python_implementation()} {platform.architecture()[0]})",
             detail=sys.executable,
-        ))
-    else:
-        checks.append(DiagnosticCheck(
-            name="Python Runtime",
-            status="fail",
-            message=f"Python {py_ver_str} is below required Python 3.11+",
-            remedy="Upgrade to Python 3.11 or newer: https://www.python.org/downloads/",
-        ))
+        )
+    return DiagnosticCheck(
+        name="Python Runtime",
+        status="fail",
+        message=f"Python {py_ver_str} is below required Python 3.11+",
+        remedy="Upgrade to Python 3.11 or newer: https://www.python.org/downloads/",
+    )
 
-    # 2. Operating System
-    os_desc = f"{platform.system()} {platform.release()} ({platform.machine()})"
-    checks.append(DiagnosticCheck(
+
+def check_operating_system(_ctx: DoctorContext) -> DiagnosticCheck:
+    return DiagnosticCheck(
         name="Operating System",
         status="ok",
-        message=os_desc,
-    ))
+        message=f"{platform.system()} {platform.release()} ({platform.machine()})",
+    )
 
-    # 3. MKVToolNix (mkvmerge) — needed by mkv_track_cleaner.py
-    try:
+
+def check_mkvtoolnix(_ctx: DoctorContext) -> DiagnosticCheck:
+    """mkvmerge - needed by mkv_track_cleaner.py."""
+
+    def probe() -> tuple[str, str]:
         import mkv_track_cleaner as tc
         mkvmerge_bin = tc.resolve_mkvmerge_path()
-        mkvmerge_ver = tc.get_mkvmerge_version(mkvmerge_bin)
-        checks.append(DiagnosticCheck(
+        return mkvmerge_bin, tc.get_mkvmerge_version(mkvmerge_bin)
+
+    found = probe_quietly(probe)
+    if found is not None:
+        mkvmerge_bin, mkvmerge_ver = found
+        return DiagnosticCheck(
             name="MKVToolNix (mkvmerge)",
             status="ok",
             message=f"Found: {mkvmerge_ver or 'mkvmerge'}",
             detail=mkvmerge_bin,
-        ))
-    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
-        # probe that raises anything at all is the "not usable here" answer.
-        remedy_msg = (
+        )
+    return DiagnosticCheck(
+        name="MKVToolNix (mkvmerge)",
+        status="warn",
+        message="Not found on PATH or standard install paths",
+        detail="Track cleaner step will be skipped until mkvmerge is installed",
+        remedy=(
             "Windows: winget install MKVToolNix.MKVToolNix or https://mkvtoolnix.download/\n"
             "Debian/Ubuntu: sudo apt install -y mkvtoolnix\n"
             "macOS: brew install mkvtoolnix"
-        )
-        checks.append(DiagnosticCheck(
-            name="MKVToolNix (mkvmerge)",
-            status="warn",
-            message="Not found on PATH or standard install paths",
-            detail="Track cleaner step will be skipped until mkvmerge is installed",
-            remedy=remedy_msg,
-        ))
+        ),
+    )
 
-    # 4. FFmpeg (ffprobe) — needed by bitdepth.py and standardizer duplicate check
-    try:
+
+def check_ffprobe(_ctx: DoctorContext) -> DiagnosticCheck:
+    """ffprobe - needed by bitdepth.py and the standardizer's duplicate check."""
+
+    def probe() -> str:
         import bitdepth as probe_mod
         ffprobe_bin = probe_mod.find_ffprobe()
-        if ffprobe_bin and probe_mod.ffprobe_works(ffprobe_bin):
-            ver_text = get_binary_version(ffprobe_bin, "-version")
-            checks.append(DiagnosticCheck(
-                name="FFmpeg (ffprobe)",
-                status="ok",
-                message=f"Found: {ver_text or 'ffprobe'}",
-                detail=ffprobe_bin,
-            ))
-        else:
+        if not ffprobe_bin or not probe_mod.ffprobe_works(ffprobe_bin):
             raise FileNotFoundError("ffprobe not found or not working")
-    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
-        # probe that raises anything at all is the "not usable here" answer.
-        remedy_msg = (
+        return ffprobe_bin
+
+    ffprobe_bin = probe_quietly(probe)
+    if ffprobe_bin:
+        return DiagnosticCheck(
+            name="FFmpeg (ffprobe)",
+            status="ok",
+            message=f"Found: {get_binary_version(ffprobe_bin, '-version') or 'ffprobe'}",
+            detail=ffprobe_bin,
+        )
+    return DiagnosticCheck(
+        name="FFmpeg (ffprobe)",
+        status="warn",
+        message="Not found on PATH or standard install paths",
+        detail="10-bit bit depth scanning and technical quality upgrades will be skipped",
+        remedy=(
             "Windows: winget install Gyan.FFmpeg or drop ffprobe.exe in C:\\ffmpeg\\bin\\\n"
             "Debian/Ubuntu: sudo apt install -y ffmpeg\n"
             "macOS: brew install ffmpeg"
-        )
-        checks.append(DiagnosticCheck(
-            name="FFmpeg (ffprobe)",
-            status="warn",
-            message="Not found on PATH or standard install paths",
-            detail="10-bit bit depth scanning and technical quality upgrades will be skipped",
-            remedy=remedy_msg,
-        ))
+        ),
+    )
 
-    # 4b. FFmpeg (ffmpeg) — needed by sync_subtitles.py (ffsubsync shells out to it)
+
+def check_ffmpeg(_ctx: DoctorContext) -> DiagnosticCheck:
+    """ffmpeg - needed by sync_subtitles.py, because ffsubsync shells out to it."""
     ffmpeg_bin = shutil.which("ffmpeg")
     if ffmpeg_bin:
-        ffmpeg_ver = get_binary_version(ffmpeg_bin, "-version")
-        checks.append(DiagnosticCheck(
+        return DiagnosticCheck(
             name="FFmpeg (ffmpeg)",
             status="ok",
-            message=f"Found: {ffmpeg_ver or 'ffmpeg'}",
+            message=f"Found: {get_binary_version(ffmpeg_bin, '-version') or 'ffmpeg'}",
             detail=ffmpeg_bin,
-        ))
-    else:
-        checks.append(DiagnosticCheck(
-            name="FFmpeg (ffmpeg)",
-            status="warn",
-            message="Not found on PATH",
-            detail="ffsubsync needs ffmpeg to extract audio; the subtitle-sync step will be skipped",
-            remedy=(
-                "Windows: winget install Gyan.FFmpeg\n"
-                "Debian/Ubuntu: sudo apt install -y ffmpeg\n"
-                "macOS: brew install ffmpeg"
-            ),
-        ))
+        )
+    return DiagnosticCheck(
+        name="FFmpeg (ffmpeg)",
+        status="warn",
+        message="Not found on PATH",
+        detail="ffsubsync needs ffmpeg to extract audio; the subtitle-sync step will be skipped",
+        remedy=(
+            "Windows: winget install Gyan.FFmpeg\n"
+            "Debian/Ubuntu: sudo apt install -y ffmpeg\n"
+            "macOS: brew install ffmpeg"
+        ),
+    )
 
-    # 4c. ffsubsync — needed by sync_subtitles.py (pip-installed program)
-    try:
+
+def check_ffsubsync(_ctx: DoctorContext) -> DiagnosticCheck:
+    """ffsubsync - the pip-installed program sync_subtitles.py drives."""
+
+    def probe() -> str | None:
         import sync_subtitles as ss_sync
-        ffsubsync_bin = ss_sync.find_ffsubsync()
-    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
-        # probe that raises anything at all is the "not usable here" answer.
-        ffsubsync_bin = None
+        return ss_sync.find_ffsubsync()
+
+    ffsubsync_bin = probe_quietly(probe)
     if ffsubsync_bin:
-        ffsubsync_ver = get_binary_version(ffsubsync_bin, "--version")
-        checks.append(DiagnosticCheck(
+        return DiagnosticCheck(
             name="ffsubsync",
             status="ok",
-            message=f"Found: {ffsubsync_ver or 'ffsubsync'}",
+            message=f"Found: {get_binary_version(ffsubsync_bin, '--version') or 'ffsubsync'}",
             detail=ffsubsync_bin,
-        ))
-    else:
-        checks.append(DiagnosticCheck(
-            name="ffsubsync",
-            status="warn",
-            message="Not found on PATH",
-            detail="The subtitle-sync step is skipped until ffsubsync is installed",
-            remedy=(
-                "Install once:  pip install ffsubsync   (needs ffmpeg on the PATH)\n"
-                "Alternative:   pipx install ffsubsync"
-            ),
-        ))
+        )
+    return DiagnosticCheck(
+        name="ffsubsync",
+        status="warn",
+        message="Not found on PATH",
+        detail="The subtitle-sync step is skipped until ffsubsync is installed",
+        remedy=(
+            "Install once:  pip install ffsubsync   (needs ffmpeg on the PATH)\n"
+            "Alternative:   pipx install ffsubsync"
+        ),
+    )
 
-    # 4d. mkvextract — needed to extract the movie's own embedded subtitle tracks
-    #     (mkvmerge is already reported above for the track cleaner)
-    try:
+
+def check_mkvextract(_ctx: DoctorContext) -> DiagnosticCheck:
+    """mkvextract - reads a movie's own embedded subtitle tracks.
+
+    mkvmerge is already reported above for the track cleaner; it is checked
+    again here because the extractor needs both programs, not either one.
+    """
+
+    def probe() -> tuple[str | None, str | None]:
         import subtitle_fetcher as sf_extract
-        mkvmerge_bin = sf_extract.find_mkvtoolnix_binary("mkvmerge")
-        mkvextract_bin = sf_extract.find_mkvtoolnix_binary("mkvextract")
-    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
-        # probe that raises anything at all is the "not usable here" answer.
-        mkvmerge_bin = None
-        mkvextract_bin = None
+        return (
+            sf_extract.find_mkvtoolnix_binary("mkvmerge"),
+            sf_extract.find_mkvtoolnix_binary("mkvextract"),
+        )
+
+    mkvmerge_bin, mkvextract_bin = probe_quietly(probe) or (None, None)
     if mkvmerge_bin and mkvextract_bin:
-        checks.append(DiagnosticCheck(
+        return DiagnosticCheck(
             name="mkvextract (embedded subs)",
             status="ok",
             message=f"Found: {get_binary_version(mkvextract_bin, '--version') or 'mkvextract'}",
             detail=f"{mkvextract_bin} · mkvmerge {mkvmerge_bin}",
-        ))
-    else:
-        checks.append(DiagnosticCheck(
-            name="mkvextract (embedded subs)",
-            status="warn",
-            message="Not found on PATH",
-            detail="subtitle_fetcher.py cannot read the movie's own embedded subtitle tracks, "
-                   "so those movies are downloaded from the provider sources instead",
-            remedy=(
-                "Windows: winget install MoritzBunkus.MKVToolNix\n"
-                "Debian/Ubuntu: sudo apt install -y mkvtoolnix\n"
-                "macOS: brew install mkvtoolnix"
-            ),
-        ))
+        )
+    return DiagnosticCheck(
+        name="mkvextract (embedded subs)",
+        status="warn",
+        message="Not found on PATH",
+        detail="subtitle_fetcher.py cannot read the movie's own embedded subtitle tracks, "
+               "so those movies are downloaded from the provider sources instead",
+        remedy=(
+            "Windows: winget install MoritzBunkus.MKVToolNix\n"
+            "Debian/Ubuntu: sudo apt install -y mkvtoolnix\n"
+            "macOS: brew install mkvtoolnix"
+        ),
+    )
 
-    # 4e. Image-subtitle OCR — optional, only for PGS/VobSub embedded tracks
-    try:
+
+def check_ocr_backend(_ctx: DoctorContext) -> DiagnosticCheck:
+    """Image-subtitle OCR - optional, and only for PGS/VobSub embedded tracks."""
+
+    def probe() -> tuple[Any, str]:
         import subtitle_fetcher as sf_ocr
-        ocr_backend, ocr_note = sf_ocr.detect_ocr_backend(sf_ocr.OCR_BACKEND_AUTO)
-    except Exception as exc:  # noqa: BLE001 - a doctor check reports what is wrong; a
-        # probe that raises anything at all is the "not usable here" answer.
+        return sf_ocr.detect_ocr_backend(sf_ocr.OCR_BACKEND_AUTO)
+
+    detected, exc = probe_outcome(probe)
+    if detected is None:
         ocr_backend, ocr_note = None, f"subtitle_fetcher is unavailable ({exc})"
+    else:
+        ocr_backend, ocr_note = detected
     if ocr_backend is not None:
-        checks.append(DiagnosticCheck(
+        return DiagnosticCheck(
             name="OCR (image subtitles)",
             status="ok",
             message=f"Found: {ocr_backend.label}",
             detail="Embedded PGS/VobSub image tracks can be converted to SRT",
-        ))
-    else:
-        checks.append(DiagnosticCheck(
-            name="OCR (image subtitles)",
-            status="warn",
-            message="No OCR backend found",
-            detail=(
-                (f"{ocr_note}. " if ocr_note else "")
-                + "Text tracks (SRT/SSA/ASS) are still extracted; image-only movies fall "
-                  "through to the download sources"
-            ),
-            remedy=(
-                "pgsrip: pip install pgsrip  (needs MKVToolNix, tesseract and tessdata)\n"
-                "sup2srt + Tesseract: https://github.com/retrontology/sup2srt\n"
-                "Subtitle Edit: https://www.nikse.dk/subtitleedit\n"
-                "PgsToSrt: set PGSTOSRT_DLL to the dll path (needs dotnet)\n"
-                "Or point subtitle_fetcher.py at your own tool: --ocr-backend custom "
-                "--ocr-bin <program> --ocr-args \"{input}\" \"{output}\""
-            ),
-        ))
+        )
+    return DiagnosticCheck(
+        name="OCR (image subtitles)",
+        status="warn",
+        message="No OCR backend found",
+        detail=(
+            (f"{ocr_note}. " if ocr_note else "")
+            + "Text tracks (SRT/SSA/ASS) are still extracted; image-only movies fall "
+              "through to the download sources"
+        ),
+        remedy=(
+            "pgsrip: pip install pgsrip  (needs MKVToolNix, tesseract and tessdata)\n"
+            "sup2srt + Tesseract: https://github.com/retrontology/sup2srt\n"
+            "Subtitle Edit: https://www.nikse.dk/subtitleedit\n"
+            "PgsToSrt: set PGSTOSRT_DLL to the dll path (needs dotnet)\n"
+            "Or point subtitle_fetcher.py at your own tool: --ocr-backend custom "
+            "--ocr-bin <program> --ocr-args \"{input}\" \"{output}\""
+        ),
+    )
 
-    # 5. Subtitle provider API configuration
-    try:
+
+def mask_key(value: str) -> str:
+    """Show enough of a key to recognise it, never enough to use it."""
+    return value[:4] + "..." + value[-4:] if len(value) > 8 else "***"
+
+
+def check_provider_keys(_ctx: DoctorContext) -> list[DiagnosticCheck]:
+    """Subtitle provider configuration: zero, one or both keys."""
+
+    def probe() -> tuple[str, str]:
         import subtitle_fetcher as sf
-        opensubtitles_key = (os.environ.get("OPENSUBTITLES_API_KEY") or sf.OPENSUBTITLES_API_KEY).strip()
-        subdl_key = (os.environ.get("SUBDL_API_KEY") or sf.SUBDL_API_KEY).strip()
-    except Exception:  # noqa: BLE001 - a doctor check reports what is wrong; a
-        # probe that raises anything at all is the "not usable here" answer.
-        opensubtitles_key = None
-        subdl_key = None
+        return (
+            (os.environ.get("OPENSUBTITLES_API_KEY") or sf.OPENSUBTITLES_API_KEY).strip(),
+            (os.environ.get("SUBDL_API_KEY") or sf.SUBDL_API_KEY).strip(),
+        )
 
-    def mask_key(value: str) -> str:
-        return value[:4] + "..." + value[-4:] if len(value) > 8 else "***"
-
+    opensubtitles_key, subdl_key = probe_quietly(probe) or ("", "")
+    checks: list[DiagnosticCheck] = []
     if opensubtitles_key:
         checks.append(DiagnosticCheck(
             name="OpenSubtitles API Key",
@@ -511,92 +575,147 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
                 "Linux/macOS (bash): export OPENSUBTITLES_API_KEY='your-key'  # or export SUBDL_API_KEY='your-key'"
             ),
         ))
+    return checks
 
-    # 6. Library directories and Hardlink check
-    lib_path = _resolve_library_path(library_path)
-    src_path = _resolve_source_path(source_path)
 
-    # Library directory check
-    if lib_path.exists() and lib_path.is_dir():
-        checks.append(DiagnosticCheck(
+def check_library_directory(ctx: DoctorContext) -> DiagnosticCheck:
+    if ctx.library.exists() and ctx.library.is_dir():
+        return DiagnosticCheck(
             name="Library Directory",
             status="ok",
-            message=f"Accessible: {lib_path}",
-        ))
-    else:
-        checks.append(DiagnosticCheck(
-            name="Library Directory",
-            status="warn",
-            message=f"Path not found: {lib_path}",
-            detail="This is the target folder where organized movies will be placed",
-            remedy=f"Create it, set ORGANIZE_LIBRARY, or pass --target: mkdir {lib_path}",
-        ))
+            message=f"Accessible: {ctx.library}",
+        )
+    return DiagnosticCheck(
+        name="Library Directory",
+        status="warn",
+        message=f"Path not found: {ctx.library}",
+        detail="This is the target folder where organized movies will be placed",
+        remedy=f"Create it, set ORGANIZE_LIBRARY, or pass --target: mkdir {ctx.library}",
+    )
 
-    # Source directory check
-    if src_path.exists() and src_path.is_dir():
-        checks.append(DiagnosticCheck(
+
+def check_source_directory(ctx: DoctorContext) -> DiagnosticCheck:
+    if ctx.source.exists() and ctx.source.is_dir():
+        return DiagnosticCheck(
             name="Download Source Dir",
             status="ok",
-            message=f"Accessible: {src_path}",
-        ))
-    else:
-        checks.append(DiagnosticCheck(
-            name="Download Source Dir",
-            status="warn",
-            message=f"Path not found: {src_path}",
-            detail="This is where qBittorrent saves completed downloads",
-            remedy=f"Create it, set MOVIE_STD_SOURCE, or pass --source: mkdir {src_path}",
-        ))
+            message=f"Accessible: {ctx.source}",
+        )
+    return DiagnosticCheck(
+        name="Download Source Dir",
+        status="warn",
+        message=f"Path not found: {ctx.source}",
+        detail="This is where qBittorrent saves completed downloads",
+        remedy=f"Create it, set MOVIE_STD_SOURCE, or pass --source: mkdir {ctx.source}",
+    )
 
-    # Hardlink filesystem compatibility check (crucial invariant)
-    if lib_path.exists() and src_path.exists():
+
+def check_hardlink_compatibility(ctx: DoctorContext) -> list[DiagnosticCheck]:
+    """The invariant the whole ingest rests on: one filesystem, or no hardlinks.
+
+    Silent unless both roots exist - a missing folder is already reported by
+    the two checks above, and repeating it as a device mismatch would be noise.
+    """
+    if not (ctx.library.exists() and ctx.source.exists()):
+        return []
+    try:
+        lib_dev = ctx.library.stat().st_dev
+        src_dev = ctx.source.stat().st_dev
+    except OSError as exc:
+        return [DiagnosticCheck(
+            name="Hardlink Compatibility",
+            status="warn",
+            message=f"Could not inspect filesystem devices: {exc}",
+        )]
+    if lib_dev == src_dev:
+        return [DiagnosticCheck(
+            name="Hardlink Compatibility",
+            status="ok",
+            message="Source and library share the same filesystem volume (device ID match)",
+            detail="Hardlinks (os.link) work with 0 extra disk space and safe uninterrupted seeding",
+        )]
+    return [DiagnosticCheck(
+        name="Hardlink Compatibility",
+        status="fail",
+        message="Source and library are on DIFFERENT filesystems / drives!",
+        detail=f"Source dev={src_dev}, Target dev={lib_dev}. movie_standardizer requires same volume.",
+        remedy=(
+            "Hardlink-only placement cannot cross disk drives or separate filesystem mounts.\n"
+            "Configure qBittorrent downloads to reside on the same drive/volume as your library."
+        ),
+    )]
+
+
+# The order here is the order the scorecard prints: the interpreter and the
+# machine, then each external program in pipeline order, then configuration,
+# then the two roots and the invariant that ties them together.
+DOCTOR_CHECKS: tuple[tuple[str, DoctorProbe], ...] = (
+    ("python", check_python_runtime),
+    ("os", check_operating_system),
+    ("mkvmerge", check_mkvtoolnix),
+    ("ffprobe", check_ffprobe),
+    ("ffmpeg", check_ffmpeg),
+    ("ffsubsync", check_ffsubsync),
+    ("mkvextract", check_mkvextract),
+    ("ocr", check_ocr_backend),
+    ("provider-keys", check_provider_keys),
+    ("library-dir", check_library_directory),
+    ("source-dir", check_source_directory),
+    ("hardlinks", check_hardlink_compatibility),
+)
+
+
+def collect_diagnostics(ctx: DoctorContext) -> list[DiagnosticCheck]:
+    """Run every check in the table and return the verdicts, in table order.
+
+    A check that raises becomes a failed row rather than a traceback: doctor is
+    the command you run when the machine is in an unknown state, so it is the
+    last one that should die of one.
+    """
+    checks: list[DiagnosticCheck] = []
+    for key, probe in DOCTOR_CHECKS:
         try:
-            lib_dev = lib_path.stat().st_dev
-            src_dev = src_path.stat().st_dev
-            if lib_dev == src_dev:
-                checks.append(DiagnosticCheck(
-                    name="Hardlink Compatibility",
-                    status="ok",
-                    message="Source and library share the same filesystem volume (device ID match)",
-                    detail="Hardlinks (os.link) work with 0 extra disk space and safe uninterrupted seeding",
-                ))
-            else:
-                checks.append(DiagnosticCheck(
-                    name="Hardlink Compatibility",
-                    status="fail",
-                    message="Source and library are on DIFFERENT filesystems / drives!",
-                    detail=f"Source dev={src_dev}, Target dev={lib_dev}. movie_standardizer requires same volume.",
-                    remedy=(
-                        "Hardlink-only placement cannot cross disk drives or separate filesystem mounts.\n"
-                        "Configure qBittorrent downloads to reside on the same drive/volume as your library."
-                    ),
-                ))
-        except OSError as exc:
+            produced = probe(ctx)
+        except Exception as exc:  # noqa: BLE001 - a check that breaks is itself a finding
             checks.append(DiagnosticCheck(
-                name="Hardlink Compatibility",
-                status="warn",
-                message=f"Could not inspect filesystem devices: {exc}",
+                name=f"Check: {key}",
+                status="fail",
+                message=f"This diagnostic could not run ({type(exc).__name__}: {exc})",
+                detail="The check itself failed, so nothing is known about this prerequisite",
+                remedy="Please report it with the message above: https://github.com/smeltzzz/organize/issues",
             ))
+            continue
+        checks.extend(produced if isinstance(produced, list) else [produced])
+    return checks
 
-    # Display checks
-    total_ok = sum(1 for c in checks if c.status == "ok")
-    total_warn = sum(1 for c in checks if c.status == "warn")
-    total_fail = sum(1 for c in checks if c.status == "fail")
 
+def diagnostics_exit_code(checks: Sequence[DiagnosticCheck]) -> int:
+    """1 when something is broken, 0 when the machine can do useful work.
+
+    A warning is a step that will skip, not a reason to refuse to start, so
+    only a failure is worth a non-zero exit to a scheduler.
+    """
+    return 1 if any(check.status == "fail" for check in checks) else 0
+
+
+def render_diagnostics(checks: Sequence[DiagnosticCheck]) -> None:
+    """Print one block per check: the row, its detail, and its remedy lines."""
+    symbols = {"ok": SYM_OK, "warn": SYM_WARN}
     for check in checks:
-        if check.status == "ok":
-            symbol = SYM_OK
-        elif check.status == "warn":
-            symbol = SYM_WARN
-        else:
-            symbol = SYM_FAIL
-
+        symbol = symbols.get(check.status, SYM_FAIL)
         print(f"  {symbol} {bold(check.name):<28} {check.message}")
         if check.detail:
             print(f"      {dim(check.detail)}")
         if check.remedy:
             for r_line in check.remedy.splitlines():
                 print(f"      {cyan('Fix:')} {r_line}")
+
+
+def render_scorecard(checks: Sequence[DiagnosticCheck]) -> None:
+    """Print the tally and the one sentence that says what to do about it."""
+    total_ok = sum(1 for c in checks if c.status == "ok")
+    total_warn = sum(1 for c in checks if c.status == "warn")
+    total_fail = sum(1 for c in checks if c.status == "fail")
 
     print("  " + HRULE * 68)
     summary_line = f"  Scorecard: {green(f'{total_ok} passed')}"
@@ -608,12 +727,25 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
 
     if total_fail > 0:
         print(f"\n  {SYM_FAIL} {red('Action required:')} Fix the failed checks above before running automated tasks.")
-        return 1
-    if total_warn > 0:
+    elif total_warn > 0:
         print(f"\n  {SYM_WARN} {yellow('Ready with optional steps:')} Core tasks will work; one or more optional pipeline steps will skip until prerequisites are added.")
-        return 0
-    print(f"\n  {SYM_OK} {green('All systems operational!')} This machine is fully provisioned for the complete Jellyfin media pipeline.")
-    return 0
+    else:
+        print(f"\n  {SYM_OK} {green('All systems operational!')} This machine is fully provisioned for the complete Jellyfin media pipeline.")
+
+
+def run_doctor(library_path: Path | None = None, source_path: Path | None = None) -> int:
+    """Run full system diagnostics and print a beautiful scorecard."""
+    print_hero_banner()
+    print(bold("  SYSTEM & PREREQUISITE DIAGNOSTICS (DOCTOR)"))
+    print("  " + HRULE * 68)
+
+    checks = collect_diagnostics(DoctorContext(
+        library=_resolve_library_path(library_path),
+        source=_resolve_source_path(source_path),
+    ))
+    render_diagnostics(checks)
+    render_scorecard(checks)
+    return diagnostics_exit_code(checks)
 
 
 # =============================================================================
