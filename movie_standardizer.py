@@ -1944,24 +1944,27 @@ def technical_quality_score(info: MediaTechnicalInfo) -> float:
         + codec_bonus
     )
 
-def _movie_upgrade_decision(src: Path, dest: Path) -> tuple[bool, str]:
-    """Require same-cut identity and a meaningful, non-regressive upgrade."""
-    source_name = parse_video_identity(src, fallback=src.parent)
-    existing_name = parse_movie_name(dest.name)
-    if (source_name.title.casefold(), source_name.year) != (existing_name.title.casefold(), existing_name.year):
-        return False, "conflict: source and canonical title/year identities differ"
-    if source_name.edition or source_name.three_d or source_name.part:
-        markers = ", ".join(filter(None, (source_name.edition, source_name.three_d, source_name.part)))
-        return False, f"conflict: incoming release has alternate-cut/version marker ({markers})"
+def upgrade_verdict(
+    source_info: MediaTechnicalInfo, existing_info: MediaTechnicalInfo,
+) -> tuple[bool, str]:
+    """May this movie replace the one already in the library, on the numbers?
 
-    ffprobe = find_ffprobe(CFG.ffprobe)
-    if not ffprobe:
-        return False, "conflict: ffprobe unavailable; keeping existing movie (size alone never replaces)"
-    source_info, source_error = probe_media(src, ffprobe)
-    existing_info, existing_error = probe_media(dest, ffprobe)
-    if source_info is None or existing_info is None:
-        return False, f"conflict: {source_error or existing_error}; keeping existing movie"
+    The guard chain that decides whether an existing movie is overwritten,
+    separated from the probing that produces its inputs so it can be checked
+    without ffprobe, without a movie and without a library. Every rule here
+    is a *veto*: a run of them all passing is the only way to reach the score
+    comparison, and the score alone can never replace anything.
 
+    Order matters and is deliberate. Runtime is asked first because a
+    different runtime means a different cut - a theatrical release and an
+    extended edition are two movies, not two copies of one, and no amount of
+    technical superiority makes it safe to overwrite one with the other.
+    Then the four one-way regressions (resolution tier, HDR, bit depth, audio
+    channels), each of which loses information the library will not get back.
+    Only what survives all of that is scored, and it still has to win by
+    ``DUPLICATE_MIN_SCORE_GAIN`` - a rounding-error improvement is not worth
+    rewriting a movie for.
+    """
     duration_gap = abs(source_info.duration - existing_info.duration)
     duration_limit = max(
         DUPLICATE_DURATION_MAX_SECONDS,
@@ -1993,6 +1996,33 @@ def _movie_upgrade_decision(src: Path, dest: Path) -> tuple[bool, str]:
         f"verified same-cut technical upgrade (runtime gap {duration_gap:.1f}s; "
         f"score {source_score:.1f} vs {existing_score:.1f}, +{gain:.1f})"
     )
+
+def _movie_upgrade_decision(src: Path, dest: Path) -> tuple[bool, str]:
+    """Require same-cut identity and a meaningful, non-regressive upgrade.
+
+    The name is checked before anything is probed, because two different
+    movies - or an extended cut and a theatrical one - are not candidates for
+    replacement whatever their bitrates say, and probing costs a subprocess
+    per file. Then the technical comparison, which needs ffprobe: without it,
+    or with a file it cannot read, the answer is *keep what you have*. Size
+    alone never replaces a movie.
+    """
+    source_name = parse_video_identity(src, fallback=src.parent)
+    existing_name = parse_movie_name(dest.name)
+    if (source_name.title.casefold(), source_name.year) != (existing_name.title.casefold(), existing_name.year):
+        return False, "conflict: source and canonical title/year identities differ"
+    if source_name.edition or source_name.three_d or source_name.part:
+        markers = ", ".join(filter(None, (source_name.edition, source_name.three_d, source_name.part)))
+        return False, f"conflict: incoming release has alternate-cut/version marker ({markers})"
+
+    ffprobe = find_ffprobe(CFG.ffprobe)
+    if not ffprobe:
+        return False, "conflict: ffprobe unavailable; keeping existing movie (size alone never replaces)"
+    source_info, source_error = probe_media(src, ffprobe)
+    existing_info, existing_error = probe_media(dest, ffprobe)
+    if source_info is None or existing_info is None:
+        return False, f"conflict: {source_error or existing_error}; keeping existing movie"
+    return upgrade_verdict(source_info, existing_info)
 
 def should_replace(src: Path, dest: Path) -> tuple[bool, str]:
     """Decide whether a destination may be replaced without relying on size alone."""

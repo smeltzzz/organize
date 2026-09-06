@@ -537,6 +537,52 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6k (W5): the one decision that lets a movie overwrite a movie.**
+>
+> Everything else `movie_standardizer.py` does is additive - it hardlinks an
+> incoming file into a canonical folder and leaves what it finds alone.
+> `should_replace` is where that stops being true, and it was the least-tested
+> code in the repo's most destructive tool: 68% file coverage, with the entire
+> probe-and-compare path (~150 lines) never executed by a test. Reaching it
+> required a library, an installed `ffprobe`, and two real movies with the
+> right technical properties.
+>
+> The guard chain is now `upgrade_verdict(source_info, existing_info)` - a
+> function of two probe results, with the probing left in
+> `_movie_upgrade_decision` around it. Nothing about the decision changed; the
+> refusal strings are the same strings. What changed is that the rules can be
+> read in one place and checked in a table:
+>
+> - **Runtime first**, because a different runtime means a different cut. A
+>   theatrical release and an extended edition are two movies, not two copies
+>   of one, and no technical superiority makes overwriting one with the other
+>   safe. The comparison is symmetric (`abs`), and the tolerance scales, so
+>   100 seconds of drift on a four-hour epic is still the same cut.
+> - **Then the four one-way regressions** - resolution tier, HDR, bit depth,
+>   audio channels - each of which loses something the library will not get
+>   back. Every one is a *veto*: the test that matters here is a 1440p HDR AV1
+>   remux that beats a plain 4K copy on every other axis and on the score, and
+>   is still refused, because the pixels are already on disk.
+> - **Then the margin.** Only what survives all of that is scored, and it must
+>   win by `DUPLICATE_MIN_SCORE_GAIN`; a rounding-error improvement is not
+>   worth rewriting a movie for. Size is not an input at any point - the rule
+>   the old size heuristic broke.
+>
+> The probe reader got the same treatment, against a faked `ffprobe`: an
+> attached 4000x6000 sleeve scan is not the feature video stream (it has three
+> times the pixels of the 1080p film it is embedded in, and "largest stream"
+> alone would call that movie 4K), a container with no duration falls back to
+> the stream, and every way ffprobe can be useless - non-zero exit, HTML on
+> stdout, a hang, a missing binary - produces a reason and *keeps the existing
+> movie*. Fail-closed is the whole policy: no probe, no replacement.
+>
+> 1,238 → 1,296 tests; `movie_standardizer.py` 68% → **71%**, toolkit 79%.
+> Checked against fifteen deliberate mutations, two of which survived the
+> first pass and are the reason two of the tests above look the way they do:
+> a one-tier downgrade needs a candidate that wins on everything else to be
+> visible, and cover art has to be *bigger* than the feature to be mistaken
+> for it.
+
 > **Update — phase 6j (W5): the fetcher's report is computed, not narrated.**
 >
 > `queue_run` was 726 lines and it *ended* by building a 40-key summary dict
@@ -1075,6 +1121,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6h**~~ | ~~W7 `organize status --json` on the same envelope; the JSON helpers generalised out of `doctor`; a failed run is still a document~~ **done** | +110 lines, +16 tests | Low | ✅ |
 | ~~**6i**~~ | ~~W7 `library_auditor.py --json`; the envelope moved into `organizekit/core/jsonout.py`; `RunLog` learns where its console lines go~~ **done** | +150 lines, +34 tests | Low | ✅ |
 | ~~**6j**~~ | ~~W5 the fetcher's run summary, coverage tally, review-hold vocabulary and scraping-candidate conversion extracted from `queue_run` (726 → 653 lines) and tabled~~ **done** | +150 lines, +28 tests | Low | ✅ |
+| ~~**6k**~~ | ~~W5 the standardizer's replacement policy: the upgrade guard chain split from the probing (`upgrade_verdict`), and the probe reader, the score and the gate tabled~~ **done** | +40 lines, +58 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
