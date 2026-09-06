@@ -537,6 +537,40 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6t (W5): the movie's own subtitle track, and two dead
+> branches.**
+>
+> Extraction is the cheapest way to cover a movie — no provider, no quota, no
+> network — and after the queue work it was what was left uncovered: the USF
+> converter, the OCR backend lookup, `run_ocr`, and the inside of
+> `_extract_one_track`, where a container's bytes become a sidecar.
+>
+> Thirty-nine tests: USF (the rare XML subtitle format) converting, dropping
+> empty cues and refusing unreadable timings; the four OCR backends resolving
+> from a path handed in, a name on PATH, a known install location or a `.exe`
+> under mono; a custom OCR command validated before it is trusted; `run_ocr`
+> collecting output written where it was asked, or beside the input, or
+> nowhere; and the eight ways one track fails — mkvextract exiting non-zero,
+> mkvextract exiting *zero* and writing nothing, a track that converts to no
+> cues, a sidecar that appears mid-extraction, a read-only folder, a backend
+> that cannot read the codec, an OCR failure, and an OCR result that cannot be
+> read back.
+>
+> **Two branches turned out to be unreachable, and both were bugs.** Subtitle
+> Edit's `mono` wrapper sat *below* the program lookup — but the lookup already
+> knows Subtitle Edit's Linux install locations, so it always resolved the
+> `.exe` first and the wrapper never ran: a Linux install was exec'd as a bare
+> .NET binary. The wrapper is now applied after the lookup, and no `mono` means
+> the backend counts as not installed rather than failing minutes into a movie.
+> And `--ocr-args` accepted a template naming only *one* of `{input}` and
+> `{output}`, while its own error message says both are required — without
+> `{output}` the tool cannot know where the OCR result landed.
+>
+> Twelve mutations, all killed. Two more mutants turned out to be equivalent
+> (a BOM strip after a `utf-8-sig` decode, and the empty-cue guard in the ASS
+> converter, which the USF one shares a shape with) — worth knowing, and left
+> alone. 1,571 → 1,610 tests; `subtitle_fetcher.py` 86% → 89%.
+
 > **Update — phase 6s (W5): the queue's twenty bad days, and a bug in the ledger.**
 >
 > `queue_run` is mostly not the happy path. It is the twenty-odd places where
@@ -1431,6 +1465,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6q**~~ | ~~W5 property-based tests over the fetcher's planners: selection, pooling, the SubDL threshold, the download-URL guard and the quota arithmetic~~ **done** | +24 tests, 12 planner mutations killed | Low | ✅ |
 | ~~**6r**~~ | ~~W5 end-to-end tests for `refetch_english_srt`, the cross-tool seam that is the only code allowed to overwrite an existing sidecar~~ **done** | +27 tests, 10 mutations killed, fetcher 82% → 84% | Low | ✅ |
 | ~~**6s**~~ | ~~W5 the queue's failure branches end to end: hash failures, provider outages, an adapter crash, a sidecar appearing mid-download; fixed a ledger checkpoint that dropped every outcome after a reservation~~ **done** | +19 tests, 11 mutations killed, fetcher 84% → 86% | Low | ✅ |
+| ~~**6t**~~ | ~~W5 the extraction/OCR toolchain: USF, backend lookup, `run_ocr`, and the inside of `_extract_one_track`; fixed an unreachable mono wrapper and a half-checked `--ocr-args`~~ **done** | +39 tests, 12 mutations killed, fetcher 86% → 89% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1473,7 +1508,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 24.0 s (1,571 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 24.8 s (1,610 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

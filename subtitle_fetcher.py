@@ -3584,7 +3584,13 @@ def _resolve_program(explicit: str, name: str, *search_paths: str) -> str | None
 
 
 def _subtitleedit_program(explicit: str = "") -> tuple[str, ...] | None:
-    """Subtitle Edit is a Windows GUI app; ``mono`` runs it elsewhere."""
+    """Subtitle Edit is a Windows GUI app; ``mono`` runs it elsewhere.
+
+    The mono wrapper has to be decided *after* the program is found, not as a
+    fallback for not finding it: the lookup already knows the Linux install
+    locations, so it always resolved the ``.exe`` first and the fallback was
+    unreachable, leaving a Linux install to be exec'd as a bare .NET binary.
+    """
     known = (
         r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe",
         r"C:\Program Files (x86)\Subtitle Edit\SubtitleEdit.exe",
@@ -3592,16 +3598,14 @@ def _subtitleedit_program(explicit: str = "") -> tuple[str, ...] | None:
         "/opt/subtitleedit/SubtitleEdit.exe",
     )
     program = _resolve_program(explicit, "SubtitleEdit", *known)
-    if program:
+    if not program:
+        return None
+    if os.name == "nt" or not program.lower().endswith(".exe"):
         return (program,)
     mono = shutil.which("mono")
-    if mono:
-        for candidate in known[2:]:
-            if Path(candidate).is_file():
-                return (mono, candidate)
-        if explicit and explicit.lower().endswith(".exe") and Path(explicit).is_file():
-            return (mono, explicit)
-    return None
+    # No mono means this install cannot be run here at all, which is a backend
+    # that was not found rather than one that fails minutes into a movie.
+    return (mono, program) if mono else None
 
 
 def _pgstosrt_program(explicit: str = "") -> tuple[str, ...] | None:
@@ -3675,8 +3679,10 @@ def detect_ocr_backend(
             tokens = tuple(shlex.split(arg_template))
         except ValueError as exc:
             return None, f"--ocr-args could not be parsed ({exc})"
-        if not any(token in {"{input}", "{output}"} or "{input}" in token or "{output}" in token
-                   for token in tokens):
+        # Both, not either: without {output} the tool has no idea where the
+        # OCR result landed, and the run would fail a movie at a time.
+        if any(not any(name in token for token in tokens)
+               for name in ("{input}", "{output}")):
             return None, "--ocr-args must name both {input} and {output}"
         return OcrBackend(OCR_BACKEND_CUSTOM, "custom OCR command", (program,),
                           frozenset({"PGS", "VOBSUB", "DVBSUB"}), arg_template=tokens), ""

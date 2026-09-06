@@ -118,6 +118,12 @@ python3 subtitle_fetcher.py --source /path/to/movies --ocr-backend custom \
         --ocr-bin /opt/my-ocr --ocr-args "{input}" "{output}"                # your own tool
 ```
 
+`--ocr-args` must name **both** `{input}` and `{output}` (also available:
+`{track}`, `{lang}`); a template missing either is refused up front rather than
+failing one movie at a time. Subtitle Edit ships as a Windows `.exe`, so off
+Windows it is run through `mono` — without `mono` on `PATH` it counts as not
+installed and the run says so.
+
 Extracted sidecars are recorded outside the library
 (`ReportsAndLogs/subtitle_fetcher_extracted.json`), and `sync_subtitles.py`
 reads that record: a subtitle taken from the movie's own container timeline is
