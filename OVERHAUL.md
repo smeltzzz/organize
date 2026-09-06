@@ -537,6 +537,34 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6o (W5): the fetcher's run loop, against a provider.**
+>
+> `subtitle_fetcher.py` is the largest tool here and the only one that reaches
+> the internet. The planners are tested as pure functions and the clients
+> against canned payloads; `queue_run` - triage, quotas, provider calls,
+> validation, report - was barely covered, because reaching it needs a library
+> and a provider.
+>
+> `tests/fake_provider.py` supplies the provider one layer below the client, at
+> `urllib.request.urlopen`, so the real client builds the real request and the
+> real run decides what to do with the answer. Thirty-nine tests pin what an
+> operator depends on: a hash match is downloaded, validated and written; a
+> covered movie costs nothing on the next run; a legacy `.en.srt` is promoted
+> rather than bought again. Every refusal is checked through the whole program
+> - no Blu-ray keyword, machine-translated, not English, bytes that are not an
+> SRT (rejected *after* the download, with the reservation still recorded
+> because the provider counted it), a plain-HTTP link, and a movie rewritten
+> while its subtitle is in flight.
+>
+> The daily cap is a promise to the provider and it survives a restart: the
+> ledger in the log defers the second movie today and still defers it when the
+> run is repeated. `--allow-missing` downgrades an uncovered library to exit 0
+> but does not forgive an error.
+>
+> Eleven mutations, all killed. 1,399 → 1,438 tests; `subtitle_fetcher.py` 78%
+> → **80%**, toolkit **84%**. SubDL and the scraping tier are still only unit
+> tested; a fake for SubDL's v2 shapes is the next slice of this file.
+
 > **Update — phase 6n (W5): the first step of the pipeline, end to end.**
 >
 > `movie_standardizer.py` decides what a movie is called and where it lives,
@@ -1221,6 +1249,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6l**~~ | ~~W5 the cleaner's concurrent-change refusals proved end to end: the library changed inside the remux window (source, sidecar, Ctrl-C), plus the free-space and journal fail-closed paths~~ **done** | +10 tests, cleaner 79% → 81% | Low | ✅ |
 | ~~**6m**~~ | ~~W5 the inspector run end to end against a fake ffprobe: classification through the whole program, probe failures, cache reuse, config refusals and the `--fail-if-*` exit codes~~ **done** | +40 tests, bitdepth 67% → 93% | Low | ✅ |
 | ~~**6n**~~ | ~~W5 the standardizer run end to end: hardlink ingest proved additive, every refusal reported, config refusals — and the four unreachable helpers it exposed, deleted~~ **done** | +53 tests, −54 lines, standardizer 71% → 85% | Low | ✅ |
+| ~~**6o**~~ | ~~W5 the fetcher's run loop against a fake provider at the `urlopen` seam: validated writes, every refusal, the cross-run daily cap and the coverage exit code~~ **done** | +39 tests, fetcher 78% → 80% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1262,8 +1291,8 @@ state in one sentence, it is the wrong change.*
 | :--- | ---: | ---: | ---: |
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
-| Coverage | 58% | **83%** (cleaner 81%, inspector 93%, standardizer 85%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 22.8 s (1,399 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 80%) | ≥75%, cleaner ≥80% ✅ |
+| Test runtime | 6.7 s | 22.6 s (1,438 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
