@@ -3074,6 +3074,11 @@ def run_external_command(
     non-zero exit, or a timeout all come back as a plain ``(rc, out, err)`` so
     the caller can report the fix and fall through to the next strategy.
     """
+    if not command:
+        # Not reachable from this tool's call sites, but subprocess answers an
+        # empty argument list with IndexError, and this function's contract is
+        # that it never raises.
+        return 127, "", "could not run command: no program was given"
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     try:
         completed = subprocess.run(
@@ -3085,7 +3090,7 @@ def run_external_command(
     except subprocess.TimeoutExpired:
         return 124, "", f"timed out after {timeout:.0f}s"
     except OSError as exc:
-        return 127, "", f"could not run {command[0] if command else 'command'}: {exc}"
+        return 127, "", f"could not run {command[0]}: {exc}"
     return completed.returncode, _decode_stream(completed.stdout), _decode_stream(completed.stderr)
 
 

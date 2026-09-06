@@ -537,6 +537,39 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6w (W5): the edges, and the end of the coverage campaign.**
+>
+> What was left in the largest file was not provider work. It was the plumbing
+> either side of it: the configuration validator, the library walk, the
+> one-movie-per-folder contract, the ledger read back out of the log, the
+> inspection of what is already sitting next to a movie, and the two toolchain
+> helpers whose entire job is to fail politely.
+>
+> Sixty-six tests. Every refusal in `validate_compact_config` — and the fact
+> that they are all reported at once, because an operator should not fix a
+> configuration one attempt at a time. The walk skipping samples, non-MKVs,
+> undersized files, symlinked files, symlinked folders, extras and disc trees,
+> and a file that vanishes between the scan and the size check. The ledger read
+> back with a half-written event in the middle of it (the shape an interrupted
+> run leaves), a checkpoint belonging to another library, a payload of the
+> wrong shape — and a log that cannot be read at all, which stops the run,
+> because guessing an empty ledger silently re-spends yesterday's allowance.
+> Sidecar inspection when the folder will not list, the file will not read, the
+> file is empty, over the limit, a symlink, or simply named something else.
+>
+> One helper was not keeping its promise: `run_external_command` documents that
+> it never raises, and an empty command list raised `IndexError` from inside
+> `subprocess`. No caller passes one; it answers 127 now.
+>
+> Thirty-seven mutations, all killed. One equivalent mutant recorded: pruning
+> symlinked directories in the walk is redundant while `os.walk` runs with
+> `followlinks=False` — defence in depth, kept.
+>
+> **This closes the coverage work on `subtitle_fetcher.py`**: 78% → **94%**
+> across phases 6o–6w, with the remaining 200 uncovered lines scattered across
+> forty functions in ones and twos rather than sitting in any block worth a
+> phase of its own. 1,734 → 1,800 tests, the repo at 87%.
+
 > **Update — phase 6v (W5): the metered provider, either side of the search.**
 >
 > SubDL's search parsing and scoring were well covered; the request that
@@ -1538,11 +1571,33 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6t**~~ | ~~W5 the extraction/OCR toolchain: USF, backend lookup, `run_ocr`, and the inside of `_extract_one_track`; fixed an unreachable mono wrapper and a half-checked `--ocr-args`~~ **done** | +39 tests, 12 mutations killed, fetcher 86% → 89% | Low | ✅ |
 | ~~**6u**~~ | ~~W5 the seven scraped adapters as parsers: hostile HTML/JSON, the transport's failure translation, and the chain's breaker bookkeeping; fixed an Addic7ed language read that dropped valid rows when the row layout moved~~ **done** | +66 tests, 31 mutations killed, fetcher 89% → 91% | Low | ✅ |
 | ~~**6v**~~ | ~~W5 the SubDL client either side of its search: auth, retry/backoff, bounded reads, the download leg and the archive reader; fixed an HI-copy pattern that could never match~~ **done** | +58 tests, 30 mutations killed, fetcher 91% → 92% | Low | ✅ |
+| ~~**6w**~~ | ~~W5 the fetcher's edges: config validation, the library walk, the layout contract, the ledger reader, sidecar inspection and the toolchain helpers; closes the coverage campaign on the largest file~~ **done** | +66 tests, 37 mutations killed, fetcher 92% → 94% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
 | ~~**8c**~~ | ~~W7 the rest of the machine-readable output (a JSONL run stream, `run_summary.json`); the PyPI release: distribution `organizekit`, a complete sdist, a tag-triggered Trusted-Publishing workflow~~ **done** (the upload itself needs a maintainer with PyPI access) | +190, +51 tests | Low | ✅ |
 | ~~**8d**~~ | ~~W7 the shared console layer: colour capability, Windows VT mode, glyph support and safe raw writes decided once in `core/console.py` for both the CLI and `LiveConsole`~~ **done** (adopting the *renderer* in the other tools is a UI change, deferred) | −60, +32 tests | Low | ✅ |
+
+> **Where this ends (as of phase 6w).** Every numbered phase in the table
+> above is done except phase 7, which was taken out of scope by decision (code
+> health only, no new product features). What is deliberately *not* being done,
+> and why:
+>
+> - **Adopting `LiveConsole`'s renderer in the other four tools** — a
+>   user-visible UI change, not code health. The *capability* half (colour, VT
+>   mode, glyphs, safe writes) is already shared.
+> - **Concurrent provider requests** — deprioritised; the per-host token
+>   buckets that would make it safe exist, but a nightly run over a settled
+>   library is not request-bound.
+> - **HTTP keep-alive** — worth 100–300 ms per request and the cheapest
+>   remaining speed item, but it means holding a connection pool open across a
+>   run, which is state where there is currently none.
+> - **The last ~200 uncovered lines in `subtitle_fetcher.py`** — scattered in
+>   ones and twos across forty functions; there is no block left worth a phase.
+>
+> The plan is, in other words, finished. Anything after this is maintenance:
+> keeping the suite green, and the two optional items above if they are ever
+> wanted.
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run
@@ -1580,7 +1635,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 22.0 s (1,734 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 22.5 s (1,800 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
