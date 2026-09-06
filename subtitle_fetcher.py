@@ -756,9 +756,18 @@ class Addic7edSource(BaseSource):
             end = movie_html.find('class="language"', lm.end())
             window = movie_html[lm.end(): end if end != -1 else lm.end() + 3000]
             text = unescape(strip_tags(window))
-            # The language name precedes the completion status in the row.
-            pre_status = text.split("Completed", 1)[0].strip()
-            lang_name = re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", pre_status).strip()
+            # The language name is the language *cell's* own text. Reading it
+            # as "everything in the row before the word Completed" made the
+            # language test depend on where the status sits: a row that put
+            # the download count first, or stated completion as a bare "80%",
+            # produced a language name like "English 1200 Downloads" and the
+            # row was dropped as non-English — silently, and for the wrong
+            # reason. Bounded by the cell, the two status checks below are
+            # the ones that decide whether a row is downloadable.
+            cell_text = unescape(strip_tags(window.split("</td>", 1)[0]))
+            lang_field = cell_text.split("Completed", 1)[0]
+            lang_name = re.sub(r"\d+(?:[.,]\d+)?\s*%", "", lang_field)
+            lang_name = re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", lang_name).strip()
             if lang_name.casefold() != "english":
                 continue
             if re.search(r"%\s*Completed", text, re.I):
@@ -776,7 +785,7 @@ class Addic7edSource(BaseSource):
                 feature_title=header_title or identity.title,
                 feature_year=header_year or identity.year,
                 downloads=int(dl_count.group(1)) if dl_count else 0,
-                hearing_impaired="hearing impaired" in pre_status.casefold(),
+                hearing_impaired="hearing impaired" in cell_text.casefold(),
                 extra={"referer": referer},
             ))
             if len(cands) >= SCRAPE_MAX_CANDIDATES_PER_SOURCE * 2:
@@ -986,7 +995,9 @@ class YifySubtitlesSource(BaseSource):
     def fetch(self, candidate: ScrapeCandidate, t: ScrapeTransport) -> bytes:
         page = t.get(absolute_url(self.BASE, candidate.file_id)).decode("utf-8", errors="replace")
         best_href: str | None = None
-        best_rating = -1.0
+        # -inf, not -1: the "downvoted rows are not offered" rule below is
+        # the only thing that rejects a negative rating.
+        best_rating = float("-inf")
         for row in re.findall(r"<tr data-id=[\"'][^\"']*[\"']>(.*?)(?:</tr>|$)", page, re.S):
             lang_m = re.search(r"<span[^>]*class=[\"']sub-lang[\"'][^>]*>([^<]+)</span>", row, re.I)
             if not lang_m or lang_m.group(1).strip().casefold() != "english":

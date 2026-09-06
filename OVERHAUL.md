@@ -537,6 +537,42 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6u (W5): seven sites that change without telling anybody.**
+>
+> The scraped tier is seven HTML pages written for humans. Nothing about them
+> is a contract: a table gains a column, a status moves into its own cell, a
+> search page starts listing sidebar links, and a parser written against last
+> year's markup quietly returns nothing — or worse, the wrong row. The chain
+> around those parsers was tested end to end; the parsers themselves had only
+> ever seen one good page per site.
+>
+> `tests/test_scrape_sources.py` (66 tests) hands them the pages a site serves
+> on a bad day. The transport turns every network outcome into one printable
+> sentence — a non-2xx answer that does not raise, an `HTTPError`, a DNS
+> failure named by host and *not* by query, a timeout, a body over the size
+> limit. Podnapisi gets a payload that is not a list, entries that are not
+> objects, a duplicate id, a year that is not a number, a second page, and
+> pagination fields that are nonsense. Addic7ed gets an empty result page that
+> still carries sidebar movie links, a draft at 80%, a row with no download
+> link, a hearing-impaired row and both cell layouts. SubSource gets a guessed
+> URL that misses, a search page listing a different film, and a slug page that
+> 500s. YIFY gets a downvoted row, a row with no link, and rows out of order.
+> Then the chain: what counts as a hard failure, what counts as a parse
+> failure, what a refused candidate must *not* cost, and every reason string
+> `run_scrape_chain` reports.
+>
+> **The Addic7ed row parser had a real fragility.** It read the language name
+> as "everything in the row before the word `Completed`", so a layout that put
+> the download count before the status produced the language `English 1200
+> Downloads` and the row was dropped as non-English — silently, and for the
+> wrong reason, which for a scraped source looks exactly like "the site has
+> nothing". The name now comes from the language cell itself, which also makes
+> the two completion checks below it reachable: they, not an accident of string
+> splitting, are what refuses a draft.
+>
+> Thirty-one mutations, all killed. 1,610 → 1,676 tests; `subtitle_fetcher.py`
+> 89% → 91%, the repo 87%.
+
 > **Update — phase 6t (W5): the movie's own subtitle track, and two dead
 > branches.**
 >
@@ -1466,6 +1502,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6r**~~ | ~~W5 end-to-end tests for `refetch_english_srt`, the cross-tool seam that is the only code allowed to overwrite an existing sidecar~~ **done** | +27 tests, 10 mutations killed, fetcher 82% → 84% | Low | ✅ |
 | ~~**6s**~~ | ~~W5 the queue's failure branches end to end: hash failures, provider outages, an adapter crash, a sidecar appearing mid-download; fixed a ledger checkpoint that dropped every outcome after a reservation~~ **done** | +19 tests, 11 mutations killed, fetcher 84% → 86% | Low | ✅ |
 | ~~**6t**~~ | ~~W5 the extraction/OCR toolchain: USF, backend lookup, `run_ocr`, and the inside of `_extract_one_track`; fixed an unreachable mono wrapper and a half-checked `--ocr-args`~~ **done** | +39 tests, 12 mutations killed, fetcher 86% → 89% | Low | ✅ |
+| ~~**6u**~~ | ~~W5 the seven scraped adapters as parsers: hostile HTML/JSON, the transport's failure translation, and the chain's breaker bookkeeping; fixed an Addic7ed language read that dropped valid rows when the row layout moved~~ **done** | +66 tests, 31 mutations killed, fetcher 89% → 91% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1508,7 +1545,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 24.8 s (1,610 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 25.0 s (1,676 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
