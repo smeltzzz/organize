@@ -246,8 +246,6 @@ REPORT_FILE = str(default_tool_dir("movie_standardizer") / "movie_standardizer_r
 
 # Canonical-library contract: output no artwork, extras, cleanup artifacts,
 # or duplicate-management actions—only one MKV and English subtitles.
-COPY_EXTRAS = False
-COPY_ARTWORK = False
 RUN_CLEANUP_ON_TARGET = False
 ENABLE_DEDUPLICATION = False
 # REPORT is non-destructive. QUARANTINE moves candidates outside the library.
@@ -578,8 +576,6 @@ class Config:
     report_file: Path | None = field(
         default_factory=lambda: Path(REPORT_FILE) if REPORT_FILE else None
     )
-    copy_extras: bool = COPY_EXTRAS
-    copy_artwork: bool = COPY_ARTWORK
     run_cleanup_on_target: bool = RUN_CLEANUP_ON_TARGET
     enable_deduplication: bool = ENABLE_DEDUPLICATION
     dedup_size_margin_pct: float = DEDUP_SIZE_MARGIN_PCT
@@ -2097,56 +2093,6 @@ def process_file_action(src: Path, dest: Path) -> bool:
         LOG.error("%s failed for '%s': %s", mode, src, exc)
         record_outcome("failed", mode, src=src, dest=dest, reason=str(exc))
         return False
-
-def process_disc_folder(src_dir: Path, parsed: ParsedName) -> bool:
-    """Hardlink a disc tree only when called explicitly (canonical scans skip discs)."""
-    dest_root = CFG.target_dir / parsed.folder_name
-    LOG.info("Disc structure detected: '%s' -> '%s'", src_dir, dest_root)
-    ok = True
-    for dirpath, dirnames, filenames in os.walk(src_dir):
-        dirnames[:] = [d for d in dirnames if not is_skipped_junk_name(d)]
-        rel = Path(dirpath).relative_to(src_dir)
-        for name in filenames:
-            if is_skipped_junk_name(name):
-                continue
-            src = Path(dirpath) / name
-            dest = dest_root / rel / name
-            if not process_file_action(src, dest):
-                ok = False
-    return ok
-
-def copy_extras_into(src_root: Path, dest_movie_folder: Path, extras: Sequence[ScannedFile]) -> None:
-    if not CFG.copy_extras or not extras:
-        return
-    if not CFG.create_subfolders:
-        return
-    for item in extras:
-        try:
-            rel = item.path.relative_to(src_root)
-        except ValueError:
-            rel = Path("extras") / item.path.name
-        # Keep extra-folder names Plex understands; if the extra was a
-        # loose file, drop it into extras/.
-        if rel.parent == Path():
-            rel = Path("extras") / rel.name
-        process_file_action(item.path, dest_movie_folder / rel)
-
-def copy_artwork_into(dest_movie_folder: Path, artwork: Sequence[ScannedFile]) -> None:
-    if not CFG.copy_artwork or not artwork or not CFG.create_subfolders:
-        return
-    for item in artwork:
-        process_file_action(item.path, dest_movie_folder / item.path.name.lower())
-
-def pair_idx_files(subtitles: Sequence[ScannedFile]) -> dict[Path, Path]:
-    """Map .sub → sibling .idx when both exist (VobSub pair)."""
-    pairs: dict[Path, Path] = {}
-    for item in subtitles:
-        if item.path.suffix.lower() != ".sub":
-            continue
-        idx = item.path.with_suffix(".idx")
-        if idx.exists():
-            pairs[item.path] = idx
-    return pairs
 
 # =====================================================================
 # PROCESSING

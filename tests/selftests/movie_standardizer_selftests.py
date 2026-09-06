@@ -38,8 +38,6 @@ def run_canonical_self_tests() -> int:
             log_file=None,
             report_file=None,
             min_movie_size_mb=0,
-            copy_extras=False,
-            copy_artwork=False,
             run_cleanup_on_target=False,
             enable_deduplication=False,
         )
