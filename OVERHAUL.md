@@ -537,6 +537,42 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6p (W5): the other two tiers of the fetcher, end to end.**
+>
+> Phase 6o ran the fetcher against OpenSubtitles. The other two tiers — SubDL,
+> and the seven keyless scraped sites behind it — were still only unit tested,
+> which meant the *pooling* rules between them had never been executed: which
+> source wins, what each one costs, and what happens when one of them is out.
+>
+> `tests/fake_provider.py` grew a SubDL that answers both v2 routes per movie
+> (the release-aware `/files/search` and the weaker title route), a `FakeSites`
+> standing in for the scraped tier, and a router that puts all of them behind
+> one `urlopen` — which is the only way to test sources that are documented as
+> equals. Twenty-five tests pin the result:
+>
+> * **Equal means equal.** The most-downloaded qualifying release wins whoever
+>   has it: a 400-download SubDL match beats a 10-download OpenSubtitles hash
+>   match, and a 9,000-download hash match beats the same SubDL entry. One
+>   provider's exhausted cap is not the library's problem — the run covers one
+>   movie from each.
+> * **SubDL's claims are checked.** A `match_score` below 0.80 is not a release
+>   match, subtitles filed under a different movie are refused, and a
+>   non-English or explicitly non-SRT entry never reaches a download. SubDL
+>   meters searches *and* downloads separately, and both ledgers survive into
+>   the next run; an exhausted download cap defers the next movie **before** the
+>   lookup, because a search it cannot use is waste.
+> * **The scraped tier is a chain, not a scattergun.** It stops at the first
+>   site that answers (one site contacted, six left alone); when nothing has the
+>   movie all seven are asked, once each, and each search is reserved in the
+>   durable ledger under its own field. `--skip-source` is honoured, a zero cap
+>   turns the tier off, a dry run asks nothing, and a site that fails three
+>   times is dropped for the rest of the run.
+>
+> Twelve mutations, eleven killed on the first pass; the twelfth — deleting
+> SubDL's English gate — survived because a second gate downstream also refuses
+> it, and removing both together is killed. 1,438 → 1,463 tests;
+> `subtitle_fetcher.py` 80% → **82%**, toolkit **84%**.
+
 > **Update — phase 6o (W5): the fetcher's run loop, against a provider.**
 >
 > `subtitle_fetcher.py` is the largest tool here and the only one that reaches
@@ -1250,6 +1286,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6m**~~ | ~~W5 the inspector run end to end against a fake ffprobe: classification through the whole program, probe failures, cache reuse, config refusals and the `--fail-if-*` exit codes~~ **done** | +40 tests, bitdepth 67% → 93% | Low | ✅ |
 | ~~**6n**~~ | ~~W5 the standardizer run end to end: hardlink ingest proved additive, every refusal reported, config refusals — and the four unreachable helpers it exposed, deleted~~ **done** | +53 tests, −54 lines, standardizer 71% → 85% | Low | ✅ |
 | ~~**6o**~~ | ~~W5 the fetcher's run loop against a fake provider at the `urlopen` seam: validated writes, every refusal, the cross-run daily cap and the coverage exit code~~ **done** | +39 tests, fetcher 78% → 80% | Low | ✅ |
+| ~~**6p**~~ | ~~W5 the fetcher's other two tiers end to end: SubDL's two v2 routes, the seven scraped sites behind one `urlopen`, and the pooling, metering and failover rules between all three~~ **done** | +25 tests, fetcher 80% → 82% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1291,8 +1328,8 @@ state in one sentence, it is the wrong change.*
 | :--- | ---: | ---: | ---: |
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
-| Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 80%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 22.6 s (1,438 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
+| Test runtime | 6.7 s | 23.6 s (1,463 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

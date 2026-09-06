@@ -429,5 +429,234 @@ class RunEndingTests(FetcherRunFixture):
         self.assertIn("--allow-missing", self.stderr)
 
 
+class SubdlFixture(FetcherRunFixture):
+    """A run with both providers configured, answered by both fakes."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        key = mock.patch.dict(os.environ, {"SUBDL_API_KEY": "test-subdl-key"})
+        key.start()
+        self.addCleanup(key.stop)
+        self.subdl = fake.FakeSubdl(
+            release_results=[fake.subdl_subtitle("sub123", GOOD_RELEASE, downloads=400)],
+        )
+        self.provider.hash_results = []
+        self.both = fake.FakeProviders(self.provider, self.subdl)
+
+    def run_main(self, *extra: str, provider: object | None = None) -> int:
+        return super().run_main(*extra, provider=self.both if provider is None else provider)
+
+
+class SubdlTests(SubdlFixture):
+    """SubDL is an equal source, metered separately, and gated on its score."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.video = self.movie()
+
+    def test_subdl_covers_a_movie_opensubtitles_could_not(self) -> None:
+        self.assertEqual(self.run_main(), 0)
+        self.assertEqual(self.sidecar_of(self.video).read_text(encoding="utf-8"),
+                         fake.SRT_TEXT)
+        self.assertEqual(self.subdl.count("download"), 1)
+
+    def test_a_low_score_release_match_is_not_treated_as_one(self) -> None:
+        """Below 0.80 the provider is not claiming this is the same release."""
+        self.subdl.release_results = [
+            fake.subdl_subtitle("sub123", GOOD_RELEASE, match_score=0.4)]
+        self.assertEqual(self.run_main(), 1)
+        self.assertEqual(self.sidecars(), [])
+
+    def test_subtitles_filed_under_a_different_movie_are_refused(self) -> None:
+        """The provider's own identity record has to be this movie."""
+        self.subdl.title = "Heat"
+        self.subdl.year = 1995
+        self.assertEqual(self.run_main(), 1)
+        self.assertEqual(self.sidecars(), [])
+        self.assertEqual(self.subdl.count("download"), 0)
+
+    def test_a_non_english_subdl_result_is_refused(self) -> None:
+        self.subdl.release_results = [
+            fake.subdl_subtitle("sub123", GOOD_RELEASE, language="es")]
+        self.assertEqual(self.run_main(), 1)
+        self.assertEqual(self.sidecars(), [])
+
+    def test_an_explicitly_non_srt_result_is_refused(self) -> None:
+        self.subdl.release_results = [
+            fake.subdl_subtitle("sub123", GOOD_RELEASE, media_format="ass")]
+        self.assertEqual(self.run_main(), 1)
+        self.assertEqual(self.sidecars(), [])
+
+    def test_the_search_cap_is_metered_apart_from_the_download_cap(self) -> None:
+        """SubDL publishes two quotas; spending one must not spend the other."""
+        self.assertEqual(self.run_main(), 0)
+        ledger = self.ledger()
+        self.assertEqual(ledger.get("subdl_search_requests_reserved"), 1)
+        self.assertEqual(ledger.get("subdl_download_requests_reserved"), 1)
+
+    def test_an_exhausted_search_cap_defers_instead_of_searching(self) -> None:
+        self.assertEqual(self.run_main("--subdl-search-daily-cap", "1"), 0)
+        self.movie("Heat (1995)")
+        self.subdl.calls.clear()
+        self.assertEqual(self.run_main("--subdl-search-daily-cap", "1"), 1)
+        self.assertEqual(self.subdl.count("/files/search"), 0)
+        self.assertIn("search cap", self.report_text().casefold())
+
+    def test_an_exhausted_download_cap_defers_the_next_movie(self) -> None:
+        """And it defers it *before* the lookup: a search it cannot use is waste."""
+        self.movie("Heat (1995)")
+        self.subdl.add_movie("Heat", 1995, release_results=[
+            fake.subdl_subtitle("sub999", "Heat.1995.1080p.BluRay.x264-GROUP")])
+        self.assertEqual(self.run_main("--subdl-daily-cap", "1"), 1)
+        self.assertEqual(self.subdl.count("download"), 1)
+        self.assertEqual(len(self.sidecars()), 1)
+        self.assertIn("cap exhausted before lookup", self.report_text())
+
+    def test_a_subdl_outage_does_not_stop_the_library(self) -> None:
+        self.movie("Heat (1995)")
+        self.subdl.fail("/files/search", 500, 500, 500, 500)
+        self.assertEqual(self.run_main(), 1)
+        self.assertTrue(self.report.is_file())
+
+    def test_a_rejected_search_is_reported_as_an_error(self) -> None:
+        self.subdl.fail("/files/search", ("rejected", "invalid api key"))
+        self.assertEqual(self.run_main(), 1)
+        self.assertIn("subdl", self.report_text().casefold())
+
+    def test_a_dry_run_spends_neither_subdl_quota(self) -> None:
+        self.assertEqual(self.run_main("--dry-run", "--allow-missing"), 0)
+        self.assertEqual(self.sidecars(), [])
+        self.assertEqual(self.subdl.count("download"), 0)
+        self.assertEqual(self.ledger().get("subdl_download_requests_reserved", 0), 0)
+
+
+class BothProvidersTests(SubdlFixture):
+    """The pooling rule: whichever source has the better release, wins."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.video = self.movie()
+
+    def test_the_most_downloaded_qualifying_release_wins_whoever_has_it(self) -> None:
+        """Equal sources means exactly that: the provider is not the tiebreak."""
+        self.provider.hash_results = [
+            fake.subtitle(9001, GOOD_RELEASE, downloads=10,
+                          title="The Dark Knight", year=2008)]
+        self.subdl.release_results = [
+            fake.subdl_subtitle("sub123", GOOD_RELEASE, downloads=400)]
+        self.assertEqual(self.run_main(), 0)
+        self.assertEqual(self.subdl.count("download"), 1, "SubDL had the popular one")
+        self.assertEqual(self.provider.count("/download"), 0)
+
+    def test_and_the_same_rule_sends_the_job_to_opensubtitles(self) -> None:
+        self.provider.hash_results = [
+            fake.subtitle(9001, GOOD_RELEASE, downloads=9000,
+                          title="The Dark Knight", year=2008)]
+        self.subdl.release_results = [
+            fake.subdl_subtitle("sub123", GOOD_RELEASE, downloads=400)]
+        self.assertEqual(self.run_main(), 0)
+        self.assertEqual(self.provider.count("/download"), 1)
+        self.assertEqual(self.subdl.count("download"), 0)
+
+    def test_subdl_is_still_asked_when_opensubtitles_has_nothing(self) -> None:
+        self.assertEqual(self.run_main(), 0)
+        self.assertTrue(self.provider.count("/subtitles") >= 1)
+        self.assertEqual(self.subdl.count("download"), 1)
+
+    def test_with_opensubtitles_capped_the_run_falls_through_to_subdl(self) -> None:
+        """One provider's exhausted quota is not the library's problem."""
+        self.movie("Heat (1995)")
+        self.provider.hash_results = [
+            fake.subtitle(9001, GOOD_RELEASE, downloads=9000,
+                          title="The Dark Knight", year=2008)]
+        self.subdl.add_movie("Heat", 1995, release_results=[
+            fake.subdl_subtitle("sub999", "Heat.1995.1080p.BluRay.x264-GROUP")])
+        self.assertEqual(self.run_main("--daily-cap", "1"), 0)
+        self.assertEqual(len(self.sidecars()), 2, "one from each provider")
+
+    def test_the_report_names_both_sources(self) -> None:
+        self.assertEqual(self.run_main(), 0)
+        text = self.report_text()
+        self.assertIn("OpenSubtitles", text)
+        self.assertIn("SubDL", text)
+
+
+class ScrapingTierFixture(FetcherRunFixture):
+    """Both APIs empty, so the run falls through to the scraped sources."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.provider.hash_results = []
+        self.provider.identity_results = []
+        self.sites = fake.FakeSites(fake.subf2m_pages())
+        self.all = fake.FakeProviders(self.provider, fake.FakeSubdl(), self.sites)
+        self.video = self.movie()
+
+    def run_main(self, *extra: str, provider: object | None = None) -> int:
+        return super().run_main("--scrape-daily-cap", "50", *extra,
+                                provider=self.all if provider is None else provider)
+
+
+class ScrapingTierTests(ScrapingTierFixture):
+    """The third tier: seven keyless sites, tried in order, one search each."""
+
+    def test_a_scraped_site_can_cover_a_movie_no_api_could(self) -> None:
+        self.assertEqual(self.run_main(), 0)
+        self.assertEqual(self.sidecar_of(self.video).read_text(encoding="utf-8"),
+                         fake.SRT_TEXT)
+        self.assertIn("Subf2m.co", self.report_text())
+
+    def test_the_chain_stops_at_the_first_site_that_answers(self) -> None:
+        """Six requests not made is six sites not annoyed."""
+        self.assertEqual(self.run_main(), 0)
+        self.assertEqual(self.sites.hosts(), ["subf2m.co"])
+
+    def test_when_a_site_has_nothing_the_next_one_is_asked(self) -> None:
+        self.sites.pages = {}
+        self.assertEqual(self.run_main(), 1)
+        self.assertEqual(len(self.sites.hosts()), 7, self.sites.hosts())
+        self.assertEqual(self.sidecars(), [])
+        self.assertIn("HELD FOR MANUAL REVIEW", self.report_text())
+
+    def test_a_skipped_site_is_never_contacted(self) -> None:
+        self.assertEqual(self.run_main("--skip-source", "subf2me"), 1)
+        self.assertNotIn("subf2m.co", self.sites.hosts())
+        self.assertEqual(self.sidecars(), [])
+
+    def test_a_zero_cap_turns_the_whole_tier_off(self) -> None:
+        self.assertEqual(self.run_main("--scrape-daily-cap", "0"), 1)
+        self.assertEqual(self.sites.calls, [])
+
+    def test_a_dry_run_asks_no_site_anything(self) -> None:
+        self.assertEqual(self.run_main("--dry-run", "--allow-missing"), 0)
+        self.assertEqual(self.sites.calls, [])
+        self.assertEqual(self.sidecars(), [])
+
+    def test_each_site_search_is_reserved_in_the_durable_ledger(self) -> None:
+        """One reservation per source per movie, written before the request."""
+        self.sites.pages = {}
+        self.assertEqual(self.run_main(), 1)
+        ledger = self.ledger()
+        for key in sf.SCRAPE_PROVIDER_ORDER:
+            self.assertEqual(ledger.get(f"{key}_search_requests_reserved"), 1, key)
+
+    def test_yesterdays_reservations_are_still_spent_today(self) -> None:
+        self.sites.pages = {}
+        self.assertEqual(self.run_main("--scrape-daily-cap", "1"), 1)
+        self.movie("Heat (1995)")
+        self.sites.calls.clear()
+        self.assertEqual(self.run_main("--scrape-daily-cap", "1"), 1)
+        self.assertEqual(self.sites.calls, [], "every source's cap was already spent")
+
+    def test_a_site_that_keeps_failing_is_dropped_for_the_rest_of_the_run(self) -> None:
+        """Three hard failures and the breaker stops paying for that source."""
+        self.sites.pages = {}
+        for name in ("Heat (1995)", "Alien (1979)", "Jaws (1975)", "Up (2009)"):
+            self.movie(name)
+        self.assertEqual(self.run_main(), 1)
+        self.assertEqual(self.sites.count("/subtitles/searchbytitle"), 3)
+        self.assertIn("disabled", self.report_text())
+
+
 if __name__ == "__main__":
     unittest.main()
