@@ -2069,7 +2069,7 @@ def decode_subdl_srt_payload(data: bytes, max_bytes: int) -> str:
                         0 if LIBRARY_1080P_RE.search(info.filename or "") else 1,
                         0 if LIBRARY_QXR_RE.search(info.filename or "") else 1,
                         0 if LIBRARY_TIGOLE_RE.search(info.filename or "") else 1,
-                        1 if re.search(r"(?i)sdh|hi\\b|hearing", info.filename or "") else 0,
+                        1 if re.search(r"(?i)sdh|\bhi\b|hearing", info.filename or "") else 0,
                         info.filename.casefold(),
                     ),
                 )
@@ -2077,10 +2077,9 @@ def decode_subdl_srt_payload(data: bytes, max_bytes: int) -> str:
                 with archive.open(selected, "r") as member:
                     raw_srt = member.read(max_bytes + 1)
         except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
-            if isinstance(exc, RuntimeError) and (
-                str(exc).startswith("no usable .srt")
-                or str(exc).startswith("SubDL zip archive contains multiple")
-            ):
+            # "no usable .srt" is this function's own verdict about the
+            # archive's contents, not a failure to read it; let it through.
+            if isinstance(exc, RuntimeError) and str(exc).startswith("no usable .srt"):
                 raise
             raise RuntimeError("SubDL zip archive could not be read safely") from exc
         if len(raw_srt) > max_bytes:

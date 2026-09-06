@@ -537,6 +537,40 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6v (W5): the metered provider, either side of the search.**
+>
+> SubDL's search parsing and scoring were well covered; the request that
+> carries them and the bytes that come back were not. That is the part that
+> costs something when it is wrong: the request is authenticated and counted
+> against a daily allowance, and its answer becomes a file in the user's
+> library.
+>
+> `tests/test_subdl_client.py` (58 tests) pins all three. **The request**: the
+> key rides in an `Authorization` header and never in a URL; a 429 or a 5xx is
+> retried, a 401 is not (asking again spends the quota twice); `Retry-After` is
+> honoured, capped at 30 seconds, ignored when it is not a number, and applied
+> to the *host* so the next movie inherits the pause. **The answer**: a
+> declared length over the limit is refused before the read, a body that lies
+> about its length is still bounded, and every non-subtitle shape — a list, an
+> error document, HTML, a truncated archive, a gzip bomb — is refused by name.
+> **The file**: a relative URL is resolved against `dl.subdl.com`, an
+> identifier builds the documented v2 endpoint locally, a JSON redirect is
+> followed exactly once and never to another host, and nothing is written for a
+> movie that changed during the lookup or on top of a sidecar that appeared
+> while the download was in flight.
+>
+> **One more pattern that could not match.** Where an archive holds several
+> SRTs the tool prefers the plain one over the SDH/HI copy, but the pattern
+> read `hi\\b` — an escaped backslash, not a word boundary — so it could only
+> match the literal characters `hi\b`. `SDH` and `hearing` were recognised;
+> the very common `...HI.srt` was not, and the HI copy won on filename order.
+>
+> Thirty mutations, all killed. One is recorded as equivalent: the length check
+> after reading a zip member cannot fire, because the member was already
+> filtered on its declared size and `zipfile` never returns more than that —
+> defence in depth, kept and now documented. 1,676 → 1,734 tests;
+> `subtitle_fetcher.py` 91% → 92%.
+
 > **Update — phase 6u (W5): seven sites that change without telling anybody.**
 >
 > The scraped tier is seven HTML pages written for humans. Nothing about them
@@ -1503,6 +1537,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6s**~~ | ~~W5 the queue's failure branches end to end: hash failures, provider outages, an adapter crash, a sidecar appearing mid-download; fixed a ledger checkpoint that dropped every outcome after a reservation~~ **done** | +19 tests, 11 mutations killed, fetcher 84% → 86% | Low | ✅ |
 | ~~**6t**~~ | ~~W5 the extraction/OCR toolchain: USF, backend lookup, `run_ocr`, and the inside of `_extract_one_track`; fixed an unreachable mono wrapper and a half-checked `--ocr-args`~~ **done** | +39 tests, 12 mutations killed, fetcher 86% → 89% | Low | ✅ |
 | ~~**6u**~~ | ~~W5 the seven scraped adapters as parsers: hostile HTML/JSON, the transport's failure translation, and the chain's breaker bookkeeping; fixed an Addic7ed language read that dropped valid rows when the row layout moved~~ **done** | +66 tests, 31 mutations killed, fetcher 89% → 91% | Low | ✅ |
+| ~~**6v**~~ | ~~W5 the SubDL client either side of its search: auth, retry/backoff, bounded reads, the download leg and the archive reader; fixed an HI-copy pattern that could never match~~ **done** | +58 tests, 30 mutations killed, fetcher 91% → 92% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1545,7 +1580,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 25.0 s (1,676 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 22.0 s (1,734 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
