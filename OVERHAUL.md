@@ -537,6 +537,40 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6s (W5): the queue's twenty bad days, and a bug in the ledger.**
+>
+> `queue_run` is mostly not the happy path. It is the twenty-odd places where
+> something goes wrong for *one* movie and the run has to decide what that
+> movie's status is, write it down, and go to the next one — the property a
+> nightly job over 900 movies lives or dies by. The end-to-end suite covered
+> the paths where a provider says no; the paths where something *breaks* were
+> the largest uncovered region left in the file.
+>
+> Eighteen tests now drive them: a movie that cannot be hashed, a movie that
+> changes while it is being hashed, a movie that vanishes between the scan and
+> the read, a title search that goes down between the two providers (twice —
+> once with somewhere else to ask, once without), a SubDL title search that
+> fails, a crash inside a scraped adapter, bytes an adapter should have
+> rejected, a subtitle that appears from somewhere else mid-download, and the
+> two ways the run can be told to be stricter (`--no-identity-fallback`, and a
+> filename with no `Title (Year)` in it). Each asks the same two questions:
+> what happened to *this* movie, and did the next one still get its subtitle?
+>
+> **Writing them found a real bug.** The ledger is append-only and each
+> checkpoint carries only the records that changed since the last one, which
+> is what keeps a long night's log small. A movie that gets as far as a
+> download is checkpointed twice — once to reserve the request before it is
+> spent, once for the outcome — and the first checkpoint empties the
+> changed-record set while recording an outcome does not put the record back
+> in. So **every outcome after a reservation was dropped**: the durable ledger
+> was left saying the download was still reserved for a movie that had long
+> since been downloaded, already covered, or failed. The scraping branch four
+> hundred lines above already re-marks its record for exactly this reason,
+> with a comment explaining why; the download branch now does the same.
+>
+> Eleven mutations of the queue's failure handling, all killed. 1,552 → 1,571
+> tests; `subtitle_fetcher.py` 84% → 86%.
+
 > **Update — phase 6r (W5): the one function allowed to overwrite a subtitle.**
 >
 > `refetch_english_srt` is the seam between the two tools: `sync_subtitles.py`
@@ -1396,6 +1430,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**5c**~~ | ~~W2 the two JSON probe caches folded into `state.db`'s `probe` table, with the old files imported once and `--cache` still honoured~~ **done** | +38 tests, probecache 94% | Low | ✅ |
 | ~~**6q**~~ | ~~W5 property-based tests over the fetcher's planners: selection, pooling, the SubDL threshold, the download-URL guard and the quota arithmetic~~ **done** | +24 tests, 12 planner mutations killed | Low | ✅ |
 | ~~**6r**~~ | ~~W5 end-to-end tests for `refetch_english_srt`, the cross-tool seam that is the only code allowed to overwrite an existing sidecar~~ **done** | +27 tests, 10 mutations killed, fetcher 82% → 84% | Low | ✅ |
+| ~~**6s**~~ | ~~W5 the queue's failure branches end to end: hash failures, provider outages, an adapter crash, a sidecar appearing mid-download; fixed a ledger checkpoint that dropped every outcome after a reservation~~ **done** | +19 tests, 11 mutations killed, fetcher 84% → 86% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1438,7 +1473,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 24.7 s (1,552 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 24.0 s (1,571 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

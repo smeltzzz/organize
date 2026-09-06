@@ -5792,6 +5792,12 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             result = JobResult(video, "download", note, dest, reason=REASON_DOWNLOADED)
             results.append(result)
             emit(index, "SAVED", video, dest.name)
+        # Same reason as the scraping branch above: the reservation checkpoint
+        # emptied the dirty set, and set_movie_status only touches the record.
+        # Without re-marking it, how this movie actually ended - downloaded,
+        # already had one, or failed - would never reach the durable ledger,
+        # which would be left claiming the download is still reserved.
+        state.setdefault("_dirty_movies", set()).add(key)
         persist_state(state, cfg.log_file)
 
     summary = run_summary(

@@ -434,6 +434,18 @@ class RunIntegrationTests(unittest.TestCase):
         self.assertIn(str(self.movie),
                       [str(item) for item in summary.get("deferred_videos") or []])
 
+    def test_a_dry_run_names_the_track_it_would_use_and_writes_nothing(self) -> None:
+        """The whole run, in dry-run: the movie is answered before any provider."""
+        runner = FakeRunner(TEXT_TRACKS)
+        with mock.patch.object(subprocess, "run", runner), \
+                mock.patch.object(sf, "find_mkvtoolnix_binary", fake_binaries):
+            results, _summary = sf.queue_run(self._config(dry_run=True))
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, "dry-run")
+        self.assertIn("embedded", results[0].detail)
+        self.assertEqual(list(self.movie.parent.glob("*.srt")), [],
+                         "a dry run writes no sidecar")
+
     def test_report_names_what_was_extracted(self) -> None:
         runner = FakeRunner(TEXT_TRACKS)
         with mock.patch.object(subprocess, "run", runner), \
