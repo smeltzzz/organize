@@ -537,6 +537,38 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6m (W5): the inspector's worklist, end to end.**
+>
+> `bitdepth.py` never modifies a movie, which made it look like the safe tool
+> here. What it produces is a *worklist* - "send these through HandBrake" - and
+> a wrong row is an HDR master re-encoded into SDR by hand. The verdicts were
+> unit-tested against payload dictionaries; the program around them was not
+> tested at all. Launching ffprobe, reading what comes back, containing a probe
+> that fails, reusing yesterday's answers, and turning a library of verdicts
+> into the exit code a nightly job acts on: none of it had been executed by a
+> test, because reaching it needs a library and an installed FFmpeg.
+>
+> `tests/fake_ffprobe.py` supplies the FFmpeg - a real executable, launched as
+> a real subprocess by the unmodified tool, where each "movie" carries its own
+> ffprobe answer as a JSON header line. A test writes the technical properties
+> it wants; the tool discovers, probes and files them. Both fail-closed rules
+> are checked through the whole program rather than at the function: a PQ
+> transfer on 8-bit video and a bit depth nothing in the file states are held
+> for review, never queued.
+>
+> The exit codes are the interface to whatever started the run, so they are
+> pinned: 3 queued, 4 review, 5 unreadable, each only when the matching
+> `--fail-if-*` flag asks, and the most serious finding wins when several
+> apply. A missing library, an output path inside the media library, a log and
+> a report that are the same file, and an ffprobe that will not run are all
+> refused before anything is probed - better no report than a report full of
+> ERROR rows. A failed probe is never cached (a test proves the next run
+> reaches the real answer), Ctrl-C still publishes what was learned, and a
+> report that cannot be written fails the run.
+>
+> Nine mutations, all killed. 1,306 → 1,346 tests; `bitdepth.py` 67% →
+> **93%**, toolkit 80% → **81%**.
+
 > **Update — phase 6l (W5): the library does not hold still for a remux.**
 >
 > A remux takes minutes, and the window between reading a movie and swapping
@@ -1156,6 +1188,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6j**~~ | ~~W5 the fetcher's run summary, coverage tally, review-hold vocabulary and scraping-candidate conversion extracted from `queue_run` (726 → 653 lines) and tabled~~ **done** | +150 lines, +28 tests | Low | ✅ |
 | ~~**6k**~~ | ~~W5 the standardizer's replacement policy: the upgrade guard chain split from the probing (`upgrade_verdict`), and the probe reader, the score and the gate tabled~~ **done** | +40 lines, +58 tests | Low | ✅ |
 | ~~**6l**~~ | ~~W5 the cleaner's concurrent-change refusals proved end to end: the library changed inside the remux window (source, sidecar, Ctrl-C), plus the free-space and journal fail-closed paths~~ **done** | +10 tests, cleaner 79% → 81% | Low | ✅ |
+| ~~**6m**~~ | ~~W5 the inspector run end to end against a fake ffprobe: classification through the whole program, probe failures, cache reuse, config refusals and the `--fail-if-*` exit codes~~ **done** | +40 tests, bitdepth 67% → 93% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1197,8 +1230,8 @@ state in one sentence, it is the wrong change.*
 | :--- | ---: | ---: | ---: |
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
-| Coverage | 58% | **80%** (cleaner 81%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 18.5 s (1,306 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Coverage | 58% | **81%** (cleaner 81%, inspector 93%) | ≥75%, cleaner ≥80% ✅ |
+| Test runtime | 6.7 s | 22.1 s (1,346 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
