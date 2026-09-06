@@ -1,0 +1,21 @@
+# What goes in the source distribution, beyond the code setuptools finds by
+# itself.
+#
+# The default sdist picks up `tests/test_*.py` and nothing else, which is the
+# worst of both worlds: half a suite that cannot run, because the fixtures it
+# imports (`tests/property.py`, `tests/fake_mkvmerge.py`, `tests/selftests/`)
+# were left behind. A distributor who runs the tests at build time - which is
+# the reason to ship them at all - would see import errors rather than a
+# verdict. So the sdist carries the whole suite, its fixtures, the docs the
+# README links to, and the zipapp builder.
+#
+# The *wheel* stays code-only: `[tool.setuptools] packages/py-modules` decides
+# that, and `organize test --unit` says so when the suite is not there.
+graft tests
+graft docs
+include CHANGELOG.md CONTRIBUTING.md SECURITY.md LICENSE OVERHAUL.md REVIEW.md
+include .env.example
+graft benchmarks
+include scripts/build_pyz.py
+include __main__.py
+global-exclude __pycache__ *.py[cod]

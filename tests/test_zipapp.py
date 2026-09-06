@@ -100,6 +100,7 @@ class TheArchiveRunsTests(unittest.TestCase):
         result = run_archive("test", "--unit")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("not part of the single-file build", result.stdout)
+        self.assertIn("Clone the repository", result.stdout)
 
     def test_an_unknown_tool_is_refused(self) -> None:
         result = run_archive("run-tool", "os.py")

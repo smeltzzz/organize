@@ -495,6 +495,47 @@ Still open from this slice: the remaining tier orchestration inside
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 8c (W7, part two): the release, checked before it is made.**
+>
+> A version on PyPI is immutable: a broken 3.6.0 cannot be fixed, only answered
+> with 3.6.1. So this phase is mostly about what is verified before the upload.
+>
+> **The distribution had to be renamed.** `organize` on PyPI has belonged to an
+> unrelated tabular-data parser since 2011, and `organize-media` to a media
+> copier. It is published as **`organizekit`** - the name the shared package
+> already has on disk - and the console script is still `organize`, so
+> `pip install organizekit` gives you `organize doctor`.
+>
+> **Three real defects, found by actually installing the thing.** The wheel's
+> `organize test --unit` handed the operator an `ImportError` traceback out of
+> unittest's discoverer: the guard asked *"am I a zipapp?"* when the question is
+> *"is the suite here?"* - it now asks the second, which covers both
+> deployments. The sdist carried `tests/test_*.py` and none of the fixtures they
+> import, so its suite could not even be collected; `MANIFEST.in` now ships the
+> whole suite, its `selftests/`, the docs the link tests check, `__main__.py`
+> and the zipapp builder - and the unpacked sdist runs all 1,152 tests green.
+> The default sdist also omitted `__main__.py`, which meant it could not build
+> its own zipapp.
+>
+> **`tests/test_packaging.py`** reads the declarations and holds them against
+> the files on disk, offline and in milliseconds: every root-level tool appears
+> in `py-modules` (the drift that works in a checkout and vanishes from the
+> wheel), every subpackage is listed, the console script is `organize` whatever
+> the distribution is called, the version is single-sourced, the Python floor
+> matches the one `doctor` enforces, and nothing in `MANIFEST.in` points at a
+> file that no longer exists. `tests/test_docs.py` now also runs `git apply
+> --check` on every held-back workflow patch, because a patch nobody can apply
+> any more looks like finished work.
+>
+> **`docs/release-workflow.patch`** adds a tag-triggered release workflow using
+> PyPI Trusted Publishing, so no API token exists to leak: it re-runs the suite
+> before building, refuses a tag that disagrees with `organizekit.VERSION`,
+> installs the wheel into a clean venv and runs it from outside the source tree,
+> executes the sdist's own suite, and attaches the wheel, the sdist and
+> `organize.pyz` to the GitHub release. It is a patch rather than a commit for
+> the usual reason: this branch's bot has no `workflows` permission.
+> 1,135 -> 1,152 tests, nine mutations checked.
+
 > **Update — phase 8c (W7): a run reports as it happens.**
 >
 > The three `--json` commands describe states, and a run is not one. `doctor`,
@@ -902,7 +943,7 @@ Each phase is independently shippable and leaves the repo green.
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
-| **8c** | ~~W7 the rest of the machine-readable output (a JSONL run stream, `run_summary.json`)~~ **done**; PyPI release still open | +190, +34 tests | Low | 2 |
+| ~~**8c**~~ | ~~W7 the rest of the machine-readable output (a JSONL run stream, `run_summary.json`); the PyPI release: distribution `organizekit`, a complete sdist, a tag-triggered Trusted-Publishing workflow~~ **done** (the upload itself needs a maintainer with PyPI access) | +190, +51 tests | Low | ✅ |
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run
@@ -940,7 +981,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **78%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 16.1 s (1,135 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 15.9 s (1,152 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

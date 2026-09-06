@@ -1287,16 +1287,20 @@ def run_unit_tests() -> int:
     """Run python3 -m unittest discover -s tests."""
     print(bold("  RUNNING REPOSITORY UNIT TESTS"))
     print("  " + HRULE * 68)
-    from organizekit.core import tools_home, zipapp_path
+    from organizekit.core import tools_home
 
-    if zipapp_path() is not None:
-        # The offline suite is developer equipment: it is not in the archive,
-        # and shipping it there would mean shipping its fixtures too.
-        print("  The unit test suite is not part of the single-file build.")
+    home = tools_home()
+    if not (home / "tests").is_dir():
+        # The offline suite is developer equipment. It is not in the zipapp and
+        # it is not in the wheel - shipping it would mean shipping its fixtures
+        # too - so ask for the suite itself rather than for the deployment:
+        # an installed package used to reach this line and hand the operator an
+        # ImportError traceback from unittest's discoverer.
+        print("  The unit test suite is not part of the single-file build or the installed package.")
         print("  Clone the repository and run: python3 -m unittest discover -s tests")
         return 0
     cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
-    proc = subprocess.run(cmd, cwd=str(tools_home()), check=False)
+    proc = subprocess.run(cmd, cwd=str(home), check=False)
     return proc.returncode
 
 

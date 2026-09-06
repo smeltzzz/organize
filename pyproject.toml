@@ -3,7 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "organize"
+# The *distribution* name, which is not the command name. `organize` on PyPI
+# has been taken since 2011 by an unrelated tabular-data parser, and
+# `organize-media` by a media copier, so the package is published as
+# `organizekit` - the name the shared package already has on disk. The console
+# script installed by it is still `organize`, and `pip install organizekit`
+# gives you `organize doctor`. Nothing about the checkout changes.
+name = "organizekit"
 # Single-sourced from organizekit.VERSION so the wheel, the console script's
 # --version and the dashboard banner can never disagree again.
 dynamic = ["version"]

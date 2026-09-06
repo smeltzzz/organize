@@ -10,7 +10,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,135 unit tests, ~16 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,152 unit tests, ~16 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -19,9 +19,59 @@ Installing the package also provides an `organize` console script, so the CLI
 works from any directory:
 
 ```bash
-pip install .
+pip install .          # from a clone
+pip install organizekit
 organize doctor
 ```
+
+The distribution is called **`organizekit`** — the name the shared package
+already has on disk — because `organize` on PyPI has belonged to an unrelated
+tabular-data parser since 2011, and `organize-media` to a media copier. The
+command you type is unaffected: `pip install organizekit` gives you `organize`.
+
+## Cutting a release
+
+A version on PyPI is immutable. A broken 3.6.0 cannot be fixed, only answered
+with 3.6.1, so everything that can be checked before the upload is checked
+before the upload — by
+[`docs/release-workflow.patch`](release-workflow.patch) in CI, and by this list
+if you are doing it by hand:
+
+```bash
+# 1. One version, in one place. Everything else reads organizekit.VERSION.
+$EDITOR organizekit/__init__.py           # bump VERSION
+$EDITOR CHANGELOG.md                      # move [Unreleased] to the new version
+
+# 2. The suite, the linter and the field smoke tests.
+python3 -m unittest discover -s tests -p "test_*.py" && ruff check . && python3 organize.py test
+
+# 3. Build both artifacts and check the metadata PyPI will render.
+rm -rf dist build *.egg-info && python3 -m build && python3 -m twine check dist/*
+
+# 4. The wheel must work from outside the source tree, in a clean environment.
+python3 -m venv /tmp/checkinstall && /tmp/checkinstall/bin/pip install dist/*.whl
+cd /tmp && /tmp/checkinstall/bin/organize --version && /tmp/checkinstall/bin/organize doctor
+
+# 5. The sdist must carry a suite that actually runs.
+mkdir /tmp/sdist && tar xzf dist/*.tar.gz -C /tmp/sdist --strip-components=1
+cd /tmp/sdist && python3 -m unittest discover -s tests -p "test_*.py"
+
+# 6. Tag it. The workflow does the rest; the tag must match VERSION.
+git tag -a v3.6.0 -m "3.6.0" && git push origin v3.6.0
+```
+
+Steps 4 and 5 are not ceremony. The wheel ships nine top-level modules and a
+package, and a tool added at the repository root without a line in
+`py-modules` is missing from it while working perfectly in the checkout;
+`tests/test_packaging.py` catches that one offline, but only running the thing
+proves the console script resolves. And setuptools' default sdist ships
+`tests/test_*.py` while leaving behind the fixtures they import, which produces
+a distribution whose tests cannot be collected — `MANIFEST.in` fixes it and
+step 5 is what notices when it stops.
+
+Publishing itself uses **Trusted Publishing**: GitHub mints a short-lived OIDC
+credential for that exact repository and workflow, so there is no PyPI token in
+the repository secrets to rotate, leak or forget.
 
 ## One file, no install
 

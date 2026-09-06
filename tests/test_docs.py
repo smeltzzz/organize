@@ -15,6 +15,8 @@ with an answer.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -153,6 +155,44 @@ class FrontPageTests(unittest.TestCase):
         self.assertTrue(targets, "the front page lost its navigation bar")
         for target in targets:
             self.assertIn(target, anchors, f"nav links to #{target}, which no heading provides")
+
+
+@unittest.skipUnless((REPO / ".git").exists() and shutil.which("git"),
+                     "needs a git checkout (an sdist ships the patches but not .git)")
+class HeldBackWorkflowPatchTests(unittest.TestCase):
+    """CI changes this branch cannot commit are held as patches, and patches rot.
+
+    The bot that pushes this repository has no `workflows` permission, so
+    `.github/workflows/*` changes live in `docs/*.patch` until someone applies
+    them with a token that does. A patch nobody can apply any more is worse
+    than no patch: it looks like the work is done.
+    """
+
+    def patches(self) -> list[Path]:
+        found = sorted(DOCS.glob("*.patch"))
+        self.assertTrue(found, "the held-back patches vanished; so should this test")
+        return found
+
+    def test_every_held_patch_still_applies(self) -> None:
+        for patch in self.patches():
+            with self.subTest(patch=patch.name):
+                proc = subprocess.run(["git", "apply", "--check", str(patch)],
+                                      cwd=str(REPO), capture_output=True, encoding="utf-8")
+                self.assertEqual(proc.returncode, 0,
+                                 f"{patch.name} no longer applies:\n{proc.stderr}")
+
+    def test_every_held_patch_says_why_it_is_held(self) -> None:
+        for patch in self.patches():
+            with self.subTest(patch=patch.name):
+                head = patch.read_text(encoding="utf-8").split("diff --git", 1)[0]
+                self.assertIn("workflows", head)
+                self.assertIn("git apply", head)
+
+    def test_the_docs_index_lists_them(self) -> None:
+        index = (DOCS / "README.md").read_text(encoding="utf-8")
+        for patch in self.patches():
+            with self.subTest(patch=patch.name):
+                self.assertIn(patch.name, index)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,12 @@ Also in this folder:
   `.github/workflows/ci.yml` that are held as a patch rather than a commit,
   because the bot that pushes this branch has no `workflows` permission.
   Apply with `git apply docs/ci-workflow.patch`.
+- [`release-workflow.patch`](release-workflow.patch) — a new
+  `.github/workflows/release.yml`, held back for the same reason. It publishes
+  to PyPI from a pushed tag with Trusted Publishing (no API token anywhere),
+  after re-running the suite, checking the tag against `organizekit.VERSION`,
+  installing the wheel into a clean environment and running the sdist's own
+  tests. Apply with `git apply docs/release-workflow.patch`.
 
 Elsewhere in the repo: [`CHANGELOG.md`](../CHANGELOG.md) (what changed and
 why), [`OVERHAUL.md`](../OVERHAUL.md) (the measured plan the recent work
