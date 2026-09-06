@@ -82,18 +82,24 @@ from organizekit.core import (
     EXTERNAL_SRT_MAX_BYTES,
     EXTERNAL_SRT_SUFFIX,
     KIND_REMUX,
+    Ansi,
     CoordinationLock,
     MediaProbeCache,
     Report,
     StateStore,
+    color_enabled,
     decode_srt_bytes,
     default_tool_dir,
     enable_utf8_stdio,
     normalize_srt_newlines,
     open_state,
+    print_text,
     promote_legacy_external_english_srt,
     resolve_library,
     run_field_smoke_test,
+    stream_can_encode,
+    style,
+    write_raw,
 )
 
 # ---------------------------------------------------------------------------
@@ -386,24 +392,17 @@ def apply_low_priority() -> str:
         return f"unchanged ({e})"
 
 def _print_safe(msg: str) -> None:
-    try:
-        print(msg, flush=True)
-    except UnicodeEncodeError:
-        try:
-            enc = sys.stdout.encoding or "utf-8"
-            sys.stdout.buffer.write((msg + "\n").encode(enc, errors="replace"))
-            sys.stdout.buffer.flush()
-        except (OSError, ValueError, AttributeError, UnicodeError):
-            pass  # no usable byte stream either: the line is simply lost
-    except (OSError, ValueError):
-        pass  # a closed or broken stdout must not end a remux queue
+    """``print_text`` plus one guarantee this tool needs and no other does.
 
-def _write_raw(text: str) -> None:
+    The shared writer already survives a console that cannot encode the text.
+    A remux queue also has to survive a stdout that has *gone* - a closed pipe,
+    a detached terminal - because by the time that happens the run may be six
+    hours in. The line is lost; the queue is not.
+    """
     try:
-        sys.stdout.write(text)
-        sys.stdout.flush()
+        print_text(msg)
     except (OSError, ValueError):
-        pass  # a closed or broken stdout must not end a remux queue
+        pass
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
 
@@ -418,28 +417,6 @@ def _ellipsize_path(text: str, max_len: int) -> str:
     if max_len <= 3:
         return text[:max_len]
     return "..." + text[-(max_len - 3):]
-
-def _enable_windows_vt() -> bool:
-    if os.name != "nt":
-        return True
-    try:
-        import ctypes
-        windll = getattr(ctypes, "windll", None)
-        if windll:
-            kernel32 = windll.kernel32
-            handle = kernel32.GetStdHandle(-11)
-            if not handle or handle == -1:
-                return False
-            mode = ctypes.c_uint32()
-            if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-                return False
-            if mode.value & 0x0004:
-                return True
-            return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
-    except Exception:  # noqa: BLE001 - ctypes; a console that will not take VT mode
-        # just gets the plain renderer.
-        return False
-    return False
 
 _GUI_PROGRESS_RE = re.compile(
     r"#\s*GUI\s*#\s*progress(?:\s+(\d+)\s*%?|#percent=(\d+)|#parts=(\d+)/(\d+))",
@@ -491,13 +468,21 @@ def _summarize_mkvmerge_failure(output: str, rc: int) -> str:
     return text[:497] + "..." if len(text) > 500 else text
 
 class LiveConsole:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    CYAN = "\033[36m"
+    """The one-line-per-movie renderer: a live file line and a remux bar.
+
+    What the terminal will *accept* - colour, VT mode, the block glyphs - is
+    decided by ``organizekit/core/console.py``, which the CLI asks the same
+    questions. What is drawn with the answers is this tool's own: no other
+    tool has an hours-long child process to report percentages for.
+    """
+
+    RESET = Ansi.RESET
+    BOLD = Ansi.BOLD
+    DIM = Ansi.DIM
+    RED = Ansi.RED
+    GREEN = Ansi.GREEN
+    YELLOW = Ansi.YELLOW
+    CYAN = Ansi.CYAN
 
     def __init__(self, use_color: bool | None = None):
         self.is_tty = False
@@ -505,29 +490,11 @@ class LiveConsole:
             self.is_tty = bool(sys.stdout and sys.stdout.isatty())
         except (OSError, ValueError, AttributeError):
             self.is_tty = False
-        env_no_color = bool(os.environ.get("NO_COLOR"))
-        env_force = os.environ.get("FORCE_COLOR", "").strip() not in ("", "0")
-        env_dumb = os.environ.get("TERM", "").lower() == "dumb"
-        if use_color is False:
-            want_color = False
-        elif use_color is True or env_force:
-            want_color = True
-        elif env_no_color or env_dumb:
-            want_color = False
-        else:
-            want_color = self.is_tty
-        ansi_ok = _enable_windows_vt() if want_color else False
-        if os.name != "nt":
-            ansi_ok = want_color
-        if env_force and use_color is not False:
-            ansi_ok = True
-        self.use_color = bool(want_color and ansi_ok)
+        self.use_color = color_enabled(use_color=use_color)
         self._can_erase = self.use_color or (os.name != "nt" and self.is_tty)
-        try:
-            enc = getattr(sys.stdout, "encoding", None) or "utf-8"
-            "█░".encode(enc)
+        if stream_can_encode("█░"):
             self._bar_fill, self._bar_empty = "█", "░"
-        except (LookupError, UnicodeError, AttributeError):
+        else:
             self._bar_fill, self._bar_empty = "#", "-"
         self.target_root: Path | None = None
         self._detail_indent = "           "
@@ -542,9 +509,7 @@ class LiveConsole:
         self._last_progress_bucket = -1
 
     def style(self, text: str, *codes: str) -> str:
-        if not self.use_color or not codes:
-            return text
-        return "".join(codes) + text + self.RESET
+        return style(text, *codes, enabled=self.use_color)
 
     def _cols(self) -> int:
         try:
@@ -574,9 +539,9 @@ class LiveConsole:
             visible = text
         try:
             if self._can_erase:
-                _write_raw("\r" + text + "\033[K")
+                write_raw("\r" + text + "\033[K")
             else:
-                _write_raw("\r" + text + (" " * max(0, cols - 1 - len(visible))))
+                write_raw("\r" + text + (" " * max(0, cols - 1 - len(visible))))
         except (OSError, ValueError):
             _print_safe(_strip_ansi(text))
 
@@ -584,7 +549,7 @@ class LiveConsole:
         if self._file_line_pending or self._progress_active:
             try:
                 if self.is_tty:
-                    _write_raw("\n")
+                    write_raw("\n")
             except (OSError, ValueError):
                 pass
         self._file_line_pending = False
@@ -630,7 +595,7 @@ class LiveConsole:
         if self.is_tty and self._file_name:
             plain, styled = self._compose_file_line(suffix_plain, suffix_styled)
             self._overwrite_line(styled if self.use_color else plain)
-            _write_raw("\n")
+            write_raw("\n")
         else:
             indent = self._detail_indent or "           "
             _print_safe(f"{indent}{self.style(suffix, color) if color else suffix}")
@@ -643,7 +608,7 @@ class LiveConsole:
             if self.is_tty and self._file_name:
                 plain, styled = self._compose_file_line()
                 self._overwrite_line(styled if self.use_color else plain)
-            _write_raw("\n")
+            write_raw("\n")
             self._file_line_pending = False
 
     def detail(self, msg: str, kind: str = "info") -> None:

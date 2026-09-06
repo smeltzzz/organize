@@ -113,7 +113,7 @@ class ConsoleTests(unittest.TestCase):
         broken.write.side_effect = ValueError("I/O operation on closed file")
         with mock.patch.object(tc.sys, "stdout", broken):
             tc._print_safe("a line nobody will read")
-            tc._write_raw("\rprogress")
+            tc.write_raw("\rprogress")  # the shared helper, same guarantee
 
     def test_a_broken_pipe_is_not_fatal(self) -> None:
         broken = mock.Mock()

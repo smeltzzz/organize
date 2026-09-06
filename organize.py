@@ -53,65 +53,57 @@ from organizekit import VERSION  # noqa: E402  (needs the sys.path bootstrap abo
 # tools - `library_auditor.py` answers in JSON too - so they live in the package
 # every tool already imports rather than in this front door. See
 # `organizekit/core/jsonout.py` for the rules they enforce.
-from organizekit.core import JSON_SCHEMA, json_document, print_json, slug_id  # noqa: E402, F401
-
-# ANSI styling helpers (with safe fallbacks)
-_SUPPORTS_COLOR = (
-    sys.stdout.isatty()
-    and not os.environ.get("NO_COLOR")
-    and os.environ.get("TERM") != "dumb"
+from organizekit.core import (  # noqa: E402, F401
+    JSON_SCHEMA,
+    Ansi,
+    color_enabled,
+    json_document,
+    print_json,
+    slug_id,
+    stream_can_encode,
+    style,
 )
-_SUPPORTS_UNICODE = False
-try:
-    _encoding = (sys.stdout.encoding or "").casefold()
-    _SUPPORTS_UNICODE = "utf-8" in _encoding or "utf8" in _encoding
-except (AttributeError, ValueError):
-    pass  # a replaced stream with no .encoding, or a detached one
 
-# On Windows 10/11, enable VT mode for ANSI color support in cmd/powershell
-if os.name == "nt" and _SUPPORTS_COLOR:
-    try:
-        import ctypes
-        windll = getattr(ctypes, "windll", None)
-        if windll:
-            windll.kernel32.SetConsoleMode(windll.kernel32.GetStdHandle(-11), 7)
-    except Exception:  # noqa: BLE001 - ctypes reports a bad call as ArgumentError,
-        # OSError or AttributeError depending on where it fails, and colour is
-        # optional: a console that refuses VT mode simply does not get it.
-        pass
+# What this console will take - one decision, shared with the cleaner's live
+# console (organizekit/core/console.py). This file used to answer it on its own
+# and answered it differently: it ignored FORCE_COLOR, and it enabled Windows
+# VT mode by assigning the literal mode 7, which discards every other console
+# flag. The palette below is this CLI's own; the capability is not.
+_SUPPORTS_COLOR = color_enabled()
+_SUPPORTS_UNICODE = stream_can_encode("✔─➜")
 
 
-def _c(text: str, code: str) -> str:
-    """Format text with ANSI color code if supported."""
-    return f"\033[{code}m{text}\033[0m" if _SUPPORTS_COLOR else text
+def _c(text: str, *codes: str) -> str:
+    """This CLI's palette, over the shared styling primitive."""
+    return style(text, *codes, enabled=_SUPPORTS_COLOR)
 
 
 def bold(text: str) -> str:
-    return _c(text, "1")
+    return _c(text, Ansi.BOLD)
 
 
 def dim(text: str) -> str:
-    return _c(text, "2")
+    return _c(text, Ansi.DIM)
 
 
 def cyan(text: str) -> str:
-    return _c(text, "36")
+    return _c(text, Ansi.CYAN)
 
 
 def green(text: str) -> str:
-    return _c(text, "32")
+    return _c(text, Ansi.GREEN)
 
 
 def yellow(text: str) -> str:
-    return _c(text, "33")
+    return _c(text, Ansi.YELLOW)
 
 
 def red(text: str) -> str:
-    return _c(text, "31")
+    return _c(text, Ansi.RED)
 
 
 def blue(text: str) -> str:
-    return _c(text, "34")
+    return _c(text, Ansi.BLUE)
 
 
 def magenta(text: str) -> str:

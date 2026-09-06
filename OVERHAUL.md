@@ -535,6 +535,45 @@ Still open from this slice: the remaining tier orchestration inside
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 8d (W7): one answer to "what will this terminal take?"**
+>
+> Two tools asked the same two questions - *can this console take colour, and
+> can it take these characters?* - and answered them differently, so the same
+> terminal could get colour from `mkv_track_cleaner.py` and plain text from
+> `organize.py`. The CLI ignored `FORCE_COLOR` (so every CI log it wrote was
+> colourless whatever the operator asked for), and it enabled Windows VT mode
+> by **assigning** the console mode the literal `7`, which turns on the three
+> bits in it and silently clears every other flag the console had set. The
+> cleaner read the mode and OR-ed in the one bit it needs, which is the correct
+> way to do it.
+>
+> `organizekit/core/console.py` - which already held `enable_utf8_stdio()` and
+> `print_text()` - now also holds `Ansi`, `enable_windows_vt()`,
+> `color_enabled()`, `stream_can_encode()`, `style()` and `write_raw()`. The
+> precedence is stated once, in one function: an explicit `--no-color` beats
+> everything, then `--color`/`FORCE_COLOR`, then `NO_COLOR`/`TERM=dumb`, then
+> `isatty()` - and every "yes" is gated on VT actually being available, because
+> a Windows console that refuses the mode would otherwise be sent escape codes
+> it prints literally.
+>
+> **What is shared is the capability, not the rendering.** A scorecard and a
+> live remux progress bar want different things drawn; both want the same
+> answer about the terminal. So each tool keeps its own palette
+> (`organize.py`'s `green()`, `LiveConsole`'s bar) over the shared primitive,
+> and each keeps its own *enablement model* too: the CLI decides once at
+> import, the cleaner decides per run from `--no-color`.
+>
+> **The one intended behaviour change** is that the CLI now honours
+> `FORCE_COLOR` and no longer clobbers the Windows console mode. Everything
+> else is byte-identical, and that was checked rather than assumed: the old
+> tree was extracted to a scratch directory with `git archive`, both trees were
+> run against the same fake two-movie library, and the cleaner's output
+> differed only in the PID line. 1,178 → 1,210 tests, checked against thirteen
+> deliberate mutations - dropping the `FORCE_COLOR` branch, inverting
+> `--no-color`, letting a pipe fill with escape codes, restoring the literal
+> mode `7`, calling an unprintable glyph printable, and letting a closed stdout
+> end a six-hour remux queue.
+
 > **Update — phase 8c (W7, part two): the release, checked before it is made.**
 >
 > A version on PyPI is immutable: a broken 3.6.0 cannot be fixed, only answered
@@ -942,8 +981,12 @@ promises:
   — those describe work being done, not a library being read.
   Cron/Healthchecks/Grafana integration becomes trivial; the human reports stay
   exactly as they are.
-- **One shared `LiveConsole`** (currently only in the cleaner) so every step has
-  the same progress UI, and it degrades to plain lines when not a TTY.
+- **One shared console layer** — ~~currently only in the cleaner~~ **the
+  *capability* half is done** (phase 8d): what colour and which characters a
+  terminal will take is now one decision in `organizekit/core/console.py`, used
+  by both the CLI and the cleaner's `LiveConsole`. Adopting the renderer itself
+  in the other four tools is deliberately *not* done here — that is a
+  user-visible UI change, and this phase was a no-behaviour-change one.
 - **Distribution:** publish to PyPI (`pipx install organize` / `uvx organize`),
   attach `organize.pyz` and the generated standalone scripts to each GitHub
   release, and ship systemd-timer and Task-Scheduler templates in `docs/`.
@@ -985,6 +1028,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
 | ~~**8c**~~ | ~~W7 the rest of the machine-readable output (a JSONL run stream, `run_summary.json`); the PyPI release: distribution `organizekit`, a complete sdist, a tag-triggered Trusted-Publishing workflow~~ **done** (the upload itself needs a maintainer with PyPI access) | +190, +51 tests | Low | ✅ |
+| ~~**8d**~~ | ~~W7 the shared console layer: colour capability, Windows VT mode, glyph support and safe raw writes decided once in `core/console.py` for both the CLI and `LiveConsole`~~ **done** (adopting the *renderer* in the other tools is a UI change, deferred) | −60, +32 tests | Low | ✅ |
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run

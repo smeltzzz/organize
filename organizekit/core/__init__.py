@@ -21,7 +21,16 @@ from .config import (
     load_dotenv,
     resolve_library,
 )
-from .console import enable_utf8_stdio, print_text
+from .console import (
+    Ansi,
+    color_enabled,
+    enable_utf8_stdio,
+    enable_windows_vt,
+    print_text,
+    stream_can_encode,
+    style,
+    write_raw,
+)
 from .events import EventStream
 from .fsio import atomic_write_text, path_is_within, path_norm, sha256_file
 from .jsonout import JSON_SCHEMA, json_document, print_json, slug_id
@@ -193,7 +202,12 @@ __all__ = [
     "default_reports_root",
     "default_tool_dir",
     "describe_library_origin",
+    "Ansi",
+    "color_enabled",
     "enable_utf8_stdio",
+    "enable_windows_vt",
+    "style",
+    "stream_can_encode",
     "exact_external_english_srt_path",
     "legacy_external_english_srt_path",
     "load_dotenv",
@@ -215,4 +229,5 @@ __all__ = [
     "validate_srt_sidecar",
     "wrap_path_text",
     "wrap_text",
+    "write_raw",
 ]
