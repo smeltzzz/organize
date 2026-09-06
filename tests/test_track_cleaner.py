@@ -1152,5 +1152,149 @@ class LayoutAndCountTests(unittest.TestCase):
         self.assertEqual(tc._normal_int(None), None)
 
 
+class RemuxVerdictTests(unittest.TestCase):
+    """What one movie's turn through ``process_mkv`` decided, read off ``stats``.
+
+    ``process_mkv`` reports by appending to buckets rather than returning, so
+    the verdict `organize status` displays is derived by comparing the buckets
+    before and after. These hold that derivation to the meanings the buckets
+    actually have.
+    """
+
+    def setUp(self) -> None:
+        self.stats: dict[str, list] = {bucket: [] for bucket, _ in tc.VERDICT_BUCKETS}
+        self.before = tc.bucket_counts(self.stats)
+
+    def verdict(self):
+        return tc.remux_verdict(self.stats, self.before)
+
+    def test_a_movie_nothing_happened_to_gets_no_verdict(self) -> None:
+        """The interrupt path: the original is untouched, so nothing is claimed."""
+        self.assertIsNone(self.verdict())
+
+    def test_a_remuxed_movie_reports_what_it_kept_and_saved(self) -> None:
+        self.stats["cleaned"].append({"name": "Film.mkv", "kept_audio": "English TrueHD 7.1",
+                                      "space_saved": 2 * 1024**3})
+        status, detail = self.verdict()
+        self.assertEqual(status, tc.STATUS_CLEANED)
+        self.assertIn("English TrueHD 7.1", detail)
+        self.assertIn("2.00 GB", detail)
+
+    def test_a_movie_that_needed_nothing_is_already_clean(self) -> None:
+        self.stats["already_clean"].append("Film.mkv")
+        self.assertEqual(self.verdict(), (tc.STATUS_ALREADY_CLEAN, ""))
+
+    def test_a_seeding_movie_is_deferred_with_its_link_count(self) -> None:
+        self.stats["deferred_hardlinked"].append({"name": "Film.mkv", "hardlinks": 2})
+        status, detail = self.verdict()
+        self.assertEqual(status, tc.STATUS_DEFERRED)
+        self.assertIn("2 hardlink", detail)
+
+    def test_a_skip_carries_the_reason_the_tool_gave(self) -> None:
+        self.stats["skipped_no_english"].append({"name": "Film.mkv", "reason": "no English audio"})
+        self.assertEqual(self.verdict(), (tc.STATUS_SKIPPED, "no English audio"))
+
+    def test_a_layout_skip_is_its_own_verdict(self) -> None:
+        """The standardizer has to move it first; that is not "done"."""
+        self.stats["skipped_layout"].append({"name": "Film.mkv", "reason": "not canonical"})
+        self.assertEqual(self.verdict(), (tc.STATUS_SKIPPED_LAYOUT, "not canonical"))
+
+    def test_a_failure_carries_the_error(self) -> None:
+        self.stats["errors"].append({"name": "Film.mkv", "error": "mkvmerge exited 2"})
+        self.assertEqual(self.verdict(), (tc.STATUS_FAILED, "mkvmerge exited 2"))
+
+    def test_a_movie_that_failed_after_being_counted_elsewhere_is_a_failure(self) -> None:
+        """Verification can reject a remux that was already appended as cleaned."""
+        self.stats["cleaned"].append({"name": "Film.mkv", "kept_audio": "English"})
+        self.stats["errors"].append({"name": "Film.mkv", "error": "verification failed"})
+        self.assertEqual(self.verdict()[0], tc.STATUS_FAILED)
+
+    def test_a_moviehash_warning_is_not_an_outcome(self) -> None:
+        """`remux_without_srt` rides along with a successful clean; it is a warning."""
+        self.stats.setdefault("remux_without_srt", []).append("Film.mkv")
+        self.assertIsNone(self.verdict())
+
+    def test_only_this_movies_turn_counts(self) -> None:
+        """The buckets are cumulative for the whole run, not per movie."""
+        self.stats["cleaned"].append({"name": "Earlier.mkv", "kept_audio": "English"})
+        self.before = tc.bucket_counts(self.stats)
+        self.stats["already_clean"].append("Film.mkv")
+        self.assertEqual(self.verdict(), (tc.STATUS_ALREADY_CLEAN, ""))
+
+    def test_every_bucket_the_tool_fills_has_a_verdict(self) -> None:
+        """A new outcome bucket must not silently vanish from `organize status`."""
+        source = pathlib.Path(tc.__file__).read_text(encoding="utf-8")
+        appended = {
+            line.split('stats.setdefault("')[1].split('"')[0]
+            for line in source.splitlines() if 'stats.setdefault("' in line
+        } | {
+            line.split('stats["')[1].split('"')[0]
+            for line in source.splitlines()
+            if 'stats["' in line and "].append(" in line
+        }
+        known = {bucket for bucket, _ in tc.VERDICT_BUCKETS} | {"remux_without_srt"}
+        self.assertEqual(appended - known, set())
+
+
+class PublishRemuxVerdictTests(unittest.TestCase):
+    """The write itself: keyed to the bytes on disk, and never fatal."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="tc_state_")
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.movie = self.tmp / "Film (2000).mkv"
+        self.movie.write_bytes(b"x" * 2048)
+        self.db = self.tmp / "state.db"
+        self.stats: dict[str, list] = {bucket: [] for bucket, _ in tc.VERDICT_BUCKETS}
+        self.before = tc.bucket_counts(self.stats)
+
+    def store(self, enabled: bool = True):
+        store = core.open_state(self.db, enabled=enabled, tool="mkv_track_cleaner")
+        self.addCleanup(store.close)
+        return store
+
+    def stored(self):
+        reader = core.open_state(self.db, tool="tests")
+        self.addCleanup(reader.close)
+        return reader.verdicts(core.KIND_REMUX)
+
+    def test_a_verdict_is_keyed_to_the_bytes_it_describes(self) -> None:
+        """The stamp is taken after the swap, so the answer is about the new file."""
+        self.stats["cleaned"].append({"name": self.movie.name, "kept_audio": "English",
+                                      "space_saved": 1024})
+        self.movie.write_bytes(b"y" * 1024)  # the remux replaced the file
+        self.assertTrue(tc.publish_remux_verdict(self.store(), self.movie,
+                                                 self.stats, self.before, None))
+        (verdict,) = self.stored().values()
+        info = self.movie.stat()
+        self.assertEqual(verdict.verdict, tc.STATUS_CLEANED)
+        self.assertTrue(verdict.is_current_for(info.st_size, info.st_mtime_ns))
+
+    def test_nothing_decided_writes_nothing(self) -> None:
+        self.assertFalse(tc.publish_remux_verdict(self.store(), self.movie,
+                                                  self.stats, self.before, None))
+        self.assertEqual(self.stored(), {})
+
+    def test_a_disabled_store_writes_nothing(self) -> None:
+        self.stats["already_clean"].append(self.movie.name)
+        self.assertFalse(tc.publish_remux_verdict(self.store(enabled=False), self.movie,
+                                                  self.stats, self.before, None))
+        self.assertFalse(self.db.exists())
+
+    def test_a_cache_write_that_fails_never_fails_the_run(self) -> None:
+        """The remux already happened; a cache is not allowed to undo that."""
+        self.stats["already_clean"].append(self.movie.name)
+
+        class Exploding:
+            enabled = True
+
+            def record(self, *_a, **_k):
+                raise RuntimeError("database is locked")
+
+        self.assertFalse(tc.publish_remux_verdict(Exploding(), self.movie,
+                                                  self.stats, self.before, None))
+
+
 if __name__ == "__main__":
     unittest.main()

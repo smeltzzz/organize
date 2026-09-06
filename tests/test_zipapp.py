@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
 import subprocess
 import sys
 import tomllib
@@ -61,10 +62,16 @@ def tearDownModule() -> None:
 
 
 def run_archive(*args: str, cwd: Path | None = None, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    # These are real child processes running real tools, so they would publish
+    # verdicts to the state cache at its default location - which on a
+    # developer's machine is their own ~/.local/state/organize/state.db. The
+    # offline suite touches nothing outside its temporary directories; the
+    # archive's launcher is what is under test here, not the cache.
+    env = {**os.environ, "ORGANIZE_NO_STATE": "1"}
     return subprocess.run(
         [sys.executable, str(ARCHIVE), *args],
         capture_output=True, encoding="utf-8", errors="replace",
-        check=False, cwd=str(cwd) if cwd else None, timeout=timeout,
+        check=False, cwd=str(cwd) if cwd else None, timeout=timeout, env=env,
     )
 
 

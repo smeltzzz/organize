@@ -895,11 +895,16 @@ def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
     quietly optimistic.
     """
     import bitdepth as probe_mod
+    import mkv_track_cleaner as remux_mod
     import sync_subtitles as sync_mod
     from organizekit.core import KIND_BITDEPTH, KIND_REMUX, KIND_SYNC, path_norm
 
+    # Each step's own module says which of its verdicts mean "nothing further
+    # to do", so this command cannot drift from the tool that wrote the answer.
+    # The remux step used to be `None` here - *any* recorded verdict counted as
+    # settled - which was only harmless while nothing recorded one.
     settled_verdicts: dict[str, frozenset[str] | None] = {
-        KIND_REMUX: None,  # any current answer means the remux question is closed
+        KIND_REMUX: remux_mod.SETTLED_REMUX,
         KIND_BITDEPTH: frozenset({probe_mod.STATUS_SKIP_SDR, probe_mod.STATUS_SKIP_HDR}),
         KIND_SYNC: frozenset({sync_mod.STATUS_SYNCED, sync_mod.STATUS_IN_SYNC,
                               sync_mod.STATUS_REMEMBERED}),

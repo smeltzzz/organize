@@ -212,9 +212,49 @@ copying `subtitle_fetcher.py` around.
 > parallel sweep already exists on top of `core/parallel.py`, and a second scan
 > module would be exactly the duplication this repo's tests forbid. One scan
 > shared across all five steps therefore stays a `pipeline.py` question, not a
-> new module. `mkv_track_cleaner.py` does not publish verdicts yet, so
+> new module. ~~`mkv_track_cleaner.py` does not publish verdicts yet, so
 > `organize status` prints `Remux  not recorded yet` and leaves that step out
-> of the "nothing to do" tally instead of quietly counting it.
+> of the "nothing to do" tally instead of quietly counting it.~~ **done in
+> phase 5b, below.**
+
+> **Update — phase 5b (W2): the remux step reports what it did.**
+>
+> The last of the five steps to publish. Until now a library could be
+> completely remuxed and `organize status` would still print `Remux  not
+> recorded yet` and leave the step out of the settled tally, because the one
+> tool that knew never wrote it down.
+>
+> Two things make the cleaner different from the other publishers, and both
+> shaped the design. It *rewrites* movies and takes hours doing it, so a
+> publish-at-the-end pass would throw away every verdict of an interrupted run:
+> a verdict is therefore written **per movie**, the moment that movie is
+> finished, and one small SQLite write next to a remux measured in minutes is
+> free. And its per-movie outcome is not a return value - `process_mkv` is a
+> 400-line procedure that reports by appending to one of six buckets - so
+> rather than thread a store through all of it, `remux_verdict()` reads the
+> outcome back out of those buckets by comparing them before and after. That is
+> a pure function of two dicts, and therefore testable without a movie, an
+> mkvmerge or a filesystem.
+>
+> **The vocabulary is the tool's, not the summary's.** `cleaned`,
+> `already-clean` and `skipped` mean there is nothing left to do; `deferred`
+> (still seeding), `skipped-layout` (waiting for the standardizer) and `failed`
+> are pending work and are counted as such. `organize status` imports
+> `SETTLED_REMUX` from the cleaner instead of keeping its own list - the entry
+> it replaced treated *any* recorded verdict as settled, which was harmless
+> only while nothing recorded one.
+>
+> **The stamp is taken after the swap**, so a cleaned movie's verdict describes
+> the remuxed bytes and the next `status` reports it as current rather than
+> stale. A dry run publishes nothing, `--no-state` publishes nothing, and a
+> cache write that fails is a warning: the remux already happened and a cache
+> is not allowed to undo it.
+>
+> Found on the way past: `tests/test_zipapp.py` ran real tools as child
+> processes without `--state-db`, so the offline suite had been quietly writing
+> to the developer's own `~/.local/state/organize/state.db`. It now sets
+> `ORGANIZE_NO_STATE` for those children. 1,152 -> 1,178 tests, eight mutations
+> checked.
 
 **Problem.** Five independent library walks per pass; two JSON probe caches with
 different schemas; `sync_state.json`; a ledger reconstructed by re-parsing an
@@ -931,6 +971,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**4b**~~ | ~~W4 per-source token buckets for the fetcher~~ **done** (concurrent fetching and HTTP keep-alive still open) | +230 | Med | ✅ |
 | ~~**4c**~~ | ~~W4 the fetcher's local pre-flight parallelised (`triage_movie` + `TriageQueue`, `--workers`)~~ **done**; the quota ledger stays in the log — spending is still serial, by decision | +300, +18 tests | Low | ✅ |
 | ~~**5**~~ | ~~W2 SQLite state cache + write-through + `organize status`~~ **done** (probe caches and the fetcher's quota ledger not yet moved in; `core/scan.py` rejected — see the W2 note) | +841 | Med-High | ✅ |
+| ~~**5b**~~ | ~~W2 the remux step publishes per-movie verdicts; `organize status` stops printing `Remux  not recorded yet`~~ **done** | +120, +26 tests | Low | ✅ |
 | ~~**6a**~~ | ~~W5 fault-injection, end-to-end and destructive-path suites, coverage 69% → 75%, gate → 72~~ **done** | +1,240 | Low | ✅ |
 | ~~**6b**~~ | ~~W5 the fetcher's spending planners extracted from `queue_run` and tabled~~ **done** (the remaining tier orchestration and the property tests are still open — see the W5 update) | +460 | Low | ✅ |
 | ~~**6c**~~ | ~~one shared `RunLog`, the last duplicated implementation; `core/toolchain.py` off the blanket `BLE001` ignore~~ **done** (the nine tool files' 84 broad catches are still blanket-ignored) | −62, +200 tests | Low | ✅ |
@@ -981,7 +1022,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **78%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 15.9 s (1,152 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 16.9 s (1,178 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

@@ -18,7 +18,7 @@ Everything is overridable per run with CLI flags (see each tool's
 | `MOVIE_STD_TARGET` | every tool (legacy) | Older name for `ORGANIZE_LIBRARY`; still honoured, lower precedence |
 | `MOVIE_STD_LOCK_TIMEOUT` | movie_standardizer | Coordination-lock wait (default 60 s) |
 | `MOVIE_STD_MAINTENANCE_MODE` | movie_standardizer | `REPORT` (default) / `QUARANTINE` / `DELETE` for duplicates |
-| `ORGANIZE_STATE_DB` | auditor / 10-bit / sync / `status` | Where the shared state cache lives (default: beside the logs and reports, never inside the library) |
+| `ORGANIZE_STATE_DB` | auditor / cleaner / 10-bit / sync / `status` | Where the shared state cache lives (default: beside the logs and reports, never inside the library) |
 | `ORGANIZE_NO_STATE` | the same tools | Set to `1` to turn the cache off everywhere at once (equivalent to passing `--no-state`) |
 
 A `.env` file next to the scripts is read automatically at startup by every

@@ -81,13 +81,16 @@ from organizekit.core import (
     EXTERNAL_SRT_CUE_RE,
     EXTERNAL_SRT_MAX_BYTES,
     EXTERNAL_SRT_SUFFIX,
+    KIND_REMUX,
     CoordinationLock,
     MediaProbeCache,
     Report,
+    StateStore,
     decode_srt_bytes,
     default_tool_dir,
     enable_utf8_stdio,
     normalize_srt_newlines,
+    open_state,
     promote_legacy_external_english_srt,
     resolve_library,
     run_field_smoke_test,
@@ -1924,6 +1927,124 @@ def _log_live_totals(
     )
     log(msg, log_file_path=log_file_path)
 
+# =============================================================================
+# WHAT THIS RUN DECIDED, FOR `organize status`
+# =============================================================================
+#
+# Every other expensive step publishes its verdicts to the shared state cache
+# (``bitdepth`` its queue decision, ``sync_subtitles`` its timing verdict), so
+# `organize status` can answer "what is left to do?" without touching a media
+# byte. The remux step did not, which is why that command printed
+# ``Remux  not recorded yet`` and left the step out of the settled tally
+# entirely - a library could be fully remuxed and the summary would never say
+# so.
+#
+# Two things make this tool different from the other two publishers, and both
+# shape what is below.
+#
+# First, it *rewrites* movies and takes hours doing it. A publish-at-the-end
+# pass would throw away every verdict of an interrupted run, so a verdict is
+# written per movie, the moment that movie is finished. One small SQLite write
+# next to a remux measured in minutes is free.
+#
+# Second, its per-movie outcome is not a return value: ``process_mkv`` is a
+# 400-line procedure that records what happened by appending to one of six
+# buckets in ``stats``. Rather than thread a store through all of it,
+# ``remux_verdict`` reads the outcome back out of those buckets - which is a
+# pure function of two dicts, and therefore testable without a movie, an
+# mkvmerge or a filesystem.
+
+STATUS_CLEANED = "cleaned"
+STATUS_ALREADY_CLEAN = "already-clean"
+STATUS_SKIPPED = "skipped"
+STATUS_DEFERRED = "deferred"
+STATUS_SKIPPED_LAYOUT = "skipped-layout"
+STATUS_FAILED = "failed"
+
+# The verdicts that mean this step has nothing further to do with the movie.
+# `organize status` imports this rather than keeping its own copy: a status
+# line that disagrees with the tool about what "done" means is worse than no
+# status line. A deferred file is waiting for seeding to stop, a layout skip is
+# waiting for the standardizer, and a failure is waiting for a human - all three
+# are pending work, and saying so is the point of the command.
+SETTLED_REMUX = frozenset({STATUS_CLEANED, STATUS_ALREADY_CLEAN, STATUS_SKIPPED})
+
+# Bucket -> verdict, in priority order. A remux that lands without a validated
+# sidecar is appended to `remux_without_srt` *as well as* `cleaned`; that bucket
+# is a warning about the moviehash, not an outcome, so it is not listed here.
+# `errors` comes first because a movie that failed after being counted anywhere
+# else is a failure.
+VERDICT_BUCKETS: tuple[tuple[str, str], ...] = (
+    ("errors", STATUS_FAILED),
+    ("cleaned", STATUS_CLEANED),
+    ("already_clean", STATUS_ALREADY_CLEAN),
+    ("deferred_hardlinked", STATUS_DEFERRED),
+    ("skipped_layout", STATUS_SKIPPED_LAYOUT),
+    ("skipped_no_english", STATUS_SKIPPED),
+)
+
+
+def bucket_counts(stats: dict[str, Any]) -> dict[str, int]:
+    """How full each outcome bucket is, to be compared against after a movie."""
+    return {bucket: len(stats.get(bucket) or []) for bucket, _ in VERDICT_BUCKETS}
+
+
+def _verdict_detail(entry: Any) -> str:
+    """One human sentence about a bucket entry, for the status line's detail."""
+    if not isinstance(entry, dict):
+        return ""
+    if "error" in entry:
+        return str(entry["error"])
+    if "reason" in entry:
+        return str(entry["reason"])
+    if "hardlinks" in entry:
+        return f"{entry['hardlinks']} hardlink(s): still seeding"
+    if "kept_audio" in entry:
+        saved = int(entry.get("space_saved") or 0)
+        kept = str(entry.get("kept_audio") or "")
+        return f"kept {kept}; saved {format_size(saved)}" if saved else f"kept {kept}"
+    return ""
+
+
+def remux_verdict(stats: dict[str, Any], before: dict[str, int]) -> tuple[str, str] | None:
+    """What one movie's turn through :func:`process_mkv` decided, or ``None``.
+
+    ``None`` means the run recorded no outcome for that movie at all - the
+    interrupt path, which leaves the original untouched and deliberately
+    publishes nothing rather than guessing.
+    """
+    for bucket, status in VERDICT_BUCKETS:
+        entries = stats.get(bucket) or []
+        if len(entries) > before.get(bucket, 0):
+            return status, _verdict_detail(entries[-1])
+    return None
+
+
+def publish_remux_verdict(
+    store: StateStore, movie: Path, stats: dict[str, Any], before: dict[str, int],
+    log_file_path: str | None = LOG_FILE,
+) -> bool:
+    """Record this movie's outcome. A cache write can never fail a run.
+
+    The stamp comes from the file as it is *now*, which for a cleaned movie is
+    the remuxed file: the verdict describes the bytes on disk, so the next
+    ``organize status`` reports it as current rather than stale.
+    """
+    if not store.enabled:
+        return False
+    decision = remux_verdict(stats, before)
+    if decision is None:
+        return False
+    verdict, detail = decision
+    try:
+        store.record(movie, KIND_REMUX, verdict, detail)
+    except Exception as exc:  # noqa: BLE001 - a cache write can never fail a run
+        log(f"state cache not updated for '{movie.name}': {exc}",
+            level="WARNING", to_console=False, log_file_path=log_file_path)
+        return False
+    return True
+
+
 @dataclass(frozen=True)
 class CleanupPlan:
     """The track-retention decision a remux would implement.
@@ -2779,6 +2900,11 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"Reusable mkvmerge metadata for unchanged files (Default: {CACHE_FILE})")
     parser.add_argument("--no-cache", dest="use_cache", action="store_false",
                         help="Re-read metadata for every movie and do not read or write the cache")
+    parser.add_argument("--no-state", action="store_true",
+                        help="Do not record these verdicts in the shared state cache "
+                             "that `organize status` reads (the metadata cache is unaffected)")
+    parser.add_argument("--state-db", type=Path, default=None, metavar="PATH",
+                        help="Where that cache lives (default: beside the logs and reports)")
     parser.set_defaults(use_cache=True)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
@@ -2809,7 +2935,8 @@ def main(argv: list[str] | None = None) -> int:
     if not target_path.exists() or not target_path.is_dir():
         log(f"Target directory does not exist: '{target_path}'", level="ERROR", log_file_path=args.log)
         return 1
-    for label, raw_path in (("--log", args.log), ("--report", args.report)):
+    for label, raw_path in (("--log", args.log), ("--report", args.report),
+                            ("--state-db", args.state_db)):
         if not raw_path:
             continue
         candidate = Path(str(raw_path)).expanduser().resolve()
@@ -2904,6 +3031,11 @@ def main(argv: list[str] | None = None) -> int:
     probe_cache = MediaProbeCache(args.cache, tool="mkv_track_cleaner", enabled=args.use_cache)
     if args.use_cache:
         log(f"Metadata cache: {args.cache} ({len(probe_cache)} entries loaded)", log_file_path=args.log)
+    # A dry run decides nothing about the bytes on disk, so it publishes
+    # nothing - the same rule sync_subtitles follows.
+    state_store = open_state(args.state_db, enabled=not (args.no_state or args.dry_run),
+                             tool="mkv_track_cleaner")
+    published = 0
     try:
         mkv_files, file_sizes, library_bytes = discover_mkv_files(
             target_path, log_file_path=args.log, onerror=_walk_error,
@@ -2946,6 +3078,7 @@ def main(argv: list[str] | None = None) -> int:
             stats["total_scanned"] += 1
             prev_cleaned = len(stats["cleaned"])
             prev_errors = len(stats["errors"])
+            before_buckets = bucket_counts(stats)
             try:
                 process_mkv(
                     mkv_path=file_path, stats=stats, mkvmerge_bin=mkvmerge_bin,
@@ -2964,6 +3097,10 @@ def main(argv: list[str] | None = None) -> int:
                 log(f"Unexpected error processing '{file_path.name}': {e}",
                     level="ERROR", log_file_path=args.log)
                 stats["errors"].append({"name": file_path.name, "error": str(e)})
+            # Per movie, not per run: a remux pass runs for hours, and an
+            # interrupted one must still leave behind what it already decided.
+            published += int(publish_remux_verdict(state_store, file_path, stats,
+                                                   before_buckets, args.log))
             processed_bytes += file_sizes[i - 1] if (i - 1) < len(file_sizes) else 0
             if (
                 len(stats["cleaned"]) != prev_cleaned or len(stats["errors"]) != prev_errors
@@ -2986,6 +3123,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.use_cache:
             log(f"Metadata cache: {probe_cache.hits} reused, {probe_cache.misses} read from mkvmerge.",
                 log_file_path=args.log)
+        if state_store.enabled:
+            try:
+                state_store.note("remux", f"{published} movie(s) decided")
+            except Exception as exc:  # noqa: BLE001 - a cache write can never fail a run
+                log(f"state cache note not written: {exc}", level="WARNING", log_file_path=args.log)
+            log(f"State cache: {published} verdict(s) recorded for `organize status`.",
+                log_file_path=args.log)
+        state_store.close()
         _release_locks()
 
     if _interrupt_requested:

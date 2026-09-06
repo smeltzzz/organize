@@ -55,7 +55,14 @@ def dirty_movie_spec() -> dict:
 
 
 @unittest.skipIf(WINDOWS, "the fake mkvmerge is launched through a POSIX shebang")
-class EndToEndRunTests(unittest.TestCase):
+class CleanerRunFixture(unittest.TestCase):
+    """One dirty movie, one fake multiplexer, one command line - and no tests.
+
+    The fixture is its own class so that the suites below do not inherit each
+    other: a subclass of a suite silently re-runs every test in it, which buys
+    nothing and costs seconds on every developer's machine.
+    """
+
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory(prefix="tc_e2e_")
         self.addCleanup(self._td.cleanup)
@@ -68,6 +75,7 @@ class EndToEndRunTests(unittest.TestCase):
         self.log = self.tmp / "out" / "cleaner.log"
         self.report = self.tmp / "out" / "cleaner_report.txt"
         self.cache = self.tmp / "out" / "cache.json"
+        self.state_db = self.tmp / "out" / "state.db"
         self.mkvmerge = self._install_fake_mkvmerge()
 
         # main() installs signal handlers and leaves a console behind; put the
@@ -103,8 +111,13 @@ class EndToEndRunTests(unittest.TestCase):
     # -- helpers -----------------------------------------------------------
 
     def _run(self, *extra: str, env: dict[str, str] | None = None) -> int:
+        # --state-db is not optional here: without it a real run publishes its
+        # verdicts to the default location, which is the developer's own
+        # ~/.local/state/organize/state.db. This suite touches nothing outside
+        # its temporary directory.
         argv = ["--dir", str(self.library), "--log", str(self.log),
                 "--report", str(self.report), "--cache", str(self.cache),
+                "--state-db", str(self.state_db),
                 "--mkvmerge", str(self.mkvmerge), "--no-color", *extra]
         with contextlib.redirect_stdout(io.StringIO()), \
                 mock.patch.dict(os.environ, env or {}):
@@ -121,7 +134,9 @@ class EndToEndRunTests(unittest.TestCase):
         return sorted(p.name for p in self.folder.iterdir()
                       if p.name.startswith((tc.TEMP_PREFIX, tc.TRANSACTION_MARKER)))
 
-    # -- the runs ----------------------------------------------------------
+
+class EndToEndRunTests(CleanerRunFixture):
+    """A run started from the command line: the files, the exit code, the debris."""
 
     def test_a_dry_run_changes_nothing(self) -> None:
         before = self.movie.read_bytes()
@@ -281,6 +296,93 @@ class EndToEndRunTests(unittest.TestCase):
     def test_the_self_test_flag_runs_the_bundled_checks(self) -> None:
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(tc.main(["--self-test"]), 0)
+
+
+class WhatTheRunTellsStatusTests(CleanerRunFixture):
+    """The verdicts a real run leaves behind for ``organize status``.
+
+    Until this existed the command printed ``Remux  not recorded yet`` forever:
+    a library could be completely remuxed and the summary would never say so,
+    because the one tool that knew never wrote it down.
+    """
+
+    def verdicts(self) -> dict[str, tuple[str, str]]:
+        from organizekit.core import KIND_REMUX, open_state
+
+        store = open_state(self.state_db, tool="tests")
+        self.addCleanup(store.close)
+        return {
+            Path(key).name: (row.verdict, row.detail)
+            for (key, _), row in store.verdicts(KIND_REMUX).items()
+        }
+
+    def test_a_cleaned_movie_is_recorded_as_cleaned(self) -> None:
+        self.assertEqual(self._run(), 0)
+        verdict, detail = self.verdicts()[self.movie.name]
+        self.assertEqual(verdict, tc.STATUS_CLEANED)
+        self.assertIn("kept", detail)
+
+    def test_the_verdict_describes_the_remuxed_bytes_not_the_old_ones(self) -> None:
+        """Written after the swap: `organize status` must not call it stale."""
+        from organizekit.core import KIND_REMUX, open_state, path_norm
+
+        self.assertEqual(self._run(), 0)
+        store = open_state(self.state_db, tool="tests")
+        self.addCleanup(store.close)
+        row = store.verdicts(KIND_REMUX)[(path_norm(self.movie), KIND_REMUX)]
+        info = self.movie.stat()
+        self.assertTrue(row.is_current_for(info.st_size, info.st_mtime_ns))
+
+    def test_the_second_run_records_that_there_was_nothing_to_do(self) -> None:
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(self.verdicts()[self.movie.name][0], tc.STATUS_ALREADY_CLEAN)
+
+    def test_a_seeding_movie_is_recorded_as_deferred_not_done(self) -> None:
+        os.link(self.movie, self.tmp / "seed.mkv")
+        self.assertEqual(self._run(), 0)
+        verdict, detail = self.verdicts()[self.movie.name]
+        self.assertEqual(verdict, tc.STATUS_DEFERRED)
+        self.assertNotIn(verdict, tc.SETTLED_REMUX, "it still has to be remuxed later")
+        self.assertIn("hardlink", detail)
+
+    def test_a_failed_remux_is_recorded_as_failed(self) -> None:
+        self.assertEqual(self._run(env={"FAKE_MKVMERGE_RC": "2"}), 1)
+        self.assertEqual(self.verdicts()[self.movie.name][0], tc.STATUS_FAILED)
+
+    def test_a_dry_run_publishes_nothing(self) -> None:
+        """It measured nothing about the bytes on disk, so it claims nothing."""
+        self.assertEqual(self._run("--dry-run"), 0)
+        self.assertFalse(self.state_db.exists())
+
+    def test_no_state_publishes_nothing(self) -> None:
+        self.assertEqual(self._run("--no-state"), 0)
+        self.assertFalse(self.state_db.exists())
+        self.assertNotEqual(self.movie.read_bytes(), b"", "the run itself still happened")
+
+    def test_a_state_db_inside_the_library_is_refused(self) -> None:
+        self.state_db = self.library / "state.db"
+        self.assertEqual(self._run(), 2)
+
+    def test_an_interrupted_run_keeps_the_verdicts_it_already_wrote(self) -> None:
+        """Per movie, not per run: hours of work must not vanish at Ctrl-C."""
+        second = self.library / "Other (2001)"
+        second.mkdir()
+        fake.write_movie(second / "Other (2001).mkv", dirty_movie_spec())
+        real_process = tc.process_mkv
+        seen: list[str] = []
+
+        def interrupting(*args, **kwargs):
+            seen.append(kwargs["mkv_path"].name)
+            if len(seen) == 2:
+                tc.request_interrupt()
+            return real_process(*args, **kwargs)
+
+        with mock.patch.object(tc, "process_mkv", interrupting):
+            self.assertEqual(self._run(), 130)
+        recorded = self.verdicts()
+        self.assertEqual(len(recorded), 1, "only the movie that finished")
+        self.assertEqual(next(iter(recorded.values()))[0], tc.STATUS_CLEANED)
 
 
 @unittest.skipIf(WINDOWS, "the fake mkvmerge is launched through a POSIX shebang")

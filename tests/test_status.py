@@ -187,20 +187,48 @@ class StatusTests(StatusFixture, unittest.TestCase):
         self.assertEqual(status.movies, 1)
         self.assertEqual(status.steps[0].counts["NO_DIRECT_MOVIE_FILE"], 1)
 
-    def test_any_current_remux_verdict_settles_the_remux_question(self) -> None:
+    def _remux_status(self, verdict: str):
         from organizekit.core import Verdict, path_norm
 
         key = path_norm(self.library / "Alpha (2001)" / "Alpha (2001).mkv")
-        verdict = Verdict(path_key=key, kind=KIND_REMUX, verdict="ALREADY_CLEAN",
-                          size=1, mtime_ns=2)
+        stored = Verdict(path_key=key, kind=KIND_REMUX, verdict=verdict, size=1, mtime_ns=2)
         status = self._summary(
             [self._folder("Alpha (2001)", "CANONICAL_MKV")],
-            verdicts={(key, KIND_REMUX): verdict},
+            verdicts={(key, KIND_REMUX): stored},
             stamps={key: (1, 2)},
         )
-        remux = next(step for step in status.steps if step.label == "Remux")
-        self.assertEqual(remux.counts, {"ALREADY_CLEAN": 1})
-        self.assertEqual(remux.settled, 1)
+        return next(step for step in status.steps if step.label == "Remux")
+
+    def test_a_finished_remux_verdict_settles_the_remux_question(self) -> None:
+        import mkv_track_cleaner as remux_mod
+
+        for verdict in sorted(remux_mod.SETTLED_REMUX):
+            with self.subTest(verdict=verdict):
+                remux = self._remux_status(verdict)
+                self.assertEqual(remux.counts, {verdict: 1})
+                self.assertEqual(remux.settled, 1)
+
+    def test_a_movie_the_cleaner_could_not_finish_is_still_pending(self) -> None:
+        """Deferred, layout-blocked and failed are all work that is still to do."""
+        import mkv_track_cleaner as remux_mod
+
+        for verdict in (remux_mod.STATUS_DEFERRED, remux_mod.STATUS_SKIPPED_LAYOUT,
+                        remux_mod.STATUS_FAILED):
+            with self.subTest(verdict=verdict):
+                remux = self._remux_status(verdict)
+                self.assertEqual(remux.counts, {verdict: 1})
+                self.assertEqual(remux.settled, 0)
+
+    def test_the_status_line_uses_the_cleaners_own_vocabulary(self) -> None:
+        """A status line that disagrees with the tool about "done" is worse than none."""
+        import mkv_track_cleaner as remux_mod
+
+        self.assertEqual(
+            remux_mod.SETTLED_REMUX | {remux_mod.STATUS_DEFERRED,
+                                       remux_mod.STATUS_SKIPPED_LAYOUT,
+                                       remux_mod.STATUS_FAILED},
+            {status for _, status in remux_mod.VERDICT_BUCKETS},
+        )
 
     def test_pending_never_goes_negative(self) -> None:
         status = organize.LibraryStatus(
