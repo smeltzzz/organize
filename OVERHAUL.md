@@ -495,6 +495,32 @@ Still open from this slice: the remaining tier orchestration inside
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6g (W7): `doctor --json`, the first machine-readable command.**
+>
+> The check table from 6f made this a renderer rather than a feature: the
+> verdicts were already structured data, so `--json` is `diagnostics_document()`
+> (rows plus a summary plus the exit code) and a `json.dumps`. No check knows
+> which renderer is running, which is why the human scorecard is still
+> byte-identical.
+>
+> Three decisions worth recording. **Match on `id`, not `name`**: one probe can
+> emit two rows (both provider keys), so the table key is not unique per row -
+> the id is a slug of the row name, unique within a run and stable if the
+> printed label is reworded. **`exit_code` is in the document**, so a consumer
+> parsing stdout does not also have to capture `$?`. And **there is no
+> timestamp**: the caller knows when it ran, and leaving it out means two runs
+> on an unchanged machine produce identical bytes, so a nightly job can diff
+> today's output against yesterday's and alert only on a real change.
+>
+> `doctor`'s flags were also defined twice - once in `build_parser()` for
+> `organize --help`, once inline in `main()` for dispatch - so `--json` would
+> have been easy to add to one and not the other. They are now one
+> `add_doctor_arguments()`, matching what `status` already did, and a test
+> asserts the two parsers advertise exactly the same options. 1,028 → 1,051
+> tests; the seven JSON mutations (a timestamp, a hard-coded exit code, escaped
+> Unicode, a banner on stdout, an untrimmed slug, a dropped flag, a miscounted
+> summary) plus a deliberate help/dispatch drift were each caught.
+
 > **Update — phase 6f (W5): the doctor becomes a table.**
 >
 > `run_doctor` was 350 lines: twelve prerequisite checks inlined into one
@@ -718,9 +744,12 @@ promises:
 ### W7 · Ops, UX, distribution
 
 - **`organize status`** (W2) — the missing verb.
-- **Machine-readable output** — one JSONL event stream per run plus
-  `run_summary.json`, and `--json` on every command. Cron/Healthchecks/Grafana
-  integration becomes trivial; the human reports stay exactly as they are.
+- **Machine-readable output** — ~~`--json` on every command~~ **started in
+  phase 6g**: `organize doctor --json` prints a versioned, timestamp-free
+  document (see the note below). Still to come: one JSONL event stream per run
+  plus `run_summary.json`, and the same flag on `status` and `audit`.
+  Cron/Healthchecks/Grafana integration becomes trivial; the human reports stay
+  exactly as they are.
 - **One shared `LiveConsole`** (currently only in the cleaner) so every step has
   the same progress UI, and it degrades to plain lines when not a TTY.
 - **Distribution:** publish to PyPI (`pipx install organize` / `uvx organize`),
@@ -756,10 +785,11 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6d**~~ | ~~every `except Exception` in the toolkit narrowed or justified in place; no file-wide `BLE001` exemption left~~ **done** | 27 narrowed, +290 tests | Low | ✅ |
 | ~~**6e**~~ | ~~W5 property-based tests on seeded stdlib `random`: a shrinking harness, 38 properties over the fail-closed, destructive and cross-tool rules, and mutation tests that prove they notice~~ **done** | +38 tests | Low | ✅ |
 | ~~**6f**~~ | ~~W5 `run_doctor` split into a table of twelve named check functions; `doctor`'s output byte-identical~~ **done** | +132 lines, +56 tests | Low | ✅ |
+| ~~**6g**~~ | ~~W7 `organize doctor --json`: a versioned, deterministic document over the same check table, with the flags defined once for both parsers~~ **done** | +90 lines, +23 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
-| **8c** | W7 JSON/JSONL output, PyPI release | +300 | Low | 2 |
+| **8c** | W7 the rest of the machine-readable output (`--json` on `status`/`audit`, a JSONL run stream, `run_summary.json`), PyPI release | +250 | Low | 2 |
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run
@@ -797,7 +827,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **78%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 14.4 s (1,028 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ✅ |
+| Test runtime | 6.7 s | 14.1 s (1,051 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ✅ |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

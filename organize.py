@@ -30,6 +30,7 @@ Zero runtime dependencies. Standard library only.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import shutil
@@ -698,6 +699,69 @@ def diagnostics_exit_code(checks: Sequence[DiagnosticCheck]) -> int:
     return 1 if any(check.status == "fail" for check in checks) else 0
 
 
+DOCTOR_JSON_SCHEMA = 1
+
+
+def check_id(name: str) -> str:
+    """A stable machine-readable id for a row, derived from its name.
+
+    Two checks may come from one probe (the provider keys), so the table key is
+    not unique per row - the row name is, and the suite asserts it. Slugging it
+    gives a consumer something to match on (``mkvtoolnix-mkvmerge``) that does
+    not depend on the punctuation or capitalisation of the printed label.
+    """
+    slug = "".join(char.lower() if char.isalnum() else "-" for char in name)
+    return "-".join(part for part in slug.split("-") if part)
+
+
+def diagnostics_document(ctx: DoctorContext, checks: Sequence[DiagnosticCheck]) -> dict[str, object]:
+    """The same verdicts as a JSON-serialisable document, for machines.
+
+    Deliberately *not* stamped with the time it ran: the caller already knows
+    that, and leaving it out means two runs on an unchanged machine produce
+    identical bytes - so a cron job can diff today's ``doctor --json`` against
+    yesterday's and alert only when the machine actually changed.
+
+    ``schema`` is versioned for the same reason the state cache is: this output
+    is meant to be parsed by something that is not in this repository.
+    """
+    return {
+        "schema": DOCTOR_JSON_SCHEMA,
+        "tool": "organize",
+        "version": VERSION,
+        "command": "doctor",
+        "library": str(ctx.library),
+        "source": str(ctx.source),
+        "summary": {
+            "ok": sum(1 for check in checks if check.status == "ok"),
+            "warn": sum(1 for check in checks if check.status == "warn"),
+            "fail": sum(1 for check in checks if check.status == "fail"),
+            "total": len(checks),
+        },
+        "exit_code": diagnostics_exit_code(checks),
+        "checks": [
+            {
+                "id": check_id(check.name),
+                "name": check.name,
+                "status": check.status,
+                "message": check.message,
+                "detail": check.detail,
+                "remedy": check.remedy,
+            }
+            for check in checks
+        ],
+    }
+
+
+def render_diagnostics_json(document: dict[str, object]) -> None:
+    """Print the document and nothing else, so stdout stays parseable.
+
+    No banner, no colour, no scorecard: a caller that asked for JSON is piping
+    stdout into a parser, and one decorative line would break it.
+    """
+    print(json.dumps(document, indent=2, ensure_ascii=False))
+
+
 def render_diagnostics(checks: Sequence[DiagnosticCheck]) -> None:
     """Print one block per check: the row, its detail, and its remedy lines."""
     symbols = {"ok": SYM_OK, "warn": SYM_WARN}
@@ -733,16 +797,40 @@ def render_scorecard(checks: Sequence[DiagnosticCheck]) -> None:
         print(f"\n  {SYM_OK} {green('All systems operational!')} This machine is fully provisioned for the complete Jellyfin media pipeline.")
 
 
-def run_doctor(library_path: Path | None = None, source_path: Path | None = None) -> int:
-    """Run full system diagnostics and print a beautiful scorecard."""
+def add_doctor_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """Define `doctor`'s flags in one place, for both parsers that offer them."""
+    parser.add_argument("--source", type=Path, default=None, metavar="PATH",
+                        help="Override the completed-download directory to check")
+    parser.add_argument("--target", type=Path, default=None, metavar="PATH",
+                        help="Override the library directory to check")
+    parser.add_argument("--json", action="store_true",
+                        help="Print the checks as one JSON document instead of the scorecard")
+    return parser
+
+
+def run_doctor(library_path: Path | None = None, source_path: Path | None = None,
+               as_json: bool = False) -> int:
+    """Run full system diagnostics and print a beautiful scorecard.
+
+    With ``as_json`` the same verdicts are printed as one JSON document and
+    nothing else; the exit code is identical either way, because the checks
+    decide it and the renderer only reports it.
+    """
+    ctx = DoctorContext(
+        library=_resolve_library_path(library_path),
+        source=_resolve_source_path(source_path),
+    )
+
+    if as_json:
+        checks = collect_diagnostics(ctx)
+        render_diagnostics_json(diagnostics_document(ctx, checks))
+        return diagnostics_exit_code(checks)
+
     print_hero_banner()
     print(bold("  SYSTEM & PREREQUISITE DIAGNOSTICS (DOCTOR)"))
     print("  " + HRULE * 68)
 
-    checks = collect_diagnostics(DoctorContext(
-        library=_resolve_library_path(library_path),
-        source=_resolve_source_path(source_path),
-    ))
+    checks = collect_diagnostics(ctx)
     render_diagnostics(checks)
     render_scorecard(checks)
     return diagnostics_exit_code(checks)
@@ -1188,9 +1276,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
 
     # doctor
-    p_doc = subparsers.add_parser("doctor", aliases=["check"], help="Diagnose environment, binaries, and hardlink compatibility")
-    p_doc.add_argument("--source", type=Path, help="Override source download directory")
-    p_doc.add_argument("--target", type=Path, help="Override target library directory")
+    add_doctor_arguments(subparsers.add_parser(
+        "doctor", aliases=["check"], help="Diagnose environment, binaries, and hardlink compatibility"))
 
     # status
     add_status_arguments(subparsers.add_parser(
@@ -1277,11 +1364,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub_args = raw_args[1:]
 
     if command in {"doctor", "check"}:
-        p = argparse.ArgumentParser(prog="organize doctor")
-        p.add_argument("--source", type=Path, default=None)
-        p.add_argument("--target", type=Path, default=None)
-        parsed = p.parse_args(sub_args)
-        return run_doctor(library_path=parsed.target, source_path=parsed.source)
+        # Same definition the top-level parser advertises, so `organize --help`
+        # and `organize doctor --help` can never describe different flags.
+        parsed = add_doctor_arguments(
+            argparse.ArgumentParser(prog="organize doctor",
+                                    description="Diagnose this machine's readiness to run the pipeline.")
+        ).parse_args(sub_args)
+        return run_doctor(library_path=parsed.target, source_path=parsed.source,
+                          as_json=bool(parsed.json))
 
     if command == "status":
         # Same definition the top-level parser advertises, so `organize --help`

@@ -97,6 +97,50 @@ append-only log, to `E:\torrents\tools\ReportsAndLogs\<tool>\` on Windows
 right-aligned scorecard, then titled sections ordered by how cheap the fix
 is. Start at the scorecard; it tells you what needs your attention.
 
+### Machine-readable diagnostics
+
+`organize doctor --json` prints the same checks as one JSON document on stdout
+and nothing else — no banner, no colour, no scorecard — so it can be piped
+straight into a parser:
+
+```bash
+organize doctor --json | jq -r '.checks[] | select(.status != "ok") | "\(.status)\t\(.name)\t\(.message)"'
+```
+
+```json
+{
+  "schema": 1,
+  "tool": "organize",
+  "version": "3.5.0",
+  "command": "doctor",
+  "library": "/srv/media/Movies",
+  "source": "/srv/torrents/final",
+  "summary": { "ok": 11, "warn": 1, "fail": 0, "total": 12 },
+  "exit_code": 0,
+  "checks": [
+    {
+      "id": "ffsubsync",
+      "name": "ffsubsync",
+      "status": "ok",
+      "message": "Found: 0.4.25",
+      "detail": "/usr/local/bin/ffsubsync",
+      "remedy": ""
+    }
+  ]
+}
+```
+
+Match on `id` rather than `name`: it is a slug of the row name
+(`mkvtoolnix-mkvmerge`, `hardlink-compatibility`), stable against rewording of
+the printed label, and unique within a run. `status` is `ok`, `warn` or `fail`;
+`exit_code` is the process exit code, so a consumer reading the document does
+not also have to capture `$?`. `schema` is versioned — it changes if the shape
+does.
+
+The document carries **no timestamp**, deliberately: two runs on an unchanged
+machine produce byte-identical output, so a nightly job can diff today's
+against yesterday's and alert only when the machine really changed.
+
 ---
 
 [← Back to the README](../README.md) · [Tool reference](tools.md) ·

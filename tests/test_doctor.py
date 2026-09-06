@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import collections
 import io
+import json
 import os
 import sys
 import tempfile
@@ -512,6 +513,203 @@ class RenderTests(unittest.TestCase):
             organize.render_scorecard([organize.DiagnosticCheck(name="a", status="ok", message="")])
         self.assertIn("All systems operational", buf.getvalue())
         self.assertNotIn("warnings", buf.getvalue())
+
+
+class CheckIdTests(unittest.TestCase):
+    """Machine-readable ids: what a consumer is allowed to match on."""
+
+    def test_a_name_becomes_a_lowercase_hyphenated_slug(self) -> None:
+        self.assertEqual(organize.check_id("Python Runtime"), "python-runtime")
+
+    def test_punctuation_never_survives_or_doubles_up(self) -> None:
+        self.assertEqual(organize.check_id("MKVToolNix (mkvmerge)"), "mkvtoolnix-mkvmerge")
+        self.assertEqual(organize.check_id("mkvextract (embedded subs)"), "mkvextract-embedded-subs")
+
+    def test_leading_and_trailing_separators_are_trimmed(self) -> None:
+        self.assertEqual(organize.check_id("  (Weird) name!  "), "weird-name")
+
+    def test_every_real_check_has_a_unique_non_empty_id(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            checks = organize.collect_diagnostics(context(td, td))
+        ids = [organize.check_id(c.name) for c in checks]
+        self.assertTrue(all(ids), "a check produced an empty id")
+        self.assertEqual(len(ids), len(set(ids)), "two checks share a machine-readable id")
+
+
+class JsonDocumentTests(unittest.TestCase):
+    """The document is a published interface, so its shape is pinned here."""
+
+    def document(self, *checks: organize.DiagnosticCheck) -> dict[str, object]:
+        return organize.diagnostics_document(context("/lib", "/src"), checks)
+
+    def sample(self) -> tuple[organize.DiagnosticCheck, ...]:
+        return (
+            organize.DiagnosticCheck(name="Python Runtime", status="ok", message="Python 3.11.2"),
+            organize.DiagnosticCheck(name="ffsubsync", status="warn", message="Not found on PATH",
+                                     detail="skipped", remedy="pip install ffsubsync"),
+            organize.DiagnosticCheck(name="Hardlink Compatibility", status="fail", message="different devices"),
+        )
+
+    def test_top_level_keys_are_the_documented_ones(self) -> None:
+        document = self.document(*self.sample())
+        self.assertEqual(
+            sorted(document),
+            ["checks", "command", "exit_code", "library", "schema", "source", "summary", "tool", "version"],
+        )
+
+    def test_schema_and_version_identify_the_producer(self) -> None:
+        document = self.document(*self.sample())
+        self.assertEqual(document["schema"], organize.DOCTOR_JSON_SCHEMA)
+        self.assertEqual(document["tool"], "organize")
+        self.assertEqual(document["version"], organize.VERSION)
+        self.assertEqual(document["command"], "doctor")
+
+    def test_the_resolved_roots_are_reported_as_strings(self) -> None:
+        document = self.document()
+        self.assertEqual(document["library"], "/lib")
+        self.assertEqual(document["source"], "/src")
+
+    def test_summary_counts_match_the_checks(self) -> None:
+        self.assertEqual(
+            self.document(*self.sample())["summary"],
+            {"ok": 1, "warn": 1, "fail": 1, "total": 3},
+        )
+
+    def test_exit_code_in_the_document_is_the_process_exit_code(self) -> None:
+        """A consumer reading the JSON must not have to also capture $?."""
+        self.assertEqual(self.document(*self.sample())["exit_code"], 1)
+        self.assertEqual(self.document(self.sample()[0])["exit_code"], 0)
+
+    def test_each_check_row_carries_id_name_status_message_detail_remedy(self) -> None:
+        rows = self.document(*self.sample())["checks"]
+        self.assertEqual(sorted(rows[1]), ["detail", "id", "message", "name", "remedy", "status"])
+        self.assertEqual(rows[1]["id"], "ffsubsync")
+        self.assertEqual(rows[1]["status"], "warn")
+        self.assertEqual(rows[1]["remedy"], "pip install ffsubsync")
+
+    def test_rows_keep_the_order_of_the_check_table(self) -> None:
+        rows = self.document(*self.sample())["checks"]
+        self.assertEqual([r["name"] for r in rows], ["Python Runtime", "ffsubsync", "Hardlink Compatibility"])
+
+    def test_an_empty_run_is_still_a_valid_document(self) -> None:
+        document = self.document()
+        self.assertEqual(document["summary"], {"ok": 0, "warn": 0, "fail": 0, "total": 0})
+        self.assertEqual(document["checks"], [])
+
+    def test_the_document_is_json_serialisable_as_is(self) -> None:
+        """No Paths, no dataclasses: json.dumps must not need a custom encoder."""
+        json.dumps(self.document(*self.sample()))
+
+    def test_the_document_carries_no_timestamp_so_two_runs_are_byte_identical(self) -> None:
+        """A cron job diffs today's output against yesterday's; only real changes should show."""
+        first = json.dumps(self.document(*self.sample()))
+        second = json.dumps(self.document(*self.sample()))
+        self.assertEqual(first, second)
+        self.assertNotIn("timestamp", first)
+        self.assertNotIn("generated", first)
+
+
+class JsonRenderTests(unittest.TestCase):
+    def run_json(self, **kwargs: object) -> tuple[int, str]:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = organize.run_doctor(as_json=True, **kwargs)
+        return code, buf.getvalue()
+
+    def test_stdout_is_nothing_but_the_json_document(self) -> None:
+        """One decorative line would break every parser downstream."""
+        with tempfile.TemporaryDirectory() as td:
+            code, output = self.run_json(library_path=Path(td), source_path=Path(td))
+        document = json.loads(output)
+        self.assertEqual(code, document["exit_code"])
+        self.assertNotIn("ORGANIZE", output)
+        self.assertNotIn("Scorecard", output)
+        self.assertNotIn(organize.HRULE, output)
+
+    def test_the_json_run_reports_the_same_verdicts_as_the_human_run(self) -> None:
+        """Two renderers, one set of checks - they must never disagree."""
+        with tempfile.TemporaryDirectory() as td:
+            lib, src = Path(td), Path(td)
+            json_code, output = self.run_json(library_path=lib, source_path=src)
+            human = io.StringIO()
+            with redirect_stdout(human):
+                human_code = organize.run_doctor(library_path=lib, source_path=src)
+        document = json.loads(output)
+        self.assertEqual(json_code, human_code)
+        for row in document["checks"]:
+            self.assertIn(row["name"], human.getvalue())
+        self.assertIn(f"{document['summary']['ok']} passed", human.getvalue())
+
+    def test_a_failure_still_exits_one_in_json_mode(self) -> None:
+        def failing(ctx: organize.DoctorContext) -> organize.DiagnosticCheck:
+            return organize.DiagnosticCheck(name="Doomed", status="fail", message="broken")
+
+        with patch.object(organize, "DOCTOR_CHECKS", (("doomed", failing),)):
+            code, output = self.run_json(library_path=Path("/tmp"), source_path=Path("/tmp"))
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(output)["exit_code"], 1)
+
+    def test_a_key_is_not_leaked_into_the_json_either(self) -> None:
+        """The masking lives in the check, so both renderers inherit it - prove it."""
+        secret = "os-secret-key-1234567890"
+        fetcher = fake_module("subtitle_fetcher", OPENSUBTITLES_API_KEY="", SUBDL_API_KEY="")
+        with with_modules(subtitle_fetcher=fetcher), \
+                patch.dict(os.environ, {"OPENSUBTITLES_API_KEY": secret, "SUBDL_API_KEY": ""}):
+            _, output = self.run_json(library_path=Path("/tmp"), source_path=Path("/tmp"))
+        self.assertIn("os-s...7890", output)
+        self.assertNotIn(secret, output)
+
+    def test_unicode_is_written_as_text_not_escapes(self) -> None:
+        document = organize.diagnostics_document(context(), [
+            organize.DiagnosticCheck(name="mkvextract (embedded subs)", status="ok",
+                                     message="Found", detail="/usr/bin/mkvextract · mkvmerge /usr/bin/mkvmerge"),
+        ])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            organize.render_diagnostics_json(document)
+        self.assertIn("·", buf.getvalue())
+        self.assertNotIn("\\u00b7", buf.getvalue())
+
+
+class DoctorCliTests(unittest.TestCase):
+    """`organize doctor` end to end, both renderers, through main()."""
+
+    def test_json_flag_is_accepted_and_produces_a_document(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = organize.main(["doctor", "--json", "--target", td, "--source", td])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["command"], "doctor")
+
+    def test_the_check_alias_takes_the_same_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = organize.main(["check", "--json", "--target", td, "--source", td])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["library"], td)
+
+    def test_without_the_flag_the_scorecard_is_printed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                organize.main(["doctor", "--target", td, "--source", td])
+        self.assertIn("Scorecard:", buf.getvalue())
+
+    def test_both_parsers_describe_the_same_doctor_flags(self) -> None:
+        """`organize --help` and `organize doctor --help` cannot drift apart."""
+        top = organize.build_parser()
+        doctor_action = next(
+            action for action in top._subparsers._group_actions  # noqa: SLF001 - argparse exposes no public reader
+            if "doctor" in action.choices
+        )
+        advertised = {opt for action in doctor_action.choices["doctor"]._actions  # noqa: SLF001
+                      for opt in action.option_strings}
+        dispatched = {opt for action in organize.add_doctor_arguments(
+            organize.argparse.ArgumentParser(prog="organize doctor"))._actions  # noqa: SLF001
+            for opt in action.option_strings}
+        self.assertEqual(advertised, dispatched)
 
 
 class RunDoctorTests(unittest.TestCase):
