@@ -529,11 +529,61 @@ tests cover the OpenSubtitles transport and download safety rules against a
 fake `urlopen`. 779 → 845 tests, coverage 75% → **76%**, `subtitle_fetcher.py`
 74% → 77%.
 
-Still open from this slice: the remaining tier orchestration inside
-`queue_run` (712 lines). ~~The `run_doctor` check table.~~ **done in phase 6f.**
+Still open from this slice: ~~the remaining tier orchestration inside
+`queue_run` (712 lines)~~ **narrowed in phase 6j** — the loop is 653 lines and
+everything in it now either performs I/O or decides what to do with its
+result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f.**
 ~~The property-based tests — `hypothesis` cannot be assumed present in this
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
+
+> **Update — phase 6j (W5): the fetcher's report is computed, not narrated.**
+>
+> `queue_run` was 726 lines and it *ended* by building a 40-key summary dict
+> inline: the day's caps and reservations, the per-scraping-source tallies,
+> `quota_reached`, and the coverage numbers the report leads with. That dict is
+> what the report, `--summary-json` and the exit code are all read from, and
+> the only way to see one was to run the whole fetcher against a library.
+>
+> It is a function of a ledger and a result list, so it is one now:
+> `run_summary()`, with `providers_with_capacity()` (what decides "come back
+> tomorrow" - and SubDL needs all three of its gates open to count, because a
+> download allowance it cannot search against is not capacity) and
+> `coverage_count()` (the product promise: an already-covered movie counts
+> exactly as much as one downloaded this run; a dry run counts its forecast).
+>
+> Three more decisions came out of the loop's interior for the same reason -
+> they were reachable only by driving a provider:
+>
+> - **`subdl_unavailable_reason()` / `opensubtitles_unavailable_reason()` /
+>   `subdl_defer_detail()`** — the phrases a review hold is assembled from,
+>   previously if/elif chains three levels deep. This is the vocabulary the
+>   operator acts on: *"daily search cap exhausted"* means wait until tomorrow,
+>   *"identity fallback disabled"* means turn a switch back on, and the two
+>   must never be printed for each other's situation. The order is now stated
+>   where it can be read: a scraping retry explains the miss even with quota to
+>   spare, and a spent download cap is reported ahead of a spent search cap
+>   because there is no point searching for a subtitle that cannot be
+>   downloaded today.
+> - **`candidate_from_scrape()`** — a scraping hit presented as the same
+>   `Candidate` the APIs return, so the tiers below it need no branch. The
+>   fields with no scraping equivalent are stated honestly in one place: no
+>   moviehash match, no votes, nothing trusted. The chain validated bytes,
+>   which is a weaker claim than a provider's metadata and must not be dressed
+>   up as one.
+> - **`selection_note()`** — the single line recording *why this subtitle*,
+>   which is written into the durable record and is how a bad pick is traced
+>   back to its tier months later.
+>
+> No behaviour change, and again checked rather than asserted: five
+> configurations (each cap exhausted in turn, identity fallback off, a dry run)
+> were run against the same fake library on the previous tree and this one, and
+> the results, the summary dict and the rendered report are byte-identical.
+> 1,210 → 1,238 tests, checked against fourteen deliberate mutations - swapping
+> the two SubDL cap phrases, letting a scraped candidate claim a moviehash
+> match or provider trust, counting a dry run's forecast as real coverage,
+> dropping already-covered movies from the tally, and letting a SubDL with no
+> search allowance keep a run alive.
 
 > **Update — phase 8d (W7): one answer to "what will this terminal take?"**
 >
@@ -1024,6 +1074,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6g**~~ | ~~W7 `organize doctor --json`: a versioned, deterministic document over the same check table, with the flags defined once for both parsers~~ **done** | +90 lines, +23 tests | Low | ✅ |
 | ~~**6h**~~ | ~~W7 `organize status --json` on the same envelope; the JSON helpers generalised out of `doctor`; a failed run is still a document~~ **done** | +110 lines, +16 tests | Low | ✅ |
 | ~~**6i**~~ | ~~W7 `library_auditor.py --json`; the envelope moved into `organizekit/core/jsonout.py`; `RunLog` learns where its console lines go~~ **done** | +150 lines, +34 tests | Low | ✅ |
+| ~~**6j**~~ | ~~W5 the fetcher's run summary, coverage tally, review-hold vocabulary and scraping-candidate conversion extracted from `queue_run` (726 → 653 lines) and tabled~~ **done** | +150 lines, +28 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |

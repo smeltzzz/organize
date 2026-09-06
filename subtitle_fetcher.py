@@ -4801,6 +4801,66 @@ def plan_sources(
 
 
 # ---------------------------------------------------------------------------
+# Why a provider was not asked: the review detail's vocabulary
+# ---------------------------------------------------------------------------
+# When no source produces a usable subtitle, the movie is held for review with
+# a detail line assembled from one phrase per provider - and that line is the
+# only thing the operator has to decide whether to wait for tomorrow's quota,
+# fix a filename, or go and find the subtitle by hand. "SubDL: daily search cap
+# exhausted" and "SubDL: identity fallback disabled" call for opposite actions.
+#
+# The phrases used to be built by if/elif chains buried in the middle of the
+# per-movie loop, three levels deep, reachable only by running the whole
+# fetcher against a provider. They are decisions about the ledger and the
+# configuration and nothing else, so they are functions of the ledger and the
+# configuration.
+
+
+def opensubtitles_unavailable_reason(*, api_tiers_allowed: bool) -> str:
+    """Why OpenSubtitles was configured but not asked about this movie.
+
+    Only two things stop a configured client here: the movie is on a scraping
+    retry (the API already missed on an earlier day, and asking again would
+    spend a request on a known miss), or the daily download cap is used up.
+    """
+    if not api_tiers_allowed:
+        return "OpenSubtitles: not re-queried on a scraping retry (known API miss)"
+    return "OpenSubtitles: daily download cap exhausted"
+
+
+def subdl_unavailable_reason(cfg: QueueConfig, ledger: dict[str, int], *,
+                             api_tiers_allowed: bool) -> str:
+    """Why SubDL was configured but not asked about this movie.
+
+    SubDL has two independent caps - searches and downloads - and one config
+    switch that disables it wholesale, so its answer distinguishes four cases
+    where OpenSubtitles has two. The order matters: a scraping retry explains
+    the miss even when there is quota to spare, and an exhausted *download*
+    cap is reported ahead of the search cap because there is no point spending
+    a search on a subtitle that cannot be downloaded today.
+    """
+    if not api_tiers_allowed:
+        return "SubDL: not re-queried on a scraping retry (known API miss)"
+    if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
+        return "SubDL: daily download cap exhausted"
+    if not subdl_search_has_quota(cfg, ledger):
+        return "SubDL: daily search cap exhausted"
+    return "SubDL: identity fallback disabled"
+
+
+def subdl_defer_detail(cfg: QueueConfig, ledger: dict[str, int]) -> str:
+    """Why this movie is deferred rather than held for review.
+
+    A cap reached *before* the lookup means the movie was never evaluated, so
+    it is skipped for today and retried on the next UTC day - the opposite
+    disposition to a review hold, which says a human has to intervene.
+    """
+    if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
+        return "SubDL daily download cap exhausted before lookup; deferred to the next UTC day"
+    return "SubDL daily search cap exhausted before lookup; deferred to the next UTC day"
+
+
+# ---------------------------------------------------------------------------
 # Local triage: what a movie needs, decided without asking anybody
 # ---------------------------------------------------------------------------
 # Before a movie can cost a provider request it has to get past three purely
@@ -4934,6 +4994,163 @@ class TriageQueue:
         # downloaded subtitles. KeyboardInterrupt is re-raised by the pool.
         detail = str(outcome.error) or outcome.error.__class__.__name__
         return Triage(outcome.item, error=detail)
+
+
+# ---------------------------------------------------------------------------
+# What a run picked, and what a run did: the two things it has to report
+# ---------------------------------------------------------------------------
+
+
+def candidate_from_scrape(
+    scraped: ScrapeCandidate, key: str, identity: MovieIdentity,
+) -> tuple[Candidate, str]:
+    """Present a scraping-source hit as the same Candidate the APIs return.
+
+    Everything downstream - the note, the sidecar contract, the report row -
+    is written against ``Candidate``, so the scraping tier converts rather
+    than branching. The fields that have no scraping equivalent are stated
+    here once, honestly: no moviehash match (these sources index by title),
+    no votes, nothing trusted, nothing machine- or AI-translated - the chain
+    validated the bytes as an English SRT, which is a different claim from a
+    provider's metadata and should not be dressed up as one.
+    """
+    candidate = Candidate(
+        file_id=f"scrape:{key}:{scraped.file_id}",
+        release=scraped.release or "",
+        moviehash_match=False,
+        downloads=int(scraped.downloads or 0),
+        votes=0,
+        rating=float(scraped.rating or 0.0),
+        trusted=False,
+        hearing_impaired=bool(scraped.hearing_impaired),
+        machine_translated=False,
+        ai_translated=False,
+        foreign_parts_only=False,
+        language="en",
+        feature_title=scraped.feature_title or identity.title,
+        feature_year=scraped.feature_year or identity.year,
+    )
+    reason = (
+        f"scraping source {scrape_provider_label(key)} "
+        f"(candidate validated as an English SRT naming the movie)"
+    )
+    return candidate, reason
+
+
+def selection_note(pick: Candidate, *, provider: str, method: str, reason: str) -> str:
+    """The one line that records *why this subtitle* for this movie.
+
+    It is written into the durable state record, printed in the run log and
+    shown in the report, so a subtitle that turns out to be wrong can be
+    traced back to the tier and the ranking that chose it months later.
+    """
+    return (
+        f"provider={provider_label(provider)}; method={method}; id={pick.file_id}; "
+        f"trusted={'yes' if pick.trusted else 'no'}; rating={pick.rating:g}/{pick.votes}; "
+        f"{reason}; {pick.release or 'unnamed release'}"
+    )
+
+
+def providers_with_capacity(
+    cfg: QueueConfig, ledger: dict[str, int], *,
+    active_providers: Sequence[str], scrape_keys: Sequence[str],
+) -> list[str]:
+    """Which sources could still be spent, after the run has finished.
+
+    This is what decides ``quota_reached``, which in turn decides whether the
+    report tells the operator to come back tomorrow. SubDL needs all three of
+    its gates open to count - identity fallback enabled, download cap and
+    search cap both unspent - because a download allowance it cannot search
+    against is not capacity.
+    """
+    available = [
+        provider for provider in active_providers
+        if provider_has_quota(cfg, ledger, provider)
+        and (provider != PROVIDER_SUBDL or cfg.identity_fallback)
+        and (provider != PROVIDER_SUBDL or subdl_search_has_quota(cfg, ledger))
+    ]
+    available += [key for key in scrape_keys if provider_has_quota(cfg, ledger, key)]
+    return available
+
+
+def coverage_count(results: Sequence[JobResult], *, dry_run: bool) -> int:
+    """How many movies end this run with a validated English subtitle.
+
+    Coverage is the product promise, so it counts outcomes rather than work:
+    a movie that already had a sidecar counts exactly as much as one that was
+    downloaded or extracted this run. A dry run counts what it would have
+    fetched, because the number it prints is a forecast of the real run.
+    """
+    return sum(
+        1 for result in results
+        if result.reason in (REASON_COVERED, REASON_DOWNLOADED, REASON_EXTRACTED)
+        or (dry_run and result.reason == REASON_DRY_RUN)
+    )
+
+
+def run_summary(
+    cfg: QueueConfig,
+    ledger: dict[str, int],
+    results: Sequence[JobResult],
+    *,
+    today: str,
+    total: int,
+    active_providers: Sequence[str],
+    scrape_keys: Sequence[str],
+    scrape_status: dict[str, str],
+    deferred_remaining: int,
+    deferred_videos: Sequence[Path],
+) -> dict[str, Any]:
+    """The run's closing tallies, as the report and `--summary-json` read them.
+
+    A dict of counters computed from a ledger and a result list, extracted
+    from the end of ``queue_run`` so the report's inputs can be checked
+    without a library, a provider or a network. The legacy unprefixed fields
+    (``daily_cap``, ``successful_downloads``, ...) stay OpenSubtitles values
+    for consumers written before there was a second provider; the prefixed
+    ones are what everything new should read.
+    """
+    return {
+        "utc_day": today,
+        # Legacy summary fields remain OpenSubtitles values for downstream
+        # consumers that predate the second provider.
+        "daily_cap": cfg.daily_cap,
+        "download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
+        "successful_downloads": ledger["successful_downloads"],
+        "opensubtitles_daily_cap": cfg.daily_cap,
+        "opensubtitles_download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
+        "opensubtitles_successful_downloads": ledger["opensubtitles_successful_downloads"],
+        "subdl_search_daily_cap": cfg.subdl_search_daily_cap,
+        "subdl_search_requests_reserved": subdl_search_reserved(ledger),
+        "subdl_daily_cap": cfg.subdl_daily_cap,
+        "subdl_download_requests_reserved": provider_reserved(ledger, PROVIDER_SUBDL),
+        "subdl_successful_downloads": ledger["subdl_successful_downloads"],
+        "scrape_search_daily_cap": cfg.scrape_daily_cap,
+        "scrape_sources_enabled": list(scrape_keys),
+        "scrape_sources_status": scrape_status,
+        "scrape_search_requests_reserved": {
+            key: provider_reserved(ledger, key) for key in scrape_keys
+        },
+        "scrape_successful_downloads": {
+            key: int(ledger.get(provider_success_field(key), 0) or 0) for key in scrape_keys
+        },
+        "quota_reached": not providers_with_capacity(
+            cfg, ledger, active_providers=active_providers, scrape_keys=scrape_keys,
+        ),
+        "deferred_remaining": deferred_remaining,
+        "extracted_from_embedded": int(ledger.get("extracted", 0) or 0),
+        "ledger_log": str(cfg.log_file),
+        "movies_discovered": total,
+        # Coverage is the product promise: every movie ends the run with a
+        # validated English SRT (dry runs count their candidates as would-be
+        # covered). Anything else - review holds, misses, errors, deferred -
+        # is uncovered and names its movies in the report.
+        "coverage_covered": coverage_count(results, dry_run=cfg.dry_run),
+        "coverage_total": total,
+        # Which movies, not just how many: the report has to be able to name
+        # what was never reached when all usable provider caps cut the batch short.
+        "deferred_videos": list(deferred_videos),
+    }
 
 
 def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
@@ -5286,14 +5503,9 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                     emit(index, "ERROR", video, detail)
                     continue
             elif subdl_client is not None:
-                if not api_tiers_allowed:
-                    pool_reasons.append("SubDL: not re-queried on a scraping retry (known API miss)")
-                elif not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
-                    pool_reasons.append("SubDL: daily download cap exhausted")
-                elif not subdl_search_has_quota(cfg, ledger):
-                    pool_reasons.append("SubDL: daily search cap exhausted")
-                else:
-                    pool_reasons.append("SubDL: identity fallback disabled")
+                pool_reasons.append(
+                    subdl_unavailable_reason(cfg, ledger, api_tiers_allowed=api_tiers_allowed)
+                )
 
             tier1_entries: list[tuple[Candidate, str, str, str]] = []
             if os_tier1 is not None:
@@ -5349,10 +5561,9 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                         pool_reasons.append(open_lookup_error)
                         emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
                 elif open_client is not None and not open_lookup_error:
-                    if not api_tiers_allowed:
-                        pool_reasons.append("OpenSubtitles: not re-queried on a scraping retry (known API miss)")
-                    else:
-                        pool_reasons.append("OpenSubtitles: daily download cap exhausted")
+                    pool_reasons.append(
+                        opensubtitles_unavailable_reason(api_tiers_allowed=api_tiers_allowed)
+                    )
 
                 # The local canonical filename deliberately omits scene tags.
                 # If SubDL's release lookup resolved nothing at all, use its
@@ -5419,10 +5630,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
 
             if (pick is None and subdl_client is not None and not subdl_lookup_attempted
                     and not subdl_available and api_tiers_allowed):
-                if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
-                    detail = "SubDL daily download cap exhausted before lookup; deferred to the next UTC day"
-                else:
-                    detail = "SubDL daily search cap exhausted before lookup; deferred to the next UTC day"
+                detail = subdl_defer_detail(cfg, ledger)
                 result = JobResult(video, "skip", detail, reason=REASON_QUOTA)
                 results.append(result)
                 emit(index, "SKIP", video, detail)
@@ -5455,28 +5663,11 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                     pool_reasons.append(f"scraping sources failed: {type(exc).__name__}: {exc}")
                     scrape_cand, scrape_key, scrape_raw = None, "", None
                 if scrape_cand is not None and scrape_raw is not None:
-                    pick = Candidate(
-                        file_id=f"scrape:{scrape_key}:{scrape_cand.file_id}",
-                        release=scrape_cand.release or "",
-                        moviehash_match=False,
-                        downloads=int(scrape_cand.downloads or 0),
-                        votes=0,
-                        rating=float(scrape_cand.rating or 0.0),
-                        trusted=False,
-                        hearing_impaired=bool(scrape_cand.hearing_impaired),
-                        machine_translated=False,
-                        ai_translated=False,
-                        foreign_parts_only=False,
-                        language="en",
-                        feature_title=scrape_cand.feature_title or identity.title,
-                        feature_year=scrape_cand.feature_year or identity.year,
+                    pick, selection_reason = candidate_from_scrape(
+                        scrape_cand, scrape_key, identity,
                     )
                     selected_provider = scrape_key
                     selection_method = "scrape"
-                    selection_reason = (
-                        f"scraping source {scrape_provider_label(scrape_key)} "
-                        f"(candidate validated as an English SRT naming the movie)"
-                    )
                     scrape_download = scrape_raw
 
             if pick is None:
@@ -5513,10 +5704,8 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 continue
 
         dest = dest_for(video, fetcher_cfg)
-        note = (
-            f"provider={provider_label(selected_provider)}; method={selection_method}; id={pick.file_id}; "
-            f"trusted={'yes' if pick.trusted else 'no'}; rating={pick.rating:g}/{pick.votes}; "
-            f"{selection_reason}; {pick.release or 'unnamed release'}"
+        note = selection_note(
+            pick, provider=selected_provider, method=selection_method, reason=selection_reason,
         )
         if cfg.dry_run:
             result = JobResult(video, "dry-run", note, dest, reason=REASON_DRY_RUN)
@@ -5605,60 +5794,16 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             emit(index, "SAVED", video, dest.name)
         persist_state(state, cfg.log_file)
 
-    available_after_run = [
-        provider for provider in active_providers
-        if provider_has_quota(cfg, ledger, provider)
-        and (provider != PROVIDER_SUBDL or cfg.identity_fallback)
-        and (provider != PROVIDER_SUBDL or subdl_search_has_quota(cfg, ledger))
-    ]
-    available_after_run += [
-        key for key in scrape_keys
-        if provider_has_quota(cfg, ledger, key)
-    ]
-    covered_count = sum(
-        1 for result in results
-        if result.reason in (REASON_COVERED, REASON_DOWNLOADED, REASON_EXTRACTED)
-        or (cfg.dry_run and result.reason == REASON_DRY_RUN)
+    summary = run_summary(
+        cfg, ledger, results,
+        today=today,
+        total=total,
+        active_providers=active_providers,
+        scrape_keys=scrape_keys,
+        scrape_status=scrape_chain.status() if scrape_chain is not None else {},
+        deferred_remaining=deferred_remaining,
+        deferred_videos=deferred_videos,
     )
-    summary = {
-        "utc_day": today,
-        # Legacy summary fields remain OpenSubtitles values for downstream
-        # consumers that predate the second provider.
-        "daily_cap": cfg.daily_cap,
-        "download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
-        "successful_downloads": ledger["successful_downloads"],
-        "opensubtitles_daily_cap": cfg.daily_cap,
-        "opensubtitles_download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
-        "opensubtitles_successful_downloads": ledger["opensubtitles_successful_downloads"],
-        "subdl_search_daily_cap": cfg.subdl_search_daily_cap,
-        "subdl_search_requests_reserved": subdl_search_reserved(ledger),
-        "subdl_daily_cap": cfg.subdl_daily_cap,
-        "subdl_download_requests_reserved": provider_reserved(ledger, PROVIDER_SUBDL),
-        "subdl_successful_downloads": ledger["subdl_successful_downloads"],
-        "scrape_search_daily_cap": cfg.scrape_daily_cap,
-        "scrape_sources_enabled": list(scrape_keys),
-        "scrape_sources_status": scrape_chain.status() if scrape_chain is not None else {},
-        "scrape_search_requests_reserved": {
-            key: provider_reserved(ledger, key) for key in scrape_keys
-        },
-        "scrape_successful_downloads": {
-            key: int(ledger.get(provider_success_field(key), 0) or 0) for key in scrape_keys
-        },
-        "quota_reached": not available_after_run,
-        "deferred_remaining": deferred_remaining,
-        "extracted_from_embedded": int(ledger.get("extracted", 0) or 0),
-        "ledger_log": str(cfg.log_file),
-        "movies_discovered": total,
-        # Coverage is the product promise: every movie ends the run with a
-        # validated English SRT (dry runs count their candidates as would-be
-        # covered). Anything else - review holds, misses, errors, deferred -
-        # is uncovered and names its movies in the report.
-        "coverage_covered": covered_count,
-        "coverage_total": total,
-        # Which movies, not just how many: the report has to be able to name
-        # what was never reached when all usable provider caps cut the batch short.
-        "deferred_videos": deferred_videos,
-    }
     return results, summary
 
 @dataclass(frozen=True)

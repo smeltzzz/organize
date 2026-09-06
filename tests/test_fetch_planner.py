@@ -275,5 +275,286 @@ class SourcePlanTests(unittest.TestCase):
         self.assertTrue(plan.open_tier)
 
 
+class MissReasonTests(unittest.TestCase):
+    """The phrases a review hold is assembled from.
+
+    When nothing is found, the movie's detail line is the only thing telling
+    the operator what to do about it — wait for tomorrow's quota, turn a
+    switch back on, or go and find the subtitle by hand. These phrases used to
+    be built by if/elif chains three levels deep inside the per-movie loop.
+    """
+
+    def config(self, **overrides: object) -> sf.QueueConfig:
+        base: dict = {"library": Path("/library"), "log_file": None,
+                      "report_file": Path("/logs/r.txt"), "daily_cap": 200,
+                      "subdl_daily_cap": 100, "subdl_search_daily_cap": 100}
+        base.update(overrides)
+        return sf.QueueConfig(**base)  # type: ignore[arg-type]
+
+    # -- OpenSubtitles: two ways to be unavailable -------------------------
+
+    def test_a_scraping_retry_says_so_rather_than_blaming_the_cap(self) -> None:
+        self.assertEqual(
+            sf.opensubtitles_unavailable_reason(api_tiers_allowed=False),
+            "OpenSubtitles: not re-queried on a scraping retry (known API miss)",
+        )
+
+    def test_otherwise_a_configured_provider_is_out_of_quota(self) -> None:
+        self.assertEqual(
+            sf.opensubtitles_unavailable_reason(api_tiers_allowed=True),
+            "OpenSubtitles: daily download cap exhausted",
+        )
+
+    # -- SubDL: four, and their order is the point -------------------------
+
+    def subdl(self, ledger: dict | None = None, *, api_tiers_allowed: bool = True,
+              **cfg_overrides: object) -> str:
+        return sf.subdl_unavailable_reason(
+            self.config(**cfg_overrides), ledger or {}, api_tiers_allowed=api_tiers_allowed,
+        )
+
+    def test_a_scraping_retry_explains_the_miss_even_with_quota_to_spare(self) -> None:
+        self.assertEqual(
+            self.subdl(api_tiers_allowed=False),
+            "SubDL: not re-queried on a scraping retry (known API miss)",
+        )
+
+    def test_a_spent_download_cap_is_reported_before_the_search_cap(self) -> None:
+        """No point spending a search on a subtitle that cannot be downloaded today."""
+        spent = {"subdl_download_requests_reserved": 100, "subdl_search_requests_reserved": 100}
+        self.assertEqual(self.subdl(spent), "SubDL: daily download cap exhausted")
+
+    def test_a_spent_search_cap_is_its_own_sentence(self) -> None:
+        self.assertEqual(
+            self.subdl({"subdl_search_requests_reserved": 100}),
+            "SubDL: daily search cap exhausted",
+        )
+
+    def test_a_funded_provider_that_was_not_asked_was_switched_off(self) -> None:
+        """The last case is not a quota problem, and must not read like one."""
+        self.assertEqual(self.subdl(), "SubDL: identity fallback disabled")
+
+    # -- deferral is a different disposition from review -------------------
+
+    def test_a_cap_reached_before_the_lookup_defers_to_the_next_day(self) -> None:
+        self.assertEqual(
+            sf.subdl_defer_detail(self.config(), {"subdl_download_requests_reserved": 100}),
+            "SubDL daily download cap exhausted before lookup; deferred to the next UTC day",
+        )
+        self.assertEqual(
+            sf.subdl_defer_detail(self.config(), {"subdl_search_requests_reserved": 100}),
+            "SubDL daily search cap exhausted before lookup; deferred to the next UTC day",
+        )
+
+    def test_every_reason_names_its_provider(self) -> None:
+        """A detail line concatenates these; an unattributed clause is useless."""
+        reasons = [
+            sf.opensubtitles_unavailable_reason(api_tiers_allowed=True),
+            sf.opensubtitles_unavailable_reason(api_tiers_allowed=False),
+            self.subdl(), self.subdl(api_tiers_allowed=False),
+            self.subdl({"subdl_download_requests_reserved": 100}),
+            self.subdl({"subdl_search_requests_reserved": 100}),
+        ]
+        for reason in reasons:
+            self.assertTrue(reason.startswith(("OpenSubtitles:", "SubDL:")), reason)
+
+
+class ScrapeCandidateTests(unittest.TestCase):
+    """A scraping hit presented as the Candidate everything downstream reads."""
+
+    IDENTITY = sf.MovieIdentity(title="Arrival", year=2016, normalized_title="arrival")
+
+    def convert(self, **overrides: object) -> tuple[sf.Candidate, str]:
+        fields: dict = {"provider": "subf2me", "file_id": "9911", "release": "Arrival.2016.BluRay",
+                        "feature_title": "Arrival", "feature_year": 2016, "downloads": 42,
+                        "rating": 4.5, "hearing_impaired": True}
+        fields.update(overrides)
+        return sf.candidate_from_scrape(sf.ScrapeCandidate(**fields), "subf2me", self.IDENTITY)
+
+    def test_the_id_carries_its_source_so_a_bad_pick_can_be_traced(self) -> None:
+        candidate, _ = self.convert()
+        self.assertEqual(candidate.file_id, "scrape:subf2me:9911")
+
+    def test_a_scraped_candidate_never_claims_a_hash_match_or_provider_trust(self) -> None:
+        """The chain validated bytes; that is a weaker claim than provider metadata."""
+        candidate, _ = self.convert()
+        self.assertFalse(candidate.moviehash_match)
+        self.assertFalse(candidate.trusted)
+        self.assertFalse(candidate.machine_translated or candidate.ai_translated)
+        self.assertEqual(candidate.votes, 0)
+        self.assertEqual(candidate.language, "en")
+
+    def test_popularity_signals_survive_the_conversion(self) -> None:
+        candidate, _ = self.convert()
+        self.assertEqual((candidate.downloads, candidate.rating), (42, 4.5))
+        self.assertTrue(candidate.hearing_impaired)
+
+    def test_a_source_that_names_no_feature_borrows_the_movie_identity(self) -> None:
+        candidate, _ = self.convert(feature_title="", feature_year=0)
+        self.assertEqual((candidate.feature_title, candidate.feature_year), ("Arrival", 2016))
+
+    def test_the_reason_names_the_source_in_words_an_operator_reads(self) -> None:
+        _, reason = self.convert()
+        self.assertIn(sf.scrape_provider_label("subf2me"), reason)
+        self.assertIn("validated as an English SRT", reason)
+
+
+class SelectionNoteTests(unittest.TestCase):
+    """The one line that records why this subtitle, for this movie."""
+
+    def note(self, **overrides: object) -> str:
+        fields: dict = {"file_id": 7, "release": "Arrival.2016.BluRay.x264", "moviehash_match": True,
+                        "downloads": 900, "votes": 12, "rating": 8.5, "trusted": True,
+                        "hearing_impaired": False, "machine_translated": False,
+                        "ai_translated": False, "foreign_parts_only": False, "language": "en"}
+        fields.update(overrides)
+        return sf.selection_note(
+            sf.Candidate(**fields), provider=sf.PROVIDER_OPENSUBTITLES,
+            method="hash", reason="moviehash match",
+        )
+
+    def test_it_records_the_tier_the_provider_and_the_file(self) -> None:
+        note = self.note()
+        self.assertIn("provider=OpenSubtitles", note)
+        self.assertIn("method=hash", note)
+        self.assertIn("id=7", note)
+        self.assertIn("trusted=yes", note)
+        self.assertIn("rating=8.5/12", note)
+        self.assertIn("moviehash match", note)
+        self.assertIn("Arrival.2016.BluRay.x264", note)
+
+    def test_an_untrusted_pick_says_no_rather_than_omitting_the_field(self) -> None:
+        self.assertIn("trusted=no", self.note(trusted=False))
+
+    def test_a_nameless_release_still_reads_as_a_sentence(self) -> None:
+        self.assertTrue(self.note(release="").endswith("unnamed release"))
+
+
+class RunSummaryTests(unittest.TestCase):
+    """The closing tallies, computed from a ledger instead of from a library."""
+
+    def config(self, **overrides: object) -> sf.QueueConfig:
+        base: dict = {"library": Path("/library"), "log_file": Path("/logs/ledger.json"),
+                      "report_file": Path("/logs/r.txt"), "daily_cap": 200,
+                      "subdl_daily_cap": 100, "subdl_search_daily_cap": 100,
+                      "scrape_daily_cap": 20}
+        base.update(overrides)
+        return sf.QueueConfig(**base)  # type: ignore[arg-type]
+
+    def ledger(self, **counters: int) -> dict:
+        ledger = sf.day_ledger(sf.new_state(Path("/library")), TODAY)
+        ledger.update(counters)
+        return ledger
+
+    def result(self, name: str, status: str, reason: str) -> sf.JobResult:
+        return sf.JobResult(Path(f"/library/{name}/{name}.mkv"), status, "", reason=reason)
+
+    def summary(self, *, results: list | None = None, cfg: sf.QueueConfig | None = None,
+                ledger: dict | None = None, **overrides: object) -> dict:
+        options: dict = {"today": TODAY, "total": 3,
+                         "active_providers": BOTH_APIS, "scrape_keys": SCRAPE_KEYS,
+                         "scrape_status": {}, "deferred_remaining": 0, "deferred_videos": []}
+        options.update(overrides)
+        return sf.run_summary(
+            cfg or self.config(), ledger if ledger is not None else self.ledger(),
+            results if results is not None else [], **options,  # type: ignore[arg-type]
+        )
+
+    # -- capacity: what decides "come back tomorrow" -----------------------
+
+    def test_a_fresh_day_has_capacity_everywhere(self) -> None:
+        self.assertFalse(self.summary()["quota_reached"])
+
+    def test_subdl_download_allowance_without_search_allowance_is_not_capacity(self) -> None:
+        spent = self.ledger(subdl_search_requests_reserved=100,
+                            opensubtitles_download_requests_reserved=200)
+        available = sf.providers_with_capacity(
+            self.config(scrape_daily_cap=0), spent,
+            active_providers=BOTH_APIS, scrape_keys=(),
+        )
+        self.assertEqual(available, [])
+
+    def test_a_disabled_identity_fallback_takes_subdl_out_of_the_tally(self) -> None:
+        available = sf.providers_with_capacity(
+            self.config(identity_fallback=False), self.ledger(),
+            active_providers=BOTH_APIS, scrape_keys=(),
+        )
+        self.assertEqual(available, [sf.PROVIDER_OPENSUBTITLES])
+
+    def test_one_scraping_source_with_capacity_keeps_the_run_alive(self) -> None:
+        spent = self.ledger(opensubtitles_download_requests_reserved=200,
+                            subdl_download_requests_reserved=100)
+        summary = self.summary(ledger=spent)
+        self.assertFalse(summary["quota_reached"], "the scraping sources are untouched")
+
+    def test_everything_spent_is_reported_as_quota_reached(self) -> None:
+        spent = self.ledger(opensubtitles_download_requests_reserved=200,
+                            subdl_download_requests_reserved=100)
+        spent.update({f"{key}_search_requests_reserved": 20 for key in SCRAPE_KEYS})
+        self.assertTrue(self.summary(ledger=spent)["quota_reached"])
+
+    # -- coverage: the product promise -------------------------------------
+
+    def test_coverage_counts_outcomes_not_work(self) -> None:
+        results = [
+            self.result("A (2001)", "have", sf.REASON_COVERED),
+            self.result("B (2002)", "download", sf.REASON_DOWNLOADED),
+            self.result("C (2003)", "extracted", sf.REASON_EXTRACTED),
+            self.result("D (2004)", "review", sf.REASON_REVIEW),
+            self.result("E (2005)", "error", sf.REASON_ERROR),
+        ]
+        self.assertEqual(sf.coverage_count(results, dry_run=False), 3)
+
+    def test_a_dry_run_counts_what_it_would_have_fetched(self) -> None:
+        results = [self.result("A (2001)", "dry-run", sf.REASON_DRY_RUN)]
+        self.assertEqual(sf.coverage_count(results, dry_run=True), 1)
+        self.assertEqual(sf.coverage_count(results, dry_run=False), 0,
+                         "a real run must never count a would-be download as coverage")
+
+    def test_coverage_is_reported_against_everything_discovered(self) -> None:
+        summary = self.summary(
+            results=[self.result("A (2001)", "have", sf.REASON_COVERED)], total=9,
+        )
+        self.assertEqual((summary["coverage_covered"], summary["coverage_total"]), (1, 9))
+        self.assertEqual(summary["movies_discovered"], 9)
+
+    # -- the fields consumers read -----------------------------------------
+
+    def test_the_legacy_fields_stay_opensubtitles_values(self) -> None:
+        """Written before there was a second provider; readers still exist."""
+        ledger = self.ledger(opensubtitles_download_requests_reserved=4,
+                             opensubtitles_successful_downloads=3,
+                             successful_downloads=3,
+                             subdl_download_requests_reserved=9,
+                             subdl_successful_downloads=8)
+        summary = self.summary(ledger=ledger)
+        self.assertEqual(summary["daily_cap"], 200)
+        self.assertEqual(summary["download_requests_reserved"], 4)
+        self.assertEqual(summary["successful_downloads"], 3)
+        self.assertEqual(summary["subdl_download_requests_reserved"], 9)
+        self.assertEqual(summary["subdl_successful_downloads"], 8)
+
+    def test_the_scraping_tallies_are_per_source(self) -> None:
+        key = SCRAPE_KEYS[0]
+        ledger = self.ledger(**{f"{key}_search_requests_reserved": 3,
+                                sf.provider_success_field(key): 1})
+        summary = self.summary(ledger=ledger, scrape_keys=(key,),
+                               scrape_status={key: "ok"})
+        self.assertEqual(summary["scrape_search_requests_reserved"], {key: 3})
+        self.assertEqual(summary["scrape_successful_downloads"], {key: 1})
+        self.assertEqual(summary["scrape_sources_enabled"], [key])
+        self.assertEqual(summary["scrape_sources_status"], {key: "ok"})
+
+    def test_a_cut_short_run_names_the_movies_it_never_reached(self) -> None:
+        deferred = [Path("/library/D (2004)/D (2004).mkv")]
+        summary = self.summary(deferred_remaining=1, deferred_videos=deferred)
+        self.assertEqual(summary["deferred_remaining"], 1)
+        self.assertEqual(summary["deferred_videos"], deferred)
+
+    def test_the_summary_says_which_day_it_belongs_to(self) -> None:
+        self.assertEqual(self.summary()["utc_day"], TODAY)
+        self.assertEqual(self.summary()["ledger_log"], "/logs/ledger.json")
+
+
 if __name__ == "__main__":
     unittest.main()
