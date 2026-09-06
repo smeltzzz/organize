@@ -537,6 +537,39 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6l (W5): the library does not hold still for a remux.**
+>
+> A remux takes minutes, and the window between reading a movie and swapping
+> the rebuilt copy over it is exactly when a download client finishes writing
+> to that movie, the fetcher replaces the sidecar the plan was built around, or
+> the operator presses Ctrl-C. The cleaner has always had a guard for each of
+> those - and not one of them had ever been executed by a test, because
+> reaching them means changing a file while a remux is in flight. They were the
+> last untested branches in the swap sequence, in the tool that rewrites
+> movies.
+>
+> The e2e suite (a real child process, a real journal, a real `os.replace`) now
+> arms a callback in one of the two windows - after verification, and in the
+> pause immediately before the swap - and changes the library from inside it.
+> Ten tests, one rule: **the original is left exactly as it was, the staging
+> file and its journal are swept up, and the movie is reported rather than
+> silently skipped.** A movie appended to mid-remux keeps the other writer's
+> bytes. A sidecar replaced or deleted mid-remux stops the swap, because the
+> embedded subtitles were dropped *precisely* on the strength of that file. A
+> Ctrl-C in either window discards a verified temp file rather than promoting
+> it in a hurry. A full disk is refused before mkvmerge is launched, and a
+> journal that cannot be written skips the movie entirely - fail closed means
+> the remux is never *started*, not started and abandoned.
+>
+> Six mutations, two of which survived the first pass and were worth the
+> trouble: deleting the first sidecar check passed because the second one
+> catches the same file and the assertion matched both messages, and demoting
+> the journal failure to a warning passed because the run happened to die
+> later for a different reason. The tests now name the message they mean and
+> assert that no remux was attempted. 1,296 → 1,306 tests;
+> `mkv_track_cleaner.py` 79% → **81%**, toolkit **80%** - the cleaner is over
+> the 80% target set at the start of this plan, from 41%.
+
 > **Update — phase 6k (W5): the one decision that lets a movie overwrite a movie.**
 >
 > Everything else `movie_standardizer.py` does is additive - it hardlinks an
@@ -1122,6 +1155,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6i**~~ | ~~W7 `library_auditor.py --json`; the envelope moved into `organizekit/core/jsonout.py`; `RunLog` learns where its console lines go~~ **done** | +150 lines, +34 tests | Low | ✅ |
 | ~~**6j**~~ | ~~W5 the fetcher's run summary, coverage tally, review-hold vocabulary and scraping-candidate conversion extracted from `queue_run` (726 → 653 lines) and tabled~~ **done** | +150 lines, +28 tests | Low | ✅ |
 | ~~**6k**~~ | ~~W5 the standardizer's replacement policy: the upgrade guard chain split from the probing (`upgrade_verdict`), and the probe reader, the score and the gate tabled~~ **done** | +40 lines, +58 tests | Low | ✅ |
+| ~~**6l**~~ | ~~W5 the cleaner's concurrent-change refusals proved end to end: the library changed inside the remux window (source, sidecar, Ctrl-C), plus the free-space and journal fail-closed paths~~ **done** | +10 tests, cleaner 79% → 81% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1163,8 +1197,8 @@ state in one sentence, it is the wrong change.*
 | :--- | ---: | ---: | ---: |
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
-| Coverage | 58% | **78%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 16.9 s (1,178 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Coverage | 58% | **80%** (cleaner 81%) | ≥75%, cleaner ≥80% ✅ |
+| Test runtime | 6.7 s | 18.5 s (1,306 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

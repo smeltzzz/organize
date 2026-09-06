@@ -386,6 +386,176 @@ class WhatTheRunTellsStatusTests(CleanerRunFixture):
 
 
 @unittest.skipIf(WINDOWS, "the fake mkvmerge is launched through a POSIX shebang")
+class LibraryChangedUnderneathTests(CleanerRunFixture):
+    """A remux takes minutes; the library does not hold still for them.
+
+    Between the moment the cleaner reads a movie and the moment it swaps the
+    remuxed copy over the original, a download client can finish writing to
+    that movie, the subtitle fetcher can replace the sidecar the remux was
+    planned around, or the operator can press Ctrl-C. Each of those makes the
+    finished temp file wrong, and promoting it would destroy the only copy of
+    something.
+
+    The rule is the same in every case: **the original is left exactly as it
+    was, the staging file and its journal are swept up, and the movie is
+    reported rather than silently skipped.** These are the branches that
+    enforce it - previously the only untested code in the whole swap sequence,
+    because reaching them means changing a file while a remux is in flight.
+    """
+
+    def arm(self, *, at_verify=None, at_swap=None):
+        """Run with a callback fired mid-remux, at one of the two windows.
+
+        ``at_verify`` runs after the remuxed file has been verified and before
+        the first concurrent-change checks; ``at_swap`` runs in the pause
+        immediately before ``os.replace``, which is the last moment anything
+        can change. Both are patched around the real functions, so everything
+        else in the run - the child process, the journal, the verification -
+        is genuine.
+        """
+        real_verify = tc.verify_remux_output
+        armed: list[bool] = []
+
+        def verifying(*args, **kwargs):
+            result = real_verify(*args, **kwargs)
+            armed.append(True)
+            if at_verify is not None:
+                at_verify()
+            return result
+
+        def sleeping(seconds: float) -> None:
+            if armed and at_swap is not None:
+                at_swap()
+
+        return contextlib.ExitStack(), verifying, sleeping
+
+    def run_with(self, *, at_verify=None, at_swap=None, extra: tuple = ()) -> int:
+        stack, verifying, sleeping = self.arm(at_verify=at_verify, at_swap=at_swap)
+        with stack:
+            stack.enter_context(mock.patch.object(tc, "verify_remux_output", verifying))
+            stack.enter_context(mock.patch.object(tc.time, "sleep", sleeping))
+            return self._run(*extra)
+
+    def sidecar(self, text: str = GOOD_SRT) -> Path:
+        path = self.folder / "Film (2000).eng.srt"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def assert_untouched(self, before: bytes) -> None:
+        self.assertEqual(self.movie.read_bytes(), before,
+                         "the original movie must survive every refusal")
+        self.assertEqual(self._leftovers(), [],
+                         "the staging file and the journal are swept up")
+
+    # -- the movie itself changed ------------------------------------------
+
+    def test_a_movie_written_to_during_the_remux_is_not_replaced(self) -> None:
+        """A download client finishing its last piece is the realistic case."""
+        def rewrite() -> None:
+            with self.movie.open("ab") as handle:
+                handle.write(b"a torrent client just finished this file")
+
+        self.assertEqual(self.run_with(at_verify=rewrite), 1)
+        self.assertTrue(self.movie.read_bytes().endswith(b"finished this file"),
+                        "the other writer's bytes are still there")
+        self.assertEqual(self._leftovers(), [])
+        self.assertIn("source changed while remuxing", self.log.read_text(encoding="utf-8"))
+
+    def test_the_refusal_is_reported_not_swallowed(self) -> None:
+        def rewrite() -> None:
+            with self.movie.open("ab") as handle:
+                handle.write(b"x")
+
+        self.assertEqual(self.run_with(at_verify=rewrite), 1)
+        self.assertIn("ERRORS", self._report_text().upper())
+
+    # -- the sidecar the plan was built around changed ----------------------
+
+    def test_a_sidecar_replaced_during_the_remux_stops_the_swap(self) -> None:
+        """The embedded subtitles were dropped *because* that sidecar was valid.
+
+        Promoting the remux after the sidecar changed would leave the movie
+        with neither its embedded subtitles nor the subtitle file that
+        justified removing them.
+        """
+        self.sidecar()
+        before = self.movie.read_bytes()
+        self.assertEqual(self.run_with(at_verify=lambda: self.sidecar("not a subtitle at all")), 1)
+        self.assert_untouched(before)
+        # Named precisely: the identical check that runs later, in the swap
+        # window, would otherwise make this test pass with this one deleted.
+        self.assertIn("changed or became invalid while remuxing",
+                      self.log.read_text(encoding="utf-8"))
+
+    def test_a_sidecar_replaced_in_the_swap_window_also_stops_it(self) -> None:
+        """The last check, in the pause before os.replace."""
+        self.sidecar()
+        before = self.movie.read_bytes()
+        self.assertEqual(self.run_with(at_swap=lambda: self.sidecar("gone")), 1)
+        self.assert_untouched(before)
+        self.assertIn("before atomic swap", self.log.read_text(encoding="utf-8"))
+
+    def test_a_sidecar_deleted_mid_remux_is_the_same_refusal(self) -> None:
+        sidecar = self.sidecar()
+        before = self.movie.read_bytes()
+        self.assertEqual(self.run_with(at_verify=sidecar.unlink), 1)
+        self.assert_untouched(before)
+        self.assertIn("changed or became invalid while remuxing",
+                      self.log.read_text(encoding="utf-8"))
+
+    # -- Ctrl-C in the two windows -----------------------------------------
+
+    def test_an_interrupt_after_verification_leaves_the_original(self) -> None:
+        before = self.movie.read_bytes()
+        self.assertEqual(self.run_with(at_verify=tc.request_interrupt), 130)
+        self.assert_untouched(before)
+        self.assertIn("INTERRUPT", self._report_text().upper())
+
+    def test_an_interrupt_in_the_swap_window_leaves_the_original(self) -> None:
+        """The verified temp file is discarded rather than promoted in a hurry."""
+        before = self.movie.read_bytes()
+        self.assertEqual(self.run_with(at_swap=tc.request_interrupt), 130)
+        self.assert_untouched(before)
+
+    # -- the run refuses to start work it cannot finish ---------------------
+
+    def test_a_disk_with_no_room_is_an_error_before_any_remux(self) -> None:
+        before = self.movie.read_bytes()
+        with mock.patch.object(tc, "check_free_space",
+                               return_value=(False, 1024, 10 * 1024 ** 3, "")):
+            self.assertEqual(self._run(), 1)
+        self.assertEqual(self.movie.read_bytes(), before)
+        self.assertIn("not enough free disk space", self.log.read_text(encoding="utf-8"))
+        self.assertIn("Original file left untouched", self.log.read_text(encoding="utf-8"))
+
+    def test_a_low_disk_warning_does_not_stop_the_run(self) -> None:
+        """A warning is advice; only a hard 'no' cancels the remux."""
+        real = tc.check_free_space
+
+        def warning(*args, **kwargs):
+            ok, free, required, _ = real(*args, **kwargs)
+            return ok, free, required, "could not read filesystem stats"
+
+        with mock.patch.object(tc, "check_free_space", warning):
+            self.assertEqual(self._run(), 0)
+        self.assertIn("Free-space check warning", self.log.read_text(encoding="utf-8"))
+
+    def test_without_a_journal_the_movie_is_skipped_not_remuxed(self) -> None:
+        """Fail closed: no journal means no crash recovery for this movie."""
+        before = self.movie.read_bytes()
+        with mock.patch.object(tc, "write_transaction",
+                               side_effect=OSError("read-only state directory")):
+            self.assertEqual(self._run(), 1)
+        self.assertEqual(self.movie.read_bytes(), before)
+        self.assertEqual(self._leftovers(), [])
+        log_text = self.log.read_text(encoding="utf-8")
+        self.assertIn("could not create remux transaction journal", log_text)
+        # Fail *closed* means the remux is never started, not that it is
+        # started and then abandoned: an hour of mkvmerge with no journal is
+        # exactly the state crash recovery exists to avoid.
+        self.assertNotIn("Verifying remux integrity", log_text)
+
+
 class MkvmergeSubprocessTests(unittest.TestCase):
     """``_run_mkvmerge`` itself: progress parsing, exit codes, child tracking."""
 
