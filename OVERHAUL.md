@@ -537,6 +537,45 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6q (W5): the fetcher's planners, against inputs nobody wrote.**
+>
+> Phase 6e gave the repo a property harness and pointed it at four areas; the
+> fetcher was not one of them, even though it is the only tool that acts on
+> input from strangers. Its planners are pure functions of what a provider
+> said, and its quota arithmetic is a promise to that provider — the two shapes
+> a table of examples covers worst.
+>
+> Twenty properties now hold for every generated answer list: the chosen
+> subtitle is always one that was offered; a machine-translated, AI-translated,
+> foreign-parts-only or non-English entry is never chosen by *any* of the three
+> selection routes; the hash route only ever installs a hash match whose
+> release names the movie; the order a provider listed its answers in cannot
+> change the pick; adding an entry the policy refuses changes nothing; an
+> unbroken tie is a review rather than a guess; a SubDL release match is never
+> below the documented 0.80; pooling two providers never invents a third
+> answer and never picks the worse-ranked of the two; a scraped shortlist is a
+> subset that names the movie and respects its own limit; a download URL is
+> `https://dl.subdl.com/subtitle/...` or it is refused; a daily cap is never
+> exceeded however many movies ask; the two SubDL allowances are metered apart;
+> a reservation is recorded before it can be used; and a movie whose download
+> was reserved today is never reserved again today.
+>
+> **The generator had to be made to produce hard cases, twice.** A first pass
+> at random candidates almost never produced an *acceptable* one, so every
+> property passed by refusing everything; weighting the strategy towards the
+> movie being asked about took the accept rate from 0.1% to 16-43% per route.
+> Then a mutation sweep showed two properties still passing with the code
+> broken — resolving a tie by guessing, and dropping the sort's tiebreakers —
+> because purely random candidates never collide on a rank key. The list
+> strategy now sometimes clones a candidate, which is what the real providers
+> return anyway, and both mutants die.
+>
+> Twelve planner mutations, all killed **by the property file alone**. Four are
+> kept as `MutationTests`; one of those found the same oracle bug phase 6e hit
+> — the URL property was reading the expected host out of the module it was
+> judging, so pointing the constant at `evil.example` left it green. It now
+> spells the host out. 1,501 → 1,525 tests.
+
 > **Update — phase 5c (W2): the probe payloads move into the same database.**
 >
 > The store shipped in phase 5 held verdicts, quotas and events, while the
@@ -1306,7 +1345,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**5**~~ | ~~W2 SQLite state cache + write-through + `organize status`~~ **done** (probe caches and the fetcher's quota ledger not yet moved in; `core/scan.py` rejected — see the W2 note) | +841 | Med-High | ✅ |
 | ~~**5b**~~ | ~~W2 the remux step publishes per-movie verdicts; `organize status` stops printing `Remux  not recorded yet`~~ **done** | +120, +26 tests | Low | ✅ |
 | ~~**6a**~~ | ~~W5 fault-injection, end-to-end and destructive-path suites, coverage 69% → 75%, gate → 72~~ **done** | +1,240 | Low | ✅ |
-| ~~**6b**~~ | ~~W5 the fetcher's spending planners extracted from `queue_run` and tabled~~ **done** (the remaining tier orchestration and the property tests are still open — see the W5 update) | +460 | Low | ✅ |
+| ~~**6b**~~ | ~~W5 the fetcher's spending planners extracted from `queue_run` and tabled~~ **done** (the property tests followed in phase 6q) | +460 | Low | ✅ |
 | ~~**6c**~~ | ~~one shared `RunLog`, the last duplicated implementation; `core/toolchain.py` off the blanket `BLE001` ignore~~ **done** (the nine tool files' 84 broad catches are still blanket-ignored) | −62, +200 tests | Low | ✅ |
 | ~~**6d**~~ | ~~every `except Exception` in the toolkit narrowed or justified in place; no file-wide `BLE001` exemption left~~ **done** | 27 narrowed, +290 tests | Low | ✅ |
 | ~~**6e**~~ | ~~W5 property-based tests on seeded stdlib `random`: a shrinking harness, 38 properties over the fail-closed, destructive and cross-tool rules, and mutation tests that prove they notice~~ **done** | +38 tests | Low | ✅ |
@@ -1322,6 +1361,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6o**~~ | ~~W5 the fetcher's run loop against a fake provider at the `urlopen` seam: validated writes, every refusal, the cross-run daily cap and the coverage exit code~~ **done** | +39 tests, fetcher 78% → 80% | Low | ✅ |
 | ~~**6p**~~ | ~~W5 the fetcher's other two tiers end to end: SubDL's two v2 routes, the seven scraped sites behind one `urlopen`, and the pooling, metering and failover rules between all three~~ **done** | +25 tests, fetcher 80% → 82% | Low | ✅ |
 | ~~**5c**~~ | ~~W2 the two JSON probe caches folded into `state.db`'s `probe` table, with the old files imported once and `--cache` still honoured~~ **done** | +38 tests, probecache 94% | Low | ✅ |
+| ~~**6q**~~ | ~~W5 property-based tests over the fetcher's planners: selection, pooling, the SubDL threshold, the download-URL guard and the quota arithmetic~~ **done** | +24 tests, 12 planner mutations killed | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1364,7 +1404,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 24.5 s (1,501 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 23.9 s (1,525 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
