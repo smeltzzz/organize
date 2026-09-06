@@ -92,6 +92,7 @@ from organizekit.core import (
     default_tool_dir,
     enable_utf8_stdio,
     normalize_srt_newlines,
+    open_probe_cache,
     open_state,
     print_text,
     promote_legacy_external_english_srt,
@@ -141,8 +142,10 @@ LOG_FILE = str(default_tool_dir("mkv_track_cleaner") / "mkv_track_cleaner.log")
 REPORT_FILE = str(default_tool_dir("mkv_track_cleaner") / "mkv_track_cleaner_report.txt")
 # Reused `mkvmerge -J` metadata for files whose size and mtime have not
 # changed, so a re-scan of an unchanged library does not respawn mkvmerge per
-# movie. Only the metadata read is cached; every decision is made fresh.
-CACHE_FILE = str(default_tool_dir("mkv_track_cleaner") / "mkv_track_cleaner_probe_cache.json")
+# movie. Only the metadata read is cached; every decision is made fresh. It
+# lives in the shared state cache now; the JSON file earlier versions wrote is
+# imported once, on the first run that finds the database empty.
+LEGACY_CACHE_FILE = str(default_tool_dir("mkv_track_cleaner") / "mkv_track_cleaner_probe_cache.json")
 # ===============================================================
 
 # Legacy temporary files used this deterministic prefix. New work uses unique
@@ -2861,13 +2864,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--nice", action="store_true", help="Lower process priority so remuxing does not starve Jellyfin")
     parser.add_argument("--min-size", type=float, default=0, metavar="MB", help="Ignore MKVs smaller than this")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N files (0 = all)")
-    parser.add_argument("--cache", default=CACHE_FILE, metavar="PATH",
-                        help=f"Reusable mkvmerge metadata for unchanged files (Default: {CACHE_FILE})")
+    parser.add_argument("--cache", default=None, metavar="PATH",
+                        help="Where the reusable mkvmerge metadata is kept (default: the "
+                             "shared state cache); a .json path keeps the old file format")
     parser.add_argument("--no-cache", dest="use_cache", action="store_false",
                         help="Re-read metadata for every movie and do not read or write the cache")
     parser.add_argument("--no-state", action="store_true",
-                        help="Do not record these verdicts in the shared state cache "
-                             "that `organize status` reads (the metadata cache is unaffected)")
+                        help="Do not use the shared state cache at all: neither these verdicts "
+                             "nor the reusable mkvmerge metadata are written to it")
     parser.add_argument("--state-db", type=Path, default=None, metavar="PATH",
                         help="Where that cache lives (default: beside the logs and reports)")
     parser.set_defaults(use_cache=True)
@@ -2993,9 +2997,14 @@ def main(argv: list[str] | None = None) -> int:
     run_started = time.monotonic()
     processed_bytes = 0
     library_bytes = 0
-    probe_cache = MediaProbeCache(args.cache, tool="mkv_track_cleaner", enabled=args.use_cache)
-    if args.use_cache:
-        log(f"Metadata cache: {args.cache} ({len(probe_cache)} entries loaded)", log_file_path=args.log)
+    probe_cache = open_probe_cache(args.cache, tool="mkv_track_cleaner",
+                                   enabled=args.use_cache, state_enabled=not args.no_state,
+                                   state_db=args.state_db, legacy=LEGACY_CACHE_FILE)
+    if probe_cache.enabled:
+        imported = (f", {probe_cache.imported} imported from the old JSON cache"
+                    if probe_cache.imported else "")
+        log(f"Metadata cache: {probe_cache.path} ({len(probe_cache)} entries loaded{imported})",
+            log_file_path=args.log)
     # A dry run decides nothing about the bytes on disk, so it publishes
     # nothing - the same rule sync_subtitles follows.
     state_store = open_state(args.state_db, enabled=not (args.no_state or args.dry_run),

@@ -125,7 +125,7 @@ STEPS: dict[str, Step] = {
         key="cleaner", script="mkv_track_cleaner.py", title="Clean MKV tracks (remux)",
         root_flag="--dir", supports_nice=True,
         banner_title="Clean tracks (lossless remux)",
-        cache_name="mkv_track_cleaner_probe_cache.json",
+        cache_name="state.db",
         timeout_seconds=7200.0,  # 2 hours per pass
         console_tag="clean",
         tool_name="mkv_track_cleaner",
@@ -139,7 +139,7 @@ STEPS: dict[str, Step] = {
         key="10bit", script="bitdepth.py", title="Check 8-bit vs 10-bit / HDR",
         root_flag="--source",
         banner_title="Inspect 10-bit / HDR",
-        cache_name="10bit_probe_cache.json",
+        cache_name="state.db",
         timeout_seconds=3600.0,
         console_tag="10bit",
         tool_name="10bit",

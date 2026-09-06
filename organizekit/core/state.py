@@ -22,6 +22,11 @@ milliseconds without touching a single media byte, and a long convergence run
 can tell which movies are actually pending instead of re-deriving the whole
 library five times per pass.
 
+Probe payloads live here too (the ``probe`` table), keyed by
+``(path_key, tool)`` and stamped the same way, so the mkvmerge and ffprobe
+answers a run reuses are in the same file as everything else it remembers
+instead of in two ad-hoc JSON caches with two different layouts.
+
 The schema deliberately differs from one wide ``movie`` row per file: verdicts
 live in their own table keyed by ``(path_key, kind)`` and carry their own
 size/mtime stamp, because the bit-depth answer for a movie can be current while
@@ -42,7 +47,7 @@ from pathlib import Path
 from .config import default_reports_root
 from .fsio import path_norm
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 STATE_DB_ENV = "ORGANIZE_STATE_DB"
 STATE_OFF_ENV = "ORGANIZE_NO_STATE"
 STATE_DB_NAME = "state.db"
@@ -85,6 +90,15 @@ CREATE TABLE IF NOT EXISTS quota (
     used     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (provider, utc_day)
 );
+CREATE TABLE IF NOT EXISTS probe (
+    path_key TEXT NOT NULL,
+    tool     TEXT NOT NULL,
+    size     INTEGER,
+    mtime_ns INTEGER,
+    payload  TEXT NOT NULL,
+    recorded TEXT NOT NULL,
+    PRIMARY KEY (path_key, tool)
+);
 CREATE TABLE IF NOT EXISTS event (
     ts        TEXT NOT NULL,
     tool      TEXT NOT NULL,
@@ -95,6 +109,12 @@ CREATE TABLE IF NOT EXISTS event (
 CREATE INDEX IF NOT EXISTS verdict_kind ON verdict (kind);
 CREATE INDEX IF NOT EXISTS event_ts ON event (ts);
 """
+
+# The probe cache opens the same file on its own short-lived connection (it is
+# loaded before a run and saved after one, not held open across it), so the one
+# statement it needs is published here rather than copied there.
+PROBE_SCHEMA = _SCHEMA[_SCHEMA.index("CREATE TABLE IF NOT EXISTS probe"):
+                       _SCHEMA.index("CREATE TABLE IF NOT EXISTS event")]
 
 
 def default_state_db() -> Path:

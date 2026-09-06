@@ -737,8 +737,8 @@ def render_run_report(state: RunState) -> str:
             "Durable state kept beside them (not logs or reports - these make "
             "re-runs cheap and keep the provider quotas honest):",
             f"  fetcher quota ledger: {state.log_dir / FETCHER_LEDGER_NAME}",
-            "  probe caches        : mkv_track_cleaner_probe_cache.json, "
-            "10bit_probe_cache.json",
+            "  probe caches        : state.db (the mkvmerge and ffprobe payloads "
+            "for unchanged files)",
             "  sync memory         : sync_state.json",
         ],
     ))

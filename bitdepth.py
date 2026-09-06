@@ -56,8 +56,10 @@ from organizekit.core import (
     default_tool_dir,
     enable_utf8_stdio,
     iter_completed,
+    open_probe_cache,
     open_state,
     path_is_within,
+    probe_cache_path,
     resolve_library,
     resolve_workers,
     run_field_smoke_test,
@@ -101,8 +103,10 @@ OUTPUT_DIR = str(default_tool_dir("10bit"))
 LOG_FILE = str(default_tool_dir("10bit") / "10bit.log")
 REPORT_FILE = str(default_tool_dir("10bit") / "10bit_report.txt")
 # Reused ffprobe output for files whose size and mtime have not changed, so a
-# re-scan of an unchanged library does not respawn ffprobe per movie.
-CACHE_FILE = str(default_tool_dir("10bit") / "10bit_probe_cache.json")
+# re-scan of an unchanged library does not respawn ffprobe per movie. It lives
+# in the shared state cache; the JSON file earlier versions wrote is imported
+# once, on the first run that finds the database empty.
+LEGACY_CACHE_FILE = str(default_tool_dir("10bit") / "10bit_probe_cache.json")
 
 # movie_standardizer.py emits canonical MKV feature files only.
 VIDEO_EXTENSIONS = {".mkv"}
@@ -194,7 +198,7 @@ class Config:
     source_dir: Path = field(default_factory=lambda: Path(SOURCE_DIR))
     log_file: Path = field(default_factory=lambda: Path(LOG_FILE))
     report_file: Path = field(default_factory=lambda: Path(REPORT_FILE))
-    cache_file: Path = field(default_factory=lambda: Path(CACHE_FILE))
+    cache_file: Path | None = None  # None = wherever this run's state cache is
     use_cache: bool = True
     min_file_size_mb: float = MIN_FILE_SIZE_MB
     workers: int = MAX_CPU_WORKERS
@@ -956,8 +960,9 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append(f"Report path must be outside --source: {cfg.report_file}")
     if path_is_within(cfg.log_file, cfg.source_dir):
         errors.append(f"Log path must be outside --source: {cfg.log_file}")
-    if cfg.use_cache and path_is_within(cfg.cache_file, cfg.source_dir):
-        errors.append(f"Cache path must be outside --source: {cfg.cache_file}")
+    cache_path = probe_cache_path(cfg.cache_file, state_db=cfg.state_db)
+    if cfg.use_cache and path_is_within(cache_path, cfg.source_dir):
+        errors.append(f"Cache path must be outside --source: {cache_path}")
     if cfg.state_db is not None and path_is_within(cfg.state_db, cfg.source_dir):
         errors.append(f"State cache must be outside --source: {cfg.state_db}")
     if os.path.normcase(os.path.normpath(str(cfg.log_file))) == os.path.normcase(os.path.normpath(str(cfg.report_file))):
@@ -1005,9 +1010,12 @@ def scan(cfg: Config) -> int:
     def _store(res: ProbeResult) -> None:
         results.append(res)
 
-    cache = MediaProbeCache(cfg.cache_file, tool="10bit", enabled=cfg.use_cache)
-    if cfg.use_cache:
-        log(f"Probe cache: {cfg.cache_file} ({len(cache)} entries loaded)")
+    cache = open_probe_cache(cfg.cache_file, tool="10bit", enabled=cfg.use_cache,
+                             state_enabled=cfg.use_state, state_db=cfg.state_db,
+                             legacy=LEGACY_CACHE_FILE)
+    if cache.enabled:
+        imported = f", {cache.imported} imported from the old JSON cache" if cache.imported else ""
+        log(f"Probe cache: {cache.path} ({len(cache)} entries loaded{imported})")
 
     if files:
         workers = resolve_workers(cfg.workers, items=len(files), cap=MAX_CPU_WORKERS)
@@ -1095,13 +1103,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=PROBE_TIMEOUT_SEC, help="ffprobe timeout seconds")
     p.add_argument("--lock-timeout", type=float, default=60.0, metavar="SECONDS", help="Maximum wait for another inspector run")
     p.add_argument("--ffprobe", default="ffprobe", help="ffprobe binary")
-    p.add_argument("--cache", type=Path, default=Path(CACHE_FILE), metavar="PATH",
-                   help="Reusable ffprobe output for unchanged files, outside the media library")
+    p.add_argument("--cache", type=Path, default=None, metavar="PATH",
+                   help="Where the reusable ffprobe output is kept (default: the shared "
+                        "state cache); a .json path keeps the old per-tool file format")
     p.add_argument("--no-cache", dest="use_cache", action="store_false",
                    help="Probe every movie again and do not read or write the cache")
     p.add_argument("--no-state", action="store_true",
-                   help="Do not record these verdicts in the shared state cache "
-                        "that `organize status` reads (the probe cache is unaffected)")
+                   help="Do not use the shared state cache at all: neither these verdicts "
+                        "nor the reusable ffprobe output are written to it")
     p.add_argument("--state-db", type=Path, default=None, metavar="PATH",
                    help="Where that cache lives (default: beside the logs and reports)")
     p.set_defaults(use_cache=True)

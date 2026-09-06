@@ -22,6 +22,7 @@ import contextlib
 import io
 import json
 import os
+import sqlite3
 import stat
 import sys
 import tempfile
@@ -32,6 +33,7 @@ from unittest import mock
 import fake_ffprobe as fake
 
 import bitdepth as bd
+from organizekit.core import MediaProbeCache
 
 # The fake is launched through a shebang wrapper, so these tests are POSIX-only.
 # The in-process suites cover the classification on every platform.
@@ -77,9 +79,13 @@ class InspectorRunFixture(unittest.TestCase):
         fake.write_movie(path, payload, size=size)
         return path
 
+    def _cache_args(self) -> list[str]:
+        """Where this run keeps its probe payloads (a subclass drops the flag)."""
+        return ["--cache", str(self.cache)]
+
     def _run(self, *extra: str, env: dict[str, str] | None = None) -> int:
         argv = ["--source", str(self.library), "--log", str(self.log),
-                "--report", str(self.report), "--cache", str(self.cache),
+                "--report", str(self.report), *self._cache_args(),
                 "--state-db", str(self.state_db),
                 "--ffprobe", str(self.ffprobe), "--workers", "2", *extra]
         with contextlib.redirect_stdout(io.StringIO()), \
@@ -235,6 +241,63 @@ class ProbeFailureTests(InspectorRunFixture):
         self.assertEqual(self._run(), 0)
         self.assertEqual(self.verdicts()["Plain SDR (2001).mkv"], bd.STATUS_QUEUE,
                          "the next run reaches the real answer")
+
+
+class ProbeCacheInTheStateDbTests(InspectorRunFixture):
+    """With no --cache the payloads go where the rest of the run's state goes."""
+
+    def _cache_args(self) -> list[str]:
+        return []
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.film = self.movie("Plain SDR (2001)", fake.sdr_8bit())
+
+    def probe_rows(self) -> list[tuple[str, str]]:
+        if not self.state_db.exists():
+            return []
+        with sqlite3.connect(self.state_db) as db:
+            return [(row[0], row[1]) for row in
+                    db.execute("SELECT tool, path_key FROM probe").fetchall()]
+
+    def test_the_payload_is_stored_in_the_state_database(self) -> None:
+        self.assertEqual(self._run(), 0)
+        self.assertFalse(self.cache.exists(), "no JSON cache is written any more")
+        rows = self.probe_rows()
+        self.assertEqual([tool for tool, _key in rows], ["10bit"])
+        self.assertIn("Plain SDR (2001).mkv", rows[0][1])
+
+    def test_and_the_second_run_reuses_it(self) -> None:
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(self._run(), 0)
+        self.assertIn("1 reused", self.log.read_text(encoding="utf-8"))
+
+    def test_no_state_turns_the_probe_cache_off_with_it(self) -> None:
+        """It is the same file: one switch cannot half-disable it."""
+        self.assertEqual(self._run("--no-state"), 0)
+        self.assertEqual(self._run("--no-state"), 0)
+        self.assertEqual(self.probe_rows(), [])
+        self.assertEqual(self.log.read_text(encoding="utf-8").count("0 reused, 1 probed"), 2,
+                         "both runs went to ffprobe")
+
+    def test_the_environment_kill_switch_does_the_same(self) -> None:
+        self.assertEqual(self._run(env={"ORGANIZE_NO_STATE": "1"}), 0)
+        self.assertEqual(self.probe_rows(), [])
+
+    def test_an_old_json_cache_is_imported_once_instead_of_re_probing(self) -> None:
+        """Upgrading must not cost a library a full re-probe."""
+        legacy = self.tmp / "out" / "legacy.json"
+        info = self.film.stat()
+        warm = MediaProbeCache(legacy, tool="10bit")
+        warm.put(self.film, info.st_size, info.st_mtime_ns, fake.sdr_8bit())
+        warm.save()
+        with mock.patch.object(bd, "LEGACY_CACHE_FILE", str(legacy)):
+            self.assertEqual(self._run(), 0)
+        text = self.log.read_text(encoding="utf-8")
+        self.assertIn("1 imported from the old JSON cache", text)
+        self.assertIn("1 reused", text)
+        self.assertTrue(legacy.is_file(), "the old file is left where it was")
+        self.assertEqual([tool for tool, _key in self.probe_rows()], ["10bit"])
 
 
 class ProbeCacheTests(InspectorRunFixture):

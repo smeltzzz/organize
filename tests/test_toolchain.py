@@ -88,9 +88,10 @@ class BuildStepArgs(unittest.TestCase):
         self.assertEqual(str(self.logs / "subtitle_fetcher_ledger.log"), log)
 
     def test_caches_live_under_the_log_dir_so_a_run_is_self_contained(self) -> None:
-        self.assertEqual(str(self.logs / "mkv_track_cleaner_probe_cache.json"),
+        """Both probe caches are one file now, and it is the run's own."""
+        self.assertEqual(str(self.logs / "state.db"),
                          self._value(self._args("cleaner"), "--cache"))
-        self.assertEqual(str(self.logs / "10bit_probe_cache.json"),
+        self.assertEqual(str(self.logs / "state.db"),
                          self._value(self._args("10bit"), "--cache"))
         # The sync tool spells the same idea differently.
         self.assertEqual(str(self.logs / "sync_state.json"),

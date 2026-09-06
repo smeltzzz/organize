@@ -204,8 +204,8 @@ copying `subtitle_fetcher.py` around.
 > the stale one fresh, which is the precise failure mode "derived cache, never
 > authority" exists to prevent.
 >
-> **Still open from this section:** the two JSON probe caches are not yet
-> folded into the DB; the fetcher still rebuilds its quota ledger by re-parsing
+> **Still open from this section:** ~~the two JSON probe caches are not yet
+> folded into the DB~~ (**done in phase 5c, below**); the fetcher still rebuilds its quota ledger by re-parsing
 > its own log (`reserve_quota` is written and tested, ready for it, and is what
 > W4b needs); `core/scan.py` was **rejected** rather than deferred — once
 > `organize status` delegates to `library_auditor.audit_library`, the one
@@ -536,6 +536,40 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 ~~The property-based tests — `hypothesis` cannot be assumed present in this
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
+
+> **Update — phase 5c (W2): the probe payloads move into the same database.**
+>
+> The store shipped in phase 5 held verdicts, quotas and events, while the
+> expensive thing a run actually reuses — the `mkvmerge -J` and `ffprobe`
+> output for a file that has not changed — stayed in two ad-hoc JSON files with
+> two different layouts, one per tool, loaded and rewritten whole. They are now
+> rows in a `probe` table keyed by `(path_key, tool)`, in the one file the
+> tools already open.
+>
+> **The safety rule is unchanged and is what makes this a cache at all**: a
+> payload is reused only while the file's size *and* `st_mtime_ns` are both
+> unchanged, and only the probe *output* is stored — never a verdict. Every
+> tool still re-derives its decision from live filesystem state, so a cached
+> entry cannot make a run blind to a sidecar that appeared, a hardlink count
+> that dropped, or a remux that landed.
+>
+> **Nobody loses a warm cache.** `--cache` still takes a path: a `.json` one
+> keeps the old per-tool file format, so an existing scheduler line keeps
+> working. Without one the payloads follow the run's state cache, and the JSON
+> file an earlier version left behind is imported once, the first time the
+> database is found empty — the old file is left exactly where it was, because
+> deleting somebody's cache is not this code's call.
+>
+> **One file means one switch.** `--no-state` and `ORGANIZE_NO_STATE` now turn
+> the probe cache off with everything else, because it is the same database;
+> `--no-cache` remains the way to skip probe reuse without touching the rest.
+> Reading never creates the database, so a run that learns nothing leaves the
+> disk as it found it, and every storage failure — missing, corrupt, foreign,
+> a directory where the file should be, a row whose payload is not JSON — is a
+> miss rather than an error, exactly as the JSON version behaved.
+>
+> Twelve mutations, all killed. 1,463 → 1,501 tests; `probecache.py` **94%**,
+> toolkit **84%**.
 
 > **Update — phase 6p (W5): the other two tiers of the fetcher, end to end.**
 >
@@ -1287,6 +1321,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6n**~~ | ~~W5 the standardizer run end to end: hardlink ingest proved additive, every refusal reported, config refusals — and the four unreachable helpers it exposed, deleted~~ **done** | +53 tests, −54 lines, standardizer 71% → 85% | Low | ✅ |
 | ~~**6o**~~ | ~~W5 the fetcher's run loop against a fake provider at the `urlopen` seam: validated writes, every refusal, the cross-run daily cap and the coverage exit code~~ **done** | +39 tests, fetcher 78% → 80% | Low | ✅ |
 | ~~**6p**~~ | ~~W5 the fetcher's other two tiers end to end: SubDL's two v2 routes, the seven scraped sites behind one `urlopen`, and the pooling, metering and failover rules between all three~~ **done** | +25 tests, fetcher 80% → 82% | Low | ✅ |
+| ~~**5c**~~ | ~~W2 the two JSON probe caches folded into `state.db`'s `probe` table, with the old files imported once and `--cache` still honoured~~ **done** | +38 tests, probecache 94% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1329,7 +1364,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 23.6 s (1,463 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 24.5 s (1,501 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

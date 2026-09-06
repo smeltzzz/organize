@@ -25,6 +25,7 @@ from organizekit.core import (
     default_state_db,
     open_state,
     path_norm,
+    state,
 )
 
 
@@ -260,7 +261,8 @@ class StateStoreTests(unittest.TestCase):
         store = self._store()
         store.record(self.movie, KIND_SYNC, "synced")
         with sqlite3.connect(self.db) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],
+                             state.SCHEMA_VERSION)
             self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
 
 

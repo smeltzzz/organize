@@ -50,7 +50,7 @@ from .parallel import (
     map_ordered,
     resolve_workers,
 )
-from .probecache import MediaProbeCache
+from .probecache import MediaProbeCache, open_probe_cache, probe_cache_path
 from .ratelimit import BucketRegistry, TokenBucket, host_key
 from .report import Report
 from .runlog import RunLog
@@ -190,6 +190,8 @@ __all__ = [
     "LockUnavailable",
     "BucketRegistry",
     "MediaProbeCache",
+    "open_probe_cache",
+    "probe_cache_path",
     "TokenBucket",
     "host_key",
     "Report",

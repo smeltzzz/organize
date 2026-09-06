@@ -19,6 +19,7 @@ import io
 import json
 import os
 import signal
+import sqlite3
 import stat
 import sys
 import tempfile
@@ -110,13 +111,17 @@ class CleanerRunFixture(unittest.TestCase):
 
     # -- helpers -----------------------------------------------------------
 
+    def _cache_args(self) -> list[str]:
+        """Where this run keeps its mkvmerge payloads (a subclass drops it)."""
+        return ["--cache", str(self.cache)]
+
     def _run(self, *extra: str, env: dict[str, str] | None = None) -> int:
         # --state-db is not optional here: without it a real run publishes its
         # verdicts to the default location, which is the developer's own
         # ~/.local/state/organize/state.db. This suite touches nothing outside
         # its temporary directory.
         argv = ["--dir", str(self.library), "--log", str(self.log),
-                "--report", str(self.report), "--cache", str(self.cache),
+                "--report", str(self.report), *self._cache_args(),
                 "--state-db", str(self.state_db),
                 "--mkvmerge", str(self.mkvmerge), "--no-color", *extra]
         with contextlib.redirect_stdout(io.StringIO()), \
@@ -296,6 +301,34 @@ class EndToEndRunTests(CleanerRunFixture):
     def test_the_self_test_flag_runs_the_bundled_checks(self) -> None:
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(tc.main(["--self-test"]), 0)
+
+
+class MetadataCacheInTheStateDbTests(CleanerRunFixture):
+    """With no --cache the payloads go where the rest of the run's state goes."""
+
+    def _cache_args(self) -> list[str]:
+        return []
+
+    def probe_rows(self) -> list[str]:
+        if not self.state_db.exists():
+            return []
+        with sqlite3.connect(self.state_db) as db:
+            return [row[0] for row in db.execute("SELECT tool FROM probe")]
+
+    def test_the_payload_is_stored_in_the_state_database(self) -> None:
+        self.assertEqual(self._run(), 0)
+        self.assertFalse(self.cache.exists(), "no JSON cache is written any more")
+        self.assertEqual(self.probe_rows(), ["mkv_track_cleaner"])
+
+    def test_a_remuxed_movie_is_stored_under_its_new_bytes(self) -> None:
+        """The swap changes the file, so the payload cached is the output's."""
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(self._run(), 0)
+        self.assertIn("1 reused", self.log.read_text(encoding="utf-8"))
+
+    def test_no_state_turns_the_metadata_cache_off_with_it(self) -> None:
+        self.assertEqual(self._run("--no-state"), 0)
+        self.assertEqual(self.probe_rows(), [])
 
 
 class WhatTheRunTellsStatusTests(CleanerRunFixture):

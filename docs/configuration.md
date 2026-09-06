@@ -27,7 +27,7 @@ tool; anything already exported in the environment wins over the file.
 Path defaults are platform-aware. On Windows they follow the documented
 `E:\torrents\...` layout; on Linux/macOS the library defaults to
 `~/Media/Movies`, the completed-download batch-scan root to `~/torrents/final`,
-and logs, reports and probe caches to `$XDG_STATE_HOME/organize`
+and logs, reports and the state cache to `$XDG_STATE_HOME/organize`
 (`~/.local/state/organize`). Source and target **must be on the same
 filesystem** (hardlink-only ingest). `organize.py doctor` resolves both roots
 through the same rules, so it can never disagree with the tools about which
