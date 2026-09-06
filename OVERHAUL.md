@@ -537,6 +537,37 @@ result; see the note below. ~~The `run_doctor` check table.~~ **done in phase 6f
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6n (W5): the first step of the pipeline, end to end.**
+>
+> `movie_standardizer.py` decides what a movie is called and where it lives,
+> and every later tool works on the folders it creates. The parsing rules were
+> heavily tested and the deleting code had a suite of its own; the *run* had
+> never been executed by a test, because it needs a download tree, a library
+> tree and a filesystem with hardlinks.
+>
+> Fifty-three tests now drive `main(argv)` against two real directories and
+> then look at what is on disk. The invariant behind most of them is that
+> **ingest is additive**: the placed file and the seeding file are proved to be
+> one file (`samefile`, `st_nlink == 2`), the download folder is untouched, and
+> a second run changes nothing. Everything the tool refuses - TV, non-MKV,
+> undersized, multipart, disc trees, symlinks - is declined with its reason in
+> the report rather than silently. With no working ffprobe there is no evidence
+> of an upgrade, so an occupied destination keeps its inode and an existing
+> canonical `.eng.srt` is never overwritten. Configuration that would corrupt
+> the library exits 2 before anything is placed.
+>
+> An end-to-end run also shows what the tool never does: `process_disc_folder`,
+> `copy_extras_into`, `copy_artwork_into` and `pair_idx_files` had no callers
+> anywhere, and two config flags existed only to feed them. 54 lines deleted,
+> no behaviour change - the canonical-library contract has been "one MKV and
+> English subtitles" for a long time, and the code now says so too.
+>
+> Twelve mutations, two of which survived the first pass and were worth the
+> trouble: disabling the TV guard passed because a different refusal also says
+> "TV", and disabling the junk-file guard passed because the batch scan filters
+> `.part` files before that code is reached. 1,346 → 1,399 tests;
+> `movie_standardizer.py` 71% → **85%**, toolkit **83%**.
+
 > **Update — phase 6m (W5): the inspector's worklist, end to end.**
 >
 > `bitdepth.py` never modifies a movie, which made it look like the safe tool
@@ -1189,6 +1220,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6k**~~ | ~~W5 the standardizer's replacement policy: the upgrade guard chain split from the probing (`upgrade_verdict`), and the probe reader, the score and the gate tabled~~ **done** | +40 lines, +58 tests | Low | ✅ |
 | ~~**6l**~~ | ~~W5 the cleaner's concurrent-change refusals proved end to end: the library changed inside the remux window (source, sidecar, Ctrl-C), plus the free-space and journal fail-closed paths~~ **done** | +10 tests, cleaner 79% → 81% | Low | ✅ |
 | ~~**6m**~~ | ~~W5 the inspector run end to end against a fake ffprobe: classification through the whole program, probe failures, cache reuse, config refusals and the `--fail-if-*` exit codes~~ **done** | +40 tests, bitdepth 67% → 93% | Low | ✅ |
+| ~~**6n**~~ | ~~W5 the standardizer run end to end: hardlink ingest proved additive, every refusal reported, config refusals — and the four unreachable helpers it exposed, deleted~~ **done** | +53 tests, −54 lines, standardizer 71% → 85% | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -1228,10 +1260,10 @@ state in one sentence, it is the wrong change.*
 
 | | Today | Now | Target |
 | :--- | ---: | ---: | ---: |
-| Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
+| Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
-| Coverage | 58% | **81%** (cleaner 81%, inspector 93%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 22.1 s (1,346 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Coverage | 58% | **83%** (cleaner 81%, inspector 93%, standardizer 85%) | ≥75%, cleaner ≥80% ✅ |
+| Test runtime | 6.7 s | 22.8 s (1,399 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |
