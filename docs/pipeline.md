@@ -97,11 +97,12 @@ append-only log, to `E:\torrents\tools\ReportsAndLogs\<tool>\` on Windows
 right-aligned scorecard, then titled sections ordered by how cheap the fix
 is. Start at the scorecard; it tells you what needs your attention.
 
-### Machine-readable diagnostics
+### Machine-readable output
 
-`organize doctor --json` prints the same checks as one JSON document on stdout
-and nothing else — no banner, no colour, no scorecard — so it can be piped
-straight into a parser:
+`organize doctor --json` and `organize status --json` print the same
+information as one JSON document on stdout and nothing else — no banner, no
+colour, no scorecard — so either can be piped straight into a parser. Progress
+lines and scan logs go to stderr, where they cannot corrupt the document:
 
 ```bash
 organize doctor --json | jq -r '.checks[] | select(.status != "ok") | "\(.status)\t\(.name)\t\(.message)"'
@@ -137,9 +138,28 @@ the printed label, and unique within a run. `status` is `ok`, `warn` or `fail`;
 not also have to capture `$?`. `schema` is versioned — it changes if the shape
 does.
 
-The document carries **no timestamp**, deliberately: two runs on an unchanged
-machine produce byte-identical output, so a nightly job can diff today's
-against yesterday's and alert only when the machine really changed.
+`organize status --json` follows the same envelope (`schema`, `tool`,
+`version`, `command`) and reports the library instead of the machine:
+
+```bash
+organize status --json | jq '{movies, settled, pending}'
+organize status --json | jq -r '.steps[] | select(.recorded) | "\(.id)\t\(.settled)/\(.stale + .unmeasured) pending"'
+```
+
+Each of the five steps is one row with `id`, `label`, `settled`, `stale`,
+`unmeasured` and its `counts`, plus `recorded` — which is how a consumer tells
+*"nothing left to do"* apart from *"nobody has measured this yet"*, the
+distinction the printed report spells out in a footnote. `state_cache` reports
+whether the cache was in use and whether it holds any verdict for this library.
+
+A failed run is still a document: a missing library or a failed scan sets
+`error` to `{"kind", "message"}` and `exit_code` to `2`, with every other field
+present and empty, so a caller never has to parse two formats.
+
+Neither document carries a **timestamp**, deliberately — nor does `status`
+report its scan duration. Two runs over an unchanged library produce
+byte-identical output, so a nightly job can diff today's against yesterday's
+and alert only when something really changed.
 
 ---
 

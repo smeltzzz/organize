@@ -10,7 +10,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-1051%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-1067%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -91,7 +91,7 @@ One file, one purpose. Nothing else.
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
 | `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided, and `ratelimit.py`, the per-host token buckets that keep every provider inside its published rate. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock. |
-| `tests/` | Fully offline unit tests (1,051), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — and `fake_mkvmerge.py`, a stand-in multiplexer real enough to drive an end-to-end remux. |
+| `tests/` | Fully offline unit tests (1,067), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — and `fake_mkvmerge.py`, a stand-in multiplexer real enough to drive an end-to-end remux. |
 | `docs/` | The long-form documentation this page links to: the [tool reference](docs/tools.md), [the pipeline](docs/pipeline.md), [configuration](docs/configuration.md) and [testing & development](docs/development.md). |
 | `benchmarks/` | The scripts behind every speed claim in this repo — stdlib-only, offline, re-runnable. |
 | `.env.example` | Every supported environment variable, annotated. |

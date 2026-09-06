@@ -495,6 +495,38 @@ Still open from this slice: the remaining tier orchestration inside
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6h (W7): `status --json`, and the envelope becomes shared.**
+>
+> The second machine-readable command, and the one that turned 6g's one-off
+> into an interface. `JSON_SCHEMA`, `json_document()` (schema, tool, version,
+> command) and `print_json()` now sit above both commands, so every document
+> this CLI emits identifies its producer the same way and a consumer can refuse
+> a shape it does not understand. `check_id` became `slug_id` because step
+> labels want it too: `Bit depth` → `bit-depth`.
+>
+> `status` reports the library rather than the machine - `movies`,
+> `total_bytes`, `settled`, `pending`, and one row per step with its counts.
+> The field worth arguing about is **`recorded`**: it is how a consumer tells
+> *"nothing left to do"* from *"nobody has measured this yet"*, which the
+> printed report only says in a parenthetical footnote. A dashboard that missed
+> that distinction would show a green library that has never been probed.
+>
+> **A failed run is still a document.** A missing library or a scan that raises
+> used to be one red line on stderr and exit 2; under `--json` that would have
+> forced a caller to parse two formats and guess which arrived. Now `error` is
+> `{kind, message}`, `exit_code` is `2`, and every other field is present and
+> empty. Progress and the `--verbose` scan log moved to stderr for the same
+> reason: stdout holds the document and nothing else.
+>
+> Also left out on purpose: the scan duration. It describes the run, not the
+> library, and with it in the document no two runs would ever be byte-identical
+> - which is the property that lets a nightly job diff today against yesterday.
+> 1,051 → 1,067 tests, checked against eight mutations (a duration field, a
+> stdout progress line, a hard-coded cache flag, both error paths reverting to
+> bare stderr lines, `recorded` pinned true, a zeroed stale count, an unslugged
+> id). The status suite was split into a fixture plus one class per rendering,
+> so the printed report's tests are not silently re-run against the JSON one.
+
 > **Update — phase 6g (W7): `doctor --json`, the first machine-readable command.**
 >
 > The check table from 6f made this a renderer rather than a feature: the
@@ -745,11 +777,12 @@ promises:
 
 - **`organize status`** (W2) — the missing verb.
 - **Machine-readable output** — ~~`--json` on every command~~ **started in
-  phase 6g**: `organize doctor --json` prints a versioned, timestamp-free
-  document (see the note below). Still to come: one JSONL event stream per run
-  plus `run_summary.json`, and the same flag on `status` and `audit`.
-  Cron/Healthchecks/Grafana integration becomes trivial; the human reports stay
-  exactly as they are.
+  phases 6g and 6h**: `organize doctor --json` and `organize status --json`
+  print versioned, timestamp-free documents on a shared envelope (see the notes
+  below). Still to come: `--json` on `audit` (it lives in `library_auditor.py`,
+  which has its own report renderer), one JSONL event stream per run, and
+  `run_summary.json`. Cron/Healthchecks/Grafana integration becomes trivial;
+  the human reports stay exactly as they are.
 - **One shared `LiveConsole`** (currently only in the cleaner) so every step has
   the same progress UI, and it degrades to plain lines when not a TTY.
 - **Distribution:** publish to PyPI (`pipx install organize` / `uvx organize`),
@@ -786,10 +819,11 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6e**~~ | ~~W5 property-based tests on seeded stdlib `random`: a shrinking harness, 38 properties over the fail-closed, destructive and cross-tool rules, and mutation tests that prove they notice~~ **done** | +38 tests | Low | ✅ |
 | ~~**6f**~~ | ~~W5 `run_doctor` split into a table of twelve named check functions; `doctor`'s output byte-identical~~ **done** | +132 lines, +56 tests | Low | ✅ |
 | ~~**6g**~~ | ~~W7 `organize doctor --json`: a versioned, deterministic document over the same check table, with the flags defined once for both parsers~~ **done** | +90 lines, +23 tests | Low | ✅ |
+| ~~**6h**~~ | ~~W7 `organize status --json` on the same envelope; the JSON helpers generalised out of `doctor`; a failed run is still a document~~ **done** | +110 lines, +16 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
-| **8c** | W7 the rest of the machine-readable output (`--json` on `status`/`audit`, a JSONL run stream, `run_summary.json`), PyPI release | +250 | Low | 2 |
+| **8c** | W7 the rest of the machine-readable output (`--json` on `audit`, a JSONL run stream, `run_summary.json`), PyPI release | +200 | Low | 2 |
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run
@@ -827,7 +861,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **78%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 14.1 s (1,051 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ✅ |
+| Test runtime | 6.7 s | 15.3 s (1,067 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

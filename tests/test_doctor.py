@@ -515,23 +515,23 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("warnings", buf.getvalue())
 
 
-class CheckIdTests(unittest.TestCase):
+class SlugIdTests(unittest.TestCase):
     """Machine-readable ids: what a consumer is allowed to match on."""
 
     def test_a_name_becomes_a_lowercase_hyphenated_slug(self) -> None:
-        self.assertEqual(organize.check_id("Python Runtime"), "python-runtime")
+        self.assertEqual(organize.slug_id("Python Runtime"), "python-runtime")
 
     def test_punctuation_never_survives_or_doubles_up(self) -> None:
-        self.assertEqual(organize.check_id("MKVToolNix (mkvmerge)"), "mkvtoolnix-mkvmerge")
-        self.assertEqual(organize.check_id("mkvextract (embedded subs)"), "mkvextract-embedded-subs")
+        self.assertEqual(organize.slug_id("MKVToolNix (mkvmerge)"), "mkvtoolnix-mkvmerge")
+        self.assertEqual(organize.slug_id("mkvextract (embedded subs)"), "mkvextract-embedded-subs")
 
     def test_leading_and_trailing_separators_are_trimmed(self) -> None:
-        self.assertEqual(organize.check_id("  (Weird) name!  "), "weird-name")
+        self.assertEqual(organize.slug_id("  (Weird) name!  "), "weird-name")
 
     def test_every_real_check_has_a_unique_non_empty_id(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             checks = organize.collect_diagnostics(context(td, td))
-        ids = [organize.check_id(c.name) for c in checks]
+        ids = [organize.slug_id(c.name) for c in checks]
         self.assertTrue(all(ids), "a check produced an empty id")
         self.assertEqual(len(ids), len(set(ids)), "two checks share a machine-readable id")
 
@@ -559,7 +559,7 @@ class JsonDocumentTests(unittest.TestCase):
 
     def test_schema_and_version_identify_the_producer(self) -> None:
         document = self.document(*self.sample())
-        self.assertEqual(document["schema"], organize.DOCTOR_JSON_SCHEMA)
+        self.assertEqual(document["schema"], organize.JSON_SCHEMA)
         self.assertEqual(document["tool"], "organize")
         self.assertEqual(document["version"], organize.VERSION)
         self.assertEqual(document["command"], "doctor")
@@ -666,7 +666,7 @@ class JsonRenderTests(unittest.TestCase):
         ])
         buf = io.StringIO()
         with redirect_stdout(buf):
-            organize.render_diagnostics_json(document)
+            organize.print_json(document)
         self.assertIn("·", buf.getvalue())
         self.assertNotIn("\\u00b7", buf.getvalue())
 

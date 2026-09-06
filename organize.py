@@ -699,49 +699,73 @@ def diagnostics_exit_code(checks: Sequence[DiagnosticCheck]) -> int:
     return 1 if any(check.status == "fail" for check in checks) else 0
 
 
-DOCTOR_JSON_SCHEMA = 1
+# Every ``--json`` document in this CLI shares one envelope and one schema
+# number, so a consumer can tell what produced a file it is holding and refuse
+# a shape it does not understand. The number changes when the shape does.
+JSON_SCHEMA = 1
 
 
-def check_id(name: str) -> str:
-    """A stable machine-readable id for a row, derived from its name.
+def slug_id(name: str) -> str:
+    """A stable machine-readable id for a row, derived from its label.
 
-    Two checks may come from one probe (the provider keys), so the table key is
-    not unique per row - the row name is, and the suite asserts it. Slugging it
-    gives a consumer something to match on (``mkvtoolnix-mkvmerge``) that does
-    not depend on the punctuation or capitalisation of the printed label.
+    Two doctor checks can come from one probe (the provider keys), so the table
+    key is not unique per row - the row name is, and the suite asserts it.
+    Slugging it gives a consumer something to match on
+    (``mkvtoolnix-mkvmerge``, ``bit-depth``) that does not depend on the
+    punctuation or capitalisation of the printed label.
     """
     slug = "".join(char.lower() if char.isalnum() else "-" for char in name)
     return "-".join(part for part in slug.split("-") if part)
 
 
+def json_document(command: str, **payload: object) -> dict[str, object]:
+    """Wrap a command's payload in the envelope every JSON document shares.
+
+    Deliberately unstamped with the time it ran: the caller already knows that,
+    and leaving it out means two runs on an unchanged machine produce identical
+    bytes - so a cron job can diff today's output against yesterday's and alert
+    only when something actually changed.
+    """
+    return {
+        "schema": JSON_SCHEMA,
+        "tool": "organize",
+        "version": VERSION,
+        "command": command,
+        **payload,
+    }
+
+
+def print_json(document: dict[str, object]) -> None:
+    """Print the document and nothing else, so stdout stays parseable.
+
+    No banner, no colour, no summary line: a caller that asked for JSON is
+    piping stdout into a parser, and one decorative line would break it.
+    Progress and warnings still have somewhere to go - stderr.
+    """
+    print(json.dumps(document, indent=2, ensure_ascii=False))
+
+
 def diagnostics_document(ctx: DoctorContext, checks: Sequence[DiagnosticCheck]) -> dict[str, object]:
     """The same verdicts as a JSON-serialisable document, for machines.
 
-    Deliberately *not* stamped with the time it ran: the caller already knows
-    that, and leaving it out means two runs on an unchanged machine produce
-    identical bytes - so a cron job can diff today's ``doctor --json`` against
-    yesterday's and alert only when the machine actually changed.
-
-    ``schema`` is versioned for the same reason the state cache is: this output
-    is meant to be parsed by something that is not in this repository.
+    Rows carry the fields the scorecard prints plus an ``id`` to match on, and
+    the document repeats the process exit code so a consumer reading stdout
+    does not also have to capture ``$?``.
     """
-    return {
-        "schema": DOCTOR_JSON_SCHEMA,
-        "tool": "organize",
-        "version": VERSION,
-        "command": "doctor",
-        "library": str(ctx.library),
-        "source": str(ctx.source),
-        "summary": {
+    return json_document(
+        "doctor",
+        library=str(ctx.library),
+        source=str(ctx.source),
+        summary={
             "ok": sum(1 for check in checks if check.status == "ok"),
             "warn": sum(1 for check in checks if check.status == "warn"),
             "fail": sum(1 for check in checks if check.status == "fail"),
             "total": len(checks),
         },
-        "exit_code": diagnostics_exit_code(checks),
-        "checks": [
+        exit_code=diagnostics_exit_code(checks),
+        checks=[
             {
-                "id": check_id(check.name),
+                "id": slug_id(check.name),
                 "name": check.name,
                 "status": check.status,
                 "message": check.message,
@@ -750,16 +774,7 @@ def diagnostics_document(ctx: DoctorContext, checks: Sequence[DiagnosticCheck]) 
             }
             for check in checks
         ],
-    }
-
-
-def render_diagnostics_json(document: dict[str, object]) -> None:
-    """Print the document and nothing else, so stdout stays parseable.
-
-    No banner, no colour, no scorecard: a caller that asked for JSON is piping
-    stdout into a parser, and one decorative line would break it.
-    """
-    print(json.dumps(document, indent=2, ensure_ascii=False))
+    )
 
 
 def render_diagnostics(checks: Sequence[DiagnosticCheck]) -> None:
@@ -823,7 +838,7 @@ def run_doctor(library_path: Path | None = None, source_path: Path | None = None
 
     if as_json:
         checks = collect_diagnostics(ctx)
-        render_diagnostics_json(diagnostics_document(ctx, checks))
+        print_json(diagnostics_document(ctx, checks))
         return diagnostics_exit_code(checks)
 
     print_hero_banner()
@@ -1039,6 +1054,64 @@ def format_status(status: LibraryStatus) -> list[str]:
     return lines
 
 
+def status_document(status: LibraryStatus, *, state_enabled: bool) -> dict[str, object]:
+    """The same summary as a JSON-serialisable document, for machines.
+
+    One row per step with the counts it reported, plus the two numbers a
+    dashboard actually wants: how many movies are finished and how many the
+    next pass will touch. ``recorded`` says whether a step has ever published a
+    verdict about this library, so a consumer can tell "nothing left to do"
+    apart from "nobody has measured yet" - the distinction the printed summary
+    spells out in a footnote.
+
+    The scan duration is left out on purpose. It describes the run, not the
+    library, and including it would mean two runs over an unchanged library
+    never produce the same bytes.
+    """
+    return json_document(
+        "status",
+        library=str(status.library),
+        movies=status.movies,
+        total_bytes=status.total_bytes,
+        settled=status.settled,
+        pending=status.pending,
+        state_cache={
+            "enabled": state_enabled,
+            "measured": any(step.recorded for step in status.steps[2:]),
+        },
+        steps=[
+            {
+                "id": slug_id(step.label),
+                "label": step.label,
+                "recorded": step.recorded,
+                "settled": step.settled,
+                "stale": step.stale,
+                "unmeasured": step.unmeasured,
+                "counts": dict(sorted(step.counts.items())),
+            }
+            for step in status.steps
+        ],
+        error=None,
+        exit_code=0,
+    )
+
+
+def status_failure_document(library: Path, kind: str, message: str) -> dict[str, object]:
+    """A failed `status --json` is still JSON, with the same keys as a good one.
+
+    A caller that asked for a document and got a bare stderr line would have to
+    parse two formats and guess which arrived; every field a success carries is
+    present here, empty, with ``error`` populated and ``exit_code`` set.
+    """
+    document = status_document(
+        LibraryStatus(library=library, movies=0, total_bytes=0, steps=(), settled=0),
+        state_enabled=False,
+    )
+    document["error"] = {"kind": kind, "message": message}
+    document["exit_code"] = 2
+    return document
+
+
 def add_status_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     """Define `status`'s flags in one place, for both parsers that offer them."""
     parser.add_argument("--library", type=Path, default=None, metavar="PATH",
@@ -1051,6 +1124,8 @@ def add_status_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
                         help="Folder scan workers (0 = decide from the CPU count, 1 = serial)")
     parser.add_argument("--verbose", action="store_true",
                         help="Also print the scan log the summary is built from")
+    parser.add_argument("--json", action="store_true",
+                        help="Print the summary as one JSON document instead of the report")
     return parser
 
 
@@ -1061,6 +1136,7 @@ def run_status(
     use_state: bool = True,
     workers: int = 0,
     verbose: bool = False,
+    as_json: bool = False,
 ) -> int:
     """Answer "what is left to do?" with one live scan and the state cache.
 
@@ -1082,14 +1158,24 @@ def run_status(
     from organizekit.core import open_state, path_norm
 
     library = _resolve_library_path(library_path)
-    if not library.is_dir():
-        print(f"{SYM_FAIL} {red('Library not found:')} {library}", file=sys.stderr)
+
+    def failed(kind: str, message: str) -> int:
+        """Report a fatal scan problem in whichever format was asked for."""
+        if as_json:
+            print_json(status_failure_document(library, kind, message))
+        else:
+            print(f"{SYM_FAIL} {red(f'{message}')}", file=sys.stderr)
         return 2
+
+    if not library.is_dir():
+        return failed("library-not-found", f"Library not found: {library}")
 
     cfg = library_auditor.Config(
         source_dir=library, workers=workers, use_state=use_state, state_db=state_db,
     )
-    print(f"{SYM_ARROW} Scanning {cyan(str(library))} ...")
+    # Progress goes to stderr under --json so stdout holds the document alone.
+    print(f"{SYM_ARROW} Scanning {cyan(str(library))} ...",
+          file=sys.stderr if as_json else sys.stdout)
     scan_log = io.StringIO()
     started = time.perf_counter()
     try:
@@ -1099,13 +1185,12 @@ def run_status(
         with redirect_stdout(scan_log):
             audit = library_auditor.audit_library(cfg)
     except Exception as exc:  # noqa: BLE001 - the scan is the whole command: any
-        # failure is reported on stderr with the captured log, then exit 2.
-        print(scan_log.getvalue(), end="")
-        print(f"{SYM_FAIL} {red('Scan failed:')} {exc}", file=sys.stderr)
-        return 2
+        # failure is reported with the captured log, then exit 2.
+        print(scan_log.getvalue(), end="", file=sys.stderr if as_json else sys.stdout)
+        return failed("scan-failed", f"Scan failed: {exc}")
     audit.elapsed_sec = time.perf_counter() - started
     if verbose:
-        print(scan_log.getvalue(), end="")
+        print(scan_log.getvalue(), end="", file=sys.stderr if as_json else sys.stdout)
 
     # Publishing here is the same write-through the auditor performs, reusing
     # its function so there is exactly one definition of what an audit means to
@@ -1131,6 +1216,10 @@ def run_status(
         store.close()
 
     status = collect_status(audit, verdicts, stamps)
+    if as_json:
+        print_json(status_document(status, state_enabled=store.enabled))
+        return 0
+
     print()
     for line in format_status(status):
         print(f"  {line}".rstrip())
@@ -1386,6 +1475,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             use_state=not parsed.no_state,
             workers=int(parsed.workers),
             verbose=bool(parsed.verbose),
+            as_json=bool(parsed.json),
         )
 
     if command in {"run", "pipeline"}:

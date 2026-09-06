@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import organize
 from organizekit.core import KIND_BITDEPTH, KIND_REMUX, KIND_SYNC, open_state
@@ -14,7 +16,9 @@ from organizekit.core import KIND_BITDEPTH, KIND_REMUX, KIND_SYNC, open_state
 SRT = "1\n00:00:01,000 --> 00:00:02,000\nhello\n\n"
 
 
-class StatusTests(unittest.TestCase):
+class StatusFixture:
+    """The library-on-disk fixture both renderings of `status` are tested on."""
+
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
@@ -42,6 +46,25 @@ class StatusTests(unittest.TestCase):
     def _record(self, movie: Path, kind: str, verdict: str) -> None:
         with open_state(self.db, tool="tests") as store:
             store.record(movie, kind, verdict)
+
+    def _summary(self, folders, verdicts=None, stamps=None) -> organize.LibraryStatus:
+        import library_auditor
+
+        audit = library_auditor.Audit(source_dir=self.library, folders=folders)
+        return organize.collect_status(audit, verdicts or {}, stamps or {})
+
+    def _folder(self, title: str, state: str) -> object:
+        import library_auditor
+
+        return library_auditor.FolderAudit(
+            folder=self.library / title,
+            state=state,
+            movie_files=[library_auditor.MovieFile(f"{title}.mkv", ".mkv", 1024)],
+        )
+
+
+class StatusTests(StatusFixture, unittest.TestCase):
+    """The printed report."""
 
     # -- the live half -----------------------------------------------------
 
@@ -144,21 +167,6 @@ class StatusTests(unittest.TestCase):
 
     # -- the arithmetic ----------------------------------------------------
 
-    def _summary(self, folders, verdicts=None, stamps=None) -> organize.LibraryStatus:
-        import library_auditor
-
-        audit = library_auditor.Audit(source_dir=self.library, folders=folders)
-        return organize.collect_status(audit, verdicts or {}, stamps or {})
-
-    def _folder(self, title: str, state: str) -> object:
-        import library_auditor
-
-        return library_auditor.FolderAudit(
-            folder=self.library / title,
-            state=state,
-            movie_files=[library_auditor.MovieFile(f"{title}.mkv", ".mkv", 1024)],
-        )
-
     def test_settled_requires_every_recorded_step_to_agree(self) -> None:
         alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
         bravo = self._movie("Bravo (2002)", sidecar="Bravo (2002).eng.srt")
@@ -212,6 +220,157 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(lines[0].startswith("Library"))
         self.assertTrue(any("Nothing to do for" in line for line in lines))
         self.assertFalse(any("\x1b[" in line for line in lines))
+
+
+class StatusJsonTests(StatusFixture, unittest.TestCase):
+    """`status --json`: the same summary, for something that is not a person."""
+
+    def _json(self, *args: str) -> tuple[int, dict, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = organize.main(["status", "--library", str(self.library),
+                                  "--state-db", str(self.db), "--json", *args])
+        return code, json.loads(out.getvalue()), err.getvalue()
+
+    def test_stdout_is_nothing_but_the_document(self) -> None:
+        """The scan progress line would otherwise sit in front of the JSON."""
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        code, document, err = self._json()
+        self.assertEqual(code, 0)
+        self.assertEqual(document["command"], "status")
+        self.assertIn("Scanning", err)
+
+    def test_the_envelope_matches_every_other_json_command(self) -> None:
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        document = self._json()[1]
+        self.assertEqual(document["schema"], organize.JSON_SCHEMA)
+        self.assertEqual(document["tool"], "organize")
+        self.assertEqual(document["version"], organize.VERSION)
+
+    def test_top_level_keys_are_the_documented_ones(self) -> None:
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        self.assertEqual(
+            sorted(self._json()[1]),
+            ["command", "error", "exit_code", "library", "movies", "pending", "schema",
+             "settled", "state_cache", "steps", "tool", "total_bytes", "version"],
+        )
+
+    def test_the_numbers_are_the_ones_the_report_prints(self) -> None:
+        alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        self._movie("Bravo (2002)")
+        self._record(alpha, KIND_BITDEPTH, "SKIP_HDR")
+        code, document, _ = self._json()
+        human = self._run()[1]
+        self.assertEqual(code, 0)
+        self.assertEqual(document["movies"], 2)
+        self.assertEqual(document["total_bytes"], 8192)
+        self.assertIn(f"Nothing to do for {document['settled']} movie(s)", human)
+        self.assertIn(f"the next pass will touch {document['pending']}", human)
+
+    def test_one_row_per_step_with_a_slug_id(self) -> None:
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        steps = self._json()[1]["steps"]
+        self.assertEqual([step["id"] for step in steps],
+                         ["layout", "subtitles", "remux", "bit-depth", "sync"])
+        self.assertEqual([step["label"] for step in steps],
+                         ["Layout", "Subtitles", "Remux", "Bit depth", "Sync"])
+
+    def test_counts_are_reported_per_step(self) -> None:
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        self._movie("Bravo (2002)")
+        steps = {step["id"]: step for step in self._json()[1]["steps"]}
+        self.assertEqual(steps["layout"]["counts"],
+                         {"CANONICAL_MKV": 1, "MISSING_SIDECAR": 1})
+        self.assertEqual(steps["subtitles"]["counts"], {"missing": 1, "present": 1})
+
+    def test_recorded_tells_nothing_to_do_apart_from_nobody_measured(self) -> None:
+        """The footnote the printed report spells out, as a field."""
+        alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        steps = {step["id"]: step for step in self._json()[1]["steps"]}
+        self.assertFalse(steps["bit-depth"]["recorded"])
+        self.assertEqual(steps["bit-depth"]["unmeasured"], 1)
+
+        self._record(alpha, KIND_BITDEPTH, "SKIP_HDR")
+        steps = {step["id"]: step for step in self._json()[1]["steps"]}
+        self.assertTrue(steps["bit-depth"]["recorded"])
+        self.assertEqual(steps["bit-depth"]["counts"], {"SKIP_HDR": 1})
+        self.assertEqual(steps["bit-depth"]["unmeasured"], 0)
+
+    def test_a_stale_verdict_is_counted_as_stale_not_as_an_answer(self) -> None:
+        alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        self._record(alpha, KIND_SYNC, "synced")
+        alpha.write_bytes(b"y" * 8192)  # the bytes the verdict described are gone
+        sync = {step["id"]: step for step in self._json()[1]["steps"]}["sync"]
+        self.assertEqual(sync["stale"], 1)
+        self.assertEqual(sync["counts"], {})
+
+    def test_the_state_cache_reports_whether_it_was_used(self) -> None:
+        alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        self._record(alpha, KIND_BITDEPTH, "SKIP_HDR")
+        self.assertEqual(self._json()[1]["state_cache"], {"enabled": True, "measured": True})
+        self.assertEqual(self._json("--no-state")[1]["state_cache"],
+                         {"enabled": False, "measured": False})
+
+    def test_a_missing_library_is_reported_as_json_not_a_bare_stderr_line(self) -> None:
+        """A caller that asked for a document must not have to parse two formats."""
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = organize.main(["status", "--library", str(self.root / "gone"), "--json"])
+        document = json.loads(out.getvalue())
+        self.assertEqual(code, 2)
+        self.assertEqual(document["exit_code"], 2)
+        self.assertEqual(document["error"]["kind"], "library-not-found")
+        self.assertIn("gone", document["error"]["message"])
+        self.assertEqual(document["steps"], [])
+        self.assertEqual(document["movies"], 0)
+
+    def test_a_failing_scan_is_reported_as_json_too(self) -> None:
+        import library_auditor
+
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        out = io.StringIO()
+        with patch.object(library_auditor, "audit_library", side_effect=RuntimeError("disk gone")), \
+                redirect_stdout(out), redirect_stderr(io.StringIO()):
+            code = organize.main(["status", "--library", str(self.library),
+                                  "--state-db", str(self.db), "--json"])
+        document = json.loads(out.getvalue())
+        self.assertEqual(code, 2)
+        self.assertEqual(document["error"]["kind"], "scan-failed")
+        self.assertIn("disk gone", document["error"]["message"])
+
+    def test_a_healthy_run_carries_no_error(self) -> None:
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        document = self._json()[1]
+        self.assertIsNone(document["error"])
+        self.assertEqual(document["exit_code"], 0)
+
+    def test_two_runs_over_an_unchanged_library_are_byte_identical(self) -> None:
+        """No scan duration in the document, so a cron job can diff it."""
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        first, second = self._json()[1], self._json()[1]
+        self.assertEqual(json.dumps(first), json.dumps(second))
+        self.assertNotIn("elapsed", json.dumps(first))
+
+    def test_the_document_is_serialisable_without_a_custom_encoder(self) -> None:
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        status = self._summary([self._folder("Alpha (2001)", "CANONICAL_MKV")])
+        json.dumps(organize.status_document(status, state_enabled=True))
+
+    def test_verbose_keeps_the_scan_log_off_stdout(self) -> None:
+        self._movie("Bravo (2002)")  # a non-canonical folder the auditor narrates
+        code, document, err = self._json("--verbose")
+        self.assertEqual(code, 0)
+        self.assertEqual(document["movies"], 1)
+        self.assertTrue(err.strip(), "the scan log should still be shown, on stderr")
+
+    def test_both_parsers_describe_the_same_status_flags(self) -> None:
+        top = organize.build_parser()
+        action = next(a for a in top._subparsers._group_actions if "status" in a.choices)  # noqa: SLF001
+        advertised = {opt for act in action.choices["status"]._actions for opt in act.option_strings}  # noqa: SLF001
+        dispatched = {opt for act in organize.add_status_arguments(
+            organize.argparse.ArgumentParser(prog="organize status"))._actions  # noqa: SLF001
+            for opt in act.option_strings}
+        self.assertEqual(advertised, dispatched)
 
 
 if __name__ == "__main__":
