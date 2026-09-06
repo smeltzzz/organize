@@ -490,9 +490,40 @@ fake `urlopen`. 779 → 845 tests, coverage 75% → **76%**, `subtitle_fetcher.p
 74% → 77%.
 
 Still open from this slice: the remaining tier orchestration inside
-`queue_run` (712 lines), the `run_doctor` check table, and the property-based
+`queue_run` (712 lines) and the `run_doctor` check table. ~~The property-based
 tests — `hypothesis` cannot be assumed present in this offline environment, so
-those would need stdlib `random` with fixed seeds.
+those would need stdlib `random` with fixed seeds.~~ **done in phase 6e; see
+the note below.**
+
+> **Update — phase 6e (W5): the properties, and what they found.**
+>
+> The suite was strong on examples and had nothing of the other kind: state an
+> invariant, then let the machine look for a counterexample. `tests/property.py`
+> is that harness in sixty lines of standard library (no `hypothesis` in an
+> offline repo with zero dependencies), and `tests/test_properties.py` is
+> thirty-eight properties over the four places an unforeseen input would be
+> expensive: the fail-closed HDR rule, the remux plan that decides which
+> tracks survive a rewrite of a movie, the shared subtitle contract, and the
+> naming handshake between the ingest hook and the auditor.
+>
+> The harness is deterministic (each test seeds from its own id;
+> `ORGANIZE_PROPERTY_SEED` sweeps), shrinks failures to the smallest case that
+> still fails the same way, and is itself made to fail on purpose — plus a
+> `MutationTests` class that breaks the *implementation* (queue an HDR file,
+> keep the worst audio track, accept any text as a subtitle) and asserts the
+> matching property notices. That last part earned its keep immediately: the
+> audio-ranking property was re-deriving "best" from the very scoring function
+> it was judging, so inverting the ranking left it green. It now plants a
+> lossless English Atmos 7.1 track among the random ones and asserts that
+> *that* is what survives — an oracle the implementation does not get a vote in.
+>
+> Two real findings, both from the wide name generator: a title whose own
+> words are scene tags (`…_EXTENDED_…`) is not a fixed point under re-parsing,
+> because the second pass reads the surviving tag as an edition. Nobody owns a
+> film called *Extended*, so the parser was left alone and the two exact
+> shapes are pinned in a named test, with the property scoped to the realistic
+> names the tool is for — 4,000 of which are fixed points. 934 → 972 tests,
+> +0.2 s.
 
 > **Update — phase 6c (code health): one run log, and a lint ratchet.**
 >
@@ -682,6 +713,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6b**~~ | ~~W5 the fetcher's spending planners extracted from `queue_run` and tabled~~ **done** (the remaining tier orchestration and the property tests are still open — see the W5 update) | +460 | Low | ✅ |
 | ~~**6c**~~ | ~~one shared `RunLog`, the last duplicated implementation; `core/toolchain.py` off the blanket `BLE001` ignore~~ **done** (the nine tool files' 84 broad catches are still blanket-ignored) | −62, +200 tests | Low | ✅ |
 | ~~**6d**~~ | ~~every `except Exception` in the toolkit narrowed or justified in place; no file-wide `BLE001` exemption left~~ **done** | 27 narrowed, +290 tests | Low | ✅ |
+| ~~**6e**~~ | ~~W5 property-based tests on seeded stdlib `random`: a shrinking harness, 38 properties over the fail-closed, destructive and cross-tool rules, and mutation tests that prove they notice~~ **done** | +38 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
@@ -723,7 +755,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **76%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 13.0 s (934 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) |
+| Test runtime | 6.7 s | 13.4 s (972 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ✅ |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

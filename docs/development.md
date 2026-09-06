@@ -10,7 +10,7 @@ no API keys, no network.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 934 unit tests, ~13 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 972 unit tests, ~13 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -56,6 +56,40 @@ protected; the standardizer verifies this filesystem actually supports
 hardlinks). The exhaustive suites those flags used to run now live in
 `tests/selftests/`, where they are part of the offline unit run and count
 towards coverage.
+
+## The property tests
+
+Most of the suite is examples: inputs somebody thought of, and a fault injected
+at each step of a transaction. `tests/test_properties.py` is the other kind —
+it states an invariant and lets `tests/property.py` hunt for a counterexample
+across a hundred generated cases. The rules it protects are the ones an
+unforeseen input would be expensive to get wrong: an HDR file is never queued
+for re-encoding, the remux plan never keeps a commentary track or invents one
+that is not in the file, arbitrary bytes are never mistaken for a subtitle, and
+a folder the ingest hook writes is one the auditor calls canonical.
+
+```bash
+python3 -m pytest tests/test_properties.py            # the default seeds
+ORGANIZE_PROPERTY_SEED=7 python3 -m pytest tests/test_properties.py   # sweep another
+```
+
+The harness is about sixty lines of standard library, and three of its
+properties matter more than its size:
+
+- **Deterministic by default.** Each test's seed comes from its own id, so a
+  failure reproduces exactly. `ORGANIZE_PROPERTY_SEED` sweeps other seeds and
+  the value used is printed with every failure, so a counterexample found at
+  3 a.m. can be pinned into the default run.
+- **Failures shrink.** A random twelve-track MKV that breaks an invariant is
+  not a bug report. Each failure is reduced — drop list elements, empty
+  strings, walk integers toward zero — while it keeps failing the same way.
+- **It cannot pass vacuously.** The harness is made to fail on purpose in
+  `HarnessTests`, and `MutationTests` breaks the *implementation* — queue an
+  HDR file, keep the worst audio track, accept any text as a subtitle — and
+  asserts the matching property notices. An oracle that quietly re-derives its
+  expectation from the function it is judging looks exactly like a passing
+  test; that is how the audio-ranking property was caught being tautological
+  and given an independent oracle instead.
 
 ## The crash tests
 
