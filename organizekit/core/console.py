@@ -30,23 +30,29 @@ def enable_utf8_stdio() -> None:
             pass
 
 
-def print_text(text: str) -> None:
+def print_text(text: str, stream: object | None = None) -> None:
     """Print report text without ever raising on a legacy console encoding.
 
     Reports contain box-drawing characters.  On a console or pipe whose
     encoding cannot represent them, ``print`` raises ``UnicodeEncodeError``,
     which used to surface as a crash *after* the work was already done.  The
     fallback writes the same text with unrepresentable characters replaced.
+
+    ``stream`` sends the line somewhere other than stdout - what a tool
+    printing a JSON document does with its progress log, so the document has
+    stdout to itself.  It is resolved per call, because ``sys.stdout`` is
+    replaced under ``redirect_stdout`` and captured tests.
     """
+    out = stream if stream is not None else sys.stdout
     try:
-        print(text, flush=True)
+        print(text, file=out, flush=True)
     except UnicodeEncodeError:
         try:
-            encoding = sys.stdout.encoding or "utf-8"
-            sys.stdout.buffer.write((text + "\n").encode(encoding, errors="replace"))
-            sys.stdout.buffer.flush()
+            encoding = getattr(out, "encoding", None) or "utf-8"
+            out.buffer.write((text + "\n").encode(encoding, errors="replace"))
+            out.buffer.flush()
         except Exception:  # noqa: BLE001  # pragma: no cover
             # Last-resort console fallback: whatever the stream did wrong, the
             # line still has to reach the user. Re-raising here would abort a
             # sweep because of a console encoding quirk.
-            print(text.encode("ascii", errors="replace").decode("ascii"), flush=True)
+            print(text.encode("ascii", errors="replace").decode("ascii"), file=out, flush=True)

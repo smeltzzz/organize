@@ -31,6 +31,11 @@ from pathlib import Path
 # Shared implementation: everything imported here is defined exactly once,
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
 # keeps it that way.
+# The JSON envelope reports the *toolkit* release, not this script's own
+# version: `doctor`, `status` and `audit` ship together, and a consumer that
+# saw three different version numbers from one install would have to learn
+# which program produced which document.
+from organizekit import VERSION as TOOLKIT_VERSION
 from organizekit.core import (
     COVERING_ENGLISH_SRT_SUFFIXES,
     EXTERNAL_SRT_SUFFIX,
@@ -44,9 +49,11 @@ from organizekit.core import (
     atomic_write_text,
     default_tool_dir,
     enable_utf8_stdio,
+    json_document,
     map_ordered,
     open_state,
     path_is_within,
+    print_json,
     print_text,
     promote_legacy_external_english_srt,
     resolve_library,
@@ -123,6 +130,7 @@ class Config:
     workers: int = 0  # 0 = decide from the CPU count; 1 = walk folders one by one
     use_state: bool = True       # publish the verdicts to the shared state cache
     state_db: Path | None = None  # None = the documented default location
+    json_output: bool = False    # answer with one JSON document instead of the report
 
 @dataclass(frozen=True)
 class MovieFile:
@@ -525,6 +533,67 @@ def build_report(audit: Audit, cfg: Config) -> str:
     ])
     return report.render()
 
+def audit_document(audit: Audit, cfg: Config, exit_code: int) -> dict[str, object]:
+    """The same audit as a JSON-serialisable document, for machines.
+
+    The printed report is written for a person deciding what to fix next: what
+    is wrong first, grouped by fix, with a paragraph of advice per group. This
+    is the same findings without the advice - one row per folder, in the same
+    order - because a consumer needs the facts and already knows what it is
+    looking for.
+
+    ``report`` names the file the human version was still written to. A JSON
+    run is not a different audit; it is the same audit, read differently.
+    """
+    counts = Counter(item.state for item in audit.folders)
+    total = len(audit.folders)
+    canonical = counts["CANONICAL_MKV"]
+    return json_document(
+        "audit",
+        TOOLKIT_VERSION,
+        library=str(audit.source_dir),
+        report=str(cfg.report_file),
+        folders=total,
+        canonical=canonical,
+        findings=total - canonical,
+        defects=sum(n for state, n in counts.items() if state in DEFECT_STATES),
+        canonical_pct=round((100.0 * canonical / total) if total else 100.0, 1),
+        states=dict(sorted(counts.items())),
+        containers=dict(sorted(Counter(
+            file.extension.upper() for item in audit.folders for file in item.movie_files
+        ).items())),
+        items=[
+            {
+                "name": item.folder.name,
+                "folder": str(item.folder),
+                "state": item.state,
+                "subtitle": SUBTITLE_STATE_FOR_AUDIT.get(item.state),
+                "detail": item.detail,
+                "movie_files": [
+                    {"name": file.name, "extension": file.extension, "size_bytes": file.size_bytes}
+                    for file in item.movie_files
+                ],
+            }
+            for item in audit.folders
+        ],
+        error=None,
+        exit_code=exit_code,
+    )
+
+
+def audit_failure_document(cfg: Config, kind: str, message: str, exit_code: int) -> dict[str, object]:
+    """A failed audit is still a document, with the same keys as a good one.
+
+    A caller that asked for JSON and got a bare stderr line would have to parse
+    two formats and guess which arrived; every field a success carries is here,
+    empty, with ``error`` populated.
+    """
+    document = audit_document(Audit(cfg.source_dir, []), cfg, exit_code)
+    document["error"] = {"kind": kind, "message": message}
+    document["canonical_pct"] = 0.0
+    return document
+
+
 def _state_label(state: str) -> str:
     """The short scorecard label for a state (``MISSING`` for a missing sidecar)."""
     for guide in STATE_GUIDES:
@@ -573,10 +642,16 @@ def exit_code_for(counts: Counter, cfg: Config) -> int:
     return 0
 
 def run(cfg: Config) -> int:
+    if cfg.json_output:
+        # The document owns stdout; the run log still reaches the operator, on
+        # stderr, exactly as it would have done on the console.
+        log.stream = sys.stderr
     errors = validate_config(cfg)
     if errors:
         for error in errors:
             log(error, level="ERROR", log_file=None)
+        if cfg.json_output:
+            print_json(audit_failure_document(cfg, "invalid-config", "; ".join(errors), 2))
         return 2
     log.file = cfg.log_file
     log(f"Starting read-only library audit; source={cfg.source_dir}")
@@ -594,13 +669,21 @@ def run(cfg: Config) -> int:
             counts = Counter(item.state for item in audit.folders)
             log(f"Audit complete: canonical_mkv={counts['CANONICAL_MKV']}; exceptions={len(audit.folders) - counts['CANONICAL_MKV']}; elapsed={audit.elapsed_sec:.2f}s")
             log(f"Report published: {cfg.report_file}")
-            print_text(report)
-        return exit_code_for(counts, cfg)
+            if not cfg.json_output:
+                print_text(report)
+        code = exit_code_for(counts, cfg)
+        if cfg.json_output:
+            print_json(audit_document(audit, cfg, code))
+        return code
     except LockUnavailable as exc:
         log(f"Audit lock unavailable: {exc}", level="ERROR")
+        if cfg.json_output:
+            print_json(audit_failure_document(cfg, "lock-unavailable", str(exc), 3))
         return 3
     except OSError as exc:
         log(f"Could not save report {cfg.report_file}: {exc}", level="ERROR")
+        if cfg.json_output:
+            print_json(audit_failure_document(cfg, "report-write-failed", str(exc), 2))
         return 2
 
 def build_parser() -> argparse.ArgumentParser:
@@ -627,6 +710,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Exit 1 when any folder is not CANONICAL_MKV (includes missing sidecars)")
     parser.add_argument("--fail-on-defects", action="store_true",
                         help="Exit 1 only on layout defects; a missing sidecar alone still exits 0")
+    parser.add_argument("--json", action="store_true",
+                        help="Print the audit as one JSON document on stdout instead of the "
+                             "report; the log goes to stderr and the report file is still written")
     parser.add_argument("--self-test", action="store_true")
     return parser
 
@@ -641,6 +727,7 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         workers=int(args.workers),
         use_state=not bool(args.no_state),
         state_db=args.state_db,
+        json_output=bool(args.json),
     )
 
 # =============================================================================

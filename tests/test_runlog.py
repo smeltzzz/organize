@@ -134,7 +134,7 @@ class FailureIsNeverFatalTests(RunLogTestCase):
         # copy must not be lost to it.
         self.log.file = self.tmp / "run.log"
         with mock.patch("organizekit.core.runlog.print_text",
-                        side_effect=lambda text: None) as printer:
+                        side_effect=lambda text, stream=None: None) as printer:
             self.log("recorded")
         printer.assert_called_once()
         self.assertIn("recorded", self.log.file.read_text(encoding="utf-8"))
@@ -159,7 +159,7 @@ class ThreadSafetyTests(RunLogTestCase):
         barrier = Barrier(workers)
         pieces: list[str] = []
 
-        def torn_printer(text: str) -> None:
+        def torn_printer(text: str, stream: object | None = None) -> None:
             head, tail = text[:12], text[12:]
             pieces.append(head)
             time.sleep(0.0005)  # invite a thread switch mid-line

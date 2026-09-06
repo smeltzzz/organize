@@ -495,6 +495,47 @@ Still open from this slice: the remaining tier orchestration inside
 offline environment, so those would need stdlib `random` with fixed seeds.~~
 **done in phase 6e.** Both notes follow.
 
+> **Update — phase 6i (W7): the audit answers in JSON, and the envelope moves
+> into the core.**
+>
+> The third and last read-only command, and the one that made the envelope a
+> shared thing rather than a convention. `doctor` and `status` live in
+> `organize.py`; the audit lives in `library_auditor.py`, which is a separate
+> program with its own report renderer. Two copies of "schema, tool, version,
+> command" in two files is exactly the shape the four copies of the run log
+> had, so `JSON_SCHEMA`, `slug_id()`, `json_document()` and `print_json()` now
+> live in `organizekit/core/jsonout.py`, whose docstring states the four rules
+> (one envelope, one schema number, no timestamps, the document owns stdout).
+>
+> **The repo's own guard caught the first attempt.** Keeping a thin
+> `json_document()` wrapper in `organize.py` failed
+> `tests/test_shared_core.py::NothingMayReVendorTheCore` - *"a second
+> definition is how atomic_write_text lost its fsync in five of six tools"* -
+> so the version became a parameter instead and there is exactly one
+> definition.
+>
+> Two smaller things had to move for the audit to speak JSON at all. `RunLog`
+> gained a `stream`, because the auditor logs twenty lines to the console
+> during a run and they would have landed on top of the document;
+> `print_text()` gained the matching destination. Under `--json` the log goes
+> to stderr, so the operator still sees it and the log file is still written -
+> and a test asserts both.
+>
+> **The audit document is one row per folder** (`name`, `folder`, `state`,
+> `subtitle`, `detail`, `movie_files`) in report order, plus the tallies and
+> the path of the plain-text report, which is still written: a JSON run is not
+> a different audit. `subtitle` is the auditor's own split of a folder state
+> into a subtitle verdict, exported rather than left for a consumer to
+> re-derive. Every failure is a document too - invalid config (2), a busy lock
+> (3), an unwritable report (2).
+>
+> A cross-command suite (`tests/test_json_output.py`) now runs all three and
+> compares the documents, so a command that invents its own envelope fails
+> there rather than in somebody's parser. It caught a real one: the auditor
+> first reported its own `VERSION` (2.1.0) where `doctor` and `status` report
+> the toolkit's (3.5.0). One install now reports one version. 1,067 → 1,101
+> tests, ten mutations checked.
+
 > **Update — phase 6h (W7): `status --json`, and the envelope becomes shared.**
 >
 > The second machine-readable command, and the one that turned 6g's one-off
@@ -776,13 +817,14 @@ promises:
 ### W7 · Ops, UX, distribution
 
 - **`organize status`** (W2) — the missing verb.
-- **Machine-readable output** — ~~`--json` on every command~~ **started in
-  phases 6g and 6h**: `organize doctor --json` and `organize status --json`
-  print versioned, timestamp-free documents on a shared envelope (see the notes
-  below). Still to come: `--json` on `audit` (it lives in `library_auditor.py`,
-  which has its own report renderer), one JSONL event stream per run, and
-  `run_summary.json`. Cron/Healthchecks/Grafana integration becomes trivial;
-  the human reports stay exactly as they are.
+- **Machine-readable output** — ~~`--json` on every command~~ **done for the
+  three read-only commands** (phases 6g, 6h, 6i): `doctor`, `status` and
+  `audit` print versioned, timestamp-free documents on one shared envelope in
+  `organizekit/core/jsonout.py` (see the notes below). Still to come: one JSONL
+  event stream per *run* plus `run_summary.json`, which is a different problem
+  — those describe work being done, not a library being read.
+  Cron/Healthchecks/Grafana integration becomes trivial; the human reports stay
+  exactly as they are.
 - **One shared `LiveConsole`** (currently only in the cleaner) so every step has
   the same progress UI, and it degrades to plain lines when not a TTY.
 - **Distribution:** publish to PyPI (`pipx install organize` / `uvx organize`),
@@ -820,10 +862,11 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**6f**~~ | ~~W5 `run_doctor` split into a table of twelve named check functions; `doctor`'s output byte-identical~~ **done** | +132 lines, +56 tests | Low | ✅ |
 | ~~**6g**~~ | ~~W7 `organize doctor --json`: a versioned, deterministic document over the same check table, with the flags defined once for both parsers~~ **done** | +90 lines, +23 tests | Low | ✅ |
 | ~~**6h**~~ | ~~W7 `organize status --json` on the same envelope; the JSON helpers generalised out of `doctor`; a failed run is still a document~~ **done** | +110 lines, +16 tests | Low | ✅ |
+| ~~**6i**~~ | ~~W7 `library_auditor.py --json`; the envelope moved into `organizekit/core/jsonout.py`; `RunLog` learns where its console lines go~~ **done** | +150 lines, +34 tests | Low | ✅ |
 | **7** | ~~W6 direct-play verification, HandBrake queue, multi-language~~ **out of scope** — code health only, by decision | +1,500 | Med | — |
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
-| **8c** | W7 the rest of the machine-readable output (`--json` on `audit`, a JSONL run stream, `run_summary.json`), PyPI release | +200 | Low | 2 |
+| **8c** | W7 the rest of the machine-readable output (a JSONL run stream, `run_summary.json`), PyPI release | +150 | Low | 2 |
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run
@@ -861,7 +904,7 @@ state in one sentence, it is the wrong change.*
 | Production lines | 26,458 | 21,516 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
 | Coverage | 58% | **78%** (cleaner 75%) | ≥75%, cleaner ≥80% |
-| Test runtime | 6.7 s | 15.3 s (1,067 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Test runtime | 6.7 s | 15.8 s (1,101 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

@@ -23,6 +23,7 @@ from .config import (
 )
 from .console import enable_utf8_stdio, print_text
 from .fsio import atomic_write_text, path_is_within, path_norm, sha256_file
+from .jsonout import JSON_SCHEMA, json_document, print_json, slug_id
 from .locking import (
     STANDARDIZER_LOCK_NAME,
     CoordinationLock,
@@ -115,6 +116,10 @@ from .toolchain import (
 
 __all__ = [
     "COVERING_ENGLISH_SRT_SUFFIXES",
+    "JSON_SCHEMA",
+    "json_document",
+    "print_json",
+    "slug_id",
     "KINDS",
     "KIND_BITDEPTH",
     "KIND_LAYOUT",

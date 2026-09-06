@@ -99,10 +99,11 @@ is. Start at the scorecard; it tells you what needs your attention.
 
 ### Machine-readable output
 
-`organize doctor --json` and `organize status --json` print the same
-information as one JSON document on stdout and nothing else — no banner, no
-colour, no scorecard — so either can be piped straight into a parser. Progress
-lines and scan logs go to stderr, where they cannot corrupt the document:
+`organize doctor --json`, `organize status --json` and `organize audit --json`
+print the same information as one JSON document on stdout and nothing else — no
+banner, no colour, no report — so any of them can be piped straight into a
+parser. Progress lines, scan logs and the audit's run log go to stderr, where
+they cannot corrupt the document:
 
 ```bash
 organize doctor --json | jq -r '.checks[] | select(.status != "ok") | "\(.status)\t\(.name)\t\(.message)"'
@@ -156,10 +157,31 @@ A failed run is still a document: a missing library or a failed scan sets
 `error` to `{"kind", "message"}` and `exit_code` to `2`, with every other field
 present and empty, so a caller never has to parse two formats.
 
-Neither document carries a **timestamp**, deliberately — nor does `status`
-report its scan duration. Two runs over an unchanged library produce
-byte-identical output, so a nightly job can diff today's against yesterday's
-and alert only when something really changed.
+`organize audit --json` reports the library folder by folder:
+
+```bash
+organize audit --json | jq -r '.items[] | select(.state != "CANONICAL_MKV") | "\(.state)\t\(.name)"'
+organize audit --json | jq '{folders, canonical, findings, defects, canonical_pct}'
+```
+
+Every folder is one row with `name`, `folder`, `state`, `subtitle`, `detail`
+and its `movie_files`, in the order the report lists them, plus the tallies
+(`states`, `containers`, `canonical_pct`) and the `report` path — because a
+JSON run is not a different audit, it is the same one read differently, and the
+plain-text report is still written and the state cache still published.
+`subtitle` is the auditor's own split of a folder state into a subtitle verdict
+(`present`, `missing`, `invalid`, `noncanonical`, or `null` where the folder has
+no sidecar question worth naming), so a consumer never has to re-derive it.
+
+**Every failure is a document too.** A missing library, a busy lock, an
+unwritable report: `error` is `{"kind", "message"}`, `exit_code` carries the
+process exit code (`2`, `3`, …) and every other field is present and empty. A
+caller never has to parse two formats.
+
+None of the three documents carries a **timestamp**, deliberately — nor does
+`status` report its scan duration or `audit` its elapsed time. Two runs over an
+unchanged library produce byte-identical output, so a nightly job can diff
+today's against yesterday's and alert only when something really changed.
 
 ---
 

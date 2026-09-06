@@ -44,6 +44,10 @@ class RunLog:
 
     def __init__(self, *, brackets: bool = False) -> None:
         self.file: Path | None = None
+        #: Where console lines go; ``None`` means stdout. A tool whose output
+        #: is a JSON document points this at stderr, so the log is still there
+        #: for the operator without corrupting what the parser reads.
+        self.stream: object | None = None
         self._brackets = brackets
         #: Held while a line is written. Anything else that prints to the same
         #: console should take it too, or its output will interleave with ours.
@@ -60,7 +64,7 @@ class RunLog:
         """Print the line and append it to the log file."""
         line = self.format(message, level)
         with self.lock:
-            print_text(line)
+            print_text(line, self.stream)
             self._append(line, log_file)
 
     def to_file(self, message: str, level: str = "INFO",

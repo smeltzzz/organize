@@ -30,7 +30,6 @@ Zero runtime dependencies. Standard library only.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import platform
 import shutil
@@ -49,6 +48,12 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from organizekit import VERSION  # noqa: E402  (needs the sys.path bootstrap above)
+
+# The JSON envelope, the schema number and the slug rule are shared with the
+# tools - `library_auditor.py` answers in JSON too - so they live in the package
+# every tool already imports rather than in this front door. See
+# `organizekit/core/jsonout.py` for the rules they enforce.
+from organizekit.core import JSON_SCHEMA, json_document, print_json, slug_id  # noqa: E402, F401
 
 # ANSI styling helpers (with safe fallbacks)
 _SUPPORTS_COLOR = (
@@ -699,50 +704,6 @@ def diagnostics_exit_code(checks: Sequence[DiagnosticCheck]) -> int:
     return 1 if any(check.status == "fail" for check in checks) else 0
 
 
-# Every ``--json`` document in this CLI shares one envelope and one schema
-# number, so a consumer can tell what produced a file it is holding and refuse
-# a shape it does not understand. The number changes when the shape does.
-JSON_SCHEMA = 1
-
-
-def slug_id(name: str) -> str:
-    """A stable machine-readable id for a row, derived from its label.
-
-    Two doctor checks can come from one probe (the provider keys), so the table
-    key is not unique per row - the row name is, and the suite asserts it.
-    Slugging it gives a consumer something to match on
-    (``mkvtoolnix-mkvmerge``, ``bit-depth``) that does not depend on the
-    punctuation or capitalisation of the printed label.
-    """
-    slug = "".join(char.lower() if char.isalnum() else "-" for char in name)
-    return "-".join(part for part in slug.split("-") if part)
-
-
-def json_document(command: str, **payload: object) -> dict[str, object]:
-    """Wrap a command's payload in the envelope every JSON document shares.
-
-    Deliberately unstamped with the time it ran: the caller already knows that,
-    and leaving it out means two runs on an unchanged machine produce identical
-    bytes - so a cron job can diff today's output against yesterday's and alert
-    only when something actually changed.
-    """
-    return {
-        "schema": JSON_SCHEMA,
-        "tool": "organize",
-        "version": VERSION,
-        "command": command,
-        **payload,
-    }
-
-
-def print_json(document: dict[str, object]) -> None:
-    """Print the document and nothing else, so stdout stays parseable.
-
-    No banner, no colour, no summary line: a caller that asked for JSON is
-    piping stdout into a parser, and one decorative line would break it.
-    Progress and warnings still have somewhere to go - stderr.
-    """
-    print(json.dumps(document, indent=2, ensure_ascii=False))
 
 
 def diagnostics_document(ctx: DoctorContext, checks: Sequence[DiagnosticCheck]) -> dict[str, object]:
@@ -754,6 +715,7 @@ def diagnostics_document(ctx: DoctorContext, checks: Sequence[DiagnosticCheck]) 
     """
     return json_document(
         "doctor",
+        VERSION,
         library=str(ctx.library),
         source=str(ctx.source),
         summary={
@@ -1070,6 +1032,7 @@ def status_document(status: LibraryStatus, *, state_enabled: bool) -> dict[str, 
     """
     return json_document(
         "status",
+        VERSION,
         library=str(status.library),
         movies=status.movies,
         total_bytes=status.total_bytes,
