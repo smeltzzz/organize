@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-09-06
+
+**The overhaul release.** Six months of prose in one line: the repo went from
+five standalone scripts with ~300 tests and no CI to a shared, packaged toolkit
+with 1,800 offline tests, a SQLite state store, a JSONL run stream, an
+`organize.pyz` zipapp and a tag-triggered PyPI release — measured at every step
+in [`OVERHAUL.md`](OVERHAUL.md). Behaviour the tools already had is unchanged
+except where an entry below says it was a bug.
+
 ### Changed
 - **The fetcher's edges are covered, which finishes the test campaign on the largest file.** What was left uncovered was not provider work but everything around it: the configuration validator, the library walk, the layout contract, the ledger reader and the sidecar inspection each had branches no test had ever taken.
   - 66 tests: every refusal in `validate_compact_config` (each one is a line an operator has to act on, and they are all reported at once rather than one per attempt); the library walk skipping samples, non-MKVs, undersized files, symlinked files and folders, extras and disc trees, and a file that vanishes mid-walk; the one-movie-per-folder contract; the ledger read back from the log with a half-written event in the middle, a checkpoint for another library, a payload of the wrong shape, and a log that cannot be read at all (which stops the run rather than silently re-spending yesterday's allowance); sidecar inspection when the folder will not list, when the file will not read, when it is empty, over the size limit, symlinked, or named something else; the MKVToolNix lookup and the "never raises" external-command helper; and the subtitle-archive reader.
