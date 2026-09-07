@@ -1019,6 +1019,13 @@ def scan(cfg: Config) -> int:
 
     if files:
         workers = resolve_workers(cfg.workers, items=len(files), cap=MAX_CPU_WORKERS)
+        # One permanent line per file is the record; on a terminal it is also
+        # a wall of text with no sense of how much is left, and a single
+        # ffprobe on a 40 GB remux is not instant. The bar below is redrawn
+        # under the last log line and erased before the next one. Off a
+        # terminal it does not draw, so a piped or logged run is unchanged.
+        live = log.live
+        live_started = time.monotonic()
         try:
             for outcome in iter_completed(files, lambda p: inspect_movie(p, cfg, cache),
                                           workers=workers):
@@ -1044,8 +1051,14 @@ def scan(cfg: Config) -> int:
                     STATUS_ERROR: "ERROR",
                 }.get(res.status, res.status)
                 log(f"[{done}/{total}] {tag:<9} {path.name}")
+                if live is not None:
+                    live.progress(done, total, label="probing", detail=path.name,
+                                  started=live_started)
         except KeyboardInterrupt:
             log("\nInterrupted — writing partial results.")
+        finally:
+            if live is not None:
+                live.clear()
 
     cache.save()
     if cfg.use_cache:
@@ -1163,6 +1176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 log(f"Configuration error: {error}", level="CRITICAL", log_file=None)
             return 2
         log.file = cfg.log_file
+        log.attach_live()
         log(f"Starting read-only 10-bit inspection; source={cfg.source_dir}")
         binary = find_ffprobe(args.ffprobe)
         if not binary or not ffprobe_works(binary):

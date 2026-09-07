@@ -84,12 +84,13 @@ from organizekit.core import (
     KIND_REMUX,
     Ansi,
     CoordinationLock,
+    LiveLine,
     MediaProbeCache,
     Report,
     StateStore,
-    color_enabled,
     decode_srt_bytes,
     default_tool_dir,
+    ellipsize,
     enable_utf8_stdio,
     normalize_srt_newlines,
     open_probe_cache,
@@ -98,8 +99,7 @@ from organizekit.core import (
     promote_legacy_external_english_srt,
     resolve_library,
     run_field_smoke_test,
-    stream_can_encode,
-    style,
+    strip_ansi,
     write_raw,
 )
 
@@ -407,19 +407,10 @@ def _print_safe(msg: str) -> None:
     except (OSError, ValueError):
         pass
 
-_ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
-
-def _strip_ansi(text: str) -> str:
-    return _ANSI_RE.sub("", text)
-
-def _ellipsize_path(text: str, max_len: int) -> str:
-    if max_len <= 0:
-        return ""
-    if len(text) <= max_len:
-        return text
-    if max_len <= 3:
-        return text[:max_len]
-    return "..." + text[-(max_len - 3):]
+# Both are ``organizekit/core/live.py``'s, kept under their old names because
+# this file reads them on nearly every drawn line.
+_strip_ansi = strip_ansi
+_ellipsize_path = ellipsize
 
 _GUI_PROGRESS_RE = re.compile(
     r"#\s*GUI\s*#\s*progress(?:\s+(\d+)\s*%?|#percent=(\d+)|#parts=(\d+)/(\d+))",
@@ -488,17 +479,15 @@ class LiveConsole:
     CYAN = Ansi.CYAN
 
     def __init__(self, use_color: bool | None = None):
-        self.is_tty = False
-        try:
-            self.is_tty = bool(sys.stdout and sys.stdout.isatty())
-        except (OSError, ValueError, AttributeError):
-            self.is_tty = False
-        self.use_color = color_enabled(use_color=use_color)
-        self._can_erase = self.use_color or (os.name != "nt" and self.is_tty)
-        if stream_can_encode("█░"):
-            self._bar_fill, self._bar_empty = "█", "░"
-        else:
-            self._bar_fill, self._bar_empty = "#", "-"
+        # What the terminal will take — TTY, colour, erase escapes, block
+        # glyphs — is the shared live line's answer; the composition below is
+        # this tool's own. The attributes are mirrored rather than reached
+        # through, because nearly every drawn line reads them.
+        self.line = LiveLine(use_color=use_color)
+        self.is_tty = self.line.is_tty
+        self.use_color = self.line.use_color
+        self._can_erase = self.line.can_erase
+        self._bar_fill, self._bar_empty = self.line.bar_fill, self.line.bar_empty
         self.target_root: Path | None = None
         self._detail_indent = "           "
         self._file_ts = ""
@@ -512,13 +501,10 @@ class LiveConsole:
         self._last_progress_bucket = -1
 
     def style(self, text: str, *codes: str) -> str:
-        return style(text, *codes, enabled=self.use_color)
+        return self.line.style(text, *codes)
 
     def _cols(self) -> int:
-        try:
-            return max(40, int(shutil.get_terminal_size((100, 24)).columns))
-        except (OSError, ValueError):
-            return 100
+        return self.line.columns()
 
     def _compose_file_line(self, suffix_plain: str = "", suffix_styled: str = "") -> tuple[str, str]:
         prefix = f"[{self._file_ts}] {self._file_tag}"
@@ -534,19 +520,7 @@ class LiveConsole:
         return plain, styled
 
     def _overwrite_line(self, text: str) -> None:
-        cols = self._cols()
-        visible = _strip_ansi(text)
-        if len(visible) > cols - 1:
-            keep = max(1, cols - 1)
-            text = visible[:keep] if keep <= 3 else "..." + visible[-(keep - 3):]
-            visible = text
-        try:
-            if self._can_erase:
-                write_raw("\r" + text + "\033[K")
-            else:
-                write_raw("\r" + text + (" " * max(0, cols - 1 - len(visible))))
-        except (OSError, ValueError):
-            _print_safe(_strip_ansi(text))
+        self.line.overwrite(text)
 
     def _commit_open_line(self) -> None:
         if self._file_line_pending or self._progress_active:

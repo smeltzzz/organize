@@ -122,6 +122,15 @@ verdicts come back in input order, so the console, the log and the report are
 byte-identical to the serial run — the tests assert exactly that, by running
 the same library both ways and diffing.
 
+**Every sweep says what it is doing.** On a terminal the auditor, the 10-bit
+inspector, the subtitle synchronizer and the standardizer each draw one status
+line — `auditing [████░░░░] 42%  1,204/2,860  ~4m30s left  Movie (2020)` — that
+is rewritten in place and erased before every permanent line, the same
+renderer the track cleaner has always used for its remux bar
+(`organizekit/core/live.py`). It is **strictly a terminal effect**: off a TTY
+— redirected, piped, under cron, or with `--json` — nothing is drawn at all,
+so log files and captured output are byte-for-byte what they were.
+
 **Embedded extraction in detail.** It is on by default and always attempted
 first; it is skipped only when it cannot help, and the report names the
 sidecars that came from the movie itself. It needs

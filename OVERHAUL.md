@@ -1589,12 +1589,14 @@ promises:
   — those describe work being done, not a library being read.
   Cron/Healthchecks/Grafana integration becomes trivial; the human reports stay
   exactly as they are.
-- **One shared console layer** — ~~currently only in the cleaner~~ **the
-  *capability* half is done** (phase 8d): what colour and which characters a
-  terminal will take is now one decision in `organizekit/core/console.py`, used
-  by both the CLI and the cleaner's `LiveConsole`. Adopting the renderer itself
-  in the other four tools is deliberately *not* done here — that is a
-  user-visible UI change, and this phase was a no-behaviour-change one.
+- **One shared console layer** — ~~currently only in the cleaner~~ **done**
+  (phases 8d and 9c): what colour and which characters a terminal will take is
+  one decision in `organizekit/core/console.py`, and the overwritable line
+  itself is one implementation in `organizekit/core/live.py`, drawn by the
+  cleaner's `LiveConsole` and by the auditor, the inspector, the synchronizer
+  and the standardizer. It is **TTY-gated**: off a terminal every drawing
+  method returns immediately, so a redirected run, a cron job and every
+  captured test see exactly the bytes they saw before.
 - **Distribution:** publish to PyPI (`pipx install organize` / `uvx organize`),
   attach `organize.pyz` and the generated standalone scripts to each GitHub
   release, and ship systemd-timer and Task-Scheduler templates in `docs/`.
@@ -1651,7 +1653,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**8a**~~ | ~~W7 `organize.pyz` single-file build; one launch rule for both deployments~~ **done** | +330, +15 tests | Low | ✅ |
 | ~~**8b**~~ | ~~W7 docs split: a 780-line README becomes a 340-line front page plus `docs/{tools,pipeline,configuration,development}.md`, with the links and the size budget tested~~ **done** | +7 tests | Low | ✅ |
 | ~~**8c**~~ | ~~W7 the rest of the machine-readable output (a JSONL run stream, `run_summary.json`); the PyPI release: distribution `organizekit`, a complete sdist, a tag-triggered Trusted-Publishing workflow~~ **done** (the upload itself needs a maintainer with PyPI access) | +190, +51 tests | Low | ✅ |
-| ~~**8d**~~ | ~~W7 the shared console layer: colour capability, Windows VT mode, glyph support and safe raw writes decided once in `core/console.py` for both the CLI and `LiveConsole`~~ **done** (adopting the *renderer* in the other tools is a UI change, deferred) | −60, +32 tests | Low | ✅ |
+| ~~**8d**~~ | ~~W7 the shared console layer: colour capability, Windows VT mode, glyph support and safe raw writes decided once in `core/console.py` for both the CLI and `LiveConsole`~~ **done** | −60, +32 tests | Low | ✅ |
 
 > **Where this ended, and why it did not stay there (phase 9).** After phase 6w
 > four items were listed here as deliberately not done. The decision was
@@ -1665,17 +1667,23 @@ Each phase is independently shippable and leaves the repo green.
 >   healthy providers and 2× against slow ones, which is written up honestly in
 >   the W4 update rather than rounded up.
 >
-> The two still open, with the original reasoning:
+> - ~~**Adopting `LiveConsole`'s renderer in the other four tools**~~ —
+>   **done, phase 9c.** `organizekit/core/live.py` (126 statements, **100%
+>   covered**) owns the overwritable line: width, truncation, the erase escape,
+>   the bar glyphs and a naive ETA. `LiveConsole` keeps its composition and
+>   loses its copy of the primitives; the auditor, the inspector, the
+>   synchronizer and the standardizer each draw one progress line that is
+>   erased before every permanent line — by `RunLog` for the three that use it,
+>   by a `logging.Filter` on the console handler for the standardizer.
+>   **The gate is the TTY**: `LiveLine.is_tty` is false off a terminal and every
+>   drawing method returns immediately, so the log files, the pipes and the
+>   `--json` documents are byte-for-byte what they were. Tests assert that per
+>   tool, not just per class.
 >
-> - **Adopting `LiveConsole`'s renderer in the other four tools** — a
->   user-visible UI change, not code health. The *capability* half (colour, VT
->   mode, glyphs, safe writes) is already shared.
+> The one still open:
+>
 > - **The last ~200 uncovered lines in `subtitle_fetcher.py`** — scattered in
 >   ones and twos across forty functions; there is no block left worth a phase.
->
-> The plan is, in other words, finished. Anything after this is maintenance:
-> keeping the suite green, and the two optional items above if they are ever
-> wanted.
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run

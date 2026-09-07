@@ -1225,6 +1225,12 @@ def run(cfg: Config) -> int:
     log("")
 
     log.file = cfg.log_file
+    # ffsubsync decodes a whole movie's audio and correlates it against the
+    # subtitle: minutes per sidecar is normal, and between the "syncing" line
+    # and its verdict the tool has nothing to say. On a terminal it now says
+    # how far through the sweep it is on one rewritten line; off a terminal it
+    # draws nothing, so a logged run is byte-for-byte what it was.
+    live = log.attach_live()
 
     results: list[SyncResult] = []
     video_count = 0
@@ -1269,10 +1275,13 @@ def run(cfg: Config) -> int:
                 suffix = f" ({result.detail})" if result.detail else ""
                 log(f"[{index}/{len(jobs)}] {result.status.upper():<8} {result.srt.name} "
                     f"in {result.seconds:.1f}s{suffix}")
+                live.progress(len(results) - len(skipped), len(jobs), label="syncing",
+                              detail=result.srt.name, started=started)
     except LockTimeoutError as exc:
         log(str(exc), level="ERROR")
         return 2
     finally:
+        live.clear()
         elapsed = time.monotonic() - started
         results.sort(key=lambda res: str(res.srt).casefold())
         text = build_report(

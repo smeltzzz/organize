@@ -271,6 +271,13 @@ def audit_library(cfg: Config) -> Audit:
     if workers > 1:
         log(f"Reading {len(folders)} folder(s) with {workers} workers (read-only).")
     audited: list[FolderAudit] = []
+    # The permanent record is one line per exception plus a heartbeat every 25
+    # folders. On a terminal that leaves a long walk looking hung, so the
+    # folder being read right now is drawn on a single line that is rewritten
+    # in place and erased before anything permanent is printed. Off a terminal
+    # (a cron job, a pipe, `--json`) nothing below draws at all.
+    live = log.live
+    started = time.monotonic()
     for index, outcome in enumerate(map_ordered(folders, classify_folder, workers=workers), 1):
         if outcome.error is not None:
             # classify_folder swallows the filesystem errors it expects, so
@@ -288,6 +295,11 @@ def audit_library(cfg: Config) -> Audit:
             log(f"[{index}/{len(folders)}] {result.state}: {folder.name}", level="WARNING")
         elif index == len(folders) or index % 25 == 0:
             log(f"[{index}/{len(folders)}] audited: {folder.name}")
+        if live is not None:
+            live.progress(index, len(folders), label="auditing",
+                          detail=folder.name, started=started)
+    if live is not None:
+        live.clear()
     return Audit(cfg.source_dir, audited)
 
 # What the audit's own vocabulary means to everything else. The audit decides
@@ -654,6 +666,7 @@ def run(cfg: Config) -> int:
             print_json(audit_failure_document(cfg, "invalid-config", "; ".join(errors), 2))
         return 2
     log.file = cfg.log_file
+    log.attach_live()
     log(f"Starting read-only library audit; source={cfg.source_dir}")
     log(f"Log={cfg.log_file}; report={cfg.report_file}")
     try:

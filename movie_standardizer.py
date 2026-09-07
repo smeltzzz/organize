@@ -106,6 +106,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 import unicodedata
 import uuid
@@ -126,6 +127,7 @@ from organizekit.core import (
     EXTERNAL_SRT_MAX_BYTES,
     EXTERNAL_SRT_SUFFIX,
     CoordinationLock,
+    LiveLine,
     LockTimeoutError,
     Report,
     atomic_write_text,
@@ -618,6 +620,23 @@ class Config:
 
 CFG = Config()
 LOG = logging.getLogger("movie_standardizer")
+#: The overwritable status line, drawn only on a terminal. Set by
+#: ``setup_logging`` so it shares the console handler's fate.
+LIVE = LiveLine()
+
+
+class _EraseLiveLine(logging.Filter):
+    """Erase the live status line before a permanent log line is printed.
+
+    A filter rather than a handler subclass because it has to run for the
+    console handler only — the log *file* has no cursor to rewind — and
+    because it must run before the record is formatted, not after.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003 - logging's name
+        LIVE.clear()
+        return True
+
 
 @dataclass
 class RunSummary:
@@ -844,6 +863,9 @@ def setup_logging(cfg: Config) -> None:
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
     sh.setLevel(logging.DEBUG if cfg.verbose else logging.INFO)
+    global LIVE
+    LIVE = LiveLine()
+    sh.addFilter(_EraseLiveLine())
     LOG.addHandler(sh)
     if cfg.log_file:
         try:
@@ -2919,12 +2941,21 @@ def batch_scan(source: Path) -> None:
         LOG.error("Cannot list %s: %s", source, exc)
         record_outcome("failed", "batch scan", src=source, reason=str(exc))
         return
+    # A batch of finished torrents is mostly filesystem work with an ffprobe
+    # here and there, and every item already logs what happened to it. What
+    # was missing on a terminal is where the run *is*: the line below is
+    # rewritten in place between items and erased before every log line. It
+    # does not draw at all off a terminal, so a scheduled run's output and its
+    # log file are exactly what they were.
+    candidates = [item for item in entries if not is_skipped_junk_name(item.name)]
+    started = time.monotonic()
     count = 0
-    for item in entries:
-        if is_skipped_junk_name(item.name):
-            continue
+    for item in candidates:
+        LIVE.progress(count, len(candidates), label="organizing",
+                      detail=item.name, started=started)
         handle_item(item)
         count += 1
+    LIVE.clear()
     LOG.info("--- Batch scan finished (%d items) ---", count)
 
 def _print_banner() -> None:
