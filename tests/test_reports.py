@@ -24,6 +24,7 @@ import mkv_track_cleaner as tc
 import movie_standardizer as ms
 import pipeline as pl
 import subtitle_fetcher as sf
+from organizekit import core
 
 HEAVY = "\u2550"
 
@@ -129,7 +130,7 @@ class SharedLayoutTests(_SampleReports):
             with self.subTest(tool=name):
                 self.assertTrue(text.startswith("\u2554"), text.splitlines()[0])
                 for line in text.splitlines():
-                    self.assertLessEqual(len(line), la.REPORT_WIDTH, line)
+                    self.assertLessEqual(len(line), core.REPORT_WIDTH, line)
                 self.assertTrue(text.endswith("\n"))
 
     def test_every_report_opens_with_a_scorecard(self) -> None:
@@ -205,7 +206,7 @@ class StandardizerReportContentTests(_SampleReports):
 
         self.assertIn("Small.1995.mkv", section(text, "ITEMS LEFT IN SOURCE"))
         for line in text.splitlines():
-            self.assertLessEqual(len(line), la.REPORT_WIDTH, line)
+            self.assertLessEqual(len(line), core.REPORT_WIDTH, line)
 
 
 class HostileConsoleEncodingTests(unittest.TestCase):
@@ -262,7 +263,7 @@ class ReportRendererTests(unittest.TestCase):
     delimit sections, and nothing that ever overflows the report width.
     """
 
-    WIDTH = la.REPORT_WIDTH
+    WIDTH = core.REPORT_WIDTH
 
     def test_header_is_a_box_the_exact_report_width(self) -> None:
         report = la.Report("TITLE", "subtitle")
@@ -323,14 +324,14 @@ class ReportRendererTests(unittest.TestCase):
         )
 
     def test_path_wrapping_prefers_separators_over_splitting_names(self) -> None:
-        wrapped = la.wrap_path_text("/aaa/bbb/ccc/ddd/Small.1995.mkv", 18)
+        wrapped = core.wrap_path_text("/aaa/bbb/ccc/ddd/Small.1995.mkv", 18)
         self.assertTrue(all(chunk in "/aaa/bbb/ccc/ddd/Small.1995.mkv" for chunk in wrapped))
         self.assertEqual("".join(wrapped).replace(" ", ""), "/aaa/bbb/ccc/ddd/Small.1995.mkv")
         self.assertIn("Small.1995.mkv", wrapped[-1])
         # A single component wider than the width still has to break somewhere.
-        self.assertEqual(la.wrap_path_text("x" * 40, 16), ["x" * 16] * 2 + ["x" * 8])
+        self.assertEqual(core.wrap_path_text("x" * 40, 16), ["x" * 16] * 2 + ["x" * 8])
         # Short text is untouched.
-        self.assertEqual(la.wrap_path_text("Heat (1995).mkv", 40), ["Heat (1995).mkv"])
+        self.assertEqual(core.wrap_path_text("Heat (1995).mkv", 40), ["Heat (1995).mkv"])
 
     def test_a_partial_run_never_reports_more_items_than_the_total(self) -> None:
         report = la.Report("T")
@@ -348,10 +349,10 @@ class ReportRendererTests(unittest.TestCase):
         self.assertGreater(second - first, 2)
 
     def test_table_columns_are_clipped_not_overflowed(self) -> None:
-        report = la.Report("T", width=la.REPORT_MIN_WIDTH)
+        report = la.Report("T", width=core.REPORT_MIN_WIDTH)
         report.table(["Folder", "Detail"], [["A" * 100, "B" * 100], ["short", "short"]])
         for line in report.render().splitlines():
-            self.assertLessEqual(len(line), la.REPORT_MIN_WIDTH, line)
+            self.assertLessEqual(len(line), core.REPORT_MIN_WIDTH, line)
 
     def test_report_always_ends_with_exactly_one_newline(self) -> None:
         report = la.Report("T")

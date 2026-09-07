@@ -195,7 +195,7 @@ Eight independent, mutually inconsistent version constants:
 | Location | Version |
 |---|---|
 | `pyproject.toml` | **3.4.0** |
-| `organize.py` | **3.5.0** |
+| `organize.py` | **3.6.0** |
 | `10bit.py` | 2.4.0 |
 | `mkv_track_cleaner.py` | 2.6.2 |
 | `library_auditor.py` | 2.1.0 |

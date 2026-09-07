@@ -86,7 +86,6 @@ SubDL key: https://subdl.com/panel/api
 from __future__ import annotations
 
 import argparse
-import errno
 import gzip
 import hashlib
 import html as _html
@@ -96,12 +95,10 @@ import os
 import re
 import shlex
 import shutil
-import stat
 import struct
 import subprocess
 import sys
 import tempfile
-import textwrap
 import time
 import traceback
 import unicodedata
@@ -111,23 +108,45 @@ import urllib.request
 import uuid
 import zipfile
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
-# ---------------------------------------------------------------------------
-# Shared helpers (vendored inline)
-#
-# This script is self-contained on purpose: every helper it needs is copied
-# below instead of imported from a shared module, so you can take this single
-# file anywhere and run it with nothing but the Python standard library.
-# The other scripts in this repo carry byte-identical copies of the same
-# helpers; if you change one, keep the others in sync.
-# ---------------------------------------------------------------------------
-
-STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
+# Shared implementation: everything imported here is defined exactly once,
+# in organizekit/core/. See tests/test_shared_core.py for the rule that
+# keeps it that way.
+from organizekit.core import (
+    COVERING_ENGLISH_SRT_SUFFIXES,
+    EXTERNAL_SRT_ENCODINGS,
+    EXTERNAL_SRT_MAX_BYTES,
+    EXTERNAL_SRT_SUFFIX,
+    REPORT_WIDTH,
+    BucketRegistry,
+    CoordinationLock,
+    JobOutcome,
+    Report,
+    RunLog,
+    atomic_write_text,
+    default_tool_dir,
+    describe_workers,
+    enable_utf8_stdio,
+    ensure_pooled_opener,
+    exact_external_english_srt_path,
+    host_key,
+    map_ordered,
+    normalize_srt_newlines,
+    path_norm,
+    print_text,
+    promote_legacy_external_english_srt,
+    resolve_library,
+    resolve_workers,
+    run_field_smoke_test,
+    srt_looks_valid,
+    tools_home,
+    validate_srt_sidecar,
+)
 
 # ---------------------------------------------------------------------------
 # External English SRT sidecar contract
@@ -146,92 +165,12 @@ STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
 # ISO 639-1 ``.en.srt`` form is recognized only as a legacy rename source so a
 # library cut over from the previous convention is not stuck in review.
 
-EXTERNAL_SRT_MAX_BYTES = 4 * 1024 * 1024
-
-EXTERNAL_SRT_CUE_RE = re.compile(
-    r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
-)
-
-EXTERNAL_SRT_LANG = "eng"
-
-EXTERNAL_SRT_SUFFIX = f".{EXTERNAL_SRT_LANG}.srt"  # ".eng.srt"
-
-LEGACY_EXTERNAL_SRT_SUFFIX = ".en.srt"
-
-# Either exact name covers the movie for Jellyfin: plain English or SDH.
-COVERING_ENGLISH_SRT_SUFFIXES: tuple[str, ...] = (
-    EXTERNAL_SRT_SUFFIX,
-    f".{EXTERNAL_SRT_LANG}.sdh.srt",
-)
 
 # The single agreed decode order. Every tool that turns subtitle bytes into
 # text uses this tuple and nothing else, so a tool cannot quietly accept an
 # encoding the others would reject. "utf-8-sig" first so a provider BOM does
 # not make an otherwise valid file look binary; "cp1252" last because it
 # decodes almost any byte sequence and would mask a genuine encoding problem.
-
-EXTERNAL_SRT_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "cp1252")
-
-def normalize_srt_newlines(text: str) -> str:
-    """Collapse CRLF and bare CR to LF so the cue pattern handles one form."""
-    return text.replace("\r\n", "\n").replace("\r", "\n")
-
-def decode_srt_bytes(raw: bytes) -> str | None:
-    """Decode subtitle bytes in the agreed order, or ``None`` if none applies.
-
-    Callers that need a best-effort string anyway (the fetcher inspects a
-    rejected download to explain why it was rejected) decode with
-    ``errors="replace"`` themselves rather than widening this contract.
-    """
-    for encoding in EXTERNAL_SRT_ENCODINGS:
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return None
-
-def srt_looks_valid(text: str) -> bool:
-    """True when ``text`` contains at least one well-formed SRT cue.
-
-    A file that fails this is not a subtitle: it is an error page, a stub, or a
-    truncated download, and must never be treated as covering a movie.
-    """
-    return bool(EXTERNAL_SRT_CUE_RE.search(text))
-
-def validate_srt_sidecar(path: Path) -> tuple[bool, str]:
-    """Conservatively decide whether ``path`` is a usable external SRT.
-
-    Returns ``(True, "")`` only for a regular, non-symlink, non-empty,
-    size-bounded file that decodes as text and contains at least one
-    well-formed cue.  Everything else returns ``(False, reason)`` with a
-    human-readable explanation suitable for a report line.
-
-    This never writes, follows symlinks, or deletes anything.
-    """
-    try:
-        file_stat = path.stat(follow_symlinks=False)
-    except OSError as exc:
-        return False, f"could not stat subtitle ({exc.strerror or exc})"
-    if path.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
-        return False, "not a regular file (symlink or special file)"
-    if file_stat.st_size <= 0:
-        return False, "subtitle file is empty"
-    if file_stat.st_size > EXTERNAL_SRT_MAX_BYTES:
-        return False, f"subtitle exceeds {EXTERNAL_SRT_MAX_BYTES // (1024 * 1024)} MiB safety limit"
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        return False, f"could not read subtitle ({exc.strerror or exc})"
-    text = decode_srt_bytes(raw)
-    if text is None:
-        return False, "subtitle has an unsupported text encoding"
-    if not srt_looks_valid(normalize_srt_newlines(text)):
-        return False, "subtitle contains no valid SRT cue"
-    return True, ""
-
-def exact_external_english_srt_path(media_path: Path) -> Path:
-    """Return the canonical ``<stem>.eng.srt`` path beside a movie file."""
-    return media_path.with_name(f"{media_path.stem}{EXTERNAL_SRT_SUFFIX}")
 
 
 def covering_english_srt_paths(media_path: Path) -> tuple[Path, ...]:
@@ -246,658 +185,6 @@ def is_covering_english_sidecar(path: Path, media_path: Path) -> bool:
     wanted = {candidate.name.casefold() for candidate in covering_english_srt_paths(media_path)}
     return path.name.casefold() in wanted
 
-def legacy_external_english_srt_path(media_path: Path) -> Path:
-    """Return the pre-cutover ``<stem>.en.srt`` path beside a movie file."""
-    return media_path.with_name(f"{media_path.stem}{LEGACY_EXTERNAL_SRT_SUFFIX}")
-
-def promote_legacy_external_english_srt(media_path: Path) -> tuple[Path | None, str]:
-    """Rename a validated legacy ``.en.srt`` to the canonical ``.eng.srt``.
-
-    Returns ``(canonical_path, "")`` when the canonical sidecar already exists
-    or was just created by renaming the legacy file.  Returns ``(None, reason)``
-    when there is nothing to promote or the rename is unsafe (e.g. both names
-    exist, legacy is invalid, or the destination is occupied by a non-file).
-
-    Never overwrites an existing ``.eng.srt``.  Never follows symlinks.
-    """
-    canonical = exact_external_english_srt_path(media_path)
-    legacy = legacy_external_english_srt_path(media_path)
-    try:
-        if canonical.exists() and not canonical.is_symlink() and canonical.is_file():
-            return canonical, ""
-        if canonical.exists() or canonical.is_symlink():
-            return None, f"canonical sidecar path is occupied: {canonical.name}"
-    except OSError as exc:
-        return None, f"could not inspect canonical sidecar: {exc}"
-    try:
-        if not legacy.exists() or legacy.is_symlink() or not legacy.is_file():
-            return None, "legacy .en.srt is absent"
-    except OSError as exc:
-        return None, f"could not inspect legacy sidecar: {exc}"
-    ok, reason = validate_srt_sidecar(legacy)
-    if not ok:
-        return None, f"legacy .en.srt is unusable ({reason})"
-    try:
-        os.replace(str(legacy), str(canonical))
-    except OSError as exc:
-        return None, f"could not rename legacy .en.srt to .eng.srt: {exc}"
-    return canonical, ""
-
-class LockTimeoutError(TimeoutError):
-    """Raised when a ``CoordinationLock`` cannot be acquired in time.
-
-    Subclasses :class:`TimeoutError` so callers that historically caught the
-    built-in ``TimeoutError`` (e.g. the mkv track cleaner) keep working.
-    """
-
-def try_file_lock(handle: Any, *, strict_non_contention: bool = False) -> bool:
-    """Attempt a non-blocking exclusive lock on ``handle``.
-
-    Returns ``True`` when the lock is taken, ``False`` when it is held by
-    another process.
-
-    ``strict_non_contention`` controls how a *real* OS error is handled:
-
-    * ``False`` (the historical behaviour of the per-tool run locks) treats any
-      ``OSError`` as "busy" — ``bitdepth.py`` and ``library_auditor.py`` retried
-      every failure until they timed out.
-    * ``True`` (the historical behaviour of the standardizer coordination lock)
-      re-raises genuine errors and only reports the well-known
-      "already locked" codes as busy.
-    """
-    if os.name == "nt":
-        import msvcrt
-
-        handle.seek(0)
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
-            return True
-        except OSError as exc:
-            if not strict_non_contention:
-                return False
-            if getattr(exc, "winerror", None) in {33, 36} or exc.errno in {
-                errno.EACCES,
-                errno.EAGAIN,
-            }:
-                return False
-            raise
-
-    import fcntl
-
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return True
-    except OSError as exc:
-        if not strict_non_contention:
-            return False
-        # Strict mode: the only expected "busy" condition is the lock being
-        # held by another process, which surfaces as EAGAIN/EWOULDBLOCK (and
-        # occasionally EACCES). Anything else is a real error worth raising.
-        if getattr(exc, "errno", None) in {
-            errno.EACCES,
-            errno.EAGAIN,
-            getattr(errno, "EWOULDBLOCK", errno.EAGAIN),
-        }:
-            return False
-        raise
-
-class CoordinationLock:
-    """Advisory, cross-platform, fail-closed lock shared across the tools.
-
-    This is the single implementation of the lock protocol used by
-    ``movie_standardizer.py``, ``mkv_track_cleaner.py`` and
-    ``subtitle_fetcher.py``.  Because all three hash the *same normalized
-    target path* with the *same lock file name* in the system temp directory,
-    they all contend on the identical file — which is exactly what prevents a
-    qBittorrent completion hook from placing or replacing canonical hardlinks
-    while another tool scans or remuxes them.
-
-    Usable as a context manager::
-
-        with CoordinationLock(library, timeout_seconds=60.0):
-            ...
-
-    or with explicit acquire/release::
-
-        lock = CoordinationLock(target, timeout_seconds=60.0)
-        lock.acquire()
-        try:
-            ...
-        finally:
-            lock.release()
-    """
-
-    def __init__(self, target: Path | str, *, timeout_seconds: float = 60.0) -> None:
-        normalized = os.path.normcase(os.path.normpath(str(target)))
-        key = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
-        self.path = Path(tempfile.gettempdir()) / f"{STANDARDIZER_LOCK_NAME}.{key}"
-        self.timeout_seconds = max(0.0, float(timeout_seconds))
-        self._fh: Any | None = None
-
-    def acquire(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(self.path, "a+b")  # noqa: SIM115 - released in release(), not here
-        self._fh = handle
-        # Windows msvcrt locks byte ranges; materialize the first byte once.
-        if handle.seek(0, os.SEEK_END) == 0:
-            handle.write(b"\0")
-            handle.flush()
-        deadline = time.monotonic() + self.timeout_seconds
-        try:
-            while not try_file_lock(handle, strict_non_contention=True):
-                if time.monotonic() >= deadline:
-                    raise LockTimeoutError(
-                        f"Timed out after {self.timeout_seconds:.1f}s waiting for "
-                        f"library coordination lock: {self.path}"
-                    )
-                time.sleep(0.1)
-        except BaseException:
-            handle.close()
-            self._fh = None
-            raise
-
-    def release(self) -> None:
-        handle = self._fh
-        if handle is None:
-            return
-        try:
-            if os.name == "nt":
-                import msvcrt
-
-                handle.seek(0)
-                try:
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
-                except OSError:
-                    pass
-            else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        finally:
-            handle.close()
-            self._fh = None
-
-    def __enter__(self) -> CoordinationLock:
-        self.acquire()
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        self.release()
-
-def path_norm(path: Path | str) -> str:
-    """Normalize a path the same way every tool compares them.
-
-    ``normcase`` lower-cases on Windows and is a no-op on POSIX; ``normpath``
-    collapses ``..`` and duplicate separators.  Matching this exactly is what
-    lets the standardizer, cleaner and subtitle fetcher agree on a lock key and
-    on whether two paths are the same file.
-    """
-    return os.path.normcase(os.path.normpath(str(path)))
-
-REPORT_WIDTH = 96
-
-REPORT_MIN_WIDTH = 64
-
-REPORT_INDENT = 2
-
-_RULE_HEAVY = "═"
-
-_RULE_LIGHT = "─"
-
-def enable_utf8_stdio() -> None:
-    """Pin this process's console streams to UTF-8 with replacement errors.
-
-    The reports are full of box-drawing characters, and every tool now prints
-    one.  Two failures follow from leaving the stream encoding to the locale:
-    a console that cannot represent ``\u2550`` raises ``UnicodeEncodeError``
-    half-way through a run, and a parent that captures a child's output with
-    ``text=True`` decodes it with the *locale* encoding - cp1252 on Windows -
-    which turns those same bytes into a ``UnicodeDecodeError``.
-
-    So every tool pins its own output to UTF-8 at startup, and every caller
-    that captures a child decodes it as UTF-8.  ``errors="replace"`` means a
-    console that still cannot cope degrades to ``?`` instead of aborting work
-    that has already been done.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is None:  # a replaced stream, e.g. under redirect_stdout
-            continue
-        try:
-            reconfigure(encoding="utf-8", errors="replace")
-        except (ValueError, OSError):  # closed or detached stream
-            pass
-
-def print_text(text: str) -> None:
-    """Print report text without ever raising on a legacy console encoding.
-
-    Reports contain box-drawing characters.  On a console or pipe whose
-    encoding cannot represent them, ``print`` raises ``UnicodeEncodeError``,
-    which used to surface as a crash *after* the work was already done.  The
-    fallback writes the same text with unrepresentable characters replaced.
-    """
-    try:
-        print(text, flush=True)
-    except UnicodeEncodeError:
-        try:
-            encoding = sys.stdout.encoding or "utf-8"
-            sys.stdout.buffer.write((text + "\n").encode(encoding, errors="replace"))
-            sys.stdout.buffer.flush()
-        except Exception:  # pragma: no cover - a stream that cannot be written at all
-            print(text.encode("ascii", errors="replace").decode("ascii"), flush=True)
-
-def clip_text(text: str, width: int, *, ellipsis: str = "...") -> str:
-    """Shorten ``text`` to at most ``width`` columns, marking the cut."""
-    text = str(text)
-    if width <= 0:
-        return ""
-    if len(text) <= width:
-        return text
-    if width <= len(ellipsis):
-        return text[:width]
-    return text[: width - len(ellipsis)].rstrip() + ellipsis
-
-def wrap_text(text: str, width: int) -> list[str]:
-    """Wrap ``text`` to ``width`` columns, preserving explicit line breaks."""
-    width = max(1, int(width))
-    out: list[str] = []
-    for paragraph in str(text).split("\n"):
-        if not paragraph.strip():
-            out.append("")
-            continue
-        chunks = textwrap.wrap(
-            paragraph,
-            width=width,
-            break_long_words=True,
-            break_on_hyphens=False,
-        )
-        out.extend(chunks or [""])
-    return out
-
-_PATH_BREAK_RE = re.compile(r"(?<=[/\\])|(?<=\s)")
-
-def _pack_on_separators(text: str, width: int) -> list[str]:
-    """Greedily fill lines, breaking only after a separator or a space."""
-    lines: list[str] = []
-    current = ""
-    for token in (tok for tok in _PATH_BREAK_RE.split(text) if tok):
-        if len(token) > width:
-            if current.strip():
-                lines.append(current.rstrip())
-            current = ""
-            lines.extend(line.rstrip() for line in wrap_text(token, width))
-            continue
-        if current and len(current) + len(token) > width:
-            lines.append(current.rstrip())
-            current = token
-        else:
-            current += token
-    if current.strip():
-        lines.append(current.rstrip())
-    return lines
-
-def wrap_path_text(text: str, width: int) -> list[str]:
-    """Wrap ``text`` on path separators and spaces, keeping names whole.
-
-    Report lines are usually paths, and the tail of a path - the movie folder
-    or file name - is what a reader scans for.  Breaking after ``/`` and ``\\``
-    keeps that name on one line, where ``wrap_text`` would happily split it in
-    half.  Only a single component longer than ``width`` is hard-broken, and
-    nothing is ever ellipsised away.
-    """
-    width = max(1, int(width))
-    text = str(text)
-    if len(text) <= width:
-        return [text]
-    out: list[str] = []
-    for paragraph in text.split("\n"):
-        if not paragraph.strip():
-            out.append("")
-        elif len(paragraph) <= width:
-            out.append(paragraph.rstrip())
-        else:
-            out.extend(_pack_on_separators(paragraph, width))
-    return out or [""]
-
-class Report:
-    """Builder for one tool's plain-text report.
-
-    The layout is fixed so every tool reads the same way::
-
-        +--------------------------------------------------------------+
-        |  boxed header: title, subtitle, aligned metadata             |
-        +--------------------------------------------------------------+
-
-          scorecard: right-aligned counts, one line per outcome
-
-          ══ SECTION TITLE ═════════════════════════════════════  n of m ══
-          wrapped explanation of why this section matters
-
-             1  first entry
-                Reason    aligned, wrapped detail field
-                Next      the thing to do about it
-
-    Nothing here writes to disk; call :meth:`render` and hand the text to
-    ``atomic_write_text``.
-    """
-
-    def __init__(self, title: str, subtitle: str = "", *, width: int = REPORT_WIDTH) -> None:
-        self._title = title
-        self._subtitle = subtitle
-        self._width = max(REPORT_MIN_WIDTH, int(width))
-        self._meta: list[tuple[str, str]] = []
-        self._body: list[str] = []
-
-    # -- geometry ------------------------------------------------------
-    @property
-    def width(self) -> int:
-        return self._width
-
-    @property
-    def _inner(self) -> int:
-        """Columns available inside the header box (``║ `` + text + `` ║``)."""
-        return self._width - 4
-
-    # -- header --------------------------------------------------------
-    def meta(self, label: str, value: object) -> Report:
-        """Add one ``label  value`` row to the boxed header."""
-        self._meta.append((str(label), "" if value is None else str(value)))
-        return self
-
-    def metas(self, pairs: Iterable[tuple[str, object]]) -> Report:
-        for label, value in pairs:
-            self.meta(label, value)
-        return self
-
-    @staticmethod
-    def _is_rule(line: str) -> bool:
-        """True for a line that is only rule characters (used to space entries)."""
-        stripped = line.strip()
-        return bool(stripped) and set(stripped) <= {_RULE_HEAVY, _RULE_LIGHT}
-
-    def _box_row(self, text: str) -> str:
-        return "║ " + clip_text(text, self._inner, ellipsis="..").ljust(self._inner) + " ║"
-
-    def render_header(self) -> str:
-        """Render just the boxed header (used for the startup banner too)."""
-        lines = ["╔" + _RULE_HEAVY * (self._width - 2) + "╗"]
-        lines.append(self._box_row(self._title))
-        if self._subtitle:
-            for chunk in wrap_text(self._subtitle, self._inner):
-                lines.append(self._box_row(chunk))
-        if self._meta:
-            lines.append("╟" + _RULE_LIGHT * (self._width - 2) + "╢")
-            label_width = max(len(label) for label, _ in self._meta)
-            value_width = self._inner - label_width - 2
-            for label, value in self._meta:
-                if not value:
-                    lines.append(self._box_row(label))
-                    continue
-                # Long values here are usually paths; break them at a
-                # separator so a directory name is not split mid-word.
-                chunks = wrap_path_text(value, value_width) or [""]
-                pad = " " * (label_width + 2)
-                for position, chunk in enumerate(chunks):
-                    lead = f"{label.ljust(label_width)}  " if position == 0 else pad
-                    lines.append(self._box_row(lead + chunk))
-        lines.append("╚" + _RULE_HEAVY * (self._width - 2) + "╝")
-        return "\n".join(lines)
-
-    # -- body ----------------------------------------------------------
-    def blank(self, count: int = 1) -> Report:
-        self._body.extend([""] * max(0, count))
-        return self
-
-    def rule(self, char: str = _RULE_LIGHT, *, indent: int = REPORT_INDENT) -> Report:
-        self._body.append(" " * indent + char * max(0, self._width - indent))
-        return self
-
-    def paragraph(self, text: str, *, indent: int = REPORT_INDENT) -> Report:
-        """A wrapped block of prose; leading spaces on continuation lines."""
-        for chunk in wrap_text(text, self._width - indent):
-            self._body.append(" " * indent + chunk)
-        return self
-
-    def title_line(self, text: str, *, right: str = "", indent: int = REPORT_INDENT) -> Report:
-        """``text`` left-aligned with ``right`` pushed to the right margin."""
-        span = self._width - indent
-        if not right:
-            self._body.append(" " * indent + clip_text(text, span))
-            return self
-        gap = span - len(right) - len(text)
-        if gap < 2:
-            self._body.append(" " * indent + clip_text(f"{text}  {right}", span))
-        else:
-            self._body.append(" " * indent + text + " " * gap + right)
-        return self
-
-    def scorecard(self, rows: Iterable[tuple], *, indent: int = REPORT_INDENT) -> Report:
-        """Render ``(count, label, hint)`` rows between two light rules.
-
-        The count is right-aligned so a reader can scan the numbers as a
-        column, and the hint column is clipped rather than wrapped: a scorecard
-        is meant to fit on one screen.
-        """
-        materialized = [(str(count), str(label), str(hint or "")) for count, label, hint in rows]
-        if not materialized:
-            return self
-        count_width = max(4, max(len(count) for count, _, _ in materialized))
-        label_width = max(len(label) for _, label, _ in materialized)
-        span = self._width - indent
-        self.rule(indent=indent)
-        for count, label, hint in materialized:
-            line = f"{count:>{count_width}}   {label:<{label_width}}"
-            if hint:
-                room = span - len(line) - 3
-                if room > 8:
-                    line += "   " + clip_text(hint, room)
-            self._body.append(" " * indent + clip_text(line, span))
-        self.rule(indent=indent)
-        return self
-
-    def section(
-        self,
-        title: str,
-        *,
-        count: int | None = None,
-        total: int | None = None,
-        intro: str = "",
-        indent: int = REPORT_INDENT,
-    ) -> Report:
-        """Open a major section: a heavy banner plus an optional explanation."""
-        if self._body and self._body[-1].strip():
-            self.blank()
-        tally = ""
-        if count is not None:
-            # A partial or interrupted run can report more items in a group than
-            # the scan counted; "5 of 3" would be nonsense, so the total is only
-            # shown when it is actually the larger number.
-            show_total = total is not None and int(total) >= int(count)
-            tally = f"{count} of {total}" if show_total else str(count)
-        span = self._width - indent
-        head = f"{_RULE_HEAVY}{_RULE_HEAVY} {title} "
-        tail = f" {tally} {_RULE_HEAVY}{_RULE_HEAVY}" if tally else ""
-        fill = span - len(head) - len(tail)
-        if fill < 3:
-            self._body.append(" " * indent + clip_text(head.strip() + ("  " + tally if tally else ""), span,
-                                                      ellipsis=""))
-        else:
-            self._body.append(" " * indent + head + _RULE_HEAVY * fill + tail)
-        if intro:
-            self.blank()
-            self.paragraph(intro, indent=indent)
-        self.blank()
-        return self
-
-    def subsection(
-        self,
-        title: str,
-        *,
-        count: int | None = None,
-        indent: int = REPORT_INDENT,
-    ) -> Report:
-        """Open a labelled group inside a section (one light rule, not a box)."""
-        if self._body and self._body[-1].strip():
-            self.blank()
-        span = self._width - indent
-        tally = f" {count}" if count is not None else ""
-        head = f"{_RULE_LIGHT}{_RULE_LIGHT} {title} "
-        tail = f"{tally} {_RULE_LIGHT}{_RULE_LIGHT}"
-        fill = span - len(head) - len(tail)
-        if fill < 3:
-            self._body.append(" " * indent + clip_text(head.strip() + tally, span, ellipsis=""))
-        else:
-            self._body.append(" " * indent + head + _RULE_LIGHT * fill + tail)
-        return self
-
-    def entry(
-        self,
-        text: str,
-        *,
-        detail: str = "",
-        ordinal: int | None = None,
-        marker: str = "",
-        fields: Iterable[tuple[str, object]] = (),
-        detail_column: int = 0,
-        indent: int = 4,
-    ) -> Report:
-        """One item in a section.
-
-        ``ordinal`` numbers the entry; ``marker`` is a short tag used instead
-        when numbering would be noise.  ``detail_column`` puts a short detail
-        on the same line at a fixed column (used for name/sidecar tables) and
-        falls back to a wrapped line underneath when it would not fit.
-        ``fields`` are ``label  value`` pairs aligned under the entry text.
-        """
-        if ordinal is not None:
-            prefix = f"{ordinal:>4}  "
-        elif marker:
-            prefix = f"{marker:<4}  "
-        else:
-            prefix = "      "
-        span = self._width - indent
-        head_limit = span - len(prefix)
-        if detail_column > 0:
-            # A fixed detail column only reads as a table when the entry text
-            # stays inside it, so long titles wrap to a continuation line
-            # instead of pushing every detail sideways.
-            head_limit = min(head_limit, max(8, detail_column - indent - len(prefix)))
-        # Entry text wraps rather than being ellipsised: the tail of a long
-        # path is usually the part a reader came for, and clipping it away
-        # hides the very information the report exists to convey.
-        head_chunks = wrap_path_text(text, max(8, head_limit)) or [""]
-        # Entries breathe: a blank line separates them, but a section banner or
-        # its explanation paragraph keeps the first entry tight underneath.
-        if self._body and self._body[-1].strip() and not self._is_rule(self._body[-1]):
-            self._body.append("")
-        head_index = len(self._body)
-        self._body.append(" " * indent + prefix + head_chunks[0])
-        continuation = " " * (indent + len(prefix))
-        self._body.extend(continuation + chunk for chunk in head_chunks[1:])
-        materialized = [(str(label), str(value or "")) for label, value in fields]
-        if materialized:
-            label_width = max(6, max(len(label) for label, _ in materialized))
-            for label, value in materialized:
-                lead = f"{label.ljust(label_width)}  "
-                chunks = wrap_text(value, max(8, span - len(prefix) - len(lead))) or [""]
-                self._body.append(continuation + lead + chunks[0])
-                for chunk in chunks[1:]:
-                    self._body.append(continuation + " " * len(lead) + chunk)
-        if detail:
-            head = head_chunks[0]
-            # A detail can ride on the entry's own line only when that entry
-            # text did not have to wrap; otherwise it belongs underneath.
-            if detail_column > 0 and len(head_chunks) == 1:
-                room = detail_column - indent - len(prefix) - len(head)
-                if room >= 1 and len(detail) <= span - detail_column:
-                    self._body[head_index] = (
-                        " " * indent + prefix + head.ljust(detail_column - indent - len(prefix)) + detail
-                    )
-                    return self
-            for chunk in wrap_text(detail, max(8, span - len(prefix) - 2)):
-                self._body.append(continuation + "  " + chunk)
-        return self
-
-    def table(
-        self,
-        headers: Iterable[str],
-        rows: Iterable[Iterable],
-        *,
-        aligns: str = "",
-        indent: int = 4,
-    ) -> Report:
-        """An aligned column table with a header row and a rule under it.
-
-        ``aligns`` is one character per column, ``<`` or ``>``.  Columns are
-        sized to their content and then trimmed - widest first, never below
-        their header - so the table always fits inside the report width.
-        """
-        head = [str(column) for column in headers]
-        body = [[("" if cell is None else str(cell)) for cell in row] for row in rows]
-        columns = len(head)
-        if not columns:
-            return self
-        aligns = (aligns or "<" * columns).ljust(columns, "<")[:columns]
-        span = self._width - indent
-        widths = [
-            max([len(head[i])] + [len(row[i]) for row in body if i < len(row)])
-            for i in range(columns)
-        ]
-        gaps = 2 * (columns - 1)
-        minimums = [max(6, len(column)) for column in head]
-        while sum(widths) + gaps > span:
-            shrinkable = [i for i in range(columns) if widths[i] > minimums[i]]
-            if not shrinkable:
-                break
-            widths[max(shrinkable, key=lambda i: widths[i])] -= 1
-
-        def render(cells: list[str]) -> str:
-            parts = []
-            for i, cell in enumerate(cells[:columns]):
-                text = clip_text(cell, widths[i])
-                parts.append(text.rjust(widths[i]) if aligns[i] == ">" else text.ljust(widths[i]))
-            return " " * indent + "  ".join(parts).rstrip()
-
-        self._body.append(render(head))
-        self._body.append(" " * indent + "  ".join(_RULE_LIGHT * width for width in widths))
-        for row in body:
-            self._body.append(render(list(row) + [""] * (columns - len(row))))
-        return self
-
-    def entries(self, items: Iterable, **defaults: object) -> Report:
-        """Render an iterable of entry specs, numbered in order.
-
-        Each item is either a ``(text, detail)`` tuple or a mapping of
-        :meth:`entry` keyword arguments (``detail``, ``fields``, ``marker``).
-        ``defaults`` supplies the keyword arguments shared by every item.
-        """
-        for position, item in enumerate(items, start=1):
-            if isinstance(item, tuple):
-                text, detail = (list(item) + [""])[:2]
-                spec: dict = {"text": text, "detail": detail}
-            else:
-                spec = dict(item)
-            spec.setdefault("ordinal", position)
-            merged = {**defaults, **spec}
-            self.entry(str(merged.pop("text", "")), **merged)
-        return self
-
-    def footer(self, lines: Iterable[str] = (), *, indent: int = REPORT_INDENT) -> Report:
-        """Close the report with a light rule and trailing notes."""
-        self.blank()
-        self.rule(indent=indent)
-        for line in lines:
-            self.paragraph(line, indent=indent)
-        return self
-
-    # -- output --------------------------------------------------------
-    def render(self) -> str:
-        """The whole report as one string, always ending in a newline."""
-        lines = self.render_header().split("\n")
-        lines.append("")
-        lines.extend(self._body)
-        # Trailing spaces are invisible in a terminal and noisy in a diff.
-        return "\n".join(line.rstrip() for line in lines).rstrip() + "\n"
 
 def report_banner(
     title: str,
@@ -1051,22 +338,30 @@ class ScrapeTransport:
 
     ``get``/``post`` return raw bytes and raise :class:`ScrapeSourceError`
     for anything that is not a clean 2xx response within the size limit.
-    A per-instance throttle keeps request rates under the polite gap.
+
+    **The polite gap is per host, not per transport.** One instance drives all
+    seven scraped sources, and they are seven different servers: making a
+    request to subf2m wait a second because the previous request went to
+    podnapisi protected nobody and, over a large library, cost roughly a second
+    per source per movie. Each host now has its own token bucket, so every site
+    still sees at most one request per ``gap`` seconds and unrelated sites do
+    not queue behind each other.
     """
 
     def __init__(self, *, timeout: float = SCRAPE_HTTP_TIMEOUT_SEC,
                  gap: float = SCRAPE_REQUEST_GAP_SEC,
-                 sleep: Callable[[float], None] = time.sleep) -> None:
+                 sleep: Callable[[float], None] | None = None,
+                 clock: Callable[[], float] | None = None) -> None:
         self.timeout = timeout
         self.gap = gap
-        self._sleep = sleep
-        self._last = 0.0
+        ensure_pooled_opener()
+        # ``sleep``/``clock`` are the test seam: pacing is arithmetic, and a
+        # test should be able to prove it without spending the seconds.
+        self.buckets = BucketRegistry(gap=gap, sleep=sleep, clock=clock)
 
-    def _throttle(self) -> None:
-        wait = self.gap - (time.monotonic() - self._last)
-        if wait > 0:
-            self._sleep(wait)
-        self._last = time.monotonic()
+    def _throttle(self, url: str) -> float:
+        """Wait until ``url``'s host may be asked again. Returns seconds slept."""
+        return self.buckets.take(host_key(url))
 
     def _open(self, url: str, data: bytes | None, headers: dict[str, str]) -> bytes:
         base = {
@@ -1097,14 +392,14 @@ class ScrapeTransport:
         return raw
 
     def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
-        self._throttle()
+        self._throttle(url)
         return self._open(url, None, headers or {})
 
     def post(self, url: str, form: dict[str, str], *, headers: dict[str, str] | None = None) -> bytes:
         data = urllib.parse.urlencode(form).encode("utf-8")
         hdrs = {"Content-Type": "application/x-www-form-urlencoded"}
         hdrs.update(headers or {})
-        self._throttle()
+        self._throttle(url)
         return self._open(url, data, hdrs)
 
 
@@ -1452,7 +747,7 @@ class Addic7edSource(BaseSource):
         header_title = re.sub(r"\s+", " ", unescape(strip_tags(header_m.group("title")))).strip() if header_m else ""
         try:
             header_year = int(header_m.group("year")) if header_m else 0
-        except ValueError:
+        except ValueError:  # pragma: no cover - the pattern captures \d{4}
             header_year = 0
         cands: list[ScrapeCandidate] = []
         version_re = re.compile(r"Version\s+([^,<]+),")
@@ -1464,9 +759,18 @@ class Addic7edSource(BaseSource):
             end = movie_html.find('class="language"', lm.end())
             window = movie_html[lm.end(): end if end != -1 else lm.end() + 3000]
             text = unescape(strip_tags(window))
-            # The language name precedes the completion status in the row.
-            pre_status = text.split("Completed", 1)[0].strip()
-            lang_name = re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", pre_status).strip()
+            # The language name is the language *cell's* own text. Reading it
+            # as "everything in the row before the word Completed" made the
+            # language test depend on where the status sits: a row that put
+            # the download count first, or stated completion as a bare "80%",
+            # produced a language name like "English 1200 Downloads" and the
+            # row was dropped as non-English — silently, and for the wrong
+            # reason. Bounded by the cell, the two status checks below are
+            # the ones that decide whether a row is downloadable.
+            cell_text = unescape(strip_tags(window.split("</td>", 1)[0]))
+            lang_field = cell_text.split("Completed", 1)[0]
+            lang_name = re.sub(r"\d+(?:[.,]\d+)?\s*%", "", lang_field)
+            lang_name = re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", lang_name).strip()
             if lang_name.casefold() != "english":
                 continue
             if re.search(r"%\s*Completed", text, re.I):
@@ -1484,7 +788,7 @@ class Addic7edSource(BaseSource):
                 feature_title=header_title or identity.title,
                 feature_year=header_year or identity.year,
                 downloads=int(dl_count.group(1)) if dl_count else 0,
-                hearing_impaired="hearing impaired" in pre_status.casefold(),
+                hearing_impaired="hearing impaired" in cell_text.casefold(),
                 extra={"referer": referer},
             ))
             if len(cands) >= SCRAPE_MAX_CANDIDATES_PER_SOURCE * 2:
@@ -1694,7 +998,9 @@ class YifySubtitlesSource(BaseSource):
     def fetch(self, candidate: ScrapeCandidate, t: ScrapeTransport) -> bytes:
         page = t.get(absolute_url(self.BASE, candidate.file_id)).decode("utf-8", errors="replace")
         best_href: str | None = None
-        best_rating = -1.0
+        # -inf, not -1: the "downvoted rows are not offered" rule below is
+        # the only thing that rejects a negative rating.
+        best_rating = float("-inf")
         for row in re.findall(r"<tr data-id=[\"'][^\"']*[\"']>(.*?)(?:</tr>|$)", page, re.S):
             lang_m = re.search(r"<span[^>]*class=[\"']sub-lang[\"'][^>]*>([^<]+)</span>", row, re.I)
             if not lang_m or lang_m.group(1).strip().casefold() != "english":
@@ -1703,7 +1009,7 @@ class YifySubtitlesSource(BaseSource):
             numbers = re.findall(r"-?\d+(?:\.\d+)?", cell_m.group(1)) if cell_m else []
             try:
                 rating = float(numbers[-1]) if numbers else 0.0
-            except ValueError:
+            except ValueError:  # pragma: no cover - the pattern captures a number
                 rating = 0.0
             if rating < 0:
                 continue
@@ -1916,7 +1222,8 @@ class ScrapeChain:
         except ScrapeSourceError as exc:
             self._note_hard_failure(key, str(exc))
             raise SourceUnavailable(str(exc)) from exc
-        except Exception as exc:  # structural surprises must not kill the run
+        except Exception as exc:  # noqa: BLE001 - a scraped page is untrusted input:
+            # any structural surprise disables that source, never the run.
             self._note_parse_failure(key, f"{type(exc).__name__}: {exc}")
             raise SourceUnavailable(f"unparseable response ({exc})") from exc
         self._note_success(key)
@@ -1936,7 +1243,7 @@ class ScrapeChain:
         except ScrapeSourceError as exc:
             self._note_hard_failure(key, str(exc))
             raise SourceUnavailable(str(exc)) from exc
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - same rule for the download leg
             self._note_parse_failure(key, f"{type(exc).__name__}: {exc}")
             raise SourceUnavailable(f"unparseable response ({exc})") from exc
         self._note_success(key)
@@ -1995,403 +1302,7 @@ def run_scrape_chain(
     return None, "", None
 
 
-
-def run_scrape_self_tests(errors: list[str]) -> None:
-    """Offline self-test: registry invariants, every parser, breaker, chain."""
-
-    def check(cond: bool, msg: str) -> None:
-        if not cond:
-            errors.append(msg)
-
-    check(tuple(SCRAPE_SOURCES.keys()) == SCRAPE_PROVIDER_ORDER, "registry keys follow the documented order")
-    check(all(src.key in SCRAPE_PROVIDER_LABELS for src in SCRAPE_SOURCES.values()), "every source has a label")
-    check(len(SCRAPE_SOURCES) == 7, "exactly seven scraped sources are registered")
-
-    identity = SourceIdentity("The Father", 2020, scrape_normalize_title("The Father"))
-
-    # --- Subf2m: search result year match + movie page + zip --------------
-    subf2me_search = (
-        b"<html><body><div class=\"search-result\">"
-        b"<h2 class=\"exact\">The Father</h2><ul>"
-        b"<li><a href=\"/subtitles/111\">The Father (2019)</a></li>"
-        b"<li><a href=\"/subtitles/222\">The Father (2020)</a></li>"
-        b"</ul></div></body></html>"
-    )
-    subf2me_movie = (
-        b"<html><body><ul>"
-        b"<li class=\"item\"><li>playWEB</li>"
-        b"<a class=\"download icon-download\" href=\"/subtitles/222/en/999\"></a></li>"
-        b"</ul></body></html>"
-    )
-    subf2me_dl_page = b"<html><body><div class=\"download\"><a href=\"/dl/file.zip\">get</a></div></body></html>"
-    def make_zip(name: str, payload: bytes) -> bytes:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(name, payload)
-        return buf.getvalue()
-
-    SRT = b"1\n00:00:01,000 --> 00:00:03,000\nhello\n\n2\n00:00:04,000 --> 00:00:06,000\nworld\n"
-    subf2me_zip = make_zip("sub.utf.srt", SRT)
-
-    class FakeT:
-        def __init__(self, routes: dict[str, bytes]) -> None:
-            self.routes = routes
-            self.calls: list[str] = []
-
-        def _route(self, url: str) -> bytes:
-            best: tuple[int, bytes] | None = None
-            for prefix, payload in self.routes.items():
-                if url.startswith(prefix) and (best is None or len(prefix) > best[0]):
-                    best = (len(prefix), payload)
-            if best is None:
-                raise ScrapeSourceError(f"unrouted {url}")
-            return best[1]
-
-        def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
-            self.calls.append(url)
-            return self._route(url)
-
-        def post(self, url: str, form: dict[str, str], *, headers: dict[str, str] | None = None) -> bytes:
-            self.calls.append("POST " + url)
-            return self._route(url)
-
-    t = FakeT({
-        "https://subf2m.co/subtitles/searchbytitle": subf2me_search,
-        "https://subf2m.co/subtitles/222/en": subf2me_movie,
-        "https://subf2m.co/subtitles/222/en/999": subf2me_dl_page,
-        "https://subf2m.co/dl/file.zip": subf2me_zip,
-    })
-    src = Subf2meSource()
-    cands = src.search(identity, t)
-    check(len(cands) == 1 and cands[0].file_id == "/subtitles/222", "subf2m search keeps the right-year entry only")
-    raw = src.fetch(cands[0], t)
-    check(raw == SRT, "subf2m fetch extracts the UTF-8 entry from the zip")
-
-    # --- Podnapisi: JSON search + year filter + zip ------------------------
-    podnapisi_payload = (
-        b'{"data":[{"id":77,"releases":["The.Father.2020.1080p.BluRay.x264-GRP"],'
-        b'"custom_releases":[],"movie":{"title":"The Father","year":"2020"}},'
-        b'{"id":78,"releases":[],"custom_releases":[],"movie":{"title":"The Father","year":"2019"}}],'
-        b'"page":"1","all_pages":"1"}'
-    )
-    t = FakeT({
-        "https://www.podnapisi.net/subtitles/search/advanced": podnapisi_payload,
-        "https://www.podnapisi.net/subtitles/77/download": make_zip("77.srt", SRT),
-    })
-    cands = PodnapisiSource().search(identity, t)
-    check(len(cands) == 1 and cands[0].file_id == "77" and cands[0].release.startswith("The.Father.2020"),
-          "podnapisi keeps English year-matching subtitles only")
-    check(PodnapisiSource().fetch(cands[0], t) == SRT, "podnapisi fetch unzips the single-file archive")
-
-    # --- Addic7ed: search + completed English rows + Referer ---------------
-    addic7ed_search = b"<html><body><b>1 results found</b><a href=\"movie/555\">x</a></body></html>"
-    addic7ed_movie = (
-        b"<html><body><div>Deadpool 2 (2018) <small>...</small></div>"
-        b"<table><tr><td class=\"version\">Version 1080p x264-KILLERS,</td></tr></table>"
-        b"<table><tr><td class=\"language\">English</td><td>Completed</td><td>"
-        b"<a href=\"/sd/9001\"><strong>Download</strong></a> 123 Downloads</td></tr>"
-        b"<tr><td class=\"language\">English (Hearing Impaired)</td><td>Completed</td><td>"
-        b"<a href=\"/sd/9002\"><strong>most updated</strong></a> 5 Downloads</td></tr>"
-        b"<tr><td class=\"language\">Fran\xc3\xa7ais</td><td>Completed</td><td>"
-        b"<a href=\"/sd/9003\"><strong>Download</strong></a> 900 Downloads</td></tr>"
-        b"<tr><td class=\"language\">English</td><td>% Completed</td><td>"
-        b"<a href=\"/sd/9004\"><strong>Download</strong></a> 400 Downloads</td></tr></table>"
-        b"<a href=\"/show/12\">show</a></body></html>"
-    )
-    t = FakeT({
-        "https://www.addic7ed.com/srch.php": addic7ed_search,
-        "https://www.addic7ed.com/movie/555": addic7ed_movie,
-        "https://www.addic7ed.com/sd/": SRT,
-    })
-    ident_dp = SourceIdentity("Deadpool 2", 2018, scrape_normalize_title("Deadpool 2"))
-    cands = Addic7edSource().search(ident_dp, t)
-    check(len(cands) == 2 and all(c.feature_title == "Deadpool 2" for c in cands),
-          "addic7ed keeps English rows only and drops the incomplete (% Completed) row")
-    check(all(c.extra.get("referer", "").endswith("/show/12") for c in cands), "addic7ed captures the movie referer")
-    check(Addic7edSource().fetch(cands[0], t) == SRT, "addic7ed fetch returns the raw SRT")
-
-    # --- SubSource: direct slug + English rows + API link -------------------
-    subsource_movie = (
-        b"<html><body><table>"
-        b"<tr><td><a href=\"/subtitle/the-father-2020/english/501\">English</a></td>"
-        b"<td><a href=\"/subtitle/the-father-2020/english/501\">The.Father.2020.1080p</a></td></tr>"
-        b"<tr><td><a href=\"/subtitle/the-father-2020/french/502\">French</a></td></tr>"
-        b"</table></body></html>"
-    )
-    t = FakeT({
-        "https://subsource.net/subtitles/the-father-2020": subsource_movie,
-        "https://subsource.net/subtitle/the-father-2020/english/501": (
-            b"<html><a href=\"https://api.subsource.net/v1/subtitle/download/abc123\">Download</a></html>"
-        ),
-        "https://api.subsource.net/v1/subtitle/download/abc123": SRT,
-    })
-    cands = SubSourceSource().search(identity, t)
-    check(len(cands) == 1 and cands[0].file_id.endswith("/english/501"), "subsource finds the English file row")
-    check(SubSourceSource().fetch(cands[0], t) == SRT, "subsource fetch follows the API download link")
-
-    # --- Subsunacs: POST search + language guard + getentry ------------------
-    subsunacs_search = (
-        b"<html><body><table><tr>"
-        b"<td><a href=\"/subtitles/The_Father-9001/\">The Father</a> <span>(2020)</span></td>"
-        b"</tr></table></body></html>"
-    )
-    subsunacs_page_en = (
-        "<html><h1>The Father (2020)</h1>Език: Английски"
-        "<a href=\"https://subsunacs.net/getentry.php?id=9001&amp;ei=0\">srt</a></html>"
-    ).encode()
-    t = FakeT({
-        "https://subsunacs.net/search.php": subsunacs_search,
-        "https://subsunacs.net/subtitles/The_Father-9001/": subsunacs_page_en,
-        "https://subsunacs.net/getentry.php": SRT,
-    })
-    cands = SubsunacsSource().search(identity, t)
-    check(len(cands) == 1 and cands[0].feature_year == 2020, "subsunacs parses the search row and year")
-    check(SubsunacsSource().fetch(cands[0], t) == SRT, "subsunacs fetch verifies English and downloads the entry")
-    t2 = FakeT({
-        "https://subsunacs.net/search.php": subsunacs_search,
-        "https://subsunacs.net/subtitles/The_Father-9001/": (
-            "<html><h1>The Father (2020)</h1>Език: Български</html>"
-        ).encode(),
-    })
-    try:
-        SubsunacsSource().fetch(cands[0], t2)
-        check(False, "subsunacs must reject a Bulgarian subtitle page")
-    except CandidateRejected:
-        pass
-
-    # --- YIFY: search cards + English rows + zip ----------------------------
-    yify_search = (
-        b"<html><body>"
-        b"<div class=\"media\"><div class=\"media-body\">"
-        b"<h3 class=\"media-heading\" itemprop=\"name\">The Father</h3>"
-        b"<span class=\"movinfo-section\">2020<small>year</small></span>"
-        b"<a href=\"/movie-imdb/tt111\">go</a></div></div>"
-        b"<div class=\"media\"><div class=\"media-body\">"
-        b"<h3 class=\"media-heading\" itemprop=\"name\">The Father</h3>"
-        b"<span class=\"movinfo-section\">2019<small>year</small></span>"
-        b"<a href=\"/movie-imdb/tt222\">go</a></div></div>"
-        b"</body></html>"
-    )
-    yify_movie = (
-        b"<html><tbody>"
-        b"<tr data-id=\"1\"><span class=\"sub-lang\">Bulgarian</span>"
-        b"<td class=\"rating-cell\">4</td><a href=\"/subtitles/77\">x</a></tr>"
-        b"<tr data-id=\"2\"><span class=\"sub-lang\">English</span>"
-        b"<td class=\"rating-cell\">2</td><a href=\"/subtitles/88\">x</a></tr>"
-        b"<tr data-id=\"3\"><span class=\"sub-lang\">English</span>"
-        b"<td class=\"rating-cell\">5</td><a href=\"/subtitles/99\">x</a></tr>"
-        b"</tbody></html>"
-    )
-    t = FakeT({
-        "https://yifysubtitles.ch/search": yify_search,
-        "https://yifysubtitles.ch/movie-imdb/tt111": yify_movie,
-        "https://yifysubtitles.ch/subtitle/99.zip": make_zip("88.srt", SRT),
-    })
-    cands = YifySubtitlesSource().search(identity, t)
-    check(len(cands) == 2 and cands[0].file_id == "/movie-imdb/tt111"
-          and cands[1].feature_year == 2019,
-          "yify search returns the movie cards with their years")
-    picked = pick_candidates(identity, cands, limit=SCRAPE_MAX_CANDIDATES_PER_SOURCE)
-    check(len(picked) == 1 and picked[0].file_id == "/movie-imdb/tt111",
-          "year filtering keeps only the right-year card")
-    check(YifySubtitlesSource().fetch(cands[0], t) == SRT, "yify fetch picks the highest-rated English row")
-
-    # --- Subs.sab.bz: POST search + Cyrillic guard ---------------------------
-    subsab_search = (
-        b"<html><body><table><tr>"
-        b"<td><a href=\"http://subs.sab.bz/index.php?s=x&amp;act=download&amp;attach_id=4242\">The Father (2020)</a></td>"
-        b"</tr></table></body></html>"
-    )
-    cyrillic = "1\n00:00:01,000 --> 00:00:03,000\nздравей свят\n\n".encode()
-    t = FakeT({
-        "http://subs.sab.bz/index.php?act=download": SRT,
-        "http://subs.sab.bz/index.php?": subsab_search,
-    })
-    cands = SubsSabSource().search(identity, t)
-    check(len(cands) == 1 and cands[0].file_id == "4242", "subs.sab.bz captures the attach id")
-    check(SubsSabSource().fetch(cands[0], t) == SRT, "subs.sab.bz fetch accepts an English SRT")
-    t2 = FakeT({
-        "http://subs.sab.bz/index.php?act=download": cyrillic,
-        "http://subs.sab.bz/index.php?": subsab_search,
-    })
-    try:
-        SubsSabSource().fetch(cands[0], t2)
-        check(False, "subs.sab.bz must reject a Cyrillic payload")
-    except CandidateRejected:
-        pass
-
-    # --- selection + breaker + chain ------------------------------------------
-    mixed = [
-        ScrapeCandidate(provider="x", file_id="a", feature_title="The Father", feature_year=2020, downloads=10),
-        ScrapeCandidate(provider="x", file_id="b", feature_title="Totally Different", feature_year=2020),
-        ScrapeCandidate(provider="x", file_id="c", feature_title="The Father", feature_year=2019),
-    ]
-    picked = pick_candidates(identity, mixed)
-    check([c.file_id for c in picked] == ["a"], "selection requires title match and year match")
-
-    chain = ScrapeChain(keys=(PROVIDER_SUBF2ME,), transport=FakeT({}))
-    for _ in range(BREAKER_HARD_FAILURES):
-        try:
-            chain.search(PROVIDER_SUBF2ME, identity)
-        except SourceUnavailable:
-            pass
-    check(chain.health[PROVIDER_SUBF2ME].disabled, "three hard failures disable the source")
-    try:
-        chain.search(PROVIDER_SUBF2ME, identity)
-        check(False, "disabled source must not be searched")
-    except SourceUnavailable:
-        pass
-
-    cap_chain = ScrapeChain(keys=(PROVIDER_SUBF2ME,), transport=FakeT({}),
-                            search_caps={PROVIDER_SUBF2ME: 1}, reserved={PROVIDER_SUBF2ME: 1})
-    try:
-        cap_chain.search(PROVIDER_SUBF2ME, identity)
-        check(False, "exhausted search cap must refuse the source")
-    except SourceUnavailable as exc:
-        check("cap" in str(exc), "cap exhaustion is named in the reason")
-
-    # chain: first source dead, second source delivers
-    ok_routes = {
-        "https://www.podnapisi.net/subtitles/search/advanced": podnapisi_payload,
-        "https://www.podnapisi.net/subtitles/77/download": make_zip("77.srt", SRT),
-    }
-    reasons: list[tuple[str, str]] = []
-    # A FakeT with only the podnapisi routes hard-fails every subf2me request
-    # ("unrouted"), so the chain must fail over to podnapisi.
-    mixed_chain = ScrapeChain(
-        keys=(PROVIDER_SUBF2ME, PROVIDER_PODNAPISI),
-        transport=FakeT(ok_routes),
-    )
-    got = run_scrape_chain(
-        identity, keys=(PROVIDER_SUBF2ME, PROVIDER_PODNAPISI), chain=mixed_chain,
-        on_reason=lambda k, r: reasons.append((k, r)),
-    )
-    check(got[1] == PROVIDER_PODNAPISI and got[2] == SRT, "chain fails over to the next live source")
-    check(any(k == PROVIDER_SUBF2ME for k, _ in reasons), "the failed source's verdict is reported")
-
-
-
-
 # =============================================================================
-
-# ---------------------------------------------------------------------------
-# Library-root resolution (vendored inline; keep every copy identical)
-#
-# The movie-library root used to be a bare literal repeated in six files, with
-# only two of them honouring MOVIE_STD_TARGET. On a non-Windows host the tools
-# that ignored it happily defaulted to a Windows drive letter, wrote reports to
-# a literal path like `E:\torrents\...` in the current directory, and .gitignore
-# grew an `E:*` rule to catch the debris. One resolver, used by every tool,
-# removes that whole class of problem.
-#
-# Precedence: explicit --flag > ORGANIZE_LIBRARY > MOVIE_STD_TARGET > platform
-# default. A `.env` beside the scripts is loaded first, but never overrides a
-# variable already exported in the environment.
-# ---------------------------------------------------------------------------
-
-ENV_FILE_NAME = ".env"
-LIBRARY_ENV_VAR = "ORGANIZE_LIBRARY"
-LEGACY_LIBRARY_ENV_VAR = "MOVIE_STD_TARGET"
-
-
-def load_dotenv(path: Path | None = None) -> dict[str, str]:
-    """Load ``KEY=value`` pairs from a .env file next to the scripts.
-
-    The repo ships a fully documented ``.env.example`` telling users to copy it
-    to ``.env``, but nothing ever read that file: every documented variable
-    silently did nothing unless separately exported. This closes that gap.
-
-    Real environment variables always win, so an explicit export still beats a
-    stale file. Blank lines, ``#`` comments, a leading ``export``, and single or
-    double quotes around the value are all accepted. Malformed lines are
-    skipped rather than raising: a typo in a config file must not stop a
-    maintenance run that would otherwise work.
-    """
-    env_path = path or (Path(__file__).resolve().parent / ENV_FILE_NAME)
-    loaded: dict[str, str] = {}
-    try:
-        raw = env_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return loaded
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        if stripped.startswith("export "):
-            stripped = stripped[len("export "):].lstrip()
-        key, _, value = stripped.partition("=")
-        key = key.strip()
-        if not key:
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        loaded[key] = value
-        os.environ.setdefault(key, value)
-    return loaded
-
-
-def default_library_root() -> Path:
-    """The platform's documented library root when nothing else is configured.
-
-    The Windows default is the layout the README documents. Pointing a POSIX
-    host at ``E:\\torrents\\final_organized`` only ever produced a confusing
-    "does not exist" (or worse, a literal ``E:...`` directory in the CWD), so
-    those hosts get a sensible home-relative default instead.
-    """
-    if os.name == "nt":
-        return Path(r"E:\torrents\final_organized")
-    return Path.home() / "Media" / "Movies"
-
-
-def resolve_library(explicit: Path | str | None = None) -> Path:
-    """Resolve the movie-library root that every tool in the toolchain shares.
-
-    Precedence: an explicit flag, then ORGANIZE_LIBRARY, then the legacy
-    MOVIE_STD_TARGET, then the platform default.
-    """
-    load_dotenv()
-    if explicit is not None and str(explicit).strip():
-        return Path(explicit).expanduser()
-    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
-        value = (os.environ.get(var) or "").strip()
-        if value:
-            return Path(value).expanduser()
-    return default_library_root()
-
-
-def describe_library_origin(explicit: Path | str | None = None) -> str:
-    """Human-readable provenance of the resolved root, for error messages."""
-    load_dotenv()
-    if explicit is not None and str(explicit).strip():
-        return "--source"
-    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
-        if (os.environ.get(var) or "").strip():
-            return var
-    return f"the default library root ({default_library_root()})"
-
-
-def default_reports_root() -> Path:
-    r"""Where logs, reports and probe caches go when nothing is configured.
-
-    These must live OUTSIDE the media library (the auditor would otherwise
-    count a log folder at the library root as a movie folder). On Windows that
-    is the documented tools directory; elsewhere it follows the XDG state
-    convention. Hardcoding the Windows path for every platform is what made a
-    POSIX run scatter literal `E:\torrents\...` filenames into the current
-    working directory.
-    """
-    if os.name == "nt":
-        return Path(r"E:\torrents\tools\ReportsAndLogs")
-    state_home = (os.environ.get("XDG_STATE_HOME") or "").strip()
-    base = Path(state_home) if state_home else Path.home() / ".local" / "state"
-    return base / "organize"
-
-
-def default_tool_dir(tool_name: str) -> Path:
-    """The per-tool subdirectory of :func:`default_reports_root`."""
-    return default_reports_root() / tool_name
-
 
 LIBRARY_DIR = str(resolve_library())
 # Logs and reports live under tools\ReportsAndLogs so the root of E:\torrents
@@ -2618,18 +1529,10 @@ class VideoSnapshot:
 class ConcurrentSidecarError(RuntimeError):
     """Raised when another actor safely created the requested sidecar first."""
 
-def log(msg: str, level: str = "INFO", log_file: Path | None = None) -> None:
-    line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [{level}] {msg}"
-    # Never let a console encoding abort a run: the progress lines carry an em
-    # dash and the report carries box-drawing characters.
-    print_text(line)
-    if log_file:
-        try:
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-            with log_file.open("a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
-        except OSError:
-            pass
+# The console/file logger every tool shares: see organizekit/core/runlog.py
+# for why a logging failure is never allowed to end a run. The fetcher passes
+# cfg.log_file explicitly at every call site, so no default file is set here.
+log = RunLog()
 
 def video_snapshot(path: Path) -> VideoSnapshot:
     """Capture a no-follow video identity before an external-provider transaction."""
@@ -2689,7 +1592,14 @@ class OpenSubtitlesClient:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.token: str | None = None
-        self._last_call = 0.0
+        # Reuse the TCP+TLS connection between requests to the same host. This
+        # installs a urllib opener, so it changes nothing about how the calls
+        # below are written or tested (ORGANIZE_NO_KEEPALIVE=1 turns it off).
+        ensure_pooled_opener()
+        # One bucket per host: the API and the download host it hands back are
+        # different servers with separate limits, and a 429 from one of them
+        # says nothing about the other.
+        self.buckets = BucketRegistry(gap=REQUEST_GAP_SEC)
 
     def _headers(self, *, auth: bool = False) -> dict[str, str]:
         h = {
@@ -2702,11 +1612,9 @@ class OpenSubtitlesClient:
             h["Authorization"] = f"Bearer {self.token}"
         return h
 
-    def _throttle(self) -> None:
-        wait = REQUEST_GAP_SEC - (time.monotonic() - self._last_call)
-        if wait > 0:
-            time.sleep(wait)
-        self._last_call = time.monotonic()
+    def _throttle(self, url: str) -> float:
+        """Wait until ``url``'s host may be asked again. Returns seconds slept."""
+        return self.buckets.take(host_key(url))
 
     def _request(
         self,
@@ -2725,7 +1633,7 @@ class OpenSubtitlesClient:
 
         last_err: Exception | None = None
         for attempt in range(4):
-            self._throttle()
+            self._throttle(url)
             req = urllib.request.Request(
                 url, data=data, method=method, headers=self._headers(auth=auth),
             )
@@ -2750,7 +1658,10 @@ class OpenSubtitlesClient:
                         delay = min(30.0, float(retry_after)) if retry_after else 2.0 * (attempt + 1)
                     except ValueError:
                         delay = 2.0 * (attempt + 1)
-                    time.sleep(delay)
+                    # "Slow down" is about this host, not about this request:
+                    # hold the whole bucket back so the retry - and anything
+                    # else aimed at that host - waits it out exactly once.
+                    self.buckets.penalize(host_key(url), delay)
                     last_err = RuntimeError(f"HTTP {exc.code} {path}: {err_body}")
                     continue
                 raise RuntimeError(f"HTTP {exc.code} {path}: {err_body}") from exc
@@ -2760,7 +1671,7 @@ class OpenSubtitlesClient:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 raise last_err from exc
-        else:
+        else:  # pragma: no cover - the last attempt always raises
             raise last_err or RuntimeError(f"request failed {path}")
 
         if not raw.strip():
@@ -2861,7 +1772,7 @@ class OpenSubtitlesClient:
         # and downgrade links cannot be dereferenced by urllib.
         if parsed_link.scheme.lower() != "https" or not parsed_link.netloc:
             raise RuntimeError("download endpoint returned an invalid non-HTTPS subtitle link")
-        self._throttle()
+        self._throttle(download_url)
         req = urllib.request.Request(
             download_url, method="GET", headers={"User-Agent": APP_USER_AGENT, "Accept": "text/plain, */*;q=0.1"},
         )
@@ -3165,7 +2076,7 @@ def decode_subdl_srt_payload(data: bytes, max_bytes: int) -> str:
                         0 if LIBRARY_1080P_RE.search(info.filename or "") else 1,
                         0 if LIBRARY_QXR_RE.search(info.filename or "") else 1,
                         0 if LIBRARY_TIGOLE_RE.search(info.filename or "") else 1,
-                        1 if re.search(r"(?i)sdh|hi\\b|hearing", info.filename or "") else 0,
+                        1 if re.search(r"(?i)sdh|\bhi\b|hearing", info.filename or "") else 0,
                         info.filename.casefold(),
                     ),
                 )
@@ -3173,10 +2084,9 @@ def decode_subdl_srt_payload(data: bytes, max_bytes: int) -> str:
                 with archive.open(selected, "r") as member:
                     raw_srt = member.read(max_bytes + 1)
         except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
-            if isinstance(exc, RuntimeError) and (
-                str(exc).startswith("no usable .srt")
-                or str(exc).startswith("SubDL zip archive contains multiple")
-            ):
+            # "no usable .srt" is this function's own verdict about the
+            # archive's contents, not a failure to read it; let it through.
+            if isinstance(exc, RuntimeError) and str(exc).startswith("no usable .srt"):
                 raise
             raise RuntimeError("SubDL zip archive could not be read safely") from exc
         if len(raw_srt) > max_bytes:
@@ -3205,10 +2115,13 @@ class SubdlClient:
         before_search_request: Callable[[], None] | None = None,
     ) -> None:
         self.api_key = api_key.strip()
+        ensure_pooled_opener()
         # Queue mode supplies a durable reservation callback. Keep it optional
         # so this small client remains usable on its own and in focused tests.
         self._before_search_request = before_search_request
-        self._last_call = 0.0
+        # Per host, for the same reason as OpenSubtitles: the API lives on one
+        # server and the subtitle payloads on another.
+        self.buckets = BucketRegistry(gap=REQUEST_GAP_SEC)
 
     def _headers(self, accept: str) -> dict[str, str]:
         headers = {"User-Agent": APP_USER_AGENT, "Accept": accept}
@@ -3218,11 +2131,9 @@ class SubdlClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    def _throttle(self) -> None:
-        wait = REQUEST_GAP_SEC - (time.monotonic() - self._last_call)
-        if wait > 0:
-            time.sleep(wait)
-        self._last_call = time.monotonic()
+    def _throttle(self, url: str) -> float:
+        """Wait until ``url``'s host may be asked again. Returns seconds slept."""
+        return self.buckets.take(host_key(url))
 
     @staticmethod
     def _read_limited(response: Any, max_bytes: int, label: str) -> bytes:
@@ -3250,7 +2161,7 @@ class SubdlClient:
             # to reject a request that will never be sent.
             if self._before_search_request is not None:
                 self._before_search_request()
-            self._throttle()
+            self._throttle(url)
             request = urllib.request.Request(url, headers=self._headers("application/json"))
             try:
                 with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - fixed provider API endpoint
@@ -3265,7 +2176,9 @@ class SubdlClient:
                         delay = min(30.0, float(retry_after)) if retry_after else 2.0 * (attempt + 1)
                     except ValueError:
                         delay = 2.0 * (attempt + 1)
-                    time.sleep(delay)
+                    # Hold the host back rather than this one request (see the
+                    # OpenSubtitles client for why).
+                    self.buckets.penalize(host_key(url), delay)
                     continue
                 raise last_error from exc
             except urllib.error.URLError as exc:
@@ -3274,7 +2187,7 @@ class SubdlClient:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 raise last_error from exc
-        else:
+        else:  # pragma: no cover - the last attempt always raises
             raise last_error or RuntimeError("SubDL API request failed")
 
         try:
@@ -3420,7 +2333,7 @@ class SubdlClient:
         return self._parse_search_payload(payload, identity)
 
     def _download_bytes(self, url: str, max_bytes: int) -> bytes:
-        self._throttle()
+        self._throttle(url)
         request = urllib.request.Request(url, headers=self._headers("application/octet-stream, */*;q=0.1"))
         try:
             with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310 - URL is provider-host validated or locally built
@@ -3488,43 +2401,6 @@ def download_subdl_srt(
         max_bytes=max_bytes,
     )
 
-def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
-    r"""Publish ``text`` to ``dest`` atomically and durably.
-
-    Writes through a unique sibling file, ``fsync``\ s it, then publishes it
-    with a single atomic operation, so a crash never leaves a truncated file
-    and a reader always sees either the previous contents or the complete new
-    ones. On failure the staged file is removed and the prior file is kept.
-
-    The ``fsync`` is what makes this survive power loss rather than only a
-    process crash: without it the rename can land while the bytes it points at
-    are still only in the page cache, publishing an empty or partial file.
-    ``newline="\n"`` keeps output byte-identical across platforms instead of
-    silently gaining CRLFs on Windows.
-
-    With ``replace=False`` the publish uses ``os.link``, an atomic
-    create-if-absent, so an existing file is never clobbered. The subtitle
-    fetcher needs this: a concurrent or hand-placed English sidecar must win
-    over a download rather than be silently overwritten.
-    """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    stage = dest.with_name(f".{dest.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp")
-    try:
-        with stage.open("x", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if replace:
-            os.replace(str(stage), str(dest))
-        else:
-            os.link(str(stage), str(dest))
-            stage.unlink()
-    except OSError:
-        try:
-            stage.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
 
 def as_bool(value: Any) -> bool:
     """API fields arrive as true/false, 0/1, or the strings \"0\"/\"true\"."""
@@ -4012,783 +2888,6 @@ def refetch_english_srt(
             pass
     return True, str(pick.file_id), pick.release or "unnamed release"
 
-def run_extract_self_tests(errors: list[str]) -> None:
-    """Offline self-tests for embedded-subtitle extraction.
-
-    Everything here is local: the external binaries are replaced with a fake
-    ``subprocess.run`` that serves a canned ``mkvmerge -J`` payload and writes
-    a canned ASS track, so no MKVToolNix, no Tesseract, and no media file is
-    needed.
-    """
-
-    def check(cond: bool, msg: str) -> None:
-        if not cond:
-            errors.append(msg)
-
-    this_module = sys.modules[__name__]
-
-    def fake_binaries(_name: str, explicit: str | None = None) -> str:
-        return f"fake-{_name}"
-
-    saved_ledger = os.environ.get(EXTRACTED_LEDGER_ENV)
-    with tempfile.TemporaryDirectory(prefix="extract_selftest_") as tmpdir:
-        tmp = Path(tmpdir)
-        os.environ[EXTRACTED_LEDGER_ENV] = str(tmp / "extracted.json")
-        try:
-            # ---- 1. ASS/SSA and WebVTT conversion --------------------------
-            ass = (
-                "[Script Info]\nTitle: demo\n\n[V4+ Styles]\n"
-                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
-                "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
-                "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-                "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,"
-                "100,0,0,1,2,2,2,10,10,10,1\n\n"
-                "[Events]\n"
-                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
-                "Dialogue: 0,0:00:01.50,0:00:03.00,Default,,0,0,0,,{\\i1}Hello there\\NGeneral Kenobi\n"
-                "Dialogue: 0,0:00:05.00,0:00:06.25,Default,,0,0,0,,Second line\n"
-                "Comment: 0,0:00:09.00,0:00:10.00,Default,,0,0,0,,not shown\n"
-            )
-            converted = ass_to_srt(ass)
-            check("00:00:01,500 --> 00:00:03,000" in converted, f"ASS timing converted: {converted!r}")
-            check("Hello there\nGeneral Kenobi" in converted,
-                  f"ASS override block and \\N line break handled: {converted!r}")
-            check("Second line" in converted, "ASS second cue kept")
-            check("not shown" not in converted, "ASS Comment lines never become cues")
-            check(converted.index("Hello there") < converted.index("Second line"),
-                  "ASS cues stay in time order")
-            check(converted.startswith("1\n"), "ASS output is renumbered from 1")
-
-            ssa = (
-                "[Script Info]\n\n[V4 Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, "
-                "SecondaryColour, TertiaryColour, BackColour, Bold, Italic, BorderStyle, Outline, "
-                "Shadow, Alignment, MarginL, MarginR, MarginV, AlphaLevel, Encoding\n"
-                "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,1,2,2,2,"
-                "10,10,10,0,1\n\n"
-                "[Events]\nFormat: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
-                "Dialogue: Marked=0,0:00:02.00,0:00:04.00,Default,,0,0,0,,SSA cue\n"
-            )
-            check("SSA cue" in ass_to_srt(ssa), "SSA v4 column order parsed (no Layer column)")
-
-            vtt = ("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello VTT\n\n"
-                   "00:00:04.000 --> 00:00:05.500 align:start\nSecond VTT\n")
-            vtt_text = vtt_to_srt(vtt)
-            check("00:00:01,000 --> 00:00:03,000" in vtt_text and "Hello VTT" in vtt_text,
-                  f"WebVTT converted: {vtt_text!r}")
-
-            messy = ("5\r\n00:00:01,000 --> 00:00:02,000\r\nfirst\r\n\r\n"
-                     "9\r\n00:00:03,000 --> 00:00:04,000\r\nsecond\r\n")
-            fixed = normalize_extracted_srt(messy)
-            check(fixed.startswith("1\n00:00:01,000 --> 00:00:02,000\nfirst\n\n2\n"),
-                  f"cues renumbered: {fixed!r}")
-            check("\r" not in fixed, "CRLF normalized away")
-
-            # ---- 2. quality gate -------------------------------------------
-            good = render_srt_cues([
-                (f"00:00:{index:02d},000", f"00:00:{index:02d},900", "This is a line of English dialogue")
-                for index in range(1, 31)
-            ])
-            ok, reason = extracted_subtitle_quality(good)
-            check(ok, f"a complete English track passes ({reason})")
-
-            short = render_srt_cues([("00:00:01,000", "00:00:02,000", "Only line")])
-            ok, reason = extracted_subtitle_quality(short)
-            check(not ok and "signs/songs-only" in reason, f"a one-cue track is refused ({reason})")
-
-            foreign = render_srt_cues([
-                ("00:00:01,000", "00:00:02,000", "Это предложение на русском языке")
-                for _ in range(30)
-            ])
-            ok, reason = extracted_subtitle_quality(foreign)
-            check(not ok and "not Latin-script" in reason, f"a Cyrillic track is refused ({reason})")
-
-            noise = render_srt_cues([
-                ("00:00:01,000", "00:00:02,000", "||| ~~~ ### ||| ~~~") for _ in range(30)
-            ])
-            ok, reason = extracted_subtitle_quality(noise, method="ocr")
-            check(not ok and "noise" in reason, f"OCR noise is refused ({reason})")
-
-            salad = render_srt_cues([
-                ("00:00:01,000", "00:00:02,000", "Qwx zp vfg blrt mnk jklqwerty") for _ in range(30)
-            ])
-            ok, reason = extracted_subtitle_quality(salad)
-            check(not ok and "does not read as English" in reason,
-                  f"word salad is refused ({reason})")
-
-            # ---- 3. track classification -----------------------------------
-            tracks: list[dict[str, Any]] = [
-                {"id": 2, "type": "subtitles",
-                 "properties": {"codec_id": "S_HDMV/PGS", "language": "eng", "track_name": "English"}},
-                {"id": 3, "type": "subtitles",
-                 "properties": {"codec_id": "S_TEXT/ASS", "language": "eng",
-                                "track_name": "English (SDH)", "flag_hearing_impaired": True}},
-                {"id": 4, "type": "subtitles",
-                 "properties": {"codec_id": "S_TEXT/UTF8", "language": "fre", "track_name": "French"}},
-                {"id": 5, "type": "subtitles",
-                 "properties": {"codec_id": "S_TEXT/UTF8", "language": "eng",
-                                "track_name": "English forced", "flag_forced": True}},
-                {"id": 6, "type": "subtitles",
-                 "properties": {"codec_id": "S_TEXT/UTF8", "language": "eng", "track_name": "Commentary"}},
-                {"id": 7, "type": "audio", "properties": {"codec_id": "A_AC3", "language": "eng"}},
-                {"id": 8, "type": "subtitles",
-                 "properties": {"codec_id": "S_VOBSUB", "language": "und", "track_name": "English"}},
-                {"id": 9, "type": "subtitles",
-                 "properties": {"codec_id": "S_KATE", "language": "eng"}},
-            ]
-            picked = classify_embedded_subtitle_tracks(tracks)
-            check([item.track_id for item in picked] == [3, 2, 8],
-                  f"text first, then PGS then VobSub; forced/commentary/foreign dropped: "
-                  f"{[item.track_id for item in picked]}")
-            check(picked[0].sdh, "the SDH flag is carried through")
-            check(picked[0].kind == "text" and picked[1].kind == "image", "text outranks image")
-            check(classify_embedded_subtitle_tracks([]) == [], "no tracks yields no candidates")
-
-            # ---- 4. OCR backends -------------------------------------------
-            pgsrip_backend = OcrBackend(OCR_BACKEND_PGSRIP, "pgsrip + Tesseract", ("pgsrip",),
-                                        frozenset({"PGS"}), output_mode="sibling")
-            check(pgsrip_backend.build_command(Path("/tmp/4.sup"), Path("/tmp/4.srt"),
-                                               track_id=4, language="eng")
-                  == ["pgsrip", "-l", "en", str(Path("/tmp/4.sup"))],
-                  "pgsrip argv is built correctly (language filter, no output flag)")
-            check(OCR_BACKEND_AUTO_ORDER[0] == OCR_BACKEND_PGSRIP,
-                  "pgsrip is the first backend auto-detection tries")
-
-            sup_backend = OcrBackend(OCR_BACKEND_SUP2SRT, "sup2srt + Tesseract", ("sup2srt",),
-                                     frozenset({"PGS"}))
-            check(sup_backend.build_command(Path("/tmp/3.sup"), Path("/tmp/3.srt"),
-                                            track_id=3, language="eng")
-                  == ["sup2srt", "-l", "eng", "-o",
-                      str(Path("/tmp/3.srt")), str(Path("/tmp/3.sup"))],
-                  "sup2srt argv is built correctly")
-            se_backend = OcrBackend(OCR_BACKEND_SUBTITLEEDIT, "Subtitle Edit", ("SubtitleEdit",),
-                                    frozenset({"PGS", "VOBSUB"}), output_mode="sibling")
-            se_argv = se_backend.build_command(Path("/tmp/3.sup"), Path("/tmp/out.srt"),
-                                               track_id=3, language="eng")
-            check(se_argv[:4] == ["SubtitleEdit", "/convert", str(Path("/tmp/3.sup")), "srt"],
-                  f"Subtitle Edit argv: {se_argv}")
-            check(se_backend.result_path(Path("/tmp/3.sup"), Path("/tmp/out.srt")) == Path("/tmp/3.srt"),
-                  "Subtitle Edit writes beside its input")
-            pg_backend = OcrBackend(OCR_BACKEND_PGSTOSRT, "PgsToSrt",
-                                    ("dotnet", "/opt/PgsToSrt.dll"), frozenset({"PGS"}))
-            check("--tesseractlanguage" in pg_backend.build_command(
-                Path("/tmp/3.sup"), Path("/tmp/o.srt"), track_id=3, language="en"),
-                "PgsToSrt is given a Tesseract language")
-            custom_backend = OcrBackend(OCR_BACKEND_CUSTOM, "custom", ("/opt/ocr.sh",),
-                                        frozenset({"PGS"}), arg_template=("{input}", "{output}"))
-            check(custom_backend.build_command(Path("/tmp/3.sup"), Path("/tmp/o.srt"),
-                                               track_id=3, language="en")
-                  == ["/opt/ocr.sh", str(Path("/tmp/3.sup")), str(Path("/tmp/o.srt"))],
-                  "custom template is expanded")
-            check(not sup_backend.supports_track(picked[2]),
-                  "sup2srt refuses a VobSub track it cannot read")
-            with tempfile.TemporaryDirectory() as ocr_dir:
-                ocr_root = Path(ocr_dir)
-                src = ocr_root / "track4.sup"
-                src.write_bytes(b"pgs")
-                expected = ocr_root / "track4.srt"
-                check(find_sibling_srt(src, expected) is None,
-                      "no output file means the OCR pass produced nothing")
-                (ocr_root / "track4.eng.srt").write_text(
-                    "1\n00:00:01,000 --> 00:00:02,000\nHi\n", encoding="utf-8")
-                check(find_sibling_srt(src, expected) is not None,
-                      "a backend that renames its output is still found")
-                expected.write_text("1\n00:00:01,000 --> 00:00:02,000\nHi\n", encoding="utf-8")
-                check(find_sibling_srt(src, expected) == expected,
-                      "the documented output name always wins")
-
-            backend, note = detect_ocr_backend(OCR_BACKEND_NONE)
-            check(backend is None and "disabled" in note, "--ocr-backend none disables OCR")
-            backend, note = detect_ocr_backend(OCR_BACKEND_CUSTOM, explicit_bin="",
-                                               arg_template="{input} {output}")
-            check(backend is None and "--ocr-bin" in note,
-                  "a custom backend without a binary explains itself")
-
-            # ---- 5. extraction record (read by sync_subtitles.py) ----------
-            video = tmp / "Movie (2020)" / "Movie (2020).mkv"
-            video.parent.mkdir(parents=True, exist_ok=True)
-            video.write_bytes(b"movie-bytes")
-            sidecar = tmp / "Movie (2020)" / "Movie (2020).eng.srt"
-            sidecar.write_text(good, encoding="utf-8")
-            track = EmbeddedSubtitleTrack(track_id=3, codec_id="S_TEXT/ASS", language="eng",
-                                          name="English", kind="text", extension=".ass")
-            check(record_extracted_sidecar(video, sidecar, track=track, method="text",
-                                           cue_count=30, sha256=sha256_text(good)),
-                  "an extraction is recorded durably")
-            found = find_extracted_record(sidecar, sha256_text(good))
-            check(found is not None and found["track_id"] == 3 and found["method"] == "text",
-                  "the record reads back")
-            check(find_extracted_record(sidecar, "stale-hash") is None,
-                  "a sidecar replaced since extraction is no longer trusted")
-            check(find_extracted_record(tmp / "Other (2021)" / "Other (2021).eng.srt") is None,
-                  "an unknown sidecar has no record")
-
-            # ---- 6. one movie, end to end, with faked binaries -------------
-            movie_dir = tmp / "library" / "Fake (2021)"
-            movie_dir.mkdir(parents=True)
-            movie = movie_dir / "Fake (2021).mkv"
-            movie.write_bytes(b"mkv-bytes")
-            dest = movie.with_name("Fake (2021).eng.srt")
-            probe_payload = json.dumps({"tracks": [
-                {"id": 0, "type": "video", "properties": {"codec_id": "V_MPEGH/ISO/HEVC"}},
-                {"id": 1, "type": "audio",
-                 "properties": {"codec_id": "A_TRUEHD", "language": "eng"}},
-                {"id": 2, "type": "subtitles",
-                 "properties": {"codec_id": "S_TEXT/ASS", "language": "eng", "track_name": "English"}},
-            ]})
-
-            def fake_run(command: Sequence[str], **_kwargs: Any) -> Any:
-                argv = [str(part) for part in command]
-                if "-J" in argv:
-                    return subprocess.CompletedProcess(argv, 0, probe_payload.encode("utf-8"), b"")
-                if len(argv) > 1 and argv[1] == "tracks":
-                    target = argv[-1].split(":", 1)[1]
-                    Path(target).write_text(ass, encoding="utf-8")
-                    return subprocess.CompletedProcess(argv, 0, b"", b"")
-                return subprocess.CompletedProcess(argv, 0, b"", b"")
-
-            with mock.patch.object(subprocess, "run", fake_run), \
-                    mock.patch.object(this_module, "find_mkvtoolnix_binary", fake_binaries):
-                outcome = extract_embedded_english_srt(movie, dest, ExtractOptions(min_cues=2))
-            check(outcome.ok, f"a text track is extracted end to end ({outcome.detail})")
-            check(outcome.method == "text" and outcome.cue_count == 2,
-                  f"end-to-end outcome reports the method and cue count ({outcome.cue_count})")
-            check(dest.is_file() and dest.read_text(encoding="utf-8") == ass_to_srt(ass),
-                  "the sidecar is written from the embedded track")
-            check(find_extracted_record(dest, sha256_text(ass_to_srt(ass))) is not None,
-                  "the end-to-end extraction is recorded for the sync step")
-
-            dest.unlink()
-            with mock.patch.object(subprocess, "run", fake_run), \
-                    mock.patch.object(this_module, "find_mkvtoolnix_binary", fake_binaries):
-                dry = extract_embedded_english_srt(movie, dest,
-                                                   ExtractOptions(min_cues=2, dry_run=True))
-            check(dry.ok and not dest.exists(),
-                  "a dry run previews the extraction without writing anything")
-
-            image_payload = json.dumps({"tracks": [
-                {"id": 4, "type": "subtitles",
-                 "properties": {"codec_id": "S_HDMV/PGS", "language": "eng"}},
-            ]})
-
-            def fake_run_image(command: Sequence[str], **_kwargs: Any) -> Any:
-                argv = [str(part) for part in command]
-                if "-J" in argv:
-                    return subprocess.CompletedProcess(argv, 0, image_payload.encode("utf-8"), b"")
-                return subprocess.CompletedProcess(argv, 0, b"", b"")
-
-            with mock.patch.object(subprocess, "run", fake_run_image), \
-                    mock.patch.object(this_module, "find_mkvtoolnix_binary", fake_binaries):
-                image_only = extract_embedded_english_srt(
-                    movie, dest, ExtractOptions(min_cues=2, ocr_backend=OCR_BACKEND_NONE))
-            check(not image_only.ok and not dest.exists(),
-                  "an image-only movie with OCR disabled does not create a sidecar")
-            check("OCR is disabled" in (image_only.unavailable_reason + image_only.detail),
-                  f"the image-only fall-through names the reason "
-                  f"({image_only.unavailable_reason or image_only.detail})")
-
-            missing_payload = json.dumps({"tracks": [
-                {"id": 1, "type": "audio", "properties": {"codec_id": "A_AC3", "language": "eng"}},
-            ]})
-
-            def fake_run_none(command: Sequence[str], **_kwargs: Any) -> Any:
-                argv = [str(part) for part in command]
-                if "-J" in argv:
-                    return subprocess.CompletedProcess(argv, 0, missing_payload.encode("utf-8"), b"")
-                return subprocess.CompletedProcess(argv, 0, b"", b"")
-
-            with mock.patch.object(subprocess, "run", fake_run_none), \
-                    mock.patch.object(this_module, "find_mkvtoolnix_binary", fake_binaries):
-                no_track = extract_embedded_english_srt(movie, dest, ExtractOptions(min_cues=2))
-            check(not no_track.ok and "no English subtitle track" in no_track.unavailable_reason,
-                  f"a movie with no English track falls through to the providers "
-                  f"({no_track.unavailable_reason})")
-
-            with mock.patch.object(this_module, "find_mkvtoolnix_binary", lambda *_a, **_k: None):
-                no_tools = extract_embedded_english_srt(movie, dest, ExtractOptions(min_cues=2))
-            check(not no_tools.ok and "MKVToolNix" in no_tools.unavailable_reason,
-                  "a machine without MKVToolNix reports the install, not a crash")
-        finally:
-            if saved_ledger is None:
-                os.environ.pop(EXTRACTED_LEDGER_ENV, None)
-            else:
-                os.environ[EXTRACTED_LEDGER_ENV] = saved_ledger
-
-
-def run_self_tests() -> int:
-    errors: list[str] = []
-
-    def check(cond: bool, msg: str) -> None:
-        if not cond:
-            errors.append(msg)
-
-    # Deterministic hash: 128 KiB of incrementing bytes.
-    blob = bytes(i & 0xFF for i in range(MIN_HASH_SIZE))
-    digest = moviehash_bytes(blob)
-    check(len(digest) == 16 and all(c in "0123456789abcdef" for c in digest), f"hash format {digest}")
-    # Same bytes → same hash
-    check(moviehash_bytes(blob) == digest, "hash stable")
-    # Size change changes hash
-    blob2 = blob + b"\x00"
-    check(moviehash_bytes(blob2[:MIN_HASH_SIZE]) == digest, "same first/last 128k")
-
-    payload = {
-        "data": [
-            {"attributes": {
-                "moviehash_match": False, "download_count": 99999,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": False,
-                "language": "en", "release": "wrong",
-                "files": [{"file_id": 1, "file_name": "fuzzy.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 12, "from_trusted": True,
-                "ratings": 8.5, "votes": 8,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": False,
-                "language": "en", "release": "hashy",
-                "files": [{"file_id": 2, "file_name": "Knowing.2009.BluRay.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 500,
-                "machine_translated": True, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": False,
-                "language": "en",
-                "files": [{"file_id": 3, "file_name": "mt.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 9000, "from_trusted": True,
-                "ratings": 10, "votes": 100,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": False,
-                "language": "fr",
-                "files": [{"file_id": 4, "file_name": "wrong-language.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 1000,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": True, "foreign_parts_only": False,
-                "language": "eng",
-                "files": [{"file_id": 5, "file_name": "sdh.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 1000,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": True,
-                "language": "english",
-                "files": [{"file_id": 6, "file_name": "forced.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 500,
-                "ratings": 6.5, "votes": 10,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": False,
-                "language": "en",
-                "files": [{"file_id": 7, "file_name": "Knowing.2009.1080p.BluRay.ENG.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 300, "from_trusted": True,
-                "ratings": 10, "votes": 100,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": False,
-                "language": "en",
-                "files": [{"file_id": 8, "file_name": "Knowing.2009.2160p.BluRay.ENG.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 9999, "from_trusted": True,
-                "ratings": 10, "votes": 100,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": False,
-                "language": "en",
-                "files": [{"file_id": 9, "file_name": "Inception.2010.1080p.BluRay.ENG.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 50000, "from_trusted": True,
-                "ratings": 10, "votes": 100,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": False,
-                "language": "en",
-                "files": [{"file_id": 10, "file_name": "Knowing.2009.720p.WEB.ENG.srt"}],
-            }},
-            {"attributes": {
-                "moviehash_match": True, "download_count": 7000, "from_trusted": True,
-                "ratings": 10, "votes": 100,
-                "machine_translated": False, "ai_translated": False,
-                "hearing_impaired": False, "foreign_parts_only": False,
-                "language": "en",
-                "files": [{"file_id": 11, "file_name": "Knowing.2010.1080p.BluRay.ENG.srt"}],
-            }},
-        ]
-    }
-    cands = parse_candidates(payload)
-    hash_identity = MovieIdentity("Knowing", 2009, "knowing")
-    # Downloads-first: without an identity the most-downloaded Blu-ray release
-    # wins even though it names another movie; with the movie identity the
-    # Inception upload and the wrong-year Knowing upload drop out and the
-    # 2009 Knowing release with the most downloads wins. The 50k-download WEB
-    # release never qualifies.
-    pick = pick_candidate(cands, Config())
-    check(pick is not None and pick.file_id == 9, f"downloads-first pick {pick}")
-    pick_named = pick_candidate(cands, Config(), identity=hash_identity)
-    check(pick_named is not None and pick_named.file_id == 7, f"named downloads-first pick {pick_named}")
-    web_candidate = next(candidate for candidate in cands if candidate.file_id == 10)
-    check(pick_candidate([web_candidate], Config()) is None,
-          "non-Blu-ray release must not be auto-selected")
-    inception_candidate = next(candidate for candidate in cands if candidate.file_id == 9)
-    check(pick_candidate([inception_candidate], Config(), identity=hash_identity) is None,
-          "release for another movie must not be picked")
-    check(pick_candidate([inception_candidate], Config(),
-                         identity=MovieIdentity("Inception", 2010, "inception")) is not None,
-          "title/year-matched release is selectable")
-    wrong_year = next(candidate for candidate in cands if candidate.file_id == 11)
-    check(pick_candidate([wrong_year], Config(), identity=hash_identity) is None,
-          "wrong release year must not be picked")
-    hi_named = Candidate(
-        file_id=50, release="Knowing.2009.1080p.BluRay.SDH.srt",
-        moviehash_match=True, downloads=40, votes=0, rating=0.0, trusted=False,
-        hearing_impaired=True, machine_translated=False, ai_translated=False,
-        foreign_parts_only=False, language="en",
-    )
-    check(pick_candidate([hi_named], Config(), identity=hash_identity) is not None,
-          "SDH/HI candidates are allowed when the release otherwise qualifies")
-    check(pick_candidate([candidate for candidate in cands if candidate.foreign_parts_only], Config()) is None,
-          "forced/foreign-part candidates must be excluded")
-    check(pick_candidate([candidate for candidate in cands if not candidate.moviehash_match], Config()) is None,
-          "no hash match → none")
-    os_pick = next(candidate for candidate in cands if candidate.file_id == 7)
-    subdl_pick = next(candidate for candidate in cands if candidate.file_id == 8)
-    web_pick = next(candidate for candidate in cands if candidate.file_id == 10)
-    # Equal sources: when both providers offer a qualifying release, the
-    # most-downloaded one wins regardless of provider.
-    pooled, pooled_provider, _pooled_method, pooled_reason = pick_pooled_candidates(
-        [(subdl_pick, PROVIDER_SUBDL, "subdl-release", "subdl release match"),
-         (os_pick, PROVIDER_OPENSUBTITLES, "hash", "moviehash match")],
-        hash_identity,
-    )
-    check(pooled is not None and pooled.file_id == 7 and pooled_provider == PROVIDER_OPENSUBTITLES,
-          f"pool picks the most-downloaded release across providers ({pooled_reason})")
-    # A non-qualifying (WEB) release from one provider never beats a
-    # qualifying release from the other.
-    pooled2, provider2, _method2, reason2 = pick_pooled_candidates(
-        [(web_pick, PROVIDER_SUBDL, "subdl-release", "subdl release match"),
-         (os_pick, PROVIDER_OPENSUBTITLES, "hash", "moviehash match")],
-        hash_identity,
-    )
-    check(pooled2 is not None and pooled2.file_id == 7 and provider2 == PROVIDER_OPENSUBTITLES,
-          f"non-qualifying provider release loses to the qualifying one ({reason2})")
-    # An unbroken cross-provider tie is held for review, not defaulted.
-    twin_pick = Candidate(**os_pick.__dict__)
-    tied_pool, _p, _m, tied_reason = pick_pooled_candidates(
-        [(os_pick, PROVIDER_OPENSUBTITLES, "hash", "moviehash match"),
-         (twin_pick, PROVIDER_SUBDL, "subdl-release", "subdl release match")],
-        hash_identity,
-    )
-    check(tied_pool is None and "review" in tied_reason,
-          f"cross-provider ties remain review-only ({tied_reason})")
-
-    sample = (
-        "1\n"
-        "00:00:01,000 --> 00:00:02,000\n"
-        "Hello\n"
-    )
-    check(looks_like_srt(sample), "srt detect")
-    check(not looks_like_srt("<html>nope</html>"), "html not srt")
-
-    subdl_identity = MovieIdentity("Knowing", 2009, "knowing")
-    subdl_candidate = Candidate(
-        file_id="subdl:fixture", release="Knowing.2009.1080p.BluRay",
-        moviehash_match=False, downloads=0, votes=0, rating=0.0, trusted=False,
-        hearing_impaired=False, machine_translated=False, ai_translated=False,
-        foreign_parts_only=False, language="en", feature_title="Knowing", feature_year=2009,
-        subdl_match_score=0.92,
-    )
-    subdl_pick, _subdl_reason = pick_subdl_identity_candidate([subdl_candidate], subdl_identity)
-    check(subdl_pick == subdl_candidate, "SubDL unique title/year fallback")
-    subdl_release_pick, _subdl_release_reason = pick_subdl_identity_candidate(
-        [subdl_candidate], subdl_identity, require_release_match_score=True,
-    )
-    check(subdl_release_pick == subdl_candidate, "SubDL confident release match")
-
-    def ident_candidate(file_id, release, downloads, rating, votes, trusted):
-        return Candidate(
-            file_id=file_id, release=release, moviehash_match=False, downloads=downloads,
-            votes=votes, rating=rating, trusted=trusted, hearing_impaired=False,
-            machine_translated=False, ai_translated=False, foreign_parts_only=False,
-            language="en", feature_title="Knowing", feature_year=2009,
-        )
-
-    popular_id = ident_candidate(21, "Knowing.2009.1080p.BluRay.ENG.srt", 300, 8.5, 25, False)
-    elite_id = ident_candidate(22, "Knowing.2009.2160p.BluRay.ENG.srt", 100, 10.0, 50, True)
-    web_id = ident_candidate(23, "Knowing.2009.720p.WEB.ENG.srt", 9999, 10.0, 100, True)
-    twin_id = ident_candidate(24, "Knowing.2009.1080p.BluRay.OTHER-GROUP.srt", 300, 8.5, 25, False)
-    identity_pick, identity_reason = pick_identity_candidate([elite_id, popular_id, web_id], subdl_identity)
-    check(identity_pick is not None and identity_pick.file_id == 21,
-          f"identity downloads-first pick {identity_pick} ({identity_reason})")
-    check(pick_identity_candidate([web_id], subdl_identity)[0] is None,
-          "non-Blu-ray release must not pass the identity policy")
-    tied_pick, tied_reason = pick_identity_candidate([popular_id, twin_id], subdl_identity)
-    check(tied_pick is None and "review" in tied_reason,
-          f"tied download counts still held for review ({tied_reason})")
-    # No quality floor: a popular-but-unvoted Blu-ray release is auto-selected.
-    fresh_id = ident_candidate(25, "Knowing.2009.1080p.BluRay.ENG.srt", 120, 0.0, 0, False)
-    fresh_pick, fresh_reason = pick_identity_candidate([fresh_id], subdl_identity)
-    check(fresh_pick is not None and fresh_pick.file_id == 25,
-          f"popular-but-unvoted subtitle is auto-selected ({fresh_reason})")
-    wrong_year_id = ident_candidate(26, "Knowing.2010.1080p.BluRay.ENG.srt", 9999, 10.0, 100, True)
-    check(pick_identity_candidate([wrong_year_id], subdl_identity)[0] is None,
-          "wrong release year must not pass the identity policy")
-    check(
-        normalize_subdl_download_url("/subtitle/fixture/file") == "https://dl.subdl.com/subtitle/fixture/file",
-        "SubDL relative download URL is constrained",
-    )
-    try:
-        normalize_subdl_download_url("https://example.invalid/subtitle/fixture")
-        errors.append("untrusted SubDL URL unexpectedly accepted")
-    except ValueError:
-        pass
-
-    tmp = Path(tempfile.mkdtemp(prefix="subf_"))
-    try:
-        movie = tmp / "Knowing (2009)"
-        extra = movie / "Featurettes"
-        extra.mkdir(parents=True)
-        vid = movie / "Knowing (2009).mkv"
-        with vid.open("wb") as fh:
-            fh.truncate(400 * 1024 * 1024)
-        (extra / "Making-Of.mkv").write_bytes(b"x")
-        sidecar = movie / f"Knowing (2009){EXTERNAL_SRT_SUFFIX}"
-        sidecar.write_text(sample, encoding="utf-8")
-        (movie / f"Another Movie (2009){EXTERNAL_SRT_SUFFIX}").write_text(sample, encoding="utf-8")
-        (movie / "Knowing (2009).eng.ass").write_text("[Script Info]", encoding="utf-8")
-        with (movie / "Knowing (2009).mp4").open("wb") as fh:
-            fh.truncate(400 * 1024 * 1024)
-        found = discover_videos(tmp, 300 * 1024 * 1024)
-        check(found == [vid], f"discover {found}")
-        check(has_english_sidecar(movie, "Knowing (2009)") == sidecar, "exact existing English SRT")
-        check(not is_english_srt_sidecar(movie / f"Another Movie (2009){EXTERNAL_SRT_SUFFIX}", "Knowing (2009)"),
-              "neighboring movie subtitle must not block download")
-        check(not is_english_srt_sidecar(movie / "Knowing (2009).eng.ass", "Knowing (2009)"),
-              "non-SRT sidecar must not count as direct-play policy output")
-
-        guarded = movie / f"Guarded{EXTERNAL_SRT_SUFFIX}"
-        atomic_write_text(guarded, sample, replace=False)
-        try:
-            atomic_write_text(guarded, "1\\n00:00:00,000 --> 00:00:01,000\\nreplacement\\n", replace=False)
-            errors.append("create-only sidecar write unexpectedly replaced destination")
-        except FileExistsError:
-            pass
-        check(guarded.read_text(encoding="utf-8") == sample, "create-only sidecar retains existing content")
-        check(not list(movie.glob(f".Guarded{EXTERNAL_SRT_SUFFIX}.partial.*")), "create-only sidecar leaves no temp")
-
-        # Legacy .en.srt is promoted to the canonical .eng.srt on inspect.
-        legacy_movie = tmp / "Legacy Film (2010)"
-        legacy_movie.mkdir()
-        legacy_vid = legacy_movie / "Legacy Film (2010).mkv"
-        with legacy_vid.open("wb") as fh:
-            fh.truncate(400 * 1024 * 1024)
-        (legacy_movie / "Legacy Film (2010).en.srt").write_text(sample, encoding="utf-8")
-        status, path, detail, _reason = inspect_existing_sidecars(legacy_vid)
-        check(status == "covered", f"legacy .en.srt promotes to covered: {status} {detail}")
-        check(path is not None and path.name.endswith(EXTERNAL_SRT_SUFFIX), f"promoted path {path}")
-        check(not (legacy_movie / "Legacy Film (2010).en.srt").exists(), "legacy .en.srt removed after promote")
-
-        sdh_movie = tmp / "Sdh Film (2011)"
-        sdh_movie.mkdir()
-        sdh_vid = sdh_movie / "Sdh Film (2011).mkv"
-        with sdh_vid.open("wb") as fh:
-            fh.truncate(400 * 1024 * 1024)
-        (sdh_movie / "Sdh Film (2011).eng.sdh.srt").write_text(sample, encoding="utf-8")
-        sdh_status, sdh_path, sdh_detail, _sdh_reason = inspect_existing_sidecars(sdh_vid)
-        check(sdh_status == "covered", f".eng.sdh.srt covers the movie: {sdh_status} {sdh_detail}")
-        check(sdh_path is not None and sdh_path.name.endswith(".eng.sdh.srt"), f"sdh covering path {sdh_path}")
-
-        snapshot = video_snapshot(vid)
-        with vid.open("ab") as fh:
-            fh.write(b"changed")
-        check(not video_snapshot_matches(vid, snapshot), "video snapshot detects change")
-        try:
-            decode_subtitle_bytes(gzip.compress(b"x" * (MAX_SUBTITLE_BYTES + 1)))
-            errors.append("oversized gzip subtitle unexpectedly accepted")
-        except ValueError:
-            pass
-
-        bad_cfg = QueueConfig(
-            library=movie, report_file=movie / "report.txt", log_file=tmp / "log.txt",
-        )
-        check(bool(validate_compact_config(bad_cfg)), "report-inside-library validation")
-
-        # The normal workflow is limited to a log and a report. Verify that a
-        # durable quota/retry checkpoint can be reconstructed from the log alone.
-        ledger_log = tmp / "subtitle_fetcher.log"
-        ledger_state = new_state(tmp)
-        ledger_day = day_ledger(ledger_state, "2026-01-02")
-        ledger_day["download_requests_reserved"] = 1
-        ledger_state["movies"]["fixture"] = {
-            "path": str(vid), "status": "reserved", "attempts": 1,
-        }
-        ledger_state["_dirty_movies"].add("fixture")
-        persist_state(ledger_state, ledger_log)
-        recovered_ledger = load_state(ledger_log, tmp)
-        check(
-            recovered_ledger["days"].get("2026-01-02", {}).get("download_requests_reserved") == 1,
-            "log ledger recovers reserved download count",
-        )
-        check(
-            recovered_ledger["movies"].get("fixture", {}).get("status") == "reserved",
-            "log ledger recovers pending movie status",
-        )
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-    # ---- vendored scraping sources: adapter/chain self-tests --------------
-    run_scrape_self_tests(errors)
-
-    # ---- scraping fallback tier (queue wiring) ----------------------------
-    check(active_scrape_sources(QueueConfig(library=Path("/x"), log_file=None, report_file=Path("/r"))) == (),
-          "scraping tier is off by default in bare QueueConfig")
-    cfg_scrape = QueueConfig(library=Path("/x"), log_file=None, report_file=Path("/r"), scrape_daily_cap=20)
-    check(active_scrape_sources(cfg_scrape) == SCRAPE_PROVIDER_ORDER,
-          "scraping tier enables all seven sources in failover order")
-    check(active_scrape_sources(QueueConfig(library=Path("/x"), log_file=None, report_file=Path("/r"),
-                                            scrape_daily_cap=20, skip_sources=("subf2me",)))
-          == SCRAPE_PROVIDER_ORDER[1:],
-          "skip_sources removes one source")
-    check(provider_daily_cap(cfg_scrape, "subf2me") == 20
-          and provider_reservation_field("subf2me") == "subf2me_search_requests_reserved"
-          and provider_success_field("subf2me") == "subf2me_successful_downloads"
-          and provider_label("subf2me") == SCRAPE_PROVIDER_LABELS["subf2me"],
-          "scraping keys map onto the generic quota helpers")
-    scrape_only_cfg = QueueConfig(library=Path("/x"), log_file=None, report_file=Path("/r"),
-                                  scrape_daily_cap=20)
-    scrape_only_cfg.library = Path(__file__).parent  # an existing directory
-    check(validate_compact_config(scrape_only_cfg) == [],
-          "a scraping-only configuration (no API keys) is valid")
-    dead_cfg = QueueConfig(library=Path(__file__).parent, log_file=None,
-                           report_file=Path("/r"))
-    check(any("scraping sources enabled" in e for e in validate_compact_config(dead_cfg)),
-          "no API keys and no scraping sources is rejected")
-
-    class _FakeScrapeT(ScrapeTransport):
-        def __init__(self, routes: dict[str, bytes]) -> None:
-            super().__init__(gap=0.0)
-            self.routes = routes
-
-        def _route(self, url: str) -> bytes:
-            best: tuple[int, bytes] | None = None
-            for prefix, payload in self.routes.items():
-                if url.startswith(prefix) and (best is None or len(prefix) > best[0]):
-                    best = (len(prefix), payload)
-            if best is None:
-                raise ScrapeSourceError(f"unrouted {url}")
-            return best[1]
-
-        def get(self, url: str, *, headers: dict[str, str] | None = None) -> bytes:
-            return self._route(url)
-
-        def post(self, url: str, form: dict[str, str], *, headers: dict[str, str] | None = None) -> bytes:
-            try:
-                return self._route(url)
-            except ScrapeSourceError as exc:
-                raise ScrapeSourceError(f"unrouted POST {url}") from exc
-
-    sample_srt = "1\n00:00:01,000 --> 00:00:03,000\nhello\n\n2\n00:00:04,000 --> 00:00:06,000\nworld\n"
-    import io as _io
-    import zipfile as _zf
-    _buf = _io.BytesIO()
-    with _zf.ZipFile(_buf, "w", _zf.ZIP_DEFLATED) as _z:
-        _z.writestr("The.Father.2020.utf.srt", sample_srt.encode("utf-8"))
-    subf2me_zip = _buf.getvalue()
-    subf2me_routes = {
-        "https://subf2m.co/subtitles/searchbytitle": (
-            b"<html><body><div class=\"search-result\"><h2 class=\"close\">close</h2>"
-            b"<ul><li><a href=\"/subtitles/222\">The Father (2020)</a></li>"
-            b"<li><a href=\"/subtitles/333\">The Father (2019)</a></li></ul></div></body></html>"
-        ).decode("utf-8").encode("utf-8"),
-        "https://subf2m.co/subtitles/222/en": (
-            b"<html><body><ul><li class=\"item\"><li>playWEB</li>"
-            b"<a class=\"download icon-download\" href=\"/subtitles/222/en/999\"></a></li></ul>"
-            b"</body></html>"
-        ).decode("utf-8").encode("utf-8"),
-        "https://subf2m.co/subtitles/222/en/999": (
-            b"<html><body><div class=\"download\"><a href=\"/dl/file.zip\">zip</a>"
-            b"</div></body></html>"
-        ).decode("utf-8").encode("utf-8"),
-        "https://subf2m.co/dl/file.zip": subf2me_zip,
-    }
-
-    def run_scrape_queue(routes: dict[str, bytes], tmp: Path | None = None
-                         ) -> tuple[list[JobResult], dict[str, Any], Path]:
-        """Run one queue over a one-movie scraping-only library.
-
-        Pass a previous tmp dir to run again over the same library and ledger
-        (the same-UTC-day retry gate).
-        """
-        if tmp is None:
-            tmp = Path(tempfile.mkdtemp(prefix="scrape-selftest-"))
-        library = tmp / "library"
-        movie = library / "The Father (2020)"
-        if not movie.exists():
-            movie.mkdir(parents=True)
-            (movie / "The Father (2020).mkv").write_bytes(b"v" * 64)
-        cfg = QueueConfig(
-            library=library, log_file=tmp / "fetcher.log", report_file=tmp / "report.txt",
-            scrape_daily_cap=20, min_movie_size_mb=0,
-        )
-        with mock.patch.object(sys.modules[__name__], "make_scrape_transport",
-                               return_value=_FakeScrapeT(routes)):
-            results, summary = queue_run(cfg)
-        return results, summary, tmp
-
-    results, summary, tmp = run_scrape_queue(subf2me_routes)
-    sidecar = tmp / "library" / "The Father (2020)" / "The Father (2020).eng.srt"
-    check(len(results) == 1 and results[0].status == "download"
-          and results[0].reason == REASON_DOWNLOADED,
-          "scraping tier downloads when every API source is absent")
-    check(sidecar.exists() and sidecar.read_text(encoding="utf-8").startswith("1\n00:00:01"),
-          "scraped SRT is written under the canonical sidecar name")
-    check(summary.get("scrape_successful_downloads", {}).get("subf2me") == 1,
-          "the scraping success is metered per source in the summary")
-    check(summary.get("coverage_covered") == 1 and summary.get("coverage_total") == 1,
-          "coverage counts the scraped movie as covered")
-    check(all(summary.get("scrape_sources_enabled") and k in summary["scrape_sources_enabled"]
-              for k in SCRAPE_PROVIDER_ORDER),
-          "the summary names every enabled scraping source")
-    report_text = build_report(results, QueueConfig(
-        library=tmp / "library", log_file=tmp / "fetcher.log", report_file=tmp / "report.txt",
-        scrape_daily_cap=20, min_movie_size_mb=0), summary)
-    check("1/1 (100.0%)" in report_text and "Subf2m.co" in report_text,
-          "the report shows 100% coverage and the scraping sources")
-    shutil.rmtree(tmp, ignore_errors=True)
-
-    results2, _summary2, tmp2 = run_scrape_queue({})
-    check(len(results2) == 1 and results2[0].status == "review"
-          and results2[0].reason == REASON_REVIEW,
-          "a movie no scraping source can cover is held for review")
-    detail2 = results2[0].detail
-    for key in SCRAPE_PROVIDER_ORDER:
-        check(scrape_provider_label(key) in detail2,
-              f"the review detail names the verdict of {key}")
-    state2 = load_state(tmp2 / "fetcher.log", tmp2 / "library")
-    check(any(str(rec.get("scrape_failed_utc_day") or "") == utc_day() and rec.get("scrape_failed")
-              for rec in state2["movies"].values()),
-          "the scraping failure is persisted for the next-UTC-day retry")
-
-    results3, _summary3, _tmp3 = run_scrape_queue({}, tmp=tmp2)
-    check(len(results3) == 1 and results3[0].status == "skip"
-          and results3[0].reason == REASON_QUOTA
-          and "already exhausted" in results3[0].detail,
-          "a movie exhausted today is not offered to the scraping tier twice")
-    shutil.rmtree(tmp2, ignore_errors=True)
-
-    run_extract_self_tests(errors)
-
-    if errors:
-        print("SELF-TEST FAILED:")
-        for e in errors:
-            print("  -", e)
-        return 1
-    print("SELF-TEST PASSED (hash + OpenSubtitles/SubDL picks + SRT safety + discovery + "
-          "transaction guards + scraping fallback tier + embedded extraction)")
-    return 0
 
 # =============================================================================
 # EMBEDDED SUBTITLE EXTRACTION
@@ -4983,6 +3082,11 @@ def run_external_command(
     non-zero exit, or a timeout all come back as a plain ``(rc, out, err)`` so
     the caller can report the fix and fall through to the next strategy.
     """
+    if not command:
+        # Not reachable from this tool's call sites, but subprocess answers an
+        # empty argument list with IndexError, and this function's contract is
+        # that it never raises.
+        return 127, "", "could not run command: no program was given"
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     try:
         completed = subprocess.run(
@@ -4994,7 +3098,7 @@ def run_external_command(
     except subprocess.TimeoutExpired:
         return 124, "", f"timed out after {timeout:.0f}s"
     except OSError as exc:
-        return 127, "", f"could not run {command[0] if command else 'command'}: {exc}"
+        return 127, "", f"could not run {command[0]}: {exc}"
     return completed.returncode, _decode_stream(completed.stdout), _decode_stream(completed.stderr)
 
 
@@ -5503,7 +3607,13 @@ def _resolve_program(explicit: str, name: str, *search_paths: str) -> str | None
 
 
 def _subtitleedit_program(explicit: str = "") -> tuple[str, ...] | None:
-    """Subtitle Edit is a Windows GUI app; ``mono`` runs it elsewhere."""
+    """Subtitle Edit is a Windows GUI app; ``mono`` runs it elsewhere.
+
+    The mono wrapper has to be decided *after* the program is found, not as a
+    fallback for not finding it: the lookup already knows the Linux install
+    locations, so it always resolved the ``.exe`` first and the fallback was
+    unreachable, leaving a Linux install to be exec'd as a bare .NET binary.
+    """
     known = (
         r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe",
         r"C:\Program Files (x86)\Subtitle Edit\SubtitleEdit.exe",
@@ -5511,16 +3621,14 @@ def _subtitleedit_program(explicit: str = "") -> tuple[str, ...] | None:
         "/opt/subtitleedit/SubtitleEdit.exe",
     )
     program = _resolve_program(explicit, "SubtitleEdit", *known)
-    if program:
+    if not program:
+        return None
+    if os.name == "nt" or not program.lower().endswith(".exe"):
         return (program,)
     mono = shutil.which("mono")
-    if mono:
-        for candidate in known[2:]:
-            if Path(candidate).is_file():
-                return (mono, candidate)
-        if explicit and explicit.lower().endswith(".exe") and Path(explicit).is_file():
-            return (mono, explicit)
-    return None
+    # No mono means this install cannot be run here at all, which is a backend
+    # that was not found rather than one that fails minutes into a movie.
+    return (mono, program) if mono else None
 
 
 def _pgstosrt_program(explicit: str = "") -> tuple[str, ...] | None:
@@ -5594,8 +3702,10 @@ def detect_ocr_backend(
             tokens = tuple(shlex.split(arg_template))
         except ValueError as exc:
             return None, f"--ocr-args could not be parsed ({exc})"
-        if not any(token in {"{input}", "{output}"} or "{input}" in token or "{output}" in token
-                   for token in tokens):
+        # Both, not either: without {output} the tool has no idea where the
+        # OCR result landed, and the run would fail a movie at a time.
+        if any(not any(name in token for token in tokens)
+               for name in ("{input}", "{output}")):
             return None, "--ocr-args must name both {input} and {output}"
         return OcrBackend(OCR_BACKEND_CUSTOM, "custom OCR command", (program,),
                           frozenset({"PGS", "VOBSUB", "DVBSUB"}), arg_template=tokens), ""
@@ -5673,14 +3783,6 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def extracted_ledger_path() -> Path:
     """Where the extraction record lives: outside the library, every time.
 
@@ -5691,7 +3793,7 @@ def extracted_ledger_path() -> Path:
     override = os.environ.get(EXTRACTED_LEDGER_ENV, "").strip()
     if override:
         return Path(override).expanduser()
-    return Path(__file__).resolve().parent / "ReportsAndLogs" / EXTRACTED_LEDGER_NAME
+    return tools_home() / "ReportsAndLogs" / EXTRACTED_LEDGER_NAME
 
 
 def load_extracted_ledger(path: Path | None = None) -> dict[str, Any]:
@@ -6112,6 +4214,10 @@ class QueueConfig:
     ocr_timeout_seconds: float = DEFAULT_OCR_TIMEOUT_SEC
     # 0 = no per-run cap on OCR jobs (they are local work, not provider quota)
     ocr_limit: int = 0
+    # Workers for the local pre-flight only (layout, existing sidecars,
+    # identity). 0 = decide from the CPU count. Provider requests, the quota
+    # ledger and every write stay on the single main thread whatever this says.
+    workers: int = 0
 
     def extract_options(self, *, ocr_allowed: bool = True, dry_run: bool = False) -> ExtractOptions:
         return ExtractOptions(
@@ -6542,6 +4648,623 @@ def build_scrape_chain(cfg: QueueConfig, ledger: dict[str, int],
         reserve_cb=reserve_search,
     )
 
+# =============================================================================
+# QUEUE PLANNING  (pure decisions, no I/O)
+# =============================================================================
+#
+# Two questions decide whether a movie costs anything before a single request
+# leaves this process: what its own ledger record already proved, and which
+# sources still have local quota. Both used to be inline in ``queue_run``'s
+# per-movie loop, where they could only be exercised by running the whole
+# fetcher against live providers. They are ordinary functions of their inputs,
+# so they are here, and tested as a table.
+
+
+def has_new_provider(
+    record: dict[str, Any],
+    *,
+    active_providers: Sequence[str],
+    scrape_keys: Sequence[str],
+) -> bool:
+    """True if this run can offer a movie a source its record never saw."""
+    prior = record.get("providers_checked")
+    if not isinstance(prior, list):
+        # A pre-SubDL ledger cannot say which sources it queried. Preserve
+        # its intentional OpenSubtitles review hold unless the newly added
+        # provider is actually enabled, then revisit once for that source.
+        # The new scraping tier counts as a new source for such records.
+        if scrape_keys and not record.get("scrape_checked"):
+            return True
+        return PROVIDER_SUBDL in active_providers
+    previous = {str(provider) for provider in prior}
+    if any(provider not in previous for provider in active_providers):
+        return True
+    # Legacy records predate the scraping tier: offer it to them once so
+    # every previously-held movie is re-checked against all nine sources.
+    return bool(scrape_keys and not record.get("scrape_checked"))
+
+
+@dataclass(frozen=True)
+class HistoryPlan:
+    """What a movie's own ledger record says before any provider is asked.
+
+    ``action`` is ``"fetch"`` when the movie is still worth spending requests
+    on; otherwise it is the terminal verdict for this run, and ``detail`` and
+    ``reason`` are the ones the report will show. The two scraping flags are
+    facts the tier selection below needs, not decisions.
+    """
+
+    action: str = "fetch"
+    detail: str = ""
+    reason: str = ""
+    scrape_tried_today: bool = False
+    scrape_retry_today: bool = False
+
+    @property
+    def fetch(self) -> bool:
+        return self.action == "fetch"
+
+
+def plan_from_history(
+    record: dict[str, Any],
+    *,
+    today: str,
+    retry_no_match: bool,
+    identity_fallback: bool,
+    scrape_keys: Sequence[str],
+    active_providers: Sequence[str],
+) -> HistoryPlan:
+    """Decide from the durable record alone whether to spend requests today.
+
+    The economy this encodes: a movie the scraping tier exhausted *today* is
+    not offered to it twice, one that exhausted it on an earlier day goes
+    straight back to scraping (the API tiers are already known to miss for
+    it), a deliberate manual-review hold is honoured until something changes,
+    and a download reserved today is left for the next UTC day rather than
+    reserved twice.
+    """
+    status = str(record.get("status") or "pending")
+    scrape_failed = bool(record.get("scrape_failed"))
+    scrape_failed_day = str(record.get("scrape_failed_utc_day") or "")
+    tried_today = scrape_failed and scrape_failed_day == today
+    retry_today = (
+        scrape_failed
+        and identity_fallback
+        and bool(scrape_keys)
+        and scrape_failed_day != today
+    )
+    flags = {"scrape_tried_today": tried_today, "scrape_retry_today": retry_today}
+
+    if tried_today and status in ("manual_review", "no_match"):
+        return HistoryPlan(
+            "skip",
+            "scraping sources were already exhausted for this movie today; "
+            "retrying on the next UTC day",
+            REASON_QUOTA, **flags,
+        )
+    if status == "no_match" and not (retry_no_match or identity_fallback):
+        return HistoryPlan(
+            "skip", "previous strict moviehash search had no match",
+            REASON_NO_MATCH, **flags,
+        )
+    if (
+        status == "manual_review"
+        and not retry_no_match
+        and not retry_today
+        and not has_new_provider(record, active_providers=active_providers,
+                                 scrape_keys=scrape_keys)
+    ):
+        return HistoryPlan(
+            "review", "previous identity fallback was intentionally held for review",
+            REASON_REVIEW, **flags,
+        )
+    if status == "reserved" and str(record.get("updated_utc") or "").startswith(today):
+        return HistoryPlan(
+            "skip",
+            "a provider download was already reserved today; waiting for next UTC day",
+            REASON_QUOTA, **flags,
+        )
+    return HistoryPlan(**flags)
+
+
+@dataclass(frozen=True)
+class SourcePlan:
+    """Which sources may be asked about one movie, and which are merely funded.
+
+    ``*_available`` means "configured and still inside its local daily cap";
+    ``*_tier`` additionally means "worth asking for *this* movie". They differ
+    on a scraping retry, where the API tiers are known to miss and are not
+    re-queried, but are still counted as funded so the quota-exhausted break
+    below does not mistake a retry for an empty wallet.
+    """
+
+    open_available: bool = False
+    subdl_available: bool = False
+    scrape_available: bool = False
+    api_tiers_allowed: bool = True
+
+    @property
+    def open_tier(self) -> bool:
+        return self.open_available and self.api_tiers_allowed
+
+    @property
+    def subdl_tier(self) -> bool:
+        return self.subdl_available and self.api_tiers_allowed
+
+    @property
+    def exhausted(self) -> bool:
+        """No configured source with an enabled mode has local capacity left."""
+        return not (self.open_available or self.subdl_available or self.scrape_available)
+
+
+def plan_sources(
+    cfg: QueueConfig,
+    ledger: dict[str, int],
+    history: HistoryPlan,
+    *,
+    has_open: bool,
+    has_subdl: bool,
+    has_scrape_chain: bool,
+    scrape_keys: Sequence[str],
+) -> SourcePlan:
+    """Decide which tiers this movie may be offered, spending nothing."""
+    return SourcePlan(
+        open_available=has_open and provider_has_quota(cfg, ledger, PROVIDER_OPENSUBTITLES),
+        # SubDL has no byte-exact release hash, so --no-identity-fallback also
+        # intentionally disables its release-aware/title-year lookup.
+        subdl_available=(
+            has_subdl
+            and cfg.identity_fallback
+            and provider_has_quota(cfg, ledger, PROVIDER_SUBDL)
+            and subdl_search_has_quota(cfg, ledger)
+        ),
+        scrape_available=(
+            has_scrape_chain
+            and cfg.identity_fallback
+            and any(provider_has_quota(cfg, ledger, key) for key in scrape_keys)
+        ),
+        # On a scraping retry the API tiers are already known to miss for this
+        # movie, so they are not asked again; the scraping tier is.
+        api_tiers_allowed=not (history.scrape_retry_today and not history.scrape_tried_today),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Why a provider was not asked: the review detail's vocabulary
+# ---------------------------------------------------------------------------
+# When no source produces a usable subtitle, the movie is held for review with
+# a detail line assembled from one phrase per provider - and that line is the
+# only thing the operator has to decide whether to wait for tomorrow's quota,
+# fix a filename, or go and find the subtitle by hand. "SubDL: daily search cap
+# exhausted" and "SubDL: identity fallback disabled" call for opposite actions.
+#
+# The phrases used to be built by if/elif chains buried in the middle of the
+# per-movie loop, three levels deep, reachable only by running the whole
+# fetcher against a provider. They are decisions about the ledger and the
+# configuration and nothing else, so they are functions of the ledger and the
+# configuration.
+
+
+def opensubtitles_unavailable_reason(*, api_tiers_allowed: bool) -> str:
+    """Why OpenSubtitles was configured but not asked about this movie.
+
+    Only two things stop a configured client here: the movie is on a scraping
+    retry (the API already missed on an earlier day, and asking again would
+    spend a request on a known miss), or the daily download cap is used up.
+    """
+    if not api_tiers_allowed:
+        return "OpenSubtitles: not re-queried on a scraping retry (known API miss)"
+    return "OpenSubtitles: daily download cap exhausted"
+
+
+def subdl_unavailable_reason(cfg: QueueConfig, ledger: dict[str, int], *,
+                             api_tiers_allowed: bool) -> str:
+    """Why SubDL was configured but not asked about this movie.
+
+    SubDL has two independent caps - searches and downloads - and one config
+    switch that disables it wholesale, so its answer distinguishes four cases
+    where OpenSubtitles has two. The order matters: a scraping retry explains
+    the miss even when there is quota to spare, and an exhausted *download*
+    cap is reported ahead of the search cap because there is no point spending
+    a search on a subtitle that cannot be downloaded today.
+    """
+    if not api_tiers_allowed:
+        return "SubDL: not re-queried on a scraping retry (known API miss)"
+    if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
+        return "SubDL: daily download cap exhausted"
+    if not subdl_search_has_quota(cfg, ledger):
+        return "SubDL: daily search cap exhausted"
+    return "SubDL: identity fallback disabled"
+
+
+def subdl_defer_detail(cfg: QueueConfig, ledger: dict[str, int]) -> str:
+    """Why this movie is deferred rather than held for review.
+
+    A cap reached *before* the lookup means the movie was never evaluated, so
+    it is skipped for today and retried on the next UTC day - the opposite
+    disposition to a review hold, which says a human has to intervene.
+    """
+    if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
+        return "SubDL daily download cap exhausted before lookup; deferred to the next UTC day"
+    return "SubDL daily search cap exhausted before lookup; deferred to the next UTC day"
+
+
+# ---------------------------------------------------------------------------
+# Local triage: what a movie needs, decided without asking anybody
+# ---------------------------------------------------------------------------
+# Before a movie can cost a provider request it has to get past three purely
+# local questions: is its folder laid out canonically, does it already have a
+# usable English sidecar, and what is its identity (device/inode/size/mtime and
+# the derived state key)? On a real library the great majority of movies stop
+# at question two - they are already covered - and answering it means listing
+# the movie's folder and decoding every candidate SRT in it. That is thousands
+# of small reads against a NAS, done one movie at a time, before the run has
+# spent a single request.
+#
+# ``triage_movie`` is that pre-flight for one movie, pulled out whole so it can
+# run in a worker pool. It asks no provider, spends no quota and touches no run
+# state; the only thing it may write is the in-place legacy ``.en.srt`` ->
+# ``.eng.srt`` rename that ``inspect_existing_sidecars`` has always done, and
+# that is confined to the one movie's own folder.
+#
+# What stays strictly serial is everything downstream of triage: the quota
+# ledger, the provider tiers, the downloads, the state checkpoints. Money is
+# spent by exactly one thread, in library order, exactly as before.
+
+
+# Triage is filesystem-bound - one directory listing and a few small reads per
+# movie - rather than CPU-bound, so several workers mostly hide the per-call
+# latency of a network share. The cap keeps a spinning NAS from being turned
+# into a queue of competing seeks.
+MAX_TRIAGE_WORKERS = 8
+
+
+@dataclass(frozen=True)
+class Triage:
+    """One movie's local verdict, decided before any provider is involved."""
+
+    video: Path
+    layout_issue: str = ""
+    sidecar_status: str = ""
+    existing: Path | None = None
+    sidecar_detail: str = ""
+    sidecar_reason: str = ""
+    snapshot: VideoSnapshot | None = None
+    key: str = ""
+    error: str = ""
+
+    @property
+    def fetchable(self) -> bool:
+        """True when nothing local settled this movie and it may be offered out."""
+        return not self.layout_issue and not self.error and self.snapshot is not None
+
+
+def triage_movie(video: Path, library: Path) -> Triage:
+    """Answer every local question about one movie, in the run's own order.
+
+    The order matters and matches the sequential run exactly: a non-canonical
+    folder is skipped before its sidecars are read, an existing sidecar settles
+    the movie before its identity is captured, and an identity error is only
+    reported for a movie that would otherwise have been fetched.
+    """
+    layout_issue = canonical_movie_layout_issue(video, library)
+    if layout_issue:
+        return Triage(video, layout_issue=layout_issue)
+    status, existing, detail, reason = inspect_existing_sidecars(video)
+    settled = Triage(
+        video, sidecar_status=status, existing=existing,
+        sidecar_detail=detail, sidecar_reason=reason,
+    )
+    if status in {"covered", "review"}:
+        return settled
+    try:
+        snapshot = video_snapshot(video)
+        key = movie_key(video, snapshot)
+    except OSError as exc:
+        return replace(settled, error=str(exc) or exc.__class__.__name__)
+    return replace(settled, snapshot=snapshot, key=key)
+
+
+# How far ahead of the sequential loop the triage pool is allowed to work. A
+# run stops the moment the last provider quota is gone, so an unbounded
+# pre-pass would read every folder in a 900-movie library to serve a run that
+# only got to movie 40. One chunk is the whole waste, and it is local reads.
+TRIAGE_LOOKAHEAD = 32
+
+
+class TriageQueue:
+    """Triage movies a chunk at a time, in parallel, handed back in order."""
+
+    def __init__(
+        self,
+        videos: Sequence[Path],
+        library: Path,
+        *,
+        workers: int = 1,
+        chunk: int = TRIAGE_LOOKAHEAD,
+    ) -> None:
+        self._videos = list(videos)
+        self._library = library
+        self._workers = max(1, int(workers))
+        self._chunk = max(1, int(chunk))
+        self._ready: dict[int, Triage] = {}
+
+    @property
+    def workers(self) -> int:
+        return self._workers
+
+    def at(self, index: int) -> Triage:
+        """Return the verdict for the 1-based ``index``-th movie."""
+        if index not in self._ready:
+            self._fill(index)
+        return self._ready[index]
+
+    def _fill(self, index: int) -> None:
+        start = index - 1
+        batch = self._videos[start:start + self._chunk]
+        outcomes = map_ordered(
+            batch,
+            lambda video: triage_movie(video, self._library),
+            workers=min(self._workers, max(1, len(batch))),
+        )
+        # Only the current window is kept: access is sequential, so an entry
+        # behind the cursor is dead weight on a large library.
+        self._ready = {
+            start + 1 + outcome.index: self._verdict(outcome)
+            for outcome in outcomes
+        }
+
+    @staticmethod
+    def _verdict(outcome: JobOutcome[Path, Triage]) -> Triage:
+        if outcome.value is not None:
+            return outcome.value
+        # An unexpected failure while reading one movie's folder becomes that
+        # movie's error rather than the end of a run that may already have
+        # downloaded subtitles. KeyboardInterrupt is re-raised by the pool.
+        detail = str(outcome.error) or outcome.error.__class__.__name__
+        return Triage(outcome.item, error=detail)
+
+
+# ---------------------------------------------------------------------------
+# What a run picked, and what a run did: the two things it has to report
+# ---------------------------------------------------------------------------
+
+
+def candidate_from_scrape(
+    scraped: ScrapeCandidate, key: str, identity: MovieIdentity,
+) -> tuple[Candidate, str]:
+    """Present a scraping-source hit as the same Candidate the APIs return.
+
+    Everything downstream - the note, the sidecar contract, the report row -
+    is written against ``Candidate``, so the scraping tier converts rather
+    than branching. The fields that have no scraping equivalent are stated
+    here once, honestly: no moviehash match (these sources index by title),
+    no votes, nothing trusted, nothing machine- or AI-translated - the chain
+    validated the bytes as an English SRT, which is a different claim from a
+    provider's metadata and should not be dressed up as one.
+    """
+    candidate = Candidate(
+        file_id=f"scrape:{key}:{scraped.file_id}",
+        release=scraped.release or "",
+        moviehash_match=False,
+        downloads=int(scraped.downloads or 0),
+        votes=0,
+        rating=float(scraped.rating or 0.0),
+        trusted=False,
+        hearing_impaired=bool(scraped.hearing_impaired),
+        machine_translated=False,
+        ai_translated=False,
+        foreign_parts_only=False,
+        language="en",
+        feature_title=scraped.feature_title or identity.title,
+        feature_year=scraped.feature_year or identity.year,
+    )
+    reason = (
+        f"scraping source {scrape_provider_label(key)} "
+        f"(candidate validated as an English SRT naming the movie)"
+    )
+    return candidate, reason
+
+
+def selection_note(pick: Candidate, *, provider: str, method: str, reason: str) -> str:
+    """The one line that records *why this subtitle* for this movie.
+
+    It is written into the durable state record, printed in the run log and
+    shown in the report, so a subtitle that turns out to be wrong can be
+    traced back to the tier and the ranking that chose it months later.
+    """
+    return (
+        f"provider={provider_label(provider)}; method={method}; id={pick.file_id}; "
+        f"trusted={'yes' if pick.trusted else 'no'}; rating={pick.rating:g}/{pick.votes}; "
+        f"{reason}; {pick.release or 'unnamed release'}"
+    )
+
+
+def providers_with_capacity(
+    cfg: QueueConfig, ledger: dict[str, int], *,
+    active_providers: Sequence[str], scrape_keys: Sequence[str],
+) -> list[str]:
+    """Which sources could still be spent, after the run has finished.
+
+    This is what decides ``quota_reached``, which in turn decides whether the
+    report tells the operator to come back tomorrow. SubDL needs all three of
+    its gates open to count - identity fallback enabled, download cap and
+    search cap both unspent - because a download allowance it cannot search
+    against is not capacity.
+    """
+    available = [
+        provider for provider in active_providers
+        if provider_has_quota(cfg, ledger, provider)
+        and (provider != PROVIDER_SUBDL or cfg.identity_fallback)
+        and (provider != PROVIDER_SUBDL or subdl_search_has_quota(cfg, ledger))
+    ]
+    available += [key for key in scrape_keys if provider_has_quota(cfg, ledger, key)]
+    return available
+
+
+def coverage_count(results: Sequence[JobResult], *, dry_run: bool) -> int:
+    """How many movies end this run with a validated English subtitle.
+
+    Coverage is the product promise, so it counts outcomes rather than work:
+    a movie that already had a sidecar counts exactly as much as one that was
+    downloaded or extracted this run. A dry run counts what it would have
+    fetched, because the number it prints is a forecast of the real run.
+    """
+    return sum(
+        1 for result in results
+        if result.reason in (REASON_COVERED, REASON_DOWNLOADED, REASON_EXTRACTED)
+        or (dry_run and result.reason == REASON_DRY_RUN)
+    )
+
+
+def run_summary(
+    cfg: QueueConfig,
+    ledger: dict[str, int],
+    results: Sequence[JobResult],
+    *,
+    today: str,
+    total: int,
+    active_providers: Sequence[str],
+    scrape_keys: Sequence[str],
+    scrape_status: dict[str, str],
+    deferred_remaining: int,
+    deferred_videos: Sequence[Path],
+) -> dict[str, Any]:
+    """The run's closing tallies, as the report and `--summary-json` read them.
+
+    A dict of counters computed from a ledger and a result list, extracted
+    from the end of ``queue_run`` so the report's inputs can be checked
+    without a library, a provider or a network. The legacy unprefixed fields
+    (``daily_cap``, ``successful_downloads``, ...) stay OpenSubtitles values
+    for consumers written before there was a second provider; the prefixed
+    ones are what everything new should read.
+    """
+    return {
+        "utc_day": today,
+        # Legacy summary fields remain OpenSubtitles values for downstream
+        # consumers that predate the second provider.
+        "daily_cap": cfg.daily_cap,
+        "download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
+        "successful_downloads": ledger["successful_downloads"],
+        "opensubtitles_daily_cap": cfg.daily_cap,
+        "opensubtitles_download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
+        "opensubtitles_successful_downloads": ledger["opensubtitles_successful_downloads"],
+        "subdl_search_daily_cap": cfg.subdl_search_daily_cap,
+        "subdl_search_requests_reserved": subdl_search_reserved(ledger),
+        "subdl_daily_cap": cfg.subdl_daily_cap,
+        "subdl_download_requests_reserved": provider_reserved(ledger, PROVIDER_SUBDL),
+        "subdl_successful_downloads": ledger["subdl_successful_downloads"],
+        "scrape_search_daily_cap": cfg.scrape_daily_cap,
+        "scrape_sources_enabled": list(scrape_keys),
+        "scrape_sources_status": scrape_status,
+        "scrape_search_requests_reserved": {
+            key: provider_reserved(ledger, key) for key in scrape_keys
+        },
+        "scrape_successful_downloads": {
+            key: int(ledger.get(provider_success_field(key), 0) or 0) for key in scrape_keys
+        },
+        "quota_reached": not providers_with_capacity(
+            cfg, ledger, active_providers=active_providers, scrape_keys=scrape_keys,
+        ),
+        "deferred_remaining": deferred_remaining,
+        "extracted_from_embedded": int(ledger.get("extracted", 0) or 0),
+        "ledger_log": str(cfg.log_file),
+        "movies_discovered": total,
+        # Coverage is the product promise: every movie ends the run with a
+        # validated English SRT (dry runs count their candidates as would-be
+        # covered). Anything else - review holds, misses, errors, deferred -
+        # is uncovered and names its movies in the report.
+        "coverage_covered": coverage_count(results, dry_run=cfg.dry_run),
+        "coverage_total": total,
+        # Which movies, not just how many: the report has to be able to name
+        # what was never reached when all usable provider caps cut the batch short.
+        "deferred_videos": list(deferred_videos),
+    }
+
+
+def judge_moviehash_candidates(
+    candidates: Sequence[Candidate], cfg: Config, identity: MovieIdentity | None,
+) -> tuple[Candidate | None, str]:
+    """The verdict on an OpenSubtitles moviehash search: the pick, and why.
+
+    Shared by the serial and the overlapped tier-1 paths so the two cannot
+    drift: the same candidates must produce the same pick and the same
+    sentence in the report whichever thread fetched them.
+    """
+    pick = pick_candidate(candidates, cfg, identity=identity)
+    if pick is None:
+        return None, (
+            "no usable Blu-ray English moviehash-matched human SRT "
+            "naming the movie and its release year"
+        )
+    return pick, (
+        "moviehash match; Blu-ray release naming the movie and its release year; "
+        "highest download count"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Two providers, one wait
+# ---------------------------------------------------------------------------
+# Tier 1 asks two unrelated companies the same question about one movie:
+# OpenSubtitles for an exact moviehash match, SubDL for a scored release-name
+# match. Their answers are pooled and the best one wins, so *both* are always
+# asked whenever both are configured - which means the second lookup spent its
+# entire life waiting for the first one to come back from a different
+# continent, on a different connection, against a different rate limit.
+#
+# One of the two now runs on a single background worker while the other runs
+# here. What deliberately does *not* move is the money: SubDL's durable search
+# reservation (persisted with fsync before every outbound attempt), the ledger,
+# every download and every state checkpoint stay on the main thread, in library
+# order, exactly as before. That is why it is OpenSubtitles that is handed to
+# the worker - it is the tier-1 lookup with nothing durable to reserve - and
+# why the pool is one worker wide: this is about overlapping two waits, not
+# about issuing more requests than a serial run would.
+#
+# ``--workers 1`` turns it off along with every other thread in the tool.
+
+
+class SearchPool:
+    """The one place a provider request may leave the main thread."""
+
+    def __init__(self, *, enabled: bool) -> None:
+        self._pool = (
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="fetch-provider")
+            if enabled else None
+        )
+
+    @property
+    def enabled(self) -> bool:
+        return self._pool is not None
+
+    def start(self, work: Callable[[], list[Candidate]]) -> Future[list[Candidate]] | None:
+        """Begin a search in the background, or return None when disabled."""
+        if self._pool is None:
+            return None
+        return self._pool.submit(work)
+
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.shutdown(wait=True)
+            self._pool = None
+
+
+def drain_search(search: Future[list[Candidate]] | None) -> None:
+    """Wait for a search whose answer is no longer wanted, and drop it.
+
+    A movie can be abandoned between dispatch and pooling - an exhausted SubDL
+    cap, a SubDL error - and the background lookup must not outlive it into the
+    next movie's turn. Whatever it raises died with the movie it was for.
+    """
+    if search is None:
+        return
+    try:
+        search.result()
+    except Exception:  # noqa: BLE001 - the answer is being discarded, not read
+        pass
+
+
 def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     """Process one daily batch with independent provider quotas.
 
@@ -6582,6 +5305,14 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     )
     active_providers = configured_providers(cfg)
     scrape_keys = active_scrape_sources(cfg)
+    # Both tier-1 lookups are issued for every movie that reaches tier 1 with
+    # the title/year fallback enabled, so the two waits can be one wait. The
+    # pool exists only when that is true; a one-provider run never starts a
+    # thread, and --workers 1 keeps the whole tool serial.
+    tier1_pool = SearchPool(enabled=(
+        open_client is not None and subdl_client is not None
+        and cfg.identity_fallback and cfg.workers != 1
+    ))
     # Dry runs spend no scraping requests: searches would count against the
     # real UTC caps, so the tier is skipped entirely (report says so).
     scrape_chain = build_scrape_chain(cfg, ledger, state) if not cfg.dry_run else None
@@ -6608,54 +5339,47 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             log_file=cfg.log_file,
         )
 
-    def has_new_provider(record: dict[str, Any]) -> bool:
-        prior = record.get("providers_checked")
-        if not isinstance(prior, list):
-            # A pre-SubDL ledger cannot say which sources it queried. Preserve
-            # its intentional OpenSubtitles review hold unless the newly added
-            # provider is actually enabled, then revisit once for that source.
-            # The new scraping tier counts as a new source for such records.
-            if scrape_keys and not record.get("scrape_checked"):
-                return True
-            return PROVIDER_SUBDL in active_providers
-        previous = {str(provider) for provider in prior}
-        if any(provider not in previous for provider in active_providers):
-            return True
-        # Legacy records predate the scraping tier: offer it to them once so
-        # every previously-held movie is re-checked against all nine sources.
-        return bool(scrape_keys and not record.get("scrape_checked"))
+    triage_queue = TriageQueue(
+        videos, cfg.library,
+        workers=resolve_workers(cfg.workers, items=len(videos), cap=MAX_TRIAGE_WORKERS),
+    )
+    if triage_queue.workers > 1:
+        log(
+            f"Inspecting existing sidecars with {triage_queue.workers} workers "
+            f"(--workers 1 for the serial run); every provider request stays serial.",
+            log_file=cfg.log_file,
+        )
 
     for index, video in enumerate(videos, start=1):
-        layout_issue = canonical_movie_layout_issue(video, cfg.library)
-        if layout_issue:
-            result = JobResult(video, "skip", layout_issue, reason=REASON_LAYOUT)
+        triage = triage_queue.at(index)
+        if triage.layout_issue:
+            result = JobResult(video, "skip", triage.layout_issue, reason=REASON_LAYOUT)
             results.append(result)
-            emit(index, "SKIP", video, layout_issue)
+            emit(index, "SKIP", video, triage.layout_issue)
             continue
-        sidecar_status, existing, sidecar_detail, sidecar_reason = inspect_existing_sidecars(video)
-        if sidecar_status == "covered" and existing is not None:
+        sidecar_detail = triage.sidecar_detail
+        if triage.sidecar_status == "covered" and triage.existing is not None:
             ledger["already_have"] += 1
-            result = JobResult(video, "have", sidecar_detail, existing, reason=REASON_COVERED)
+            result = JobResult(video, "have", sidecar_detail, triage.existing, reason=REASON_COVERED)
             results.append(result)
             emit(index, "HAVE", video, sidecar_detail)
             continue
-        if sidecar_status == "review":
-            result = JobResult(video, "review", sidecar_detail, existing, reason=sidecar_reason)
+        if triage.sidecar_status == "review":
+            result = JobResult(video, "review", sidecar_detail, triage.existing,
+                               reason=triage.sidecar_reason)
             results.append(result)
             emit(index, "REVIEW", video, sidecar_detail)
             continue
 
-        try:
-            snapshot = video_snapshot(video)
-            key = movie_key(video, snapshot)
-        except OSError as exc:
+        if not triage.fetchable or triage.snapshot is None:
             ledger["errors"] += 1
-            result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
+            result = JobResult(video, "error", triage.error, reason=REASON_ERROR)
             results.append(result)
-            emit(index, "ERROR", video, str(exc))
+            emit(index, "ERROR", video, triage.error)
             continue
+        snapshot = triage.snapshot
+        key = triage.key
         record = state_movie(state, key, video)
-        old_status = str(record.get("status") or "pending")
 
         # Embedded-subtitle extraction. A movie's own English track is exact
         # for this release, costs no provider request, and needs no timing
@@ -6697,69 +5421,31 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 if "not installed" in outcome.unavailable_reason or "OCR" in outcome.unavailable_reason:
                     log(outcome.unavailable_reason, level="WARNING", log_file=cfg.log_file)
 
-        # Scraping retry economy: a movie the scraping tier already exhausted
-        # today is not offered to it twice, and a movie that exhausted it on
-        # an earlier day goes straight back to the scraping tier (the API
-        # tiers already miss for it, so re-spending their quota is wasted).
-        scrape_failed_day = str(record.get("scrape_failed_utc_day") or "")
-        scrape_tried_today = bool(record.get("scrape_failed")) and scrape_failed_day == today
-        scrape_retry_today = (
-            bool(record.get("scrape_failed"))
-            and cfg.identity_fallback
-            and bool(scrape_keys)
-            and scrape_failed_day != today
+        # Scraping retry economy and the ledger holds: see plan_from_history.
+        history = plan_from_history(
+            record, today=today, retry_no_match=cfg.retry_no_match,
+            identity_fallback=cfg.identity_fallback, scrape_keys=scrape_keys,
+            active_providers=active_providers,
         )
-        if scrape_tried_today and old_status in ("manual_review", "no_match"):
-            result = JobResult(
-                video, "skip",
-                "scraping sources were already exhausted for this movie today; retrying on the next UTC day",
-                reason=REASON_QUOTA)
+        if not history.fetch:
+            result = JobResult(video, history.action, history.detail, reason=history.reason)
             results.append(result)
-            emit(index, "SKIP", video, result.detail)
-            continue
-        if old_status == "no_match" and not (cfg.retry_no_match or cfg.identity_fallback):
-            result = JobResult(video, "skip", "previous strict moviehash search had no match",
-                               reason=REASON_NO_MATCH)
-            results.append(result)
-            emit(index, "SKIP", video, result.detail)
-            continue
-        if (old_status == "manual_review" and not cfg.retry_no_match
-                and not scrape_retry_today and not has_new_provider(record)):
-            result = JobResult(video, "review", "previous identity fallback was intentionally held for review",
-                               reason=REASON_REVIEW)
-            results.append(result)
-            emit(index, "REVIEW", video, result.detail)
-            continue
-        if old_status == "reserved" and str(record.get("updated_utc") or "").startswith(today):
-            result = JobResult(video, "skip", "a provider download was already reserved today; waiting for next UTC day",
-                               reason=REASON_QUOTA)
-            results.append(result)
-            emit(index, "SKIP", video, result.detail)
+            emit(index, "REVIEW" if history.action == "review" else "SKIP", video, history.detail)
             continue
 
-        open_available = (
-            open_client is not None
-            and provider_has_quota(cfg, ledger, PROVIDER_OPENSUBTITLES)
+        sources = plan_sources(
+            cfg, ledger, history,
+            has_open=open_client is not None,
+            has_subdl=subdl_client is not None,
+            has_scrape_chain=scrape_chain is not None,
+            scrape_keys=scrape_keys,
         )
-        # SubDL has no byte-exact release hash, so --no-identity-fallback also
-        # intentionally disables its release-aware/title-year lookup.
-        subdl_available = (
-            subdl_client is not None
-            and cfg.identity_fallback
-            and provider_has_quota(cfg, ledger, PROVIDER_SUBDL)
-            and subdl_search_has_quota(cfg, ledger)
-        )
-        # On a scraping retry the API tiers are already known to miss for
-        # this movie, so they are not asked again; the scraping tier is.
-        api_tiers_allowed = not (scrape_retry_today and not scrape_tried_today)
-        open_tier_available = open_available and api_tiers_allowed
-        subdl_tier_available = subdl_available and api_tiers_allowed
-        scrape_available = (
-            scrape_chain is not None
-            and cfg.identity_fallback
-            and any(provider_has_quota(cfg, ledger, key) for key in scrape_keys)
-        )
-        if not open_available and not subdl_available and not scrape_available:
+        open_available = sources.open_available
+        subdl_available = sources.subdl_available
+        api_tiers_allowed = sources.api_tiers_allowed
+        open_tier_available = sources.open_tier
+        subdl_tier_available = sources.subdl_tier
+        if sources.exhausted:
             deferred_remaining = total - index + 1
             deferred_videos = list(videos[index - 1:])
             log(
@@ -6805,6 +5491,15 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         # OpenSubtitles' exact-moviehash match and SubDL's score-gated
         # filename match. Whichever qualifying release has the most downloads
         # wins, regardless of provider.
+        # Set when the OpenSubtitles lookup is running in the background; its
+        # result is collected below, after SubDL has been asked on this thread.
+        open_search: Future[list[Candidate]] | None = None
+        overlap_tier1 = (
+            tier1_pool.enabled
+            and open_tier_available and open_client is not None
+            and subdl_tier_available and subdl_client is not None
+            and identity is not None
+        )
         if open_tier_available and open_client is not None:
             providers_checked.append(PROVIDER_OPENSUBTITLES)
             emit(index, "SEARCH", video, "calculating moviehash and checking OpenSubtitles")
@@ -6828,29 +5523,36 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 results.append(result)
                 emit(index, "ERROR", video, str(exc))
                 continue
-            try:
-                candidates = open_client.search(movie_hash=digest, query=video.stem)
-                os_tier1 = pick_candidate(candidates, fetcher_cfg, identity=identity)
-            except (RuntimeError, ValueError) as exc:
-                if not subdl_tier_available:
-                    set_movie_status(
-                        record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1,
-                        providers_checked=providers_checked,
-                    )
-                    ledger["errors"] += 1
-                    persist_state(state, cfg.log_file)
-                    result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
-                    results.append(result)
-                    emit(index, "ERROR", video, str(exc))
-                    continue
-                open_lookup_error = f"OpenSubtitles moviehash lookup failed: {exc}"
-                pool_reasons.append(open_lookup_error)
-                emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
-            if os_tier1 is not None:
-                os_tier1_reason = (
-                    "moviehash match; Blu-ray release naming the movie and its release year; "
-                    "highest download count"
+            if overlap_tier1:
+                # SubDL is going to be asked about this same movie in a moment
+                # whatever this returns, so start it and go. The answer is
+                # collected - and judged - on this thread, below.
+                open_search = tier1_pool.start(
+                    lambda client=open_client, movie_hash=digest, query=video.stem:
+                        client.search(movie_hash=movie_hash, query=query)
                 )
+            if open_search is None:
+                try:
+                    candidates = open_client.search(movie_hash=digest, query=video.stem)
+                    os_tier1, os_tier1_reason = judge_moviehash_candidates(
+                        candidates, fetcher_cfg, identity,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    if not subdl_tier_available:
+                        set_movie_status(
+                            record, "error", str(exc),
+                            attempts=int(record.get("attempts", 0) or 0) + 1,
+                            providers_checked=providers_checked,
+                        )
+                        ledger["errors"] += 1
+                        persist_state(state, cfg.log_file)
+                        result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
+                        results.append(result)
+                        emit(index, "ERROR", video, str(exc))
+                        continue
+                    open_lookup_error = f"OpenSubtitles moviehash lookup failed: {exc}"
+                    pool_reasons.append(open_lookup_error)
+                    emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
 
         if os_tier1 is not None and (not cfg.identity_fallback or identity is None):
             # A strict hash match stands alone when nothing else may be
@@ -6918,12 +5620,14 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                     # The callback fires before an outbound request. This movie
                     # was not fully evaluated, so defer it rather than turning a
                     # temporary provider limit into a manual-review decision.
+                    drain_search(open_search)
                     detail = str(exc)
                     result = JobResult(video, "skip", detail, reason=REASON_QUOTA)
                     results.append(result)
                     emit(index, "SKIP", video, detail)
                     continue
                 except (RuntimeError, ValueError) as exc:
+                    drain_search(open_search)
                     detail = f"SubDL lookup failed: {exc}"
                     set_movie_status(
                         record, "error", detail, moviehash=digest,
@@ -6937,14 +5641,27 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                     emit(index, "ERROR", video, detail)
                     continue
             elif subdl_client is not None:
-                if not api_tiers_allowed:
-                    pool_reasons.append("SubDL: not re-queried on a scraping retry (known API miss)")
-                elif not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
-                    pool_reasons.append("SubDL: daily download cap exhausted")
-                elif not subdl_search_has_quota(cfg, ledger):
-                    pool_reasons.append("SubDL: daily search cap exhausted")
-                else:
-                    pool_reasons.append("SubDL: identity fallback disabled")
+                pool_reasons.append(
+                    subdl_unavailable_reason(cfg, ledger, api_tiers_allowed=api_tiers_allowed)
+                )
+
+            if open_search is not None:
+                # Collect the lookup that has been running while SubDL was
+                # asked. The verdict is identical to the serial path's,
+                # including the note the report will carry.
+                try:
+                    os_tier1, os_tier1_reason = judge_moviehash_candidates(
+                        open_search.result(), fetcher_cfg, identity,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    # SubDL was always going to be asked as well, so a failed
+                    # hash lookup is a fallback note here, never the end of
+                    # this movie. (Serially this line is logged before SubDL
+                    # is asked; overlapped it can only be logged after, which
+                    # is the one ordering difference between the two paths.)
+                    open_lookup_error = f"OpenSubtitles moviehash lookup failed: {exc}"
+                    pool_reasons.append(open_lookup_error)
+                    emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
 
             tier1_entries: list[tuple[Candidate, str, str, str]] = []
             if os_tier1 is not None:
@@ -7000,10 +5717,9 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                         pool_reasons.append(open_lookup_error)
                         emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
                 elif open_client is not None and not open_lookup_error:
-                    if not api_tiers_allowed:
-                        pool_reasons.append("OpenSubtitles: not re-queried on a scraping retry (known API miss)")
-                    else:
-                        pool_reasons.append("OpenSubtitles: daily download cap exhausted")
+                    pool_reasons.append(
+                        opensubtitles_unavailable_reason(api_tiers_allowed=api_tiers_allowed)
+                    )
 
                 # The local canonical filename deliberately omits scene tags.
                 # If SubDL's release lookup resolved nothing at all, use its
@@ -7070,10 +5786,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
 
             if (pick is None and subdl_client is not None and not subdl_lookup_attempted
                     and not subdl_available and api_tiers_allowed):
-                if not provider_has_quota(cfg, ledger, PROVIDER_SUBDL):
-                    detail = "SubDL daily download cap exhausted before lookup; deferred to the next UTC day"
-                else:
-                    detail = "SubDL daily search cap exhausted before lookup; deferred to the next UTC day"
+                detail = subdl_defer_detail(cfg, ledger)
                 result = JobResult(video, "skip", detail, reason=REASON_QUOTA)
                 results.append(result)
                 emit(index, "SKIP", video, detail)
@@ -7101,32 +5814,16 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                         on_reason=lambda key, why, _reasons=pool_reasons: _reasons.append(
                             f"{scrape_provider_label(key)}: {why}"),
                     )
-                except Exception as exc:  # a scraping-tier bug must not kill the run
+                except Exception as exc:  # noqa: BLE001 - a bug in the scraping tier
+                    # costs this movie its free sources, not the queue its run.
                     pool_reasons.append(f"scraping sources failed: {type(exc).__name__}: {exc}")
                     scrape_cand, scrape_key, scrape_raw = None, "", None
                 if scrape_cand is not None and scrape_raw is not None:
-                    pick = Candidate(
-                        file_id=f"scrape:{scrape_key}:{scrape_cand.file_id}",
-                        release=scrape_cand.release or "",
-                        moviehash_match=False,
-                        downloads=int(scrape_cand.downloads or 0),
-                        votes=0,
-                        rating=float(scrape_cand.rating or 0.0),
-                        trusted=False,
-                        hearing_impaired=bool(scrape_cand.hearing_impaired),
-                        machine_translated=False,
-                        ai_translated=False,
-                        foreign_parts_only=False,
-                        language="en",
-                        feature_title=scrape_cand.feature_title or identity.title,
-                        feature_year=scrape_cand.feature_year or identity.year,
+                    pick, selection_reason = candidate_from_scrape(
+                        scrape_cand, scrape_key, identity,
                     )
                     selected_provider = scrape_key
                     selection_method = "scrape"
-                    selection_reason = (
-                        f"scraping source {scrape_provider_label(scrape_key)} "
-                        f"(candidate validated as an English SRT naming the movie)"
-                    )
                     scrape_download = scrape_raw
 
             if pick is None:
@@ -7163,10 +5860,8 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 continue
 
         dest = dest_for(video, fetcher_cfg)
-        note = (
-            f"provider={provider_label(selected_provider)}; method={selection_method}; id={pick.file_id}; "
-            f"trusted={'yes' if pick.trusted else 'no'}; rating={pick.rating:g}/{pick.votes}; "
-            f"{selection_reason}; {pick.release or 'unnamed release'}"
+        note = selection_note(
+            pick, provider=selected_provider, method=selection_method, reason=selection_reason,
         )
         if cfg.dry_run:
             result = JobResult(video, "dry-run", note, dest, reason=REASON_DRY_RUN)
@@ -7213,7 +5908,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 # The chain already downloaded and validated these bytes
                 # (valid_srt_bytes); the shared sidecar contract is applied
                 # here exactly as for the API providers.
-                if scrape_download is None:
+                if scrape_download is None:  # pragma: no cover - set with the pick
                     raise RuntimeError("scraping candidate download reference is missing")
                 if len(scrape_download) > MAX_SUBTITLE_BYTES:
                     raise RuntimeError(f"subtitle exceeds {MAX_SUBTITLE_BYTES} byte safety limit")
@@ -7253,62 +5948,26 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
             result = JobResult(video, "download", note, dest, reason=REASON_DOWNLOADED)
             results.append(result)
             emit(index, "SAVED", video, dest.name)
+        # Same reason as the scraping branch above: the reservation checkpoint
+        # emptied the dirty set, and set_movie_status only touches the record.
+        # Without re-marking it, how this movie actually ended - downloaded,
+        # already had one, or failed - would never reach the durable ledger,
+        # which would be left claiming the download is still reserved.
+        state.setdefault("_dirty_movies", set()).add(key)
         persist_state(state, cfg.log_file)
 
-    available_after_run = [
-        provider for provider in active_providers
-        if provider_has_quota(cfg, ledger, provider)
-        and (provider != PROVIDER_SUBDL or cfg.identity_fallback)
-        and (provider != PROVIDER_SUBDL or subdl_search_has_quota(cfg, ledger))
-    ]
-    available_after_run += [
-        key for key in scrape_keys
-        if provider_has_quota(cfg, ledger, key)
-    ]
-    covered_count = sum(
-        1 for result in results
-        if result.reason in (REASON_COVERED, REASON_DOWNLOADED, REASON_EXTRACTED)
-        or (cfg.dry_run and result.reason == REASON_DRY_RUN)
+    tier1_pool.close()
+
+    summary = run_summary(
+        cfg, ledger, results,
+        today=today,
+        total=total,
+        active_providers=active_providers,
+        scrape_keys=scrape_keys,
+        scrape_status=scrape_chain.status() if scrape_chain is not None else {},
+        deferred_remaining=deferred_remaining,
+        deferred_videos=deferred_videos,
     )
-    summary = {
-        "utc_day": today,
-        # Legacy summary fields remain OpenSubtitles values for downstream
-        # consumers that predate the second provider.
-        "daily_cap": cfg.daily_cap,
-        "download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
-        "successful_downloads": ledger["successful_downloads"],
-        "opensubtitles_daily_cap": cfg.daily_cap,
-        "opensubtitles_download_requests_reserved": provider_reserved(ledger, PROVIDER_OPENSUBTITLES),
-        "opensubtitles_successful_downloads": ledger["opensubtitles_successful_downloads"],
-        "subdl_search_daily_cap": cfg.subdl_search_daily_cap,
-        "subdl_search_requests_reserved": subdl_search_reserved(ledger),
-        "subdl_daily_cap": cfg.subdl_daily_cap,
-        "subdl_download_requests_reserved": provider_reserved(ledger, PROVIDER_SUBDL),
-        "subdl_successful_downloads": ledger["subdl_successful_downloads"],
-        "scrape_search_daily_cap": cfg.scrape_daily_cap,
-        "scrape_sources_enabled": list(scrape_keys),
-        "scrape_sources_status": scrape_chain.status() if scrape_chain is not None else {},
-        "scrape_search_requests_reserved": {
-            key: provider_reserved(ledger, key) for key in scrape_keys
-        },
-        "scrape_successful_downloads": {
-            key: int(ledger.get(provider_success_field(key), 0) or 0) for key in scrape_keys
-        },
-        "quota_reached": not available_after_run,
-        "deferred_remaining": deferred_remaining,
-        "extracted_from_embedded": int(ledger.get("extracted", 0) or 0),
-        "ledger_log": str(cfg.log_file),
-        "movies_discovered": total,
-        # Coverage is the product promise: every movie ends the run with a
-        # validated English SRT (dry runs count their candidates as would-be
-        # covered). Anything else - review holds, misses, errors, deferred -
-        # is uncovered and names its movies in the report.
-        "coverage_covered": covered_count,
-        "coverage_total": total,
-        # Which movies, not just how many: the report has to be able to name
-        # what was never reached when all usable provider caps cut the batch short.
-        "deferred_videos": deferred_videos,
-    }
     return results, summary
 
 @dataclass(frozen=True)
@@ -7741,6 +6400,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lock-timeout", type=float, default=60.0, metavar="SEC")
     parser.add_argument("--limit", type=int, default=0, metavar="N",
                         help="Process at most N movies (0 means all eligible movies)")
+    parser.add_argument("--workers", type=int, default=0, metavar="N",
+                        help=f"Inspect N movies' existing sidecars at once (0 = half the CPUs, "
+                             f"capped at {MAX_TRIAGE_WORKERS}; 1 = the serial run). Provider "
+                             f"requests and downloads are never parallel.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Preview candidates; searches still run, but no download request or SRT write")
     parser.add_argument("--no-identity-fallback", dest="identity_fallback", action="store_false",
@@ -7836,6 +6499,7 @@ def compact_config_from_args(args: argparse.Namespace) -> QueueConfig:
         ocr_args=str(args.ocr_args),
         ocr_timeout_seconds=max(0.0, float(args.ocr_timeout)),
         ocr_limit=max(0, int(args.ocr_limit)),
+        workers=int(args.workers),
         min_movie_size_mb=float(args.min_size),
         lock_timeout_seconds=max(0.0, float(args.lock_timeout)),
         retry_no_match=bool(args.retry_review),
@@ -7874,6 +6538,8 @@ def validate_compact_config(cfg: QueueConfig) -> list[str]:
         errors.append("--ocr-timeout must be zero (no limit) or greater")
     if cfg.ocr_limit < 0:
         errors.append("--ocr-limit must be zero (no cap) or greater")
+    if cfg.workers < 0:
+        errors.append("--workers must be non-negative (0 = decide from the CPU count)")
     if cfg.min_movie_size_mb < 0 or cfg.lock_timeout_seconds < 0 or cfg.limit < 0:
         errors.append("--min-size, --lock-timeout, and --limit must be non-negative")
     if cfg.report_file == cfg.library or cfg.report_file.is_relative_to(cfg.library):
@@ -7906,6 +6572,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ("Ledger", cfg.log_file),
                 ("Report", cfg.report_file),
                 ("Embedded tracks", extract_banner_text(cfg)),
+                ("Triage", describe_workers(
+                    resolve_workers(cfg.workers, cap=MAX_TRIAGE_WORKERS), "movie")
+                    + "  \u00b7  provider requests stay serial"),
             ],
         ))
         with CoordinationLock(cfg.library, timeout_seconds=cfg.lock_timeout_seconds):
@@ -7927,10 +6596,49 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted", file=sys.stderr)
         return 130
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - last resort: whatever went wrong, this run
+        # leaves through one exit code instead of an unhandled traceback.
         print(f"Subtitle fetcher failure: {exc}", file=sys.stderr)
         traceback.print_exc()
         return 1
+
+
+def run_self_tests() -> int:
+    """Field smoke test: can this copy hash a movie and judge a subtitle?
+
+    The provider clients, the scraping tiers, the quota ledger and the
+    extraction path are covered exhaustively in ``tests/selftests/``. The two
+    things worth re-checking on an unfamiliar machine are the moviehash (a
+    wrong one silently degrades every lookup to title/year matching) and the
+    sidecar contract.
+    """
+    def moviehash_is_stable() -> bool:
+        data = bytes(range(256)) * 600  # > 2 * 64 KiB so both chunks are real
+        first = moviehash_bytes(data)
+        return first == moviehash_bytes(data) and len(first) == 16
+
+    def a_real_srt_validates() -> bool:
+        with tempfile.TemporaryDirectory(prefix="fetcher_smoke_") as td:
+            srt = Path(td) / "Movie (2020).eng.srt"
+            srt.write_text("1\n00:00:01,000 --> 00:00:02,500\nHello\n", encoding="utf-8")
+            return validate_srt_sidecar(srt)[0]
+
+    def html_is_rejected() -> bool:
+        with tempfile.TemporaryDirectory(prefix="fetcher_smoke_") as td:
+            srt = Path(td) / "Movie (2020).eng.srt"
+            srt.write_text("<!DOCTYPE html><html>not a subtitle</html>", encoding="utf-8")
+            return not validate_srt_sidecar(srt)[0]
+
+    def the_sidecar_path_is_canonical() -> bool:
+        movie = Path("/library/Movie (2020)/Movie (2020).mkv")
+        return exact_external_english_srt_path(movie).name == "Movie (2020).eng.srt"
+
+    return run_field_smoke_test("subtitle_fetcher.py", [
+        ("the moviehash is stable", moviehash_is_stable),
+        ("a valid .eng.srt is accepted", a_real_srt_validates),
+        ("an HTML error page is rejected", html_is_rejected),
+        ("the sidecar path is canonical", the_sidecar_path_is_canonical),
+    ])
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -19,6 +20,7 @@ from pathlib import Path
 from unittest import mock
 
 import sync_subtitles as ss
+from organizekit import core
 
 # A valid SRT the shared contract accepts.
 GOOD_SRT = "1\n00:00:01,000 --> 00:00:02,000\nHello.\n\n2\n00:00:04,000 --> 00:00:05,000\nWorld.\n"
@@ -26,11 +28,31 @@ GOOD_SRT = "1\n00:00:01,000 --> 00:00:02,000\nHello.\n\n2\n00:00:04,000 --> 00:0
 SHIFTED_SRT = "1\n00:00:05,000 --> 00:00:06,000\nHello.\n\n2\n00:00:08,000 --> 00:00:09,000\nWorld.\n"
 
 
+# The tool publishes its verdicts to the shared state cache, whose default
+# location is the developer's real state directory. A test suite must never
+# write there, so the whole module is pointed at a temp database - which also
+# means the write-through path is exercised rather than switched off.
+_STATE_DIR: tempfile.TemporaryDirectory | None = None
+
+
+def setUpModule() -> None:
+    global _STATE_DIR
+    _STATE_DIR = tempfile.TemporaryDirectory(prefix="sync_state_")
+    os.environ["ORGANIZE_STATE_DB"] = str(Path(_STATE_DIR.name) / "state.db")
+
+
+def tearDownModule() -> None:
+    os.environ.pop("ORGANIZE_STATE_DB", None)
+    if _STATE_DIR is not None:
+        _STATE_DIR.cleanup()
+
+
 def _cfg(tmp: Path, **overrides: object) -> ss.Config:
     base: dict = {
         "library": tmp / "lib",
         "log_file": tmp / "out" / "sync_subtitles.log",
         "report_file": tmp / "out" / "sync_subtitles_report.txt",
+        "state_db": tmp / "out" / "state.db",
     }
     base.update(overrides)
     return ss.Config(**base)
@@ -631,10 +653,12 @@ class EndToEndTests(unittest.TestCase):
             self.mkv.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
-class SyncStateTests(unittest.TestCase):
-    """Remembered verdicts: a library that has already been synced must not
-    pay for another ffsubsync run, and any change to either file must send
-    the sidecar back through ffsubsync."""
+class _SyncedLibraryFixture(unittest.TestCase):
+    """One movie, one good sidecar, a fake ffsubsync: the shared end-to-end bed.
+
+    Holds no tests of its own - the suites below inherit it so that "run the
+    tool over a real library" is written once.
+    """
 
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory(prefix="sync_state_")
@@ -678,6 +702,12 @@ class SyncStateTests(unittest.TestCase):
         second = FakeFfsubsync(offset=-4.0)
         self.assertEqual(self._run(second, *extra), 0)
         return len(second.calls)
+
+
+class SyncStateTests(_SyncedLibraryFixture):
+    """Remembered verdicts: a library that has already been synced must not
+    pay for another ffsubsync run, and any change to either file must send
+    the sidecar back through ffsubsync."""
 
     def test_second_run_does_not_remeasure(self) -> None:
         """The whole point: an unchanged, already-synced library costs nothing."""
@@ -764,6 +794,65 @@ class SyncStateTests(unittest.TestCase):
         self.assertNotIn(ss.sync_state_key(self.srt), saved["entries"])
 
 
+class StateCacheTests(_SyncedLibraryFixture):
+    """The verdicts this tool publishes for ``organize status`` to read.
+
+    Inherits the end-to-end fixture above: the sync ledger stays the authority
+    for "must I re-measure?", and this cache is only ever a summary.
+    """
+
+    def _verdicts(self) -> dict:
+        store = core.open_state(self.tmp / "out" / "state.db", tool="tests")
+        try:
+            return store.verdicts(core.KIND_SYNC)
+        finally:
+            store.close()
+
+    def _run(self, fake: FakeFfsubsync, *extra: str) -> int:  # noqa: D102 - see parent
+        return super()._run(fake, "--state-db", str(self.tmp / "out" / "state.db"), *extra)
+
+    def test_a_measured_sidecar_is_published(self) -> None:
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0)), 0)
+        verdict = self._verdicts()[(core.path_norm(self.mkv), core.KIND_SYNC)]
+        self.assertEqual(verdict.verdict, ss.STATUS_SYNCED)
+        self.assertIn("Film (2000).eng.srt", verdict.detail)
+        info = self.mkv.stat()
+        self.assertTrue(verdict.is_current_for(info.st_size, info.st_mtime_ns))
+
+    def test_a_held_sidecar_is_published_as_review(self) -> None:
+        self.assertEqual(self._run(FakeFfsubsync(offset=45.0)), 0)
+        verdict = self._verdicts()[(core.path_norm(self.mkv), core.KIND_SYNC)]
+        self.assertEqual(verdict.verdict, ss.STATUS_REVIEW)
+
+    def test_an_orphan_sidecar_publishes_nothing_and_breaks_nothing(self) -> None:
+        # A .srt with no movie beside it has nothing to key a verdict on; the
+        # rest of the run must still be published.
+        (self.movie_dir.parent / "Orphan (1999)").mkdir()
+        (self.movie_dir.parent / "Orphan (1999)" / "Orphan (1999).eng.srt").write_text(
+            GOOD_SRT, encoding="utf-8")
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0)), 0)
+        self.assertEqual(list(self._verdicts()), [(core.path_norm(self.mkv), core.KIND_SYNC)])
+
+    def test_a_dry_run_publishes_nothing(self) -> None:
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0), "--dry-run"), 0)
+        self.assertEqual(self._verdicts(), {})
+
+    def test_no_state_publishes_nothing(self) -> None:
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0), "--no-state"), 0)
+        self.assertEqual(self._verdicts(), {})
+
+    def test_the_run_survives_an_unwritable_cache(self) -> None:
+        # A cache is a convenience; it can never turn a good sync into a bad run.
+        (self.tmp / "out").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "out" / "state.db").write_bytes(b"not a database" * 50)
+        self.assertEqual(self._run(FakeFfsubsync(offset=-4.0)), 0)
+        self.assertEqual(self.srt.read_text(encoding="utf-8"), SHIFTED_SRT)
+
+    def test_a_state_db_inside_the_library_is_refused(self) -> None:
+        code = self._run(FakeFfsubsync(offset=-4.0), "--state-db", str(self.lib / "state.db"))
+        self.assertEqual(code, 2)
+
+
 class ExitCodeTests(unittest.TestCase):
     def test_mapping(self) -> None:
         cfg = _cfg(Path("/tmp/wherever"))
@@ -783,10 +872,10 @@ class VendoredContractTests(unittest.TestCase):
     """The subtitle contract vendored here must match the other tools."""
 
     def test_constants(self) -> None:
-        self.assertEqual(ss.EXTERNAL_SRT_SUFFIX, ".eng.srt")
-        self.assertEqual(ss.LEGACY_EXTERNAL_SRT_SUFFIX, ".en.srt")
-        self.assertEqual(ss.EXTERNAL_SRT_MAX_BYTES, 4 * 1024 * 1024)
-        self.assertEqual(ss.EXTERNAL_SRT_ENCODINGS, ("utf-8-sig", "utf-8", "cp1252"))
+        self.assertEqual(core.EXTERNAL_SRT_SUFFIX, ".eng.srt")
+        self.assertEqual(core.LEGACY_EXTERNAL_SRT_SUFFIX, ".en.srt")
+        self.assertEqual(core.EXTERNAL_SRT_MAX_BYTES, 4 * 1024 * 1024)
+        self.assertEqual(core.EXTERNAL_SRT_ENCODINGS, ("utf-8-sig", "utf-8", "cp1252"))
 
     def test_lock_shares_the_standardizer_key(self) -> None:
         import hashlib
@@ -843,7 +932,7 @@ class ReportShapeTests(unittest.TestCase):
         lines = text.splitlines()
         self.assertTrue(text.endswith("\n"))
         self.assertTrue(all(not line.endswith(" ") for line in lines))
-        self.assertTrue(all(len(line) <= ss.REPORT_WIDTH for line in lines))
+        self.assertTrue(all(len(line) <= core.REPORT_WIDTH for line in lines))
         self.assertIn("JELLYFIN SUBTITLE SYNCHRONIZER", text)
         for title in ("SUBTITLES HELD FOR REVIEW", "FAILED SYNC ATTEMPTS",
                       "SUBTITLES SYNCED (TIMING CORRECTED)", "SKIPPED (NOTHING SYNCED)",
@@ -861,6 +950,111 @@ class ReportShapeTests(unittest.TestCase):
                                elapsed_sec=0.1, truncated=False)
         self.assertIn("NOTHING FOUND", text)
         self.assertIn("subtitle_fetcher.py", text)
+
+
+class ParallelMeasurementTests(unittest.TestCase):
+    """ffsubsync is the slowest thing the toolchain does, and each sidecar is
+    an independent measurement, so they run in parallel. Two things must
+    survive that: every sidecar is still measured exactly once, and the shared
+    remembered-verdict ledger does not lose an entry to a lost update.
+    """
+
+    MOVIES = 12
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="sync_parallel_")
+        self.tmp = Path(self._td.name).resolve()
+        self.addCleanup(self._td.cleanup)
+        self.lib = self.tmp / "lib"
+        for index in range(self.MOVIES):
+            name = f"Film {index:02d} (2000)"
+            folder = self.lib / name
+            folder.mkdir(parents=True)
+            (folder / f"{name}.mkv").write_bytes(b"fake video")
+            (folder / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8")
+        self.log = self.tmp / "out" / "sync.log"
+        self.report = self.tmp / "out" / "sync_report.txt"
+        self.ledger = self.tmp / "out" / "sync_state.json"
+
+    def _reset_library(self) -> None:
+        """Put the library back exactly as setUp left it, in place.
+
+        Rebuilding it in a *new* temporary directory would make the two
+        reports differ by path, which is not the difference under test.
+        """
+        for index in range(self.MOVIES):
+            name = f"Film {index:02d} (2000)"
+            (self.lib / name / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8")
+        self.ledger.unlink(missing_ok=True)
+
+    def _run(self, workers: int) -> int:
+        real_which = shutil.which
+
+        def which(name: str) -> str | None:
+            return "/usr/bin/ffmpeg" if name == "ffmpeg" else real_which(name)
+
+        fake = FakeFfsubsync()
+        with mock.patch.object(ss, "run_ffsubsync", fake), \
+                mock.patch.object(ss, "find_ffsubsync", lambda explicit=None: "fake-ffsubsync"), \
+                mock.patch.object(ss, "ffsubsync_version", lambda binary: "ffsubsync 9.9.9"), \
+                mock.patch.object(ss, "detect_ffsubsync_features",
+                                  lambda binary: ss.FfsubsyncFeatures(True, True, True)), \
+                mock.patch("shutil.which", side_effect=which):
+            code = ss.main([
+                "--source", str(self.lib),
+                "--log", str(self.log),
+                "--report", str(self.report),
+                "--sync-ledger", str(self.ledger),
+                "--workers", str(workers),
+            ])
+        self.calls = fake.calls
+        return code
+
+    def test_every_sidecar_is_measured_exactly_once(self) -> None:
+        self.assertEqual(0, self._run(workers=4))
+        self.assertEqual(self.MOVIES, len(self.calls),
+                         "a sidecar was measured twice or not at all")
+        for index in range(self.MOVIES):
+            name = f"Film {index:02d} (2000)"
+            self.assertEqual(
+                SHIFTED_SRT,
+                (self.lib / name / f"{name}.eng.srt").read_text(encoding="utf-8"),
+            )
+
+    def test_the_shared_ledger_keeps_every_verdict(self) -> None:
+        """The lost-update case: twelve workers writing one dict."""
+        self._run(workers=4)
+        entries = json.loads(self.ledger.read_text(encoding="utf-8"))["entries"]
+        self.assertEqual(self.MOVIES, len(entries))
+        self.assertTrue(all(entry["status"] == ss.STATUS_SYNCED for entry in entries.values()))
+
+    def test_the_report_is_the_same_whatever_the_worker_count(self) -> None:
+        """Results are sorted before rendering, so scheduling cannot show up."""
+        self._run(workers=1)
+        serial = self.report.read_text(encoding="utf-8")
+        self._reset_library()  # the first run rewrote every sidecar
+        self._run(workers=4)
+        parallel_text = self.report.read_text(encoding="utf-8")
+
+        def comparable(text: str) -> list[str]:
+            """Everything the report says except how long it took to say it.
+
+            Two runs of the same library differ in exactly three ways: the
+            clock, the worker count and the durations. Naming the labels one
+            by one was not enough - "Elapsed" was scrubbed and "Took" was not,
+            and a CI runner slow enough to spend 0.1s on a movie failed a test
+            about *ordering*. Any duration at all goes.
+            """
+            skip = ("Generated", "Report", "Log", "Library", "Workers")
+            return [line for line in text.splitlines()
+                    if not any(word in line for word in skip)
+                    and not re.search(r"\d+\.\d+s", line)]
+
+        self.assertEqual(comparable(serial), comparable(parallel_text))
+
+    def test_workers_must_not_be_negative(self) -> None:
+        cfg = _cfg(self.tmp, library=self.lib, workers=-2)
+        self.assertTrue(any("--workers" in error for error in ss.validate_config(cfg)))
 
 
 if __name__ == "__main__":

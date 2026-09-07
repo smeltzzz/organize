@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 import pipeline as pl
+from organizekit import core
 
 
 class StepOrderTests(unittest.TestCase):
@@ -71,7 +72,7 @@ class LibraryResolutionTests(unittest.TestCase):
                 os.environ.pop(var, None)
 
     def test_no_flag_no_env_uses_documented_default(self) -> None:
-        self.assertEqual(pl.resolve_library(None), pl.default_library_root())
+        self.assertEqual(pl.resolve_library(None), core.default_library_root())
 
     def test_env_var_is_honored_without_a_flag(self) -> None:
         os.environ["MOVIE_STD_TARGET"] = "/media/torrents/final_organized"

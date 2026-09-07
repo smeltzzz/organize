@@ -14,18 +14,19 @@ from unittest import mock
 from reporttext import scorecard, section
 
 import subtitle_fetcher as sf
+from organizekit import core
 
 srt_looks_valid = sf.srt_looks_valid
 validate_srt_sidecar = sf.validate_srt_sidecar
 normalize_srt_newlines = sf.normalize_srt_newlines
-decode_srt_bytes = sf.decode_srt_bytes
+decode_srt_bytes = core.decode_srt_bytes
 EXTERNAL_SRT_ENCODINGS = sf.EXTERNAL_SRT_ENCODINGS
 EXTERNAL_SRT_MAX_BYTES = sf.EXTERNAL_SRT_MAX_BYTES
-EXTERNAL_SRT_CUE_RE = sf.EXTERNAL_SRT_CUE_RE
+EXTERNAL_SRT_CUE_RE = core.EXTERNAL_SRT_CUE_RE
 EXTERNAL_SRT_SUFFIX = sf.EXTERNAL_SRT_SUFFIX
-LEGACY_EXTERNAL_SRT_SUFFIX = sf.LEGACY_EXTERNAL_SRT_SUFFIX
+LEGACY_EXTERNAL_SRT_SUFFIX = core.LEGACY_EXTERNAL_SRT_SUFFIX
 CoordinationLock = sf.CoordinationLock
-LockTimeoutError = sf.LockTimeoutError
+LockTimeoutError = core.LockTimeoutError
 promote_legacy_external_english_srt = sf.promote_legacy_external_english_srt
 exact_external_english_srt_path = sf.exact_external_english_srt_path
 
@@ -266,7 +267,6 @@ class SingleSourceContractTests(unittest.TestCase):
         import library_auditor  # noqa: F401  (imported so a break there is caught)
         import mkv_track_cleaner as tc
         import movie_standardizer as ms
-        import sync_subtitles as ss
 
         normalized = normalize_srt_newlines(text)
         return {
@@ -274,7 +274,7 @@ class SingleSourceContractTests(unittest.TestCase):
             "mkv_track_cleaner": tc.EXTERNAL_SRT_CUE_RE.search(normalized) is not None,
             "subtitle_fetcher": sf.looks_like_srt(normalized),
             "subtitle_fetcher (shared helper)": sf.srt_looks_valid(normalized),
-            "sync_subtitles": ss.srt_looks_valid(normalized),
+            "sync_subtitles": core.srt_looks_valid(normalized),
         }
 
     def test_every_tool_agrees_on_a_plain_cue(self) -> None:
@@ -296,21 +296,19 @@ class SingleSourceContractTests(unittest.TestCase):
     def test_no_tool_keeps_a_divergent_size_limit(self) -> None:
         import mkv_track_cleaner as tc
         import movie_standardizer as ms
-        import sync_subtitles as ss
 
         self.assertEqual(ms.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
         self.assertEqual(tc.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
         self.assertEqual(sf.MAX_SUBTITLE_BYTES, EXTERNAL_SRT_MAX_BYTES)
-        self.assertEqual(ss.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
+        self.assertEqual(core.EXTERNAL_SRT_MAX_BYTES, EXTERNAL_SRT_MAX_BYTES)
 
     def test_no_tool_keeps_a_divergent_cue_pattern(self) -> None:
         import mkv_track_cleaner as tc
         import movie_standardizer as ms
-        import sync_subtitles as ss
 
         self.assertEqual(ms.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
         self.assertEqual(tc.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
-        self.assertEqual(ss.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
+        self.assertEqual(core.EXTERNAL_SRT_CUE_RE.pattern, EXTERNAL_SRT_CUE_RE.pattern)
 
     def test_no_tool_keeps_a_divergent_encoding_list(self) -> None:
         self.assertEqual(EXTERNAL_SRT_ENCODINGS, ("utf-8-sig", "utf-8", "cp1252"))
@@ -1554,6 +1552,112 @@ class EqualSourcePoolTests(unittest.TestCase):
             self.assertEqual(summary["opensubtitles_download_requests_reserved"], 0)
 
 
+class PerHostRateLimitTests(unittest.TestCase):
+    """Politeness is owed to a server, not to a transport object.
+
+    One transport drives seven different scraped sites; one client talks to an
+    API host and a download host. Before this, every one of those requests
+    queued behind the same single timestamp, so a request to subf2m waited a
+    second because the previous one went to podnapisi. Each host now has its
+    own token bucket: the same per-site limit, none of the cross-site waiting.
+    """
+
+    class Clock:
+        def __init__(self) -> None:
+            self.now = 500.0
+            self.slept: list[float] = []
+
+        def time(self) -> float:
+            return self.now
+
+        def sleep(self, seconds: float) -> None:
+            self.slept.append(round(seconds, 6))
+            self.now += seconds
+
+    def setUp(self) -> None:
+        self.clock = self.Clock()
+
+    def _transport(self, gap: float = 1.0) -> sf.ScrapeTransport:
+        return sf.ScrapeTransport(gap=gap, sleep=self.clock.sleep, clock=self.clock.time)
+
+    # -- the scraping tier -------------------------------------------------
+
+    def test_seven_sources_are_seven_budgets(self) -> None:
+        transport = self._transport()
+        for host in ("subf2m.co", "www.podnapisi.net", "www.addic7ed.com",
+                     "api.subsource.net", "subsunacs.net", "yifysubtitles.ch",
+                     "subs.sab.bz"):
+            self.assertEqual(transport._throttle(f"https://{host}/search?q=x"), 0.0)
+        self.assertEqual(self.clock.slept, [],
+                         "unrelated sites must not queue behind each other")
+
+    def test_one_source_is_still_paced(self) -> None:
+        transport = self._transport()
+        transport._throttle("https://subf2m.co/subtitles/searchbytitle?query=dune")
+        # The search and the download page are the same server: still one gap.
+        self.assertEqual(transport._throttle("https://subf2m.co/subtitles/dune-2021/english"), 1.0)
+        self.assertEqual(self.clock.slept, [1.0])
+
+    def test_time_spent_on_the_request_counts_towards_the_gap(self) -> None:
+        transport = self._transport()
+        transport._throttle("https://subf2m.co/a")
+        self.clock.now += 0.75  # the HTTP round trip
+        self.assertAlmostEqual(transport._throttle("https://subf2m.co/b"), 0.25)
+
+    def test_get_and_post_throttle_the_url_they_are_sent_to(self) -> None:
+        transport = self._transport()
+        with mock.patch.object(sf.ScrapeTransport, "_open", return_value=b"ok"):
+            transport.get("https://subf2m.co/a")
+            transport.post("https://www.podnapisi.net/b", {"q": "x"})
+            transport.get("https://subf2m.co/c")
+        self.assertEqual(self.clock.slept, [1.0], "only the repeat visit waits")
+
+    def test_a_zero_gap_disables_the_wait_entirely(self) -> None:
+        transport = self._transport(gap=0.0)
+        for _ in range(5):
+            self.assertEqual(transport._throttle("https://subf2m.co/a"), 0.0)
+
+    # -- the API clients ---------------------------------------------------
+
+    def _rebind(self, client: object) -> None:
+        client.buckets = core.BucketRegistry(  # type: ignore[attr-defined]
+            gap=sf.REQUEST_GAP_SEC, sleep=self.clock.sleep, clock=self.clock.time,
+        )
+
+    def test_an_api_host_and_its_download_host_are_separate_budgets(self) -> None:
+        client = sf.OpenSubtitlesClient(sf.Config(api_key="k"))
+        self._rebind(client)
+        self.assertEqual(client._throttle("https://api.opensubtitles.com/api/v1/subtitles"), 0.0)
+        self.assertEqual(client._throttle("https://dl.opensubtitles.org/file/1"), 0.0)
+        self.assertAlmostEqual(client._throttle("https://api.opensubtitles.com/api/v1/download"),
+                               sf.REQUEST_GAP_SEC)
+
+    def test_retry_after_holds_the_host_back_rather_than_one_request(self) -> None:
+        # A 429 is information about the server: every later caller of that
+        # host must wait it out, not just the request that was unlucky.
+        client = sf.SubdlClient("secret-key")
+        self._rebind(client)
+        error = urllib.error.HTTPError(
+            "https://api.subdl.com/api/v1/subtitles", 429, "Too Many Requests",
+            {"Retry-After": "7"}, io.BytesIO(b"slow down"),
+        )
+        body = json.dumps({"status": True, "subtitles": []}).encode("utf-8")
+        with mock.patch("subtitle_fetcher.urllib.request.urlopen",
+                        side_effect=[error, SubdlIntegrationTests.Response(body)]):
+            client._request_json("/subtitles", {"film_name": "Dune"})
+        self.assertIn(7.0, self.clock.slept)
+        # And the penalty is not spent twice: the next call to a different
+        # host is free.
+        self.assertEqual(client._throttle("https://dl.subdl.com/file/1"), 0.0)
+
+    def test_a_capped_retry_after_is_still_honoured(self) -> None:
+        client = sf.SubdlClient("secret-key")
+        self._rebind(client)
+        bucket = client.buckets.bucket("api.subdl.com")
+        self.assertEqual(bucket.penalize(9999.0), 9999.0)
+        self.assertEqual(bucket.penalize(1.0), 9999.0, "a penalty never shortens a wait")
+
+
 class ScrapeFallbackWiringTests(unittest.TestCase):
     """The tier-3 scraping sources wired into the daily queue.
 
@@ -1672,7 +1776,7 @@ class ScrapeFallbackWiringTests(unittest.TestCase):
                 dry_run=False, retry_review=False, identity_fallback=True,
                 extract_embedded=True, extract_min_cues=sf.DEFAULT_EXTRACT_MIN_CUES,
                 ocr_backend=sf.OCR_BACKEND_AUTO, ocr_bin="", ocr_args="",
-                ocr_timeout=sf.DEFAULT_OCR_TIMEOUT_SEC, ocr_limit=0,
+                ocr_timeout=sf.DEFAULT_OCR_TIMEOUT_SEC, ocr_limit=0, workers=0,
             )
             with mock.patch.dict("os.environ", {"OPENSUBTITLES_API_KEY": "", "SUBDL_API_KEY": ""}):
                 cfg = sf.compact_config_from_args(args)

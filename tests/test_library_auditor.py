@@ -10,6 +10,7 @@ from pathlib import Path
 from reporttext import scorecard, section
 
 import library_auditor as la
+from organizekit import core
 
 # A minimal but genuinely well-formed SRT. Anything shorter is not a subtitle.
 VALID_SRT = "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n"
@@ -260,3 +261,139 @@ class ExitCodeGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ParallelAuditIsTheSameAudit(unittest.TestCase):
+    """The audit reads thousands of folders; on a network share that is a
+    round trip each. Folders are therefore classified in parallel - but the
+    audit is the library's official verdict, so the worker count must not be
+    able to change a single character of it.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="auditor_parallel_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        # A deliberately mixed library: canonical, missing sidecar, invalid
+        # sidecar, wrong container, and an empty folder.
+        for index in range(24):
+            name = f"Film {index:02d} (20{index:02d})"
+            folder = self.root / name
+            folder.mkdir()
+            if index % 5 == 4:
+                continue  # empty folder
+            extension = ".avi" if index % 7 == 6 else ".mkv"
+            (folder / f"{name}{extension}").write_bytes(b"x")
+            if index % 3 == 0:
+                (folder / f"{name}.eng.srt").write_text(VALID_SRT, encoding="utf-8")
+            elif index % 3 == 1:
+                (folder / f"{name}.eng.srt").write_text("not a subtitle", encoding="utf-8")
+
+    def _states(self, workers: int) -> list[tuple[str, str]]:
+        cfg = la.Config(source_dir=self.root, workers=workers)
+        audit = la.audit_library(cfg)
+        return [(item.folder.name, item.state) for item in audit.folders]
+
+    def test_worker_count_cannot_change_the_verdict(self) -> None:
+        serial = self._states(1)
+        self.assertEqual(24, len(serial))
+        for workers in (2, 4, 8):
+            with self.subTest(workers=workers):
+                self.assertEqual(serial, self._states(workers),
+                                 "the audit must not depend on how it was scheduled")
+
+    def test_results_stay_in_folder_order(self) -> None:
+        """The report is a numbered list; parallelism must not shuffle it."""
+        names = [name for name, _state in self._states(8)]
+        self.assertEqual(sorted(names, key=str.casefold), names)
+
+    def test_negative_workers_is_a_config_error(self) -> None:
+        cfg = la.Config(source_dir=self.root, workers=-1,
+                        log_file=self.root.parent / "a.log",
+                        report_file=self.root.parent / "a.txt")
+        self.assertTrue(any("--workers" in error for error in la.validate_config(cfg)))
+
+
+class StateCacheTests(unittest.TestCase):
+    """The verdicts the audit publishes for ``organize status`` to read.
+
+    The audit itself is unchanged by any of this: the cache is written after
+    the report exists, is never read back, and a failure to write it is a
+    logged warning and nothing more.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="auditor_state_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.library = self.root / "lib"
+        self.library.mkdir()
+        self.db = self.root / "state.db"
+
+    def _movie(self, title: str, *, sidecar: str | None = None) -> Path:
+        folder = self.library / title
+        folder.mkdir(parents=True, exist_ok=True)
+        movie = folder / f"{title}.mkv"
+        movie.write_bytes(b"x" * 512)
+        if sidecar is not None:
+            (folder / sidecar).write_text(VALID_SRT, encoding="utf-8")
+        return movie
+
+    def _publish(self, **overrides: object) -> tuple[int, dict]:
+        settings: dict = {"source_dir": self.library, "state_db": self.db}
+        settings.update(overrides)
+        cfg = la.Config(**settings)
+        published = la.publish_state(la.audit_library(cfg), cfg)
+        store = core.open_state(self.db, tool="tests")
+        try:
+            return published, store.verdicts()
+        finally:
+            store.close()
+
+    def test_layout_and_subtitle_verdicts_are_recorded_separately(self) -> None:
+        movie = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        published, verdicts = self._publish()
+        key = core.path_norm(movie)
+        self.assertEqual(published, 1)
+        self.assertEqual(verdicts[(key, core.KIND_LAYOUT)].verdict, "CANONICAL_MKV")
+        self.assertEqual(verdicts[(key, core.KIND_SUBTITLE)].verdict, "present")
+
+    def test_a_missing_sidecar_is_published_as_missing(self) -> None:
+        movie = self._movie("Bravo (2002)")
+        _published, verdicts = self._publish()
+        self.assertEqual(verdicts[(core.path_norm(movie), core.KIND_SUBTITLE)].verdict,
+                         "missing")
+
+    def test_every_audit_state_maps_to_at_most_one_subtitle_state(self) -> None:
+        # The auditor owns this vocabulary; `organize status` reads it rather
+        # than guessing, so an unmapped state must mean "no subtitle claim".
+        self.assertEqual(set(la.SUBTITLE_STATE_FOR_AUDIT.values()),
+                         {"present", "missing", "invalid", "noncanonical"})
+        for state in la.SUBTITLE_STATE_FOR_AUDIT:
+            self.assertIsInstance(state, str)
+
+    def test_a_deleted_movie_is_forgotten(self) -> None:
+        movie = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        self._publish()
+        for path in sorted(movie.parent.iterdir()):
+            path.unlink()
+        movie.parent.rmdir()
+        _published, verdicts = self._publish()
+        self.assertEqual(verdicts, {})
+
+    def test_no_state_publishes_nothing(self) -> None:
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        published, verdicts = self._publish(use_state=False)
+        self.assertEqual(published, 0)
+        self.assertEqual(verdicts, {})
+
+    def test_an_unusable_cache_never_fails_the_audit(self) -> None:
+        self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
+        self.db.write_bytes(b"not a database" * 50)
+        published, _verdicts = self._publish()
+        self.assertEqual(published, 0)
+
+    def test_a_state_db_inside_the_library_is_a_config_error(self) -> None:
+        cfg = la.Config(source_dir=self.library, state_db=self.library / "state.db",
+                        log_file=self.root / "a.log", report_file=self.root / "a.txt")
+        self.assertTrue(any("state" in error.casefold() for error in la.validate_config(cfg)))

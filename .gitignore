@@ -35,6 +35,10 @@ logs/
 # subtitle_fetcher.py's extraction record defaults to
 # <dir holding the scripts>/ReportsAndLogs/subtitle_fetcher_extracted.json
 ReportsAndLogs/
+# the shared state cache (a rebuildable derived cache, never authority)
+state.db
+state.db-wal
+state.db-shm
 
 # Accidental desktop / OS dumps
 Screenshot*.png

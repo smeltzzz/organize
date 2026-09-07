@@ -54,7 +54,6 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import errno
 import hashlib
 import json
 import os
@@ -66,27 +65,43 @@ import stat
 import subprocess
 import sys
 import tempfile
-import textwrap
-import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
-# ---------------------------------------------------------------------------
-# Shared helpers (vendored inline)
-#
-# This script is self-contained on purpose: every helper it needs is copied
-# below instead of imported from a shared module, so you can take this single
-# file anywhere and run it with nothing but the Python standard library.
-# The other scripts in this repo carry byte-identical copies of the same
-# helpers; if you change one, keep the others in sync.
-# ---------------------------------------------------------------------------
-
-STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
+# Shared implementation: everything imported here is defined exactly once,
+# in organizekit/core/. See tests/test_shared_core.py for the rule that
+# keeps it that way.
+from organizekit.core import (
+    COVERING_ENGLISH_SRT_SUFFIXES,
+    EXTERNAL_SRT_CUE_RE,
+    EXTERNAL_SRT_MAX_BYTES,
+    EXTERNAL_SRT_SUFFIX,
+    KIND_REMUX,
+    Ansi,
+    CoordinationLock,
+    LiveLine,
+    MediaProbeCache,
+    Report,
+    StateStore,
+    decode_srt_bytes,
+    default_tool_dir,
+    ellipsize,
+    enable_utf8_stdio,
+    normalize_srt_newlines,
+    open_probe_cache,
+    open_state,
+    print_text,
+    promote_legacy_external_english_srt,
+    resolve_library,
+    run_field_smoke_test,
+    strip_ansi,
+    write_raw,
+)
 
 # ---------------------------------------------------------------------------
 # External English SRT sidecar contract
@@ -105,22 +120,6 @@ STANDARDIZER_LOCK_NAME = ".movie_standardizer.lock"
 # ISO 639-1 ``.en.srt`` form is recognized only as a legacy rename source so a
 # library cut over from the previous convention is not stuck in review.
 
-EXTERNAL_SRT_MAX_BYTES = 4 * 1024 * 1024
-
-EXTERNAL_SRT_CUE_RE = re.compile(
-    r"(?m)^\s*\d+\s*\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}[,.]\d{3}"
-)
-
-EXTERNAL_SRT_LANG = "eng"
-
-EXTERNAL_SRT_SUFFIX = f".{EXTERNAL_SRT_LANG}.srt"  # ".eng.srt"
-
-LEGACY_EXTERNAL_SRT_SUFFIX = ".en.srt"
-
-COVERING_ENGLISH_SRT_SUFFIXES: tuple[str, ...] = (
-    EXTERNAL_SRT_SUFFIX,
-    f".{EXTERNAL_SRT_LANG}.sdh.srt",
-)
 
 # The single agreed decode order. Every tool that turns subtitle bytes into
 # text uses this tuple and nothing else, so a tool cannot quietly accept an
@@ -128,1004 +127,10 @@ COVERING_ENGLISH_SRT_SUFFIXES: tuple[str, ...] = (
 # not make an otherwise valid file look binary; "cp1252" last because it
 # decodes almost any byte sequence and would mask a genuine encoding problem.
 
-EXTERNAL_SRT_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "cp1252")
-
-def normalize_srt_newlines(text: str) -> str:
-    """Collapse CRLF and bare CR to LF so the cue pattern handles one form."""
-    return text.replace("\r\n", "\n").replace("\r", "\n")
-
-def decode_srt_bytes(raw: bytes) -> str | None:
-    """Decode subtitle bytes in the agreed order, or ``None`` if none applies.
-
-    Callers that need a best-effort string anyway (the fetcher inspects a
-    rejected download to explain why it was rejected) decode with
-    ``errors="replace"`` themselves rather than widening this contract.
-    """
-    for encoding in EXTERNAL_SRT_ENCODINGS:
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return None
-
-def srt_looks_valid(text: str) -> bool:
-    """True when ``text`` contains at least one well-formed SRT cue.
-
-    A file that fails this is not a subtitle: it is an error page, a stub, or a
-    truncated download, and must never be treated as covering a movie.
-    """
-    return bool(EXTERNAL_SRT_CUE_RE.search(text))
-
-def validate_srt_sidecar(path: Path) -> tuple[bool, str]:
-    """Conservatively decide whether ``path`` is a usable external SRT.
-
-    Returns ``(True, "")`` only for a regular, non-symlink, non-empty,
-    size-bounded file that decodes as text and contains at least one
-    well-formed cue.  Everything else returns ``(False, reason)`` with a
-    human-readable explanation suitable for a report line.
-
-    This never writes, follows symlinks, or deletes anything.
-    """
-    try:
-        file_stat = path.stat(follow_symlinks=False)
-    except OSError as exc:
-        return False, f"could not stat subtitle ({exc.strerror or exc})"
-    if path.is_symlink() or not stat.S_ISREG(file_stat.st_mode):
-        return False, "not a regular file (symlink or special file)"
-    if file_stat.st_size <= 0:
-        return False, "subtitle file is empty"
-    if file_stat.st_size > EXTERNAL_SRT_MAX_BYTES:
-        return False, f"subtitle exceeds {EXTERNAL_SRT_MAX_BYTES // (1024 * 1024)} MiB safety limit"
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        return False, f"could not read subtitle ({exc.strerror or exc})"
-    text = decode_srt_bytes(raw)
-    if text is None:
-        return False, "subtitle has an unsupported text encoding"
-    if not srt_looks_valid(normalize_srt_newlines(text)):
-        return False, "subtitle contains no valid SRT cue"
-    return True, ""
-
-def exact_external_english_srt_path(media_path: Path) -> Path:
-    """Return the canonical ``<stem>.eng.srt`` path beside a movie file."""
-    return media_path.with_name(f"{media_path.stem}{EXTERNAL_SRT_SUFFIX}")
-
-def legacy_external_english_srt_path(media_path: Path) -> Path:
-    """Return the pre-cutover ``<stem>.en.srt`` path beside a movie file."""
-    return media_path.with_name(f"{media_path.stem}{LEGACY_EXTERNAL_SRT_SUFFIX}")
-
-def promote_legacy_external_english_srt(media_path: Path) -> tuple[Path | None, str]:
-    """Rename a validated legacy ``.en.srt`` to the canonical ``.eng.srt``.
-
-    Returns ``(canonical_path, "")`` when the canonical sidecar already exists
-    or was just created by renaming the legacy file.  Returns ``(None, reason)``
-    when there is nothing to promote or the rename is unsafe (e.g. both names
-    exist, legacy is invalid, or the destination is occupied by a non-file).
-
-    Never overwrites an existing ``.eng.srt``.  Never follows symlinks.
-    """
-    canonical = exact_external_english_srt_path(media_path)
-    legacy = legacy_external_english_srt_path(media_path)
-    try:
-        if canonical.exists() and not canonical.is_symlink() and canonical.is_file():
-            return canonical, ""
-        if canonical.exists() or canonical.is_symlink():
-            return None, f"canonical sidecar path is occupied: {canonical.name}"
-    except OSError as exc:
-        return None, f"could not inspect canonical sidecar: {exc}"
-    try:
-        if not legacy.exists() or legacy.is_symlink() or not legacy.is_file():
-            return None, "legacy .en.srt is absent"
-    except OSError as exc:
-        return None, f"could not inspect legacy sidecar: {exc}"
-    ok, reason = validate_srt_sidecar(legacy)
-    if not ok:
-        return None, f"legacy .en.srt is unusable ({reason})"
-    try:
-        os.replace(str(legacy), str(canonical))
-    except OSError as exc:
-        return None, f"could not rename legacy .en.srt to .eng.srt: {exc}"
-    return canonical, ""
-
-class LockTimeoutError(TimeoutError):
-    """Raised when a ``CoordinationLock`` cannot be acquired in time.
-
-    Subclasses :class:`TimeoutError` so callers that historically caught the
-    built-in ``TimeoutError`` (e.g. the mkv track cleaner) keep working.
-    """
-
-def try_file_lock(handle: Any, *, strict_non_contention: bool = False) -> bool:
-    """Attempt a non-blocking exclusive lock on ``handle``.
-
-    Returns ``True`` when the lock is taken, ``False`` when it is held by
-    another process.
-
-    ``strict_non_contention`` controls how a *real* OS error is handled:
-
-    * ``False`` (the historical behaviour of the per-tool run locks) treats any
-      ``OSError`` as "busy" — ``bitdepth.py`` and ``library_auditor.py`` retried
-      every failure until they timed out.
-    * ``True`` (the historical behaviour of the standardizer coordination lock)
-      re-raises genuine errors and only reports the well-known
-      "already locked" codes as busy.
-    """
-    if os.name == "nt":
-        import msvcrt
-
-        handle.seek(0)
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
-            return True
-        except OSError as exc:
-            if not strict_non_contention:
-                return False
-            if getattr(exc, "winerror", None) in {33, 36} or exc.errno in {
-                errno.EACCES,
-                errno.EAGAIN,
-            }:
-                return False
-            raise
-
-    import fcntl
-
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return True
-    except OSError as exc:
-        if not strict_non_contention:
-            return False
-        # Strict mode: the only expected "busy" condition is the lock being
-        # held by another process, which surfaces as EAGAIN/EWOULDBLOCK (and
-        # occasionally EACCES). Anything else is a real error worth raising.
-        if getattr(exc, "errno", None) in {
-            errno.EACCES,
-            errno.EAGAIN,
-            getattr(errno, "EWOULDBLOCK", errno.EAGAIN),
-        }:
-            return False
-        raise
-
-class CoordinationLock:
-    """Advisory, cross-platform, fail-closed lock shared across the tools.
-
-    This is the single implementation of the lock protocol used by
-    ``movie_standardizer.py``, ``mkv_track_cleaner.py`` and
-    ``subtitle_fetcher.py``.  Because all three hash the *same normalized
-    target path* with the *same lock file name* in the system temp directory,
-    they all contend on the identical file — which is exactly what prevents a
-    qBittorrent completion hook from placing or replacing canonical hardlinks
-    while another tool scans or remuxes them.
-
-    Usable as a context manager::
-
-        with CoordinationLock(library, timeout_seconds=60.0):
-            ...
-
-    or with explicit acquire/release::
-
-        lock = CoordinationLock(target, timeout_seconds=60.0)
-        lock.acquire()
-        try:
-            ...
-        finally:
-            lock.release()
-    """
-
-    def __init__(self, target: Path | str, *, timeout_seconds: float = 60.0) -> None:
-        normalized = os.path.normcase(os.path.normpath(str(target)))
-        key = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
-        self.path = Path(tempfile.gettempdir()) / f"{STANDARDIZER_LOCK_NAME}.{key}"
-        self.timeout_seconds = max(0.0, float(timeout_seconds))
-        self._fh: Any | None = None
-
-    def acquire(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = open(self.path, "a+b")  # noqa: SIM115 - released in release(), not here
-        self._fh = handle
-        # Windows msvcrt locks byte ranges; materialize the first byte once.
-        if handle.seek(0, os.SEEK_END) == 0:
-            handle.write(b"\0")
-            handle.flush()
-        deadline = time.monotonic() + self.timeout_seconds
-        try:
-            while not try_file_lock(handle, strict_non_contention=True):
-                if time.monotonic() >= deadline:
-                    raise LockTimeoutError(
-                        f"Timed out after {self.timeout_seconds:.1f}s waiting for "
-                        f"library coordination lock: {self.path}"
-                    )
-                time.sleep(0.1)
-        except BaseException:
-            handle.close()
-            self._fh = None
-            raise
-
-    def release(self) -> None:
-        handle = self._fh
-        if handle is None:
-            return
-        try:
-            if os.name == "nt":
-                import msvcrt
-
-                handle.seek(0)
-                try:
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
-                except OSError:
-                    pass
-            else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        finally:
-            handle.close()
-            self._fh = None
-
-    def __enter__(self) -> CoordinationLock:
-        self.acquire()
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        self.release()
-
-def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
-    r"""Publish ``text`` to ``dest`` atomically and durably.
-
-    Writes through a unique sibling file, ``fsync``\ s it, then publishes it
-    with a single atomic operation, so a crash never leaves a truncated file
-    and a reader always sees either the previous contents or the complete new
-    ones. On failure the staged file is removed and the prior file is kept.
-
-    The ``fsync`` is what makes this survive power loss rather than only a
-    process crash: without it the rename can land while the bytes it points at
-    are still only in the page cache, publishing an empty or partial file.
-    ``newline="\n"`` keeps output byte-identical across platforms instead of
-    silently gaining CRLFs on Windows.
-
-    With ``replace=False`` the publish uses ``os.link``, an atomic
-    create-if-absent, so an existing file is never clobbered. The subtitle
-    fetcher needs this: a concurrent or hand-placed English sidecar must win
-    over a download rather than be silently overwritten.
-    """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    stage = dest.with_name(f".{dest.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp")
-    try:
-        with stage.open("x", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if replace:
-            os.replace(str(stage), str(dest))
-        else:
-            os.link(str(stage), str(dest))
-            stage.unlink()
-    except OSError:
-        try:
-            stage.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-
-class MediaProbeCache:
-    """Best-effort ``(path, size, mtime) -> probe payload`` cache.
-
-    ``bitdepth.py`` spawns one ``ffprobe`` per movie and ``mkv_track_cleaner.py``
-    spawns one ``mkvmerge -J`` per movie, on every single run, even for a
-    library that has not changed since the last sweep. Those subprocesses
-    dominate the cost of a maintenance run.
-
-    A probe is a pure function of a file's bytes, so a stored payload is reused
-    only while both the size and ``st_mtime_ns`` are unchanged. Crucially, only
-    the *probe output* is cached and never a tool's verdict: every consumer
-    still re-derives its own decision from live filesystem state. A cached
-    entry therefore cannot make a tool blind to a change it must react to — a
-    sidecar appearing next to a movie, a hardlink count dropping when seeding
-    stops, or a remux landing.
-
-    Deliberately fail-open on reads and fail-silent on writes: a missing,
-    unreadable, truncated, corrupt, foreign or stale cache is a miss rather
-    than an error, and a cache that cannot be saved costs only the next run's
-    speed. Nothing here can turn a correct run into an incorrect one.
-
-    ``path_norm`` keys mean the two tools agree on identity the same way they
-    already agree on lock keys.
-    """
-
-    SCHEMA = 1
-
-    def __init__(
-        self,
-        path: Path | str,
-        *,
-        tool: str = "probe",
-        enabled: bool = True,
-        max_entries: int = 20000,
-    ) -> None:
-        self.path = Path(path)
-        self.tool = tool
-        self.enabled = bool(enabled)
-        self.max_entries = max(1, int(max_entries))
-        self.hits = 0
-        self.misses = 0
-        self._lock = threading.Lock()
-        self._entries: dict[str, dict[str, Any]] = {}
-        self._dirty = False
-        if self.enabled:
-            self._load()
-
-    def _load(self) -> None:
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return
-        if not isinstance(raw, dict):
-            return
-        if raw.get("schema") != self.SCHEMA or raw.get("tool") != self.tool:
-            # A different tool's cache or an older format: start clean rather
-            # than guess at a layout we do not understand.
-            return
-        entries = raw.get("entries")
-        if not isinstance(entries, dict):
-            return
-        self._entries = {
-            str(key): value for key, value in entries.items() if isinstance(value, dict)
-        }
-
-    def get(self, file_path: Path | str, size: int, mtime_ns: int) -> dict[str, Any] | None:
-        """Return a stored payload for an unchanged file, else ``None``."""
-        if not self.enabled:
-            self.misses += 1
-            return None
-        key = path_norm(file_path)
-        with self._lock:
-            entry = self._entries.get(key)
-            if (
-                entry is not None
-                and entry.get("size") == int(size)
-                and entry.get("mtime_ns") == int(mtime_ns)
-            ):
-                payload = entry.get("payload")
-                if isinstance(payload, dict):
-                    self.hits += 1
-                    return payload
-            self.misses += 1
-            return None
-
-    def put(self, file_path: Path | str, size: int, mtime_ns: int, payload: dict[str, Any]) -> None:
-        """Store a probe payload, evicting oldest entries past ``max_entries``."""
-        if not self.enabled:
-            return
-        key = path_norm(file_path)
-        with self._lock:
-            # Pop-then-insert refreshes recency: a plain dict preserves
-            # insertion order but has no OrderedDict.move_to_end.
-            self._entries.pop(key, None)
-            self._entries[key] = {
-                "size": int(size),
-                "mtime_ns": int(mtime_ns),
-                "payload": payload,
-            }
-            while len(self._entries) > self.max_entries:
-                self._entries.pop(next(iter(self._entries)), None)
-            self._dirty = True
-
-    def save(self) -> None:
-        """Persist the cache atomically. Failures are swallowed by design."""
-        if not self.enabled or not self._dirty:
-            return
-        with self._lock:
-            snapshot = dict(self._entries)
-            self._dirty = False
-        document = {"schema": self.SCHEMA, "tool": self.tool, "entries": snapshot}
-        try:
-            atomic_write_text(
-                self.path,
-                json.dumps(document, separators=(",", ":"), ensure_ascii=False) + "\n",
-            )
-        except OSError:
-            pass
-
-    def __len__(self) -> int:
-        return len(self._entries)
-
-def path_norm(path: Path | str) -> str:
-    """Normalize a path the same way every tool compares them.
-
-    ``normcase`` lower-cases on Windows and is a no-op on POSIX; ``normpath``
-    collapses ``..`` and duplicate separators.  Matching this exactly is what
-    lets the standardizer, cleaner and subtitle fetcher agree on a lock key and
-    on whether two paths are the same file.
-    """
-    return os.path.normcase(os.path.normpath(str(path)))
-
-REPORT_WIDTH = 96
-
-REPORT_MIN_WIDTH = 64
-
-REPORT_INDENT = 2
-
-_RULE_HEAVY = "═"
-
-_RULE_LIGHT = "─"
-
-def enable_utf8_stdio() -> None:
-    """Pin this process's console streams to UTF-8 with replacement errors.
-
-    The reports are full of box-drawing characters, and every tool now prints
-    one.  Two failures follow from leaving the stream encoding to the locale:
-    a console that cannot represent ``\u2550`` raises ``UnicodeEncodeError``
-    half-way through a run, and a parent that captures a child's output with
-    ``text=True`` decodes it with the *locale* encoding - cp1252 on Windows -
-    which turns those same bytes into a ``UnicodeDecodeError``.
-
-    So every tool pins its own output to UTF-8 at startup, and every caller
-    that captures a child decodes it as UTF-8.  ``errors="replace"`` means a
-    console that still cannot cope degrades to ``?`` instead of aborting work
-    that has already been done.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is None:  # a replaced stream, e.g. under redirect_stdout
-            continue
-        try:
-            reconfigure(encoding="utf-8", errors="replace")
-        except (ValueError, OSError):  # closed or detached stream
-            pass
-
-def print_text(text: str) -> None:
-    """Print report text without ever raising on a legacy console encoding.
-
-    Reports contain box-drawing characters.  On a console or pipe whose
-    encoding cannot represent them, ``print`` raises ``UnicodeEncodeError``,
-    which used to surface as a crash *after* the work was already done.  The
-    fallback writes the same text with unrepresentable characters replaced.
-    """
-    try:
-        print(text, flush=True)
-    except UnicodeEncodeError:
-        try:
-            encoding = sys.stdout.encoding or "utf-8"
-            sys.stdout.buffer.write((text + "\n").encode(encoding, errors="replace"))
-            sys.stdout.buffer.flush()
-        except Exception:  # pragma: no cover - a stream that cannot be written at all
-            print(text.encode("ascii", errors="replace").decode("ascii"), flush=True)
-
-def clip_text(text: str, width: int, *, ellipsis: str = "...") -> str:
-    """Shorten ``text`` to at most ``width`` columns, marking the cut."""
-    text = str(text)
-    if width <= 0:
-        return ""
-    if len(text) <= width:
-        return text
-    if width <= len(ellipsis):
-        return text[:width]
-    return text[: width - len(ellipsis)].rstrip() + ellipsis
-
-def wrap_text(text: str, width: int) -> list[str]:
-    """Wrap ``text`` to ``width`` columns, preserving explicit line breaks."""
-    width = max(1, int(width))
-    out: list[str] = []
-    for paragraph in str(text).split("\n"):
-        if not paragraph.strip():
-            out.append("")
-            continue
-        chunks = textwrap.wrap(
-            paragraph,
-            width=width,
-            break_long_words=True,
-            break_on_hyphens=False,
-        )
-        out.extend(chunks or [""])
-    return out
-
-_PATH_BREAK_RE = re.compile(r"(?<=[/\\])|(?<=\s)")
-
-def _pack_on_separators(text: str, width: int) -> list[str]:
-    """Greedily fill lines, breaking only after a separator or a space."""
-    lines: list[str] = []
-    current = ""
-    for token in (tok for tok in _PATH_BREAK_RE.split(text) if tok):
-        if len(token) > width:
-            if current.strip():
-                lines.append(current.rstrip())
-            current = ""
-            lines.extend(line.rstrip() for line in wrap_text(token, width))
-            continue
-        if current and len(current) + len(token) > width:
-            lines.append(current.rstrip())
-            current = token
-        else:
-            current += token
-    if current.strip():
-        lines.append(current.rstrip())
-    return lines
-
-def wrap_path_text(text: str, width: int) -> list[str]:
-    """Wrap ``text`` on path separators and spaces, keeping names whole.
-
-    Report lines are usually paths, and the tail of a path - the movie folder
-    or file name - is what a reader scans for.  Breaking after ``/`` and ``\\``
-    keeps that name on one line, where ``wrap_text`` would happily split it in
-    half.  Only a single component longer than ``width`` is hard-broken, and
-    nothing is ever ellipsised away.
-    """
-    width = max(1, int(width))
-    text = str(text)
-    if len(text) <= width:
-        return [text]
-    out: list[str] = []
-    for paragraph in text.split("\n"):
-        if not paragraph.strip():
-            out.append("")
-        elif len(paragraph) <= width:
-            out.append(paragraph.rstrip())
-        else:
-            out.extend(_pack_on_separators(paragraph, width))
-    return out or [""]
-
-class Report:
-    """Builder for one tool's plain-text report.
-
-    The layout is fixed so every tool reads the same way::
-
-        +--------------------------------------------------------------+
-        |  boxed header: title, subtitle, aligned metadata             |
-        +--------------------------------------------------------------+
-
-          scorecard: right-aligned counts, one line per outcome
-
-          ══ SECTION TITLE ═════════════════════════════════════  n of m ══
-          wrapped explanation of why this section matters
-
-             1  first entry
-                Reason    aligned, wrapped detail field
-                Next      the thing to do about it
-
-    Nothing here writes to disk; call :meth:`render` and hand the text to
-    ``atomic_write_text``.
-    """
-
-    def __init__(self, title: str, subtitle: str = "", *, width: int = REPORT_WIDTH) -> None:
-        self._title = title
-        self._subtitle = subtitle
-        self._width = max(REPORT_MIN_WIDTH, int(width))
-        self._meta: list[tuple[str, str]] = []
-        self._body: list[str] = []
-
-    # -- geometry ------------------------------------------------------
-    @property
-    def width(self) -> int:
-        return self._width
-
-    @property
-    def _inner(self) -> int:
-        """Columns available inside the header box (``║ `` + text + `` ║``)."""
-        return self._width - 4
-
-    # -- header --------------------------------------------------------
-    def meta(self, label: str, value: object) -> Report:
-        """Add one ``label  value`` row to the boxed header."""
-        self._meta.append((str(label), "" if value is None else str(value)))
-        return self
-
-    def metas(self, pairs: Iterable[tuple[str, object]]) -> Report:
-        for label, value in pairs:
-            self.meta(label, value)
-        return self
-
-    @staticmethod
-    def _is_rule(line: str) -> bool:
-        """True for a line that is only rule characters (used to space entries)."""
-        stripped = line.strip()
-        return bool(stripped) and set(stripped) <= {_RULE_HEAVY, _RULE_LIGHT}
-
-    def _box_row(self, text: str) -> str:
-        return "║ " + clip_text(text, self._inner, ellipsis="..").ljust(self._inner) + " ║"
-
-    def render_header(self) -> str:
-        """Render just the boxed header (used for the startup banner too)."""
-        lines = ["╔" + _RULE_HEAVY * (self._width - 2) + "╗"]
-        lines.append(self._box_row(self._title))
-        if self._subtitle:
-            for chunk in wrap_text(self._subtitle, self._inner):
-                lines.append(self._box_row(chunk))
-        if self._meta:
-            lines.append("╟" + _RULE_LIGHT * (self._width - 2) + "╢")
-            label_width = max(len(label) for label, _ in self._meta)
-            value_width = self._inner - label_width - 2
-            for label, value in self._meta:
-                if not value:
-                    lines.append(self._box_row(label))
-                    continue
-                # Long values here are usually paths; break them at a
-                # separator so a directory name is not split mid-word.
-                chunks = wrap_path_text(value, value_width) or [""]
-                pad = " " * (label_width + 2)
-                for position, chunk in enumerate(chunks):
-                    lead = f"{label.ljust(label_width)}  " if position == 0 else pad
-                    lines.append(self._box_row(lead + chunk))
-        lines.append("╚" + _RULE_HEAVY * (self._width - 2) + "╝")
-        return "\n".join(lines)
-
-    # -- body ----------------------------------------------------------
-    def blank(self, count: int = 1) -> Report:
-        self._body.extend([""] * max(0, count))
-        return self
-
-    def rule(self, char: str = _RULE_LIGHT, *, indent: int = REPORT_INDENT) -> Report:
-        self._body.append(" " * indent + char * max(0, self._width - indent))
-        return self
-
-    def paragraph(self, text: str, *, indent: int = REPORT_INDENT) -> Report:
-        """A wrapped block of prose; leading spaces on continuation lines."""
-        for chunk in wrap_text(text, self._width - indent):
-            self._body.append(" " * indent + chunk)
-        return self
-
-    def title_line(self, text: str, *, right: str = "", indent: int = REPORT_INDENT) -> Report:
-        """``text`` left-aligned with ``right`` pushed to the right margin."""
-        span = self._width - indent
-        if not right:
-            self._body.append(" " * indent + clip_text(text, span))
-            return self
-        gap = span - len(right) - len(text)
-        if gap < 2:
-            self._body.append(" " * indent + clip_text(f"{text}  {right}", span))
-        else:
-            self._body.append(" " * indent + text + " " * gap + right)
-        return self
-
-    def scorecard(self, rows: Iterable[tuple], *, indent: int = REPORT_INDENT) -> Report:
-        """Render ``(count, label, hint)`` rows between two light rules.
-
-        The count is right-aligned so a reader can scan the numbers as a
-        column, and the hint column is clipped rather than wrapped: a scorecard
-        is meant to fit on one screen.
-        """
-        materialized = [(str(count), str(label), str(hint or "")) for count, label, hint in rows]
-        if not materialized:
-            return self
-        count_width = max(4, max(len(count) for count, _, _ in materialized))
-        label_width = max(len(label) for _, label, _ in materialized)
-        span = self._width - indent
-        self.rule(indent=indent)
-        for count, label, hint in materialized:
-            line = f"{count:>{count_width}}   {label:<{label_width}}"
-            if hint:
-                room = span - len(line) - 3
-                if room > 8:
-                    line += "   " + clip_text(hint, room)
-            self._body.append(" " * indent + clip_text(line, span))
-        self.rule(indent=indent)
-        return self
-
-    def section(
-        self,
-        title: str,
-        *,
-        count: int | None = None,
-        total: int | None = None,
-        intro: str = "",
-        indent: int = REPORT_INDENT,
-    ) -> Report:
-        """Open a major section: a heavy banner plus an optional explanation."""
-        if self._body and self._body[-1].strip():
-            self.blank()
-        tally = ""
-        if count is not None:
-            # A partial or interrupted run can report more items in a group than
-            # the scan counted; "5 of 3" would be nonsense, so the total is only
-            # shown when it is actually the larger number.
-            show_total = total is not None and int(total) >= int(count)
-            tally = f"{count} of {total}" if show_total else str(count)
-        span = self._width - indent
-        head = f"{_RULE_HEAVY}{_RULE_HEAVY} {title} "
-        tail = f" {tally} {_RULE_HEAVY}{_RULE_HEAVY}" if tally else ""
-        fill = span - len(head) - len(tail)
-        if fill < 3:
-            self._body.append(" " * indent + clip_text(head.strip() + ("  " + tally if tally else ""), span,
-                                                      ellipsis=""))
-        else:
-            self._body.append(" " * indent + head + _RULE_HEAVY * fill + tail)
-        if intro:
-            self.blank()
-            self.paragraph(intro, indent=indent)
-        self.blank()
-        return self
-
-    def subsection(
-        self,
-        title: str,
-        *,
-        count: int | None = None,
-        indent: int = REPORT_INDENT,
-    ) -> Report:
-        """Open a labelled group inside a section (one light rule, not a box)."""
-        if self._body and self._body[-1].strip():
-            self.blank()
-        span = self._width - indent
-        tally = f" {count}" if count is not None else ""
-        head = f"{_RULE_LIGHT}{_RULE_LIGHT} {title} "
-        tail = f"{tally} {_RULE_LIGHT}{_RULE_LIGHT}"
-        fill = span - len(head) - len(tail)
-        if fill < 3:
-            self._body.append(" " * indent + clip_text(head.strip() + tally, span, ellipsis=""))
-        else:
-            self._body.append(" " * indent + head + _RULE_LIGHT * fill + tail)
-        return self
-
-    def entry(
-        self,
-        text: str,
-        *,
-        detail: str = "",
-        ordinal: int | None = None,
-        marker: str = "",
-        fields: Iterable[tuple[str, object]] = (),
-        detail_column: int = 0,
-        indent: int = 4,
-    ) -> Report:
-        """One item in a section.
-
-        ``ordinal`` numbers the entry; ``marker`` is a short tag used instead
-        when numbering would be noise.  ``detail_column`` puts a short detail
-        on the same line at a fixed column (used for name/sidecar tables) and
-        falls back to a wrapped line underneath when it would not fit.
-        ``fields`` are ``label  value`` pairs aligned under the entry text.
-        """
-        if ordinal is not None:
-            prefix = f"{ordinal:>4}  "
-        elif marker:
-            prefix = f"{marker:<4}  "
-        else:
-            prefix = "      "
-        span = self._width - indent
-        head_limit = span - len(prefix)
-        if detail_column > 0:
-            # A fixed detail column only reads as a table when the entry text
-            # stays inside it, so long titles wrap to a continuation line
-            # instead of pushing every detail sideways.
-            head_limit = min(head_limit, max(8, detail_column - indent - len(prefix)))
-        # Entry text wraps rather than being ellipsised: the tail of a long
-        # path is usually the part a reader came for, and clipping it away
-        # hides the very information the report exists to convey.
-        head_chunks = wrap_path_text(text, max(8, head_limit)) or [""]
-        # Entries breathe: a blank line separates them, but a section banner or
-        # its explanation paragraph keeps the first entry tight underneath.
-        if self._body and self._body[-1].strip() and not self._is_rule(self._body[-1]):
-            self._body.append("")
-        head_index = len(self._body)
-        self._body.append(" " * indent + prefix + head_chunks[0])
-        continuation = " " * (indent + len(prefix))
-        self._body.extend(continuation + chunk for chunk in head_chunks[1:])
-        materialized = [(str(label), str(value or "")) for label, value in fields]
-        if materialized:
-            label_width = max(6, max(len(label) for label, _ in materialized))
-            for label, value in materialized:
-                lead = f"{label.ljust(label_width)}  "
-                chunks = wrap_text(value, max(8, span - len(prefix) - len(lead))) or [""]
-                self._body.append(continuation + lead + chunks[0])
-                for chunk in chunks[1:]:
-                    self._body.append(continuation + " " * len(lead) + chunk)
-        if detail:
-            head = head_chunks[0]
-            # A detail can ride on the entry's own line only when that entry
-            # text did not have to wrap; otherwise it belongs underneath.
-            if detail_column > 0 and len(head_chunks) == 1:
-                room = detail_column - indent - len(prefix) - len(head)
-                if room >= 1 and len(detail) <= span - detail_column:
-                    self._body[head_index] = (
-                        " " * indent + prefix + head.ljust(detail_column - indent - len(prefix)) + detail
-                    )
-                    return self
-            for chunk in wrap_text(detail, max(8, span - len(prefix) - 2)):
-                self._body.append(continuation + "  " + chunk)
-        return self
-
-    def table(
-        self,
-        headers: Iterable[str],
-        rows: Iterable[Iterable],
-        *,
-        aligns: str = "",
-        indent: int = 4,
-    ) -> Report:
-        """An aligned column table with a header row and a rule under it.
-
-        ``aligns`` is one character per column, ``<`` or ``>``.  Columns are
-        sized to their content and then trimmed - widest first, never below
-        their header - so the table always fits inside the report width.
-        """
-        head = [str(column) for column in headers]
-        body = [[("" if cell is None else str(cell)) for cell in row] for row in rows]
-        columns = len(head)
-        if not columns:
-            return self
-        aligns = (aligns or "<" * columns).ljust(columns, "<")[:columns]
-        span = self._width - indent
-        widths = [
-            max([len(head[i])] + [len(row[i]) for row in body if i < len(row)])
-            for i in range(columns)
-        ]
-        gaps = 2 * (columns - 1)
-        minimums = [max(6, len(column)) for column in head]
-        while sum(widths) + gaps > span:
-            shrinkable = [i for i in range(columns) if widths[i] > minimums[i]]
-            if not shrinkable:
-                break
-            widths[max(shrinkable, key=lambda i: widths[i])] -= 1
-
-        def render(cells: list[str]) -> str:
-            parts = []
-            for i, cell in enumerate(cells[:columns]):
-                text = clip_text(cell, widths[i])
-                parts.append(text.rjust(widths[i]) if aligns[i] == ">" else text.ljust(widths[i]))
-            return " " * indent + "  ".join(parts).rstrip()
-
-        self._body.append(render(head))
-        self._body.append(" " * indent + "  ".join(_RULE_LIGHT * width for width in widths))
-        for row in body:
-            self._body.append(render(list(row) + [""] * (columns - len(row))))
-        return self
-
-    def entries(self, items: Iterable, **defaults: object) -> Report:
-        """Render an iterable of entry specs, numbered in order.
-
-        Each item is either a ``(text, detail)`` tuple or a mapping of
-        :meth:`entry` keyword arguments (``detail``, ``fields``, ``marker``).
-        ``defaults`` supplies the keyword arguments shared by every item.
-        """
-        for position, item in enumerate(items, start=1):
-            if isinstance(item, tuple):
-                text, detail = (list(item) + [""])[:2]
-                spec: dict = {"text": text, "detail": detail}
-            else:
-                spec = dict(item)
-            spec.setdefault("ordinal", position)
-            merged = {**defaults, **spec}
-            self.entry(str(merged.pop("text", "")), **merged)
-        return self
-
-    def footer(self, lines: Iterable[str] = (), *, indent: int = REPORT_INDENT) -> Report:
-        """Close the report with a light rule and trailing notes."""
-        self.blank()
-        self.rule(indent=indent)
-        for line in lines:
-            self.paragraph(line, indent=indent)
-        return self
-
-    # -- output --------------------------------------------------------
-    def render(self) -> str:
-        """The whole report as one string, always ending in a newline."""
-        lines = self.render_header().split("\n")
-        lines.append("")
-        lines.extend(self._body)
-        # Trailing spaces are invisible in a terminal and noisy in a diff.
-        return "\n".join(line.rstrip() for line in lines).rstrip() + "\n"
 
 VERSION = "2.6.2"
 
 # ==================== DEFAULT CONFIGURATION ====================
-# ---------------------------------------------------------------------------
-# Library-root resolution (vendored inline; keep every copy identical)
-#
-# The movie-library root used to be a bare literal repeated in six files, with
-# only two of them honouring MOVIE_STD_TARGET. On a non-Windows host the tools
-# that ignored it happily defaulted to a Windows drive letter, wrote reports to
-# a literal path like `E:\torrents\...` in the current directory, and .gitignore
-# grew an `E:*` rule to catch the debris. One resolver, used by every tool,
-# removes that whole class of problem.
-#
-# Precedence: explicit --flag > ORGANIZE_LIBRARY > MOVIE_STD_TARGET > platform
-# default. A `.env` beside the scripts is loaded first, but never overrides a
-# variable already exported in the environment.
-# ---------------------------------------------------------------------------
-
-ENV_FILE_NAME = ".env"
-LIBRARY_ENV_VAR = "ORGANIZE_LIBRARY"
-LEGACY_LIBRARY_ENV_VAR = "MOVIE_STD_TARGET"
-
-
-def load_dotenv(path: Path | None = None) -> dict[str, str]:
-    """Load ``KEY=value`` pairs from a .env file next to the scripts.
-
-    The repo ships a fully documented ``.env.example`` telling users to copy it
-    to ``.env``, but nothing ever read that file: every documented variable
-    silently did nothing unless separately exported. This closes that gap.
-
-    Real environment variables always win, so an explicit export still beats a
-    stale file. Blank lines, ``#`` comments, a leading ``export``, and single or
-    double quotes around the value are all accepted. Malformed lines are
-    skipped rather than raising: a typo in a config file must not stop a
-    maintenance run that would otherwise work.
-    """
-    env_path = path or (Path(__file__).resolve().parent / ENV_FILE_NAME)
-    loaded: dict[str, str] = {}
-    try:
-        raw = env_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return loaded
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        if stripped.startswith("export "):
-            stripped = stripped[len("export "):].lstrip()
-        key, _, value = stripped.partition("=")
-        key = key.strip()
-        if not key:
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        loaded[key] = value
-        os.environ.setdefault(key, value)
-    return loaded
-
-
-def default_library_root() -> Path:
-    """The platform's documented library root when nothing else is configured.
-
-    The Windows default is the layout the README documents. Pointing a POSIX
-    host at ``E:\\torrents\\final_organized`` only ever produced a confusing
-    "does not exist" (or worse, a literal ``E:...`` directory in the CWD), so
-    those hosts get a sensible home-relative default instead.
-    """
-    if os.name == "nt":
-        return Path(r"E:\torrents\final_organized")
-    return Path.home() / "Media" / "Movies"
-
-
-def resolve_library(explicit: Path | str | None = None) -> Path:
-    """Resolve the movie-library root that every tool in the toolchain shares.
-
-    Precedence: an explicit flag, then ORGANIZE_LIBRARY, then the legacy
-    MOVIE_STD_TARGET, then the platform default.
-    """
-    load_dotenv()
-    if explicit is not None and str(explicit).strip():
-        return Path(explicit).expanduser()
-    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
-        value = (os.environ.get(var) or "").strip()
-        if value:
-            return Path(value).expanduser()
-    return default_library_root()
-
-
-def describe_library_origin(explicit: Path | str | None = None) -> str:
-    """Human-readable provenance of the resolved root, for error messages."""
-    load_dotenv()
-    if explicit is not None and str(explicit).strip():
-        return "--source"
-    for var in (LIBRARY_ENV_VAR, LEGACY_LIBRARY_ENV_VAR):
-        if (os.environ.get(var) or "").strip():
-            return var
-    return f"the default library root ({default_library_root()})"
-
-
-def default_reports_root() -> Path:
-    r"""Where logs, reports and probe caches go when nothing is configured.
-
-    These must live OUTSIDE the media library (the auditor would otherwise
-    count a log folder at the library root as a movie folder). On Windows that
-    is the documented tools directory; elsewhere it follows the XDG state
-    convention. Hardcoding the Windows path for every platform is what made a
-    POSIX run scatter literal `E:\torrents\...` filenames into the current
-    working directory.
-    """
-    if os.name == "nt":
-        return Path(r"E:\torrents\tools\ReportsAndLogs")
-    state_home = (os.environ.get("XDG_STATE_HOME") or "").strip()
-    base = Path(state_home) if state_home else Path.home() / ".local" / "state"
-    return base / "organize"
-
-
-def default_tool_dir(tool_name: str) -> Path:
-    """The per-tool subdirectory of :func:`default_reports_root`."""
-    return default_reports_root() / tool_name
-
-
 TARGET_DIR = str(resolve_library())
 MKVMERGE_PATH = "mkvmerge"
 AUDIO_LANGUAGES = {"eng", "en"}
@@ -1137,8 +142,10 @@ LOG_FILE = str(default_tool_dir("mkv_track_cleaner") / "mkv_track_cleaner.log")
 REPORT_FILE = str(default_tool_dir("mkv_track_cleaner") / "mkv_track_cleaner_report.txt")
 # Reused `mkvmerge -J` metadata for files whose size and mtime have not
 # changed, so a re-scan of an unchanged library does not respawn mkvmerge per
-# movie. Only the metadata read is cached; every decision is made fresh.
-CACHE_FILE = str(default_tool_dir("mkv_track_cleaner") / "mkv_track_cleaner_probe_cache.json")
+# movie. Only the metadata read is cached; every decision is made fresh. It
+# lives in the shared state cache now; the JSON file earlier versions wrote is
+# imported once, on the first run that finds the database empty.
+LEGACY_CACHE_FILE = str(default_tool_dir("mkv_track_cleaner") / "mkv_track_cleaner_probe_cache.json")
 # ===============================================================
 
 # Legacy temporary files used this deterministic prefix. New work uses unique
@@ -1247,7 +254,7 @@ def get_mkvmerge_version(mkvmerge_bin: str) -> str:
         return (banner[0] if banner else "unknown version").strip()
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return "unknown version"
 
 def format_size(bytes_val: int) -> str:
@@ -1280,7 +287,7 @@ def format_duration(seconds: float) -> str:
 def _this_hostname() -> str:
     try:
         return (socket.gethostname() or "").strip() or "unknown"
-    except Exception:
+    except OSError:
         return "unknown"
 
 def _eta_seconds(elapsed: float, done_bytes: int, total_bytes: int, done_files: int, total_files: int) -> float | None:
@@ -1298,7 +305,7 @@ def check_free_space(target_dir: Path, source_size: int) -> tuple[bool, int, int
     required = int(max(0, source_size) * (1.0 + _DISK_SLACK_RATIO)) + _DISK_SLACK_BYTES
     try:
         free = int(shutil.disk_usage(str(target_dir)).free)
-    except Exception as e:
+    except OSError as e:
         return True, 0, required, f"could not query free space: {e}"
     if free < required:
         return False, free, required, None
@@ -1336,7 +343,9 @@ def _restore_windows_ctime(path: Path, orig_stat: os.stat_result) -> None:
             kernel32.SetFileTime(handle, ctypes.byref(creation), None, None)
         finally:
             kernel32.CloseHandle(handle)
-    except Exception:
+    except Exception:  # noqa: BLE001 - ctypes reports a bad call as ArgumentError,
+        # OSError or AttributeError depending on where it fails, and a creation
+        # timestamp nobody can restore is cosmetic. Windows-only, untestable here.
         pass
 
 def restore_file_times(path: Path, orig_stat: os.stat_result) -> None:
@@ -1347,8 +356,8 @@ def restore_file_times(path: Path, orig_stat: os.stat_result) -> None:
             os.utime(path, ns=(int(ns), int(ms)))
         else:
             os.utime(path, (orig_stat.st_atime, orig_stat.st_mtime))
-    except Exception:
-        pass
+    except (OSError, OverflowError, ValueError):
+        pass  # a timestamp the filesystem will not take is not worth a failed remux
     _restore_windows_ctime(path, orig_stat)
 
 def apply_low_priority() -> str:
@@ -1374,70 +383,34 @@ def apply_low_priority() -> str:
                     return "thread below-normal (Windows)"
                 get_err = getattr(ctypes, "get_last_error", lambda: 0)
                 return f"unchanged (Windows error {get_err()})"
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - ctypes again; the run continues at
+            # whatever priority it already has, and says so in the banner.
             return f"unchanged ({e})"
     try:
         os.nice(10)
         return "nice +10"
     except PermissionError:
         return "unchanged (nice: permission denied)"
-    except Exception as e:
+    except (OSError, AttributeError) as e:
         return f"unchanged ({e})"
 
 def _print_safe(msg: str) -> None:
+    """``print_text`` plus one guarantee this tool needs and no other does.
+
+    The shared writer already survives a console that cannot encode the text.
+    A remux queue also has to survive a stdout that has *gone* - a closed pipe,
+    a detached terminal - because by the time that happens the run may be six
+    hours in. The line is lost; the queue is not.
+    """
     try:
-        print(msg, flush=True)
-    except UnicodeEncodeError:
-        try:
-            enc = sys.stdout.encoding or "utf-8"
-            sys.stdout.buffer.write((msg + "\n").encode(enc, errors="replace"))
-            sys.stdout.buffer.flush()
-        except Exception:
-            pass
-    except Exception:
+        print_text(msg)
+    except (OSError, ValueError):
         pass
 
-def _write_raw(text: str) -> None:
-    try:
-        sys.stdout.write(text)
-        sys.stdout.flush()
-    except Exception:
-        pass
-
-_ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
-
-def _strip_ansi(text: str) -> str:
-    return _ANSI_RE.sub("", text)
-
-def _ellipsize_path(text: str, max_len: int) -> str:
-    if max_len <= 0:
-        return ""
-    if len(text) <= max_len:
-        return text
-    if max_len <= 3:
-        return text[:max_len]
-    return "..." + text[-(max_len - 3):]
-
-def _enable_windows_vt() -> bool:
-    if os.name != "nt":
-        return True
-    try:
-        import ctypes
-        windll = getattr(ctypes, "windll", None)
-        if windll:
-            kernel32 = windll.kernel32
-            handle = kernel32.GetStdHandle(-11)
-            if not handle or handle == -1:
-                return False
-            mode = ctypes.c_uint32()
-            if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-                return False
-            if mode.value & 0x0004:
-                return True
-            return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
-    except Exception:
-        return False
-    return False
+# Both are ``organizekit/core/live.py``'s, kept under their old names because
+# this file reads them on nearly every drawn line.
+_strip_ansi = strip_ansi
+_ellipsize_path = ellipsize
 
 _GUI_PROGRESS_RE = re.compile(
     r"#\s*GUI\s*#\s*progress(?:\s+(\d+)\s*%?|#percent=(\d+)|#parts=(\d+)/(\d+))",
@@ -1489,44 +462,32 @@ def _summarize_mkvmerge_failure(output: str, rc: int) -> str:
     return text[:497] + "..." if len(text) > 500 else text
 
 class LiveConsole:
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    CYAN = "\033[36m"
+    """The one-line-per-movie renderer: a live file line and a remux bar.
+
+    What the terminal will *accept* - colour, VT mode, the block glyphs - is
+    decided by ``organizekit/core/console.py``, which the CLI asks the same
+    questions. What is drawn with the answers is this tool's own: no other
+    tool has an hours-long child process to report percentages for.
+    """
+
+    RESET = Ansi.RESET
+    BOLD = Ansi.BOLD
+    DIM = Ansi.DIM
+    RED = Ansi.RED
+    GREEN = Ansi.GREEN
+    YELLOW = Ansi.YELLOW
+    CYAN = Ansi.CYAN
 
     def __init__(self, use_color: bool | None = None):
-        self.is_tty = False
-        try:
-            self.is_tty = bool(sys.stdout and sys.stdout.isatty())
-        except Exception:
-            self.is_tty = False
-        env_no_color = bool(os.environ.get("NO_COLOR"))
-        env_force = os.environ.get("FORCE_COLOR", "").strip() not in ("", "0")
-        env_dumb = os.environ.get("TERM", "").lower() == "dumb"
-        if use_color is False:
-            want_color = False
-        elif use_color is True or env_force:
-            want_color = True
-        elif env_no_color or env_dumb:
-            want_color = False
-        else:
-            want_color = self.is_tty
-        ansi_ok = _enable_windows_vt() if want_color else False
-        if os.name != "nt":
-            ansi_ok = want_color
-        if env_force and use_color is not False:
-            ansi_ok = True
-        self.use_color = bool(want_color and ansi_ok)
-        self._can_erase = self.use_color or (os.name != "nt" and self.is_tty)
-        try:
-            enc = getattr(sys.stdout, "encoding", None) or "utf-8"
-            "█░".encode(enc)
-            self._bar_fill, self._bar_empty = "█", "░"
-        except Exception:
-            self._bar_fill, self._bar_empty = "#", "-"
+        # What the terminal will take — TTY, colour, erase escapes, block
+        # glyphs — is the shared live line's answer; the composition below is
+        # this tool's own. The attributes are mirrored rather than reached
+        # through, because nearly every drawn line reads them.
+        self.line = LiveLine(use_color=use_color)
+        self.is_tty = self.line.is_tty
+        self.use_color = self.line.use_color
+        self._can_erase = self.line.can_erase
+        self._bar_fill, self._bar_empty = self.line.bar_fill, self.line.bar_empty
         self.target_root: Path | None = None
         self._detail_indent = "           "
         self._file_ts = ""
@@ -1540,15 +501,10 @@ class LiveConsole:
         self._last_progress_bucket = -1
 
     def style(self, text: str, *codes: str) -> str:
-        if not self.use_color or not codes:
-            return text
-        return "".join(codes) + text + self.RESET
+        return self.line.style(text, *codes)
 
     def _cols(self) -> int:
-        try:
-            return max(40, int(shutil.get_terminal_size((100, 24)).columns))
-        except Exception:
-            return 100
+        return self.line.columns()
 
     def _compose_file_line(self, suffix_plain: str = "", suffix_styled: str = "") -> tuple[str, str]:
         prefix = f"[{self._file_ts}] {self._file_tag}"
@@ -1564,26 +520,14 @@ class LiveConsole:
         return plain, styled
 
     def _overwrite_line(self, text: str) -> None:
-        cols = self._cols()
-        visible = _strip_ansi(text)
-        if len(visible) > cols - 1:
-            keep = max(1, cols - 1)
-            text = visible[:keep] if keep <= 3 else "..." + visible[-(keep - 3):]
-            visible = text
-        try:
-            if self._can_erase:
-                _write_raw("\r" + text + "\033[K")
-            else:
-                _write_raw("\r" + text + (" " * max(0, cols - 1 - len(visible))))
-        except Exception:
-            _print_safe(_strip_ansi(text))
+        self.line.overwrite(text)
 
     def _commit_open_line(self) -> None:
         if self._file_line_pending or self._progress_active:
             try:
                 if self.is_tty:
-                    _write_raw("\n")
-            except Exception:
+                    write_raw("\n")
+            except (OSError, ValueError):
                 pass
         self._file_line_pending = False
         self._progress_active = False
@@ -1628,7 +572,7 @@ class LiveConsole:
         if self.is_tty and self._file_name:
             plain, styled = self._compose_file_line(suffix_plain, suffix_styled)
             self._overwrite_line(styled if self.use_color else plain)
-            _write_raw("\n")
+            write_raw("\n")
         else:
             indent = self._detail_indent or "           "
             _print_safe(f"{indent}{self.style(suffix, color) if color else suffix}")
@@ -1641,7 +585,7 @@ class LiveConsole:
             if self.is_tty and self._file_name:
                 plain, styled = self._compose_file_line()
                 self._overwrite_line(styled if self.use_color else plain)
-            _write_raw("\n")
+            write_raw("\n")
             self._file_line_pending = False
 
     def detail(self, msg: str, kind: str = "info") -> None:
@@ -1735,7 +679,7 @@ def _open_log_fp(log_file_path: str) -> IO[str] | None:
         _log_fp = open(log_file_path, "a", encoding="utf-8", errors="replace", buffering=1)  # noqa: SIM115 - module-level append log, closed at exit
         _log_fp_path = log_file_path
         return _log_fp
-    except Exception:
+    except OSError:
         _log_fp = None
         _log_fp_path = None
         return None
@@ -1749,7 +693,7 @@ def close_log_fp() -> None:
         try:
             fp.flush()
             fp.close()
-        except Exception:
+        except (OSError, ValueError):
             pass
 
 def log(msg: str, level: str = "INFO", to_console: bool = True, log_file_path: str | None = LOG_FILE):
@@ -1766,7 +710,7 @@ def log(msg: str, level: str = "INFO", to_console: bool = True, log_file_path: s
             if fp is not None:
                 fp.write(formatted + "\n")
                 fp.flush()
-        except Exception:
+        except (OSError, ValueError):
             pass
 
 def _log_detail(msg: str, log_file_path: str | None, kind: str = "info", level: str = "INFO") -> None:
@@ -2153,7 +1097,7 @@ def safe_delete(file_path: Path, max_retries: int = 6, delay: float = 0.5):
             if file_path.exists():
                 file_path.unlink(missing_ok=True)
             return
-        except Exception:
+        except OSError:
             time.sleep(delay)
 
 def describe_track(track: dict[str, Any]) -> str:
@@ -2174,7 +1118,7 @@ def _kill_active_child() -> None:
     try:
         if proc.poll() is None:
             proc.kill()
-    except Exception:
+    except (OSError, ValueError):
         pass
 
 def request_interrupt() -> None:
@@ -2186,17 +1130,18 @@ def request_interrupt() -> None:
         try:
             if _active_temp_file is not None:
                 safe_delete(_active_temp_file)
-        except Exception:
+        except Exception:  # noqa: BLE001 - second Ctrl-C: this is the last code that
+            # runs before os._exit, so every cleanup is attempted and none may raise.
             pass
         try:
             close_log_fp()
-        except Exception:
+        except Exception:  # noqa: BLE001 - as above
             pass
         os._exit(1)
     if _console is not None:
         try:
             _console.finish_progress()
-        except Exception:
+        except Exception:  # noqa: BLE001 - tidying the display during an interrupt
             pass
 
 def _run_mkvmerge(cmd: list[str], on_progress: Callable[[int], None] | None = None) -> tuple[int, str, str]:
@@ -2244,7 +1189,8 @@ def _run_mkvmerge(cmd: list[str], on_progress: Callable[[int], None] | None = No
             if pct is not None and on_progress is not None:
                 try:
                     on_progress(pct)
-                except Exception:
+                except Exception:  # noqa: BLE001 - a display callback may not
+                    # interrupt the remux it is describing.
                     pass
 
         carry = ""
@@ -2270,11 +1216,12 @@ def _run_mkvmerge(cmd: list[str], on_progress: Callable[[int], None] | None = No
         try:
             if proc.poll() is None:
                 proc.kill()
-        except Exception:
+        except Exception:  # noqa: BLE001 - an exception is already propagating; a
+            # failure to kill the child must not replace it with a different one.
             pass
         try:
             proc.wait()
-        except Exception:
+        except Exception:  # noqa: BLE001 - as above
             pass
         raise
     finally:
@@ -2573,7 +1520,8 @@ def verify_remux_output(
         rc, out, err = _run_mkvmerge([mkvmerge_bin, "-J", str(temp_path)])
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - fail closed: a verification that could
+        # not run is a verification that did not pass, whatever stopped it.
         return False, f"could not re-inspect remuxed file: {exc}", None
     if rc not in (0, 1):
         return False, f"remuxed file inspection failed (code {rc}): {(err or '').strip()[:300]}", None
@@ -2602,7 +1550,8 @@ def _pid_alive(pid: int) -> bool:
                     return False
                 kernel32.CloseHandle(handle)
                 return True
-        except Exception:
+        except Exception:  # noqa: BLE001 - ctypes; fail safe by assuming the other
+            # process is alive, which costs a skipped run rather than two writers.
             return True
     try:
         os.kill(pid, 0)
@@ -2658,15 +1607,16 @@ def acquire_lock(lock_path: Path, log_file_path: str | None = LOG_FILE) -> bool:
                     level="ERROR", log_file_path=log_file_path)
                 return False
         return False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - fail closed: anything unexpected while
+        # taking the single-instance lock means this run does not start.
         log(f"Lock acquisition error: {e}", level="ERROR", log_file_path=log_file_path)
         return False
 
 def release_lock(lock_path: Path):
     try:
         lock_path.unlink(missing_ok=True)
-    except Exception:
-        pass
+    except OSError:
+        pass  # a lock we cannot remove is handled as stale by the next run
 
 def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: str | None = LOG_FILE) -> int:
     """Resolve only journal-proven, fully verified interrupted transactions.
@@ -2771,7 +1721,8 @@ def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: st
                 handled += 1
             except (KeyboardInterrupt, SystemExit):
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - one unrecoverable orphan is
+                # left on disk for a human; the rest of the sweep still runs.
                 log(f"Could not recover verified temp '{filename}': {exc}; leaving it",
                     level="WARNING", log_file_path=log_file_path)
                 preserved += 1
@@ -2917,6 +1868,124 @@ def _log_live_totals(
         f"{byte_part}  elapsed {format_duration(elapsed)}{eta}"
     )
     log(msg, log_file_path=log_file_path)
+
+# =============================================================================
+# WHAT THIS RUN DECIDED, FOR `organize status`
+# =============================================================================
+#
+# Every other expensive step publishes its verdicts to the shared state cache
+# (``bitdepth`` its queue decision, ``sync_subtitles`` its timing verdict), so
+# `organize status` can answer "what is left to do?" without touching a media
+# byte. The remux step did not, which is why that command printed
+# ``Remux  not recorded yet`` and left the step out of the settled tally
+# entirely - a library could be fully remuxed and the summary would never say
+# so.
+#
+# Two things make this tool different from the other two publishers, and both
+# shape what is below.
+#
+# First, it *rewrites* movies and takes hours doing it. A publish-at-the-end
+# pass would throw away every verdict of an interrupted run, so a verdict is
+# written per movie, the moment that movie is finished. One small SQLite write
+# next to a remux measured in minutes is free.
+#
+# Second, its per-movie outcome is not a return value: ``process_mkv`` is a
+# 400-line procedure that records what happened by appending to one of six
+# buckets in ``stats``. Rather than thread a store through all of it,
+# ``remux_verdict`` reads the outcome back out of those buckets - which is a
+# pure function of two dicts, and therefore testable without a movie, an
+# mkvmerge or a filesystem.
+
+STATUS_CLEANED = "cleaned"
+STATUS_ALREADY_CLEAN = "already-clean"
+STATUS_SKIPPED = "skipped"
+STATUS_DEFERRED = "deferred"
+STATUS_SKIPPED_LAYOUT = "skipped-layout"
+STATUS_FAILED = "failed"
+
+# The verdicts that mean this step has nothing further to do with the movie.
+# `organize status` imports this rather than keeping its own copy: a status
+# line that disagrees with the tool about what "done" means is worse than no
+# status line. A deferred file is waiting for seeding to stop, a layout skip is
+# waiting for the standardizer, and a failure is waiting for a human - all three
+# are pending work, and saying so is the point of the command.
+SETTLED_REMUX = frozenset({STATUS_CLEANED, STATUS_ALREADY_CLEAN, STATUS_SKIPPED})
+
+# Bucket -> verdict, in priority order. A remux that lands without a validated
+# sidecar is appended to `remux_without_srt` *as well as* `cleaned`; that bucket
+# is a warning about the moviehash, not an outcome, so it is not listed here.
+# `errors` comes first because a movie that failed after being counted anywhere
+# else is a failure.
+VERDICT_BUCKETS: tuple[tuple[str, str], ...] = (
+    ("errors", STATUS_FAILED),
+    ("cleaned", STATUS_CLEANED),
+    ("already_clean", STATUS_ALREADY_CLEAN),
+    ("deferred_hardlinked", STATUS_DEFERRED),
+    ("skipped_layout", STATUS_SKIPPED_LAYOUT),
+    ("skipped_no_english", STATUS_SKIPPED),
+)
+
+
+def bucket_counts(stats: dict[str, Any]) -> dict[str, int]:
+    """How full each outcome bucket is, to be compared against after a movie."""
+    return {bucket: len(stats.get(bucket) or []) for bucket, _ in VERDICT_BUCKETS}
+
+
+def _verdict_detail(entry: Any) -> str:
+    """One human sentence about a bucket entry, for the status line's detail."""
+    if not isinstance(entry, dict):
+        return ""
+    if "error" in entry:
+        return str(entry["error"])
+    if "reason" in entry:
+        return str(entry["reason"])
+    if "hardlinks" in entry:
+        return f"{entry['hardlinks']} hardlink(s): still seeding"
+    if "kept_audio" in entry:
+        saved = int(entry.get("space_saved") or 0)
+        kept = str(entry.get("kept_audio") or "")
+        return f"kept {kept}; saved {format_size(saved)}" if saved else f"kept {kept}"
+    return ""
+
+
+def remux_verdict(stats: dict[str, Any], before: dict[str, int]) -> tuple[str, str] | None:
+    """What one movie's turn through :func:`process_mkv` decided, or ``None``.
+
+    ``None`` means the run recorded no outcome for that movie at all - the
+    interrupt path, which leaves the original untouched and deliberately
+    publishes nothing rather than guessing.
+    """
+    for bucket, status in VERDICT_BUCKETS:
+        entries = stats.get(bucket) or []
+        if len(entries) > before.get(bucket, 0):
+            return status, _verdict_detail(entries[-1])
+    return None
+
+
+def publish_remux_verdict(
+    store: StateStore, movie: Path, stats: dict[str, Any], before: dict[str, int],
+    log_file_path: str | None = LOG_FILE,
+) -> bool:
+    """Record this movie's outcome. A cache write can never fail a run.
+
+    The stamp comes from the file as it is *now*, which for a cleaned movie is
+    the remuxed file: the verdict describes the bytes on disk, so the next
+    ``organize status`` reports it as current rather than stale.
+    """
+    if not store.enabled:
+        return False
+    decision = remux_verdict(stats, before)
+    if decision is None:
+        return False
+    verdict, detail = decision
+    try:
+        store.record(movie, KIND_REMUX, verdict, detail)
+    except Exception as exc:  # noqa: BLE001 - a cache write can never fail a run
+        log(f"state cache not updated for '{movie.name}': {exc}",
+            level="WARNING", to_console=False, log_file_path=log_file_path)
+        return False
+    return True
+
 
 @dataclass(frozen=True)
 class CleanupPlan:
@@ -3079,7 +2148,7 @@ def process_mkv(
     try:
         orig_stat = mkv_path.stat()
         size_before = orig_stat.st_size
-    except Exception:
+    except OSError:
         size_before = 0
 
     if _console is not None:
@@ -3161,7 +2230,8 @@ def process_mkv(
         return
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - per-movie: an unreadable file is an
+        # error row in the report, never the end of the queue.
         err_msg = f"Metadata inspection exception: {e}"
         if _console is not None:
             _console.end_file_inline(f"ERROR: {err_msg}", kind="error")
@@ -3300,7 +2370,8 @@ def process_mkv(
         transaction["external_srt"] = external_srt
     try:
         write_transaction(journal_path, transaction)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - fail closed: without a journal there
+        # is no crash recovery for this movie, so it is skipped rather than remuxed.
         err_msg = f"could not create remux transaction journal: {exc}"
         log(f"{tag}{err_msg}", level="ERROR", log_file_path=log_file_path)
         stats["errors"].append({"name": movie_name, "error": err_msg})
@@ -3438,7 +2509,8 @@ def process_mkv(
         raise
     except SystemExit:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - per-movie: one bad movie is reported
+        # and the queue moves on. The finally block below still cleans up.
         log(f"Exception processing '{display_name}': {exc}", level="ERROR", log_file_path=log_file_path)
         stats["errors"].append({"name": movie_name, "error": str(exc)})
         if temp_output is not None:
@@ -3697,7 +2769,7 @@ def generate_and_save_report(
             except OSError:
                 pass
         log(f"Detailed summary report saved to: '{destination}'", log_file_path=log_file_path)
-    except Exception as e:
+    except OSError as e:
         log(f"Failed to save summary report: {e}", level="ERROR", log_file_path=log_file_path)
     return report_text
 
@@ -3766,10 +2838,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--nice", action="store_true", help="Lower process priority so remuxing does not starve Jellyfin")
     parser.add_argument("--min-size", type=float, default=0, metavar="MB", help="Ignore MKVs smaller than this")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N files (0 = all)")
-    parser.add_argument("--cache", default=CACHE_FILE, metavar="PATH",
-                        help=f"Reusable mkvmerge metadata for unchanged files (Default: {CACHE_FILE})")
+    parser.add_argument("--cache", default=None, metavar="PATH",
+                        help="Where the reusable mkvmerge metadata is kept (default: the "
+                             "shared state cache); a .json path keeps the old file format")
     parser.add_argument("--no-cache", dest="use_cache", action="store_false",
                         help="Re-read metadata for every movie and do not read or write the cache")
+    parser.add_argument("--no-state", action="store_true",
+                        help="Do not use the shared state cache at all: neither these verdicts "
+                             "nor the reusable mkvmerge metadata are written to it")
+    parser.add_argument("--state-db", type=Path, default=None, metavar="PATH",
+                        help="Where that cache lives (default: beside the logs and reports)")
     parser.set_defaults(use_cache=True)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
@@ -3784,7 +2862,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         if hasattr(sys.stderr, "reconfigure"):
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
+    except (ValueError, OSError):
         pass
 
     _console = LiveConsole(use_color=False if args.no_color else None)
@@ -3800,7 +2878,8 @@ def main(argv: list[str] | None = None) -> int:
     if not target_path.exists() or not target_path.is_dir():
         log(f"Target directory does not exist: '{target_path}'", level="ERROR", log_file_path=args.log)
         return 1
-    for label, raw_path in (("--log", args.log), ("--report", args.report)):
+    for label, raw_path in (("--log", args.log), ("--report", args.report),
+                            ("--state-db", args.state_db)):
         if not raw_path:
             continue
         candidate = Path(str(raw_path)).expanduser().resolve()
@@ -3892,9 +2971,19 @@ def main(argv: list[str] | None = None) -> int:
     run_started = time.monotonic()
     processed_bytes = 0
     library_bytes = 0
-    probe_cache = MediaProbeCache(args.cache, tool="mkv_track_cleaner", enabled=args.use_cache)
-    if args.use_cache:
-        log(f"Metadata cache: {args.cache} ({len(probe_cache)} entries loaded)", log_file_path=args.log)
+    probe_cache = open_probe_cache(args.cache, tool="mkv_track_cleaner",
+                                   enabled=args.use_cache, state_enabled=not args.no_state,
+                                   state_db=args.state_db, legacy=LEGACY_CACHE_FILE)
+    if probe_cache.enabled:
+        imported = (f", {probe_cache.imported} imported from the old JSON cache"
+                    if probe_cache.imported else "")
+        log(f"Metadata cache: {probe_cache.path} ({len(probe_cache)} entries loaded{imported})",
+            log_file_path=args.log)
+    # A dry run decides nothing about the bytes on disk, so it publishes
+    # nothing - the same rule sync_subtitles follows.
+    state_store = open_state(args.state_db, enabled=not (args.no_state or args.dry_run),
+                             tool="mkv_track_cleaner")
+    published = 0
     try:
         mkv_files, file_sizes, library_bytes = discover_mkv_files(
             target_path, log_file_path=args.log, onerror=_walk_error,
@@ -3937,6 +3026,7 @@ def main(argv: list[str] | None = None) -> int:
             stats["total_scanned"] += 1
             prev_cleaned = len(stats["cleaned"])
             prev_errors = len(stats["errors"])
+            before_buckets = bucket_counts(stats)
             try:
                 process_mkv(
                     mkv_path=file_path, stats=stats, mkvmerge_bin=mkvmerge_bin,
@@ -3951,10 +3041,14 @@ def main(argv: list[str] | None = None) -> int:
                 break
             except SystemExit:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - per-movie, as above
                 log(f"Unexpected error processing '{file_path.name}': {e}",
                     level="ERROR", log_file_path=args.log)
                 stats["errors"].append({"name": file_path.name, "error": str(e)})
+            # Per movie, not per run: a remux pass runs for hours, and an
+            # interrupted one must still leave behind what it already decided.
+            published += int(publish_remux_verdict(state_store, file_path, stats,
+                                                   before_buckets, args.log))
             processed_bytes += file_sizes[i - 1] if (i - 1) < len(file_sizes) else 0
             if (
                 len(stats["cleaned"]) != prev_cleaned or len(stats["errors"]) != prev_errors
@@ -3965,7 +3059,8 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         _interrupt_requested = True
         _kill_active_child()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - last resort: the report is still
+        # written and the run leaves through one exit code.
         log(f"Fatal unexpected error: {e}", level="ERROR", log_file_path=args.log)
         stats["errors"].append({"name": "<fatal>", "error": str(e)})
         generate_and_save_report(stats, dry_run=args.dry_run, report_file=args.report,
@@ -3976,6 +3071,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.use_cache:
             log(f"Metadata cache: {probe_cache.hits} reused, {probe_cache.misses} read from mkvmerge.",
                 log_file_path=args.log)
+        if state_store.enabled:
+            try:
+                state_store.note("remux", f"{published} movie(s) decided")
+            except Exception as exc:  # noqa: BLE001 - a cache write can never fail a run
+                log(f"state cache note not written: {exc}", level="WARNING", log_file_path=args.log)
+            log(f"State cache: {published} verdict(s) recorded for `organize status`.",
+                log_file_path=args.log)
+        state_store.close()
         _release_locks()
 
     if _interrupt_requested:
@@ -3998,307 +3101,43 @@ def main(argv: list[str] | None = None) -> int:
 # SELF-TEST  (no mkvmerge required)
 # =============================================================================
 
+
 def run_self_tests() -> int:
-    errors: list[str] = []
+    """Field smoke test: is the remux decision logic sane in this copy?
 
-    def check(cond: bool, msg: str) -> None:
-        if not cond:
-            errors.append(msg)
+    The full decision table (foreign films, DVS, subtitle retention, the
+    transaction journal, verification) lives in ``tests/selftests/``. These
+    three checks are the ones worth re-asking on an unfamiliar machine,
+    because getting them wrong destroys data rather than merely annoying you.
+    """
+    def commentary_is_recognised() -> bool:
+        return (is_commentary_name("Director's Commentary")
+                and not is_commentary_name("English 5.1"))
 
-    check(normalize_language("fre") == "fr", "fre->fr")
-    check(normalize_language("eng") == "en", "eng->en")
-    check(normalize_language(["en", "US"][0]) == "en", "en-US")
+    def one_english_audio_survives() -> bool:
+        info = {"tracks": [
+            {"id": 0, "type": "video", "properties": {"codec_id": "V_MPEG4/ISO/AVC"}},
+            {"id": 1, "type": "audio", "properties": {"language": "eng", "track_name": "English 5.1",
+                                                      "audio_channels": 6, "codec_id": "A_EAC3"}},
+            {"id": 2, "type": "audio", "properties": {"language": "eng", "track_name": "Commentary",
+                                                      "audio_channels": 2, "codec_id": "A_AC3"}},
+        ]}
+        plan, reason = plan_cleanup(info)
+        return (plan is not None and reason == ""
+                and plan.best_audio_id == 1 and len(plan.removed_audio) == 1)
 
-    eng = {"id": 1, "type": "audio", "properties": {"language": "eng", "language_ietf": "en"}}
-    fre = {"id": 2, "type": "audio", "properties": {"language": "fre"}}
-    check(is_matching_language(eng, {"en", "eng"}), "eng match")
-    check(is_matching_language(fre, {"fr", "fra"}), "fra matches fre")
-    check(not is_matching_language(fre, {"en"}), "fre not en")
+    def a_movie_outside_its_folder_is_reported() -> bool:
+        with tempfile.TemporaryDirectory(prefix="cleaner_smoke_") as td:
+            root = Path(td)
+            stray = root / "Movie (2020).mkv"
+            stray.write_bytes(b"x")
+            return canonical_movie_layout_issue(stray, root) is not None
 
-    sdh = {"type": "subtitles", "properties": {
-        "language": "eng", "track_name": "English SDH",
-        "flag_hearing_impaired": True, "flag_visual_impaired": True,
-    }}
-    check(not is_commentary_track(sdh, True), "SDH subtitle must be KEPT")
-
-    dvs = {"type": "audio", "properties": {
-        "language": "eng", "track_name": "English Audio Description",
-        "flag_visual_impaired": True,
-    }}
-    check(is_commentary_track(dvs, True), "DVS audio must be DROPPED")
-
-    comm = {"type": "audio", "properties": {"language": "eng", "track_name": "Director Commentary", "flag_commentary": True}}
-    check(is_commentary_track(comm, True), "commentary audio dropped")
-    cut = {"type": "audio", "properties": {"language": "eng", "track_name": "Director's Cut"}}
-    check(not is_commentary_track(cut, True), "Director's Cut is not commentary")
-
-    forced = {"type": "subtitles", "properties": {"language": "eng", "track_name": "English Forced", "flag_forced": True}}
-    check(is_forced_subtitle(forced), "forced flag")
-    check(not is_commentary_track(forced, True), "forced sub kept")
-
-    und_eng = {"type": "subtitles", "properties": {"language": "und", "track_name": "English"}}
-    und_unknown = {"type": "audio", "properties": {"language": "und", "track_name": ""}}
-    check(is_english_named_untagged(und_eng), "untagged English by name")
-    check(not is_english_named_untagged(und_unknown), "untagged unknown is not English")
-
-    truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
-    aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
-    check(get_audio_quality_score(truehd) > get_audio_quality_score(aac), "TrueHD Atmos > AAC 5.1")
-
-    check(_parse_mkvmerge_progress("Progress: 45%") == 45, "plain progress")
-    check(_parse_mkvmerge_progress("#GUI#progress 80%") == 80, "gui progress")
-    check(_parse_mkvmerge_progress("#GUI#progress#parts=1/4") == 25, "parts progress")
-    check(_parse_mkvmerge_progress("hello") is None, "no progress")
-
-    check(not SAMPLE_NAME_RE.search("The Sampler (2012)"), "false sample")
-    check(bool(SAMPLE_NAME_RE.search("Movie-sample")), "sample name")
-
-    tmp = Path(tempfile.mkdtemp(prefix="tcc_"))
-    try:
-        movie = tmp / "Film (2000)"
-        extra = movie / "Featurettes"
-        extra.mkdir(parents=True)
-        (movie / "Film (2000).mkv").write_bytes(b"x")
-        (extra / "Making-Of.mkv").write_bytes(b"y")
-        (movie / "Film-sample.mkv").write_bytes(b"z")
-        files, _, _ = discover_mkv_files(tmp, None, skip_extras=True)
-        names = {p.name for p in files}
-        check(names == {"Film (2000).mkv"}, f"discover extras/samples skipped: {names}")
-        files2, _, _ = discover_mkv_files(tmp, None, skip_extras=False)
-        check(any(p.name == "Making-Of.mkv" for p in files2), "include extras helper")
-        hardlink_source = tmp / "seed-source.mkv"
-        hardlink_target = tmp / "hardlink-target.mkv"
-        hardlink_source.write_bytes(b"linked")
-        hardlink_target.hardlink_to(hardlink_source)
-        check(hardlink_count(hardlink_source) >= 2, "hardlink count detects seeded-style link")
-        hardlink_target.unlink()
-        check(hardlink_count(hardlink_source) == 1, "hardlink count clears after source removal")
-
-        movie_srt = movie / f"Film (2000){EXTERNAL_SRT_SUFFIX}"
-        movie_srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8")
-        external_record = validate_exact_external_english_srt(movie / "Film (2000).mkv")
-        check(bool(external_record.get("valid")), f"valid exact external SRT: {external_record}")
-        check(external_srt_snapshot_matches(external_record), "external SRT snapshot initial match")
-        (movie / "Film (2000).en.forced.srt").write_text(
-            "1\n00:00:00,000 --> 00:00:01,000\nWrong suffix\n", encoding="utf-8",
-        )
-        check(
-            external_record.get("path", "").endswith(f"Film (2000){EXTERNAL_SRT_SUFFIX}"),
-            f"only exact {EXTERNAL_SRT_SUFFIX} qualifies",
-        )
-        # Legacy .en.srt is promoted to the canonical .eng.srt on validate.
-        legacy_movie = tmp / "Legacy (2001)"
-        legacy_movie.mkdir()
-        (legacy_movie / "Legacy (2001).mkv").write_bytes(b"x")
-        (legacy_movie / "Legacy (2001).en.srt").write_text(
-            "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n", encoding="utf-8",
-        )
-        legacy_record = validate_exact_external_english_srt(legacy_movie / "Legacy (2001).mkv")
-        check(bool(legacy_record.get("valid")), f"legacy .en.srt promotes: {legacy_record}")
-        check(
-            str(legacy_record.get("path", "")).endswith(f"Legacy (2001){EXTERNAL_SRT_SUFFIX}"),
-            "promoted path is .eng.srt",
-        )
-        check(not (legacy_movie / "Legacy (2001).en.srt").exists(), "legacy .en.srt removed after promote")
-        # A covering .eng.sdh.srt must be recorded under its OWN name: the
-        # post-remux re-check re-stats the recorded path, and a stale canonical
-        # path that never existed would reject an untouched valid sidecar.
-        sdh_movie = tmp / "Sdh (2002)"
-        sdh_movie.mkdir()
-        (sdh_movie / "Sdh (2002).mkv").write_bytes(b"x")
-        (sdh_movie / "Sdh (2002).eng.sdh.srt").write_text(
-            "1\n00:00:00,000 --> 00:00:01,000\nSDH line\n", encoding="utf-8",
-        )
-        sdh_record = validate_exact_external_english_srt(sdh_movie / "Sdh (2002).mkv")
-        check(bool(sdh_record.get("valid")), f"covering .eng.sdh.srt qualifies: {sdh_record}")
-        check(str(sdh_record.get("path", "")).endswith("Sdh (2002).eng.sdh.srt"),
-              "sdh record names the file it was validated from")
-        check(external_srt_snapshot_matches(sdh_record), "untouched sdh sidecar keeps its snapshot match")
-        # A broken .eng.srt beside a valid .eng.sdh.srt must fall through to
-        # the valid alternate rather than hiding it.
-        fallthrough_movie = tmp / "Fallthrough (2003)"
-        fallthrough_movie.mkdir()
-        (fallthrough_movie / "Fallthrough (2003).mkv").write_bytes(b"x")
-        (fallthrough_movie / "Fallthrough (2003).eng.srt").write_text(
-            "<html>not a subtitle</html>", encoding="utf-8",
-        )
-        (fallthrough_movie / "Fallthrough (2003).eng.sdh.srt").write_text(
-            "1\n00:00:00,000 --> 00:00:01,000\nSDH line\n", encoding="utf-8",
-        )
-        fallthrough_record = validate_exact_external_english_srt(fallthrough_movie / "Fallthrough (2003).mkv")
-        check(bool(fallthrough_record.get("valid")),
-              f"broken .eng.srt falls through to valid .eng.sdh.srt: {fallthrough_record}")
-        check(str(fallthrough_record.get("path", "")).endswith("Fallthrough (2003).eng.sdh.srt"),
-              "fallthrough record names the valid .eng.sdh.srt")
-        check(external_srt_snapshot_matches(fallthrough_record), "fallthrough sdh keeps its snapshot match")
-        movie_srt.write_text("<html>not a subtitle</html>", encoding="utf-8")
-        check(not external_srt_snapshot_matches(external_record), "changed/malformed external SRT rejects activation")
-        check(not validate_exact_external_english_srt(movie / "Film (2000).mkv").get("valid"),
-              "malformed external SRT does not qualify")
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-    # Accessibility and selected-track verification fixtures require no media
-    # binaries; they model mkvmerge JSON directly.
-    text_description = {"type": "subtitles", "codec": "SubRip/SRT", "properties": {
-        "language": "eng", "track_name": "English text descriptions",
-        "flag_text_descriptions": True, "flag_default": False,
-    }}
-    check(not is_commentary_track(text_description, True), "text-description subtitle must be KEPT")
-
-    source_video = {"type": "video", "codec": "AVC/H.264/MPEG-4p10", "properties": {
-        "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
-        "display_dimensions": "1920x1080", "tag_number_of_frames": "240", "flag_default": True,
-    }}
-    source_audio = {"type": "audio", "codec": "AC-3", "properties": {
-        "codec_id": "A_AC3", "language": "eng", "language_ietf": "en",
-        "track_name": "English 5.1", "audio_channels": 6,
-        "audio_sampling_frequency": 48000, "flag_default": False,
-    }}
-    source_forced = {"type": "subtitles", "codec": "SubRip/SRT", "properties": {
-        "codec_id": "S_TEXT/UTF8", "language": "eng", "track_name": "English Forced",
-        "flag_forced": True, "flag_default": False,
-    }}
-    source_info = {
-        "container": {"recognized": True, "supported": True, "properties": {"duration": 10_000_000_000}},
-        "tracks": [source_video, source_audio, source_forced, text_description],
-        "attachments": [], "chapters": [],
-    }
-    verification_plan = build_verification_plan(
-        source_info, source_audio, [source_forced, text_description], 4096,
-    )
-    output_info = json.loads(json.dumps(source_info))
-    output_info["tracks"][1]["properties"]["flag_default"] = True
-    check(
-        track_fingerprint(output_info["tracks"][1]) == verification_plan["audio"],
-        "selected audio default flag is explicit",
-    )
-    source_without_ietf = json.loads(json.dumps(source_info))
-    source_without_ietf["tracks"][1]["properties"].pop("language_ietf")
-    normalized_output = json.loads(json.dumps(output_info))
-    normalized_output["tracks"][1]["properties"]["language_ietf"] = "en"
-    normalized_plan = build_verification_plan(
-        source_without_ietf, source_without_ietf["tracks"][1], [source_forced, text_description], 4096,
-    )
-    check(
-        track_fingerprint(normalized_output["tracks"][1]) == normalized_plan["audio"],
-        "missing source IETF tag normalizes to MKVToolNix output language tag",
-    )
-    aac_seven_channel_source = {"type": "audio", "codec": "AAC", "properties": {
-        "codec_id": "A_AAC", "language": "eng", "audio_channels": 7,
-        "audio_sampling_frequency": 24000, "default_track": True,
-    }}
-    aac_eight_channel_output = json.loads(json.dumps(aac_seven_channel_source))
-    aac_eight_channel_output["properties"]["audio_channels"] = 8
-    aac_eight_channel_output["properties"]["language_ietf"] = "en"
-    aac_expected = track_fingerprint(aac_seven_channel_source, default_override=True)
-    check(
-        retained_audio_fingerprint_matches(track_fingerprint(aac_eight_channel_output), aac_expected),
-        "AAC source channel count 7 and MKVToolNix output count 8 are accepted only when all other fields match",
-    )
-    aac_six_channel_source = json.loads(json.dumps(aac_seven_channel_source))
-    aac_six_channel_source["properties"]["audio_channels"] = 6
-    aac_six_expected = track_fingerprint(aac_six_channel_source, default_override=True)
-    check(
-        not retained_audio_fingerprint_matches(track_fingerprint(aac_eight_channel_output), aac_six_expected),
-        "AAC channel changes other than the observed 7-to-8 representation mismatch reject the remux",
-    )
-
-    tx_tmp = Path(tempfile.mkdtemp(prefix="tcc_tx_"))
-    original_runner = globals()["_run_mkvmerge"]
-
-    def age_for_recovery(path: Path) -> None:
-        aged = time.time() - ORPHAN_MIN_AGE_SECONDS - 2.0
-        os.utime(path, (aged, aged))
-
-    try:
-        temp_fixture = tx_tmp / "verify-fixture.mkv"
-        temp_fixture.write_bytes(b"x" * 4096)
-        ok, reason = _verify_remux_info(temp_fixture, output_info, verification_plan)
-        check(ok, f"fingerprint verification accepted intended output: {reason}")
-        source_without_frame_stats = json.loads(json.dumps(source_info))
-        source_without_frame_stats["tracks"][0]["properties"].pop("tag_number_of_frames")
-        generated_frame_output = json.loads(json.dumps(output_info))
-        generated_frame_plan = build_verification_plan(
-            source_without_frame_stats, source_without_frame_stats["tracks"][1],
-            [source_forced, text_description], 4096,
-        )
-        ok, reason = _verify_remux_info(temp_fixture, generated_frame_output, generated_frame_plan)
-        check(ok, f"generated output-only frame statistics are accepted: {reason}")
-        wrong_frame_output = json.loads(json.dumps(output_info))
-        wrong_frame_output["tracks"][0]["properties"]["tag_number_of_frames"] = "241"
-        ok, _ = _verify_remux_info(temp_fixture, wrong_frame_output, verification_plan)
-        check(not ok, "a changed source-known video frame count rejects the remux")
-        changed_output = json.loads(json.dumps(output_info))
-        changed_output["tracks"][1]["properties"]["language"] = "fra"
-        ok, _ = _verify_remux_info(temp_fixture, changed_output, verification_plan)
-        check(not ok, "fingerprint verification rejects a wrong retained audio track")
-
-        original = tx_tmp / "Recovery Film.mkv"
-        original.write_bytes(b"source" * 1024)
-        temp_path, journal, token = new_transaction_paths(original)
-        check(temp_path.parent == original.parent and journal.parent == original.parent, "transaction paths are siblings")
-        check(temp_path.name != original.name and _transaction_token_from_temp_name(temp_path.name) == token,
-              "transaction temp names are unique and parseable")
-        transaction = create_transaction(original, temp_path, token, original.stat())
-        transaction["verification_plan"] = verification_plan
-        temp_path.write_bytes(b"x" * 4096)
-        write_transaction(journal, transaction)
-        check(read_transaction(journal) is not None, "transaction journal round-trip")
-        check(_source_snapshot_matches(original, transaction["source_snapshot"]), "source snapshot initial match")
-        original.write_bytes(b"changed" * 1024)
-        check(not _source_snapshot_matches(original, transaction["source_snapshot"]), "source snapshot detects mutation")
-
-        # An unverified missing-original transaction must be preserved, not promoted.
-        original.unlink()
-        age_for_recovery(temp_path)
-        cleanup_orphan_temps(tx_tmp, "stub", None)
-        check(temp_path.exists() and journal.exists(), "unverified orphan retained for manual review")
-        cleanup_transaction_artifacts(temp_path, journal)
-
-        # A verified journal is recoverable only after verification succeeds again.
-        recovered = tx_tmp / "Recovered Film.mkv"
-        recovered_temp, recovered_journal, recovered_token = new_transaction_paths(recovered)
-        recovered_temp.write_bytes(b"x" * 4096)
-        recovered_tx = create_transaction(recovered, recovered_temp, recovered_token, temp_fixture.stat())
-        recovered_tx["verification_plan"] = verification_plan
-        recovered_tx["phase"] = "verified"
-        age_for_recovery(recovered_temp)
-        recovered_tx["temp_snapshot"] = _source_snapshot(recovered_temp)
-        write_transaction(recovered_journal, recovered_tx)
-        globals()["_run_mkvmerge"] = lambda *_args, **_kwargs: (0, json.dumps(output_info), "")
-        cleanup_orphan_temps(tx_tmp, "stub", None)
-        check(recovered.exists() and not recovered_temp.exists() and not recovered_journal.exists(),
-              "verified and rechecked orphan recovers atomically")
-
-        # Simulate a crash after os.replace but before journal deletion.
-        journal_only = tx_tmp / "Journal Only.mkv"
-        journal_only.write_bytes(b"source" * 1024)
-        missing_temp, stale_journal, stale_token = new_transaction_paths(journal_only)
-        stale_tx = create_transaction(journal_only, missing_temp, stale_token, journal_only.stat())
-        stale_tx["phase"] = "verified"
-        write_transaction(stale_journal, stale_tx)
-        cleanup_orphan_temps(tx_tmp, "stub", None)
-        check(not stale_journal.exists() and journal_only.exists(), "stale journal removed only beside intact original")
-
-        legacy = tx_tmp / "temp_clean_legacy-missing.mkv"
-        legacy.write_bytes(b"x" * 4096)
-        age_for_recovery(legacy)
-        cleanup_orphan_temps(tx_tmp, "stub", None)
-        check(legacy.exists(), "legacy orphan without original is never auto-promoted")
-    except Exception as exc:
-        errors.append(f"transaction/fingerprint self-test exception: {exc}")
-    finally:
-        globals()["_run_mkvmerge"] = original_runner
-        shutil.rmtree(tx_tmp, ignore_errors=True)
-
-    if errors:
-        print("SELF-TEST FAILED:")
-        for e in errors:
-            print("  -", e)
-        return 1
-    print("SELF-TEST PASSED (selection + external-SRT policy + fingerprints + transactions + recovery + discovery + hardlinks)")
-    return 0
+    return run_field_smoke_test("mkv_track_cleaner.py", [
+        ("commentary tracks are recognised", commentary_is_recognised),
+        ("exactly one best English audio is kept", one_english_audio_survives),
+        ("a non-canonical layout is reported", a_movie_outside_its_folder_is_reported),
+    ])
 
 if __name__ == "__main__":
     sys.exit(main())
