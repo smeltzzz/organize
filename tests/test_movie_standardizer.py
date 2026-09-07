@@ -196,14 +196,14 @@ class DeclinedSourceTests(_RunStateMixin):
         self.assertEqual(ms.RUN_SUMMARY.skipped, 1)
         self.assertIn("300 MB minimum", ms.RUN_EVENTS[-1]["reason"])
 
-    def test_non_mkv_decline_is_recorded(self) -> None:
+    def test_unsupported_container_decline_is_recorded(self) -> None:
         final = self.root / "final"
         final.mkdir(parents=True)
-        other = final / "Big.Movie.2020.1080p.mp4"
+        other = final / "Big.Movie.2020.1080p.avi"
         other.write_bytes(b"x" * 1024)
         ms.CFG.min_movie_size_mb = 0
         ms.handle_single_file(other)
-        self.assertIn("not an MKV", ms.RUN_EVENTS[-1]["reason"])
+        self.assertIn("not an MKV or MP4", ms.RUN_EVENTS[-1]["reason"])
 
     def test_report_has_a_left_in_source_section(self) -> None:
         ms.decline_source(self.root / "final" / "Small.1995.mkv", "smaller than the 300 MB minimum")
@@ -253,9 +253,9 @@ class DeclineReasonPrecisionTests(_RunStateMixin):
         ms.handle_directory(folder)
         return ms.RUN_EVENTS[-1]["reason"]
 
-    def test_non_mkv_movie_names_the_format(self) -> None:
-        reason = self._reason("Only.Mp4.2019", "Only.Mp4.2019.mp4", 15360)
-        self.assertIn("not an MKV", reason)
+    def test_unsupported_container_names_the_format(self) -> None:
+        reason = self._reason("Only.Avi.2019", "Only.Avi.2019.avi", 15360)
+        self.assertIn("not an MKV or MP4", reason)
         self.assertIn("never transcodes", reason)
         self.assertNotIn("no movie-sized video", reason)
 
@@ -270,6 +270,12 @@ class DeclineReasonPrecisionTests(_RunStateMixin):
 
     def test_undersized_mkv_reports_the_size_floor(self) -> None:
         reason = self._reason("Tiny.Mkv.2019", "Tiny.Mkv.2019.mkv", 100)
+        self.assertIn("smaller than the 1 MB minimum", reason)
+        self.assertNotIn("not an MKV", reason)
+
+    def test_undersized_mp4_reports_the_size_floor_too(self) -> None:
+        """An MP4 is a placeable container now, so it is judged on size."""
+        reason = self._reason("Tiny.Mp4.2019", "Tiny.Mp4.2019.mp4", 100)
         self.assertIn("smaller than the 1 MB minimum", reason)
         self.assertNotIn("not an MKV", reason)
 
@@ -294,15 +300,136 @@ class DeclineReasonPrecisionTests(_RunStateMixin):
 
     def test_symlinked_video_is_not_cited_as_a_non_mkv_movie(self) -> None:
         """A symlink must not manufacture a 'not an MKV' reason either."""
-        outside = self.root / "outside.mp4"
+        outside = self.root / "outside.avi"
         outside.write_bytes(b"x" * 15360 * 1024)
         folder = self.root / "final" / "Linked.Movie.2018"
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / "Linked.Movie.2018.mp4").symlink_to(outside)
+        (folder / "Linked.Movie.2018.avi").symlink_to(outside)
 
         ms.handle_directory(folder)
 
         self.assertEqual(ms.RUN_EVENTS[-1]["reason"], "no movie-sized video found inside")
+
+
+class Mp4ContainerTests(_RunStateMixin):
+    """MP4 releases are placed, under their own extension, one per folder.
+
+    The tool never transcodes, so accepting a container means hardlinking it
+    as-is: an ``.mp4`` becomes ``Title (Year)/Title (Year).mp4``. MKV stays
+    canonical — it is the only container the rest of the pipeline can remux,
+    inspect and subtitle — so it wins any tie, and a folder never ends up
+    holding two features, which is what ``library_auditor.py`` reports as
+    MULTIPLE_DIRECT_MOVIE_FILES.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        ms.CFG.min_movie_size_mb = 0
+        self.source = self.root / "final"
+        self.source.mkdir(parents=True, exist_ok=True)
+        self.library = ms.CFG.target_dir
+
+    def _source_file(self, name: str, payload: bytes = b"x" * 4096) -> Path:
+        path = self.source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        return path
+
+    def test_single_mp4_is_placed_under_its_own_extension(self) -> None:
+        ms.handle_single_file(self._source_file("Big.Movie.2020.1080p.mp4"))
+        placed = self.library / "Big Movie (2020)" / "Big Movie (2020).mp4"
+        self.assertTrue(placed.exists(), ms.RUN_EVENTS)
+        self.assertEqual(ms.RUN_SUMMARY.completed, 1)
+
+    def test_placed_mp4_is_a_hardlink_not_a_copy(self) -> None:
+        src = self._source_file("Linked.Movie.2019.mp4")
+        ms.handle_single_file(src)
+        placed = self.library / "Linked Movie (2019)" / "Linked Movie (2019).mp4"
+        self.assertTrue(placed.samefile(src))
+
+    def test_mp4_inside_a_release_folder_is_placed(self) -> None:
+        folder = self.source / "Folder.Movie.2021.1080p.WEB"
+        folder.mkdir(parents=True)
+        (folder / "Folder.Movie.2021.1080p.WEB.mp4").write_bytes(b"x" * 4096)
+        ms.handle_directory(folder)
+        self.assertTrue((self.library / "Folder Movie (2021)" / "Folder Movie (2021).mp4").exists())
+
+    def test_other_containers_are_still_declined(self) -> None:
+        for ext in (".avi", ".m4v", ".webm", ".ts"):
+            with self.subTest(ext=ext):
+                ms.RUN_EVENTS.clear()
+                ms.handle_single_file(self._source_file(f"Other.Movie.2020{ext}"))
+                self.assertEqual(ms.RUN_EVENTS[-1]["action"], "left in source")
+                self.assertIn("not an MKV or MP4", ms.RUN_EVENTS[-1]["reason"])
+                self.assertFalse((self.library / "Other Movie (2020)").exists())
+
+    def test_mkv_wins_over_a_larger_mp4_of_the_same_movie(self) -> None:
+        folder = self.source / "Both.Movie.2018"
+        folder.mkdir(parents=True)
+        (folder / "Both.Movie.2018.1080p.mkv").write_bytes(b"a" * 4096)
+        (folder / "Both.Movie.2018.2160p.mp4").write_bytes(b"b" * 9000)
+        ms.handle_directory(folder)
+        placed = self.library / "Both Movie (2018)"
+        self.assertTrue((placed / "Both Movie (2018).mkv").exists())
+        self.assertFalse((placed / "Both Movie (2018).mp4").exists())
+
+    def test_mp4_is_declined_when_an_mkv_already_holds_the_movie(self) -> None:
+        existing = self.library / "Held Movie (2017)" / "Held Movie (2017).mkv"
+        existing.parent.mkdir(parents=True)
+        existing.write_bytes(b"already here")
+        ms.handle_single_file(self._source_file("Held.Movie.2017.mp4"))
+        self.assertFalse((existing.parent / "Held Movie (2017).mp4").exists())
+        self.assertEqual(existing.read_bytes(), b"already here")
+        self.assertIn("another container", ms.RUN_EVENTS[-1]["reason"])
+
+    def test_mkv_is_declined_when_an_mp4_already_holds_the_movie(self) -> None:
+        """First container placed wins; unique data is never deleted."""
+        existing = self.library / "Held Movie (2016)" / "Held Movie (2016).mp4"
+        existing.parent.mkdir(parents=True)
+        existing.write_bytes(b"already here")
+        ms.handle_single_file(self._source_file("Held.Movie.2016.mkv"))
+        self.assertFalse((existing.parent / "Held Movie (2016).mkv").exists())
+        self.assertEqual(existing.read_bytes(), b"already here")
+
+    def test_reingesting_the_same_mp4_is_idempotent(self) -> None:
+        src = self._source_file("Repeat.Movie.2015.mp4")
+        ms.handle_single_file(src)
+        ms.handle_single_file(src)
+        placed = self.library / "Repeat Movie (2015)" / "Repeat Movie (2015).mp4"
+        self.assertTrue(placed.samefile(src))
+        self.assertEqual(ms.RUN_EVENTS[-1]["reason"], "already in place")
+
+    def test_a_sidecar_is_not_blocked_by_the_movie_beside_it(self) -> None:
+        folder = self.library / "Sidecar Movie (2014)"
+        folder.mkdir(parents=True)
+        (folder / "Sidecar Movie (2014).mkv").write_bytes(b"movie")
+        self.assertIsNone(ms.existing_other_container(folder / "Sidecar Movie (2014).eng.srt"))
+
+    def test_a_staged_remux_is_not_mistaken_for_a_second_container(self) -> None:
+        """mkv_track_cleaner.py stages a full-size sibling mid-remux."""
+        folder = self.library / "Staged Movie (2013)"
+        folder.mkdir(parents=True)
+        (folder / "temp_clean_ab12__Staged Movie (2013).mkv").write_bytes(b"staging")
+        self.assertIsNone(ms.existing_other_container(folder / "Staged Movie (2013).mp4"))
+
+    def test_mp4_replacement_still_goes_through_the_probe_decision(self) -> None:
+        """Size alone must never replace a placed movie, MP4 included."""
+        src = self._source_file("Upgrade.Movie.2012.2160p.mp4", b"x" * 9000)
+        dest = self.library / "Upgrade Movie (2012)" / "Upgrade Movie (2012).mp4"
+        dest.parent.mkdir(parents=True)
+        dest.write_bytes(b"x" * 10)
+        find = ms.find_ffprobe
+        ms.find_ffprobe = cast(Any, lambda _explicit="ffprobe": None)
+        self.addCleanup(lambda: setattr(ms, "find_ffprobe", find))
+        replace, reason = ms.should_replace(src, dest)
+        self.assertFalse(replace)
+        self.assertIn("size alone never replaces", reason)
+
+    def test_automated_input_accepts_mp4_and_rejects_other_containers(self) -> None:
+        accepted = self._source_file("Auto.Movie.2011.mp4")
+        rejected = self._source_file("Auto.Movie.2011.avi")
+        self.assertIsNone(ms.validate_automated_input(accepted, ms.CFG))
+        self.assertIn("not an MKV or MP4", ms.validate_automated_input(rejected, ms.CFG) or "")
 
 
 class MultipartSplitDetectionTests(_RunStateMixin):

@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`movie_standardizer.py` places MP4 releases.** An `.mp4` download is now hardlinked into the library under its own extension — `Title (Year)/Title (Year).mp4` — instead of being left in the download folder as "not an MKV". Nothing is transcoded and nothing is renamed to a container it is not; the tool simply accepts a second container it can file honestly.
+  - **MKV stays canonical.** When one movie arrives as both, the MKV is placed (it is the only container the rest of the pipeline can remux, inspect and subtitle), regardless of which file is bigger. When a library folder already holds one of the two, the other is declined and reported rather than added beside it: two features in one folder is exactly the layout `library_auditor.py` flags as `MULTIPLE_DIRECT_MOVIE_FILES`, and nothing here deletes the copy that is already there.
+  - Replacement of a placed MP4 goes through the same ffprobe upgrade decision as an MKV — size alone still never replaces a movie.
+  - Every other container (`.avi`, `.m4v`, `.mov`, `.ts`, disc images, …) is still declined, now with the reason "not an MKV or MP4; this tool never transcodes". The qBittorrent completion hook accepts an MP4 path on the same terms.
+  - **What an MP4 in the library does not get**, stated plainly in `docs/tools.md` and the tool's own docstring: `library_auditor.py` reports it as `SINGLE_OTHER_CONTAINER`, and `mkv_track_cleaner.py`, `subtitle_fetcher.py` and `bitdepth.py` skip it. It plays; it is not maintained. A movie you want cleaned, subtitled and audited should still arrive as an MKV.
+  - 13 new tests covering placement, the hardlink (`samefile`), idempotent re-ingest, the MKV-wins tie-break, both directions of the one-container-per-folder rule, the staged-remux false positive, and the unchanged declines. 1,870 → 1,883 tests.
+
 ### Changed
 - **The fetcher asks both subtitle providers at the same time instead of one after the other.** Every movie that reaches the API tier with the title/year fallback enabled is offered to *both* providers — OpenSubtitles for an exact moviehash match, SubDL for a scored release-name match — and the better answer wins, so both lookups always happen. The second one merely waited for the first: two companies, two connections, two separate rate limits, one queue.
   - OpenSubtitles' search now runs on a single background worker while SubDL's runs on the main thread. Nothing that spends anything moved: SubDL's durable search reservation (persisted with `fsync` before every outbound attempt) is exactly why it is the one that stayed, and the ledger, every download and every state checkpoint are still written by one thread in library order.

@@ -4,6 +4,8 @@ Movie Filename Standardizer for qBittorrent
 ===========================================
 Organizes movie downloads into the exact canonical layout
 ``Title (Year)/Title (Year).mkv`` with English subtitle sidecars only.
+MP4 releases are placed too, keeping their own extension
+(``Title (Year)/Title (Year).mp4``); see "v3.5 MP4 releases are placed" below.
 
 Zero third-party Python dependencies. Initial placement needs no external
 binary; replacing an existing canonical movie uses optional ``ffprobe`` and
@@ -43,15 +45,29 @@ v2.7 hardlink-only canonical output
   seed without temporarily duplicating movie data.
 - The source and target must be distinct directories on the same filesystem.
 
+v3.5 MP4 releases are placed
+----------------------------
+- ``.mp4`` sources are hardlinked into the library under their own extension.
+  Nothing is transcoded and nothing is renamed to a container it is not: an
+  MP4 arrives as ``Title (Year)/Title (Year).mp4``.
+- MKV stays canonical. When one movie arrives as both, the MKV is placed; when
+  a folder already holds one container, the other is declined and reported
+  rather than added beside it, because two features in one folder is precisely
+  what ``library_auditor.py`` flags as MULTIPLE_DIRECT_MOVIE_FILES.
+- The rest of the pipeline is MKV-only by design: ``library_auditor.py``
+  reports a placed MP4 as SINGLE_OTHER_CONTAINER, and ``mkv_track_cleaner.py``,
+  ``subtitle_fetcher.py`` and ``bitdepth.py`` skip it. An MP4 in the library is
+  a playable movie, not a fully maintained one.
+
 v2.6 canonical movie-and-English-subtitle output
 --------------------------------------------------
-- The default and documented contract is exactly one canonical MKV per movie:
-  ``Title (Year)/Title (Year).mkv``.
+- The default and documented contract is exactly one movie file per folder,
+  canonically ``Title (Year)/Title (Year).mkv``.
 - Only recognized English subtitle sidecars are placed beside that MKV. Artwork,
   extras, provider IDs, edition/version labels, disc trees, multipart stacks,
   cleanup, and deduplication are not emitted by the default workflow.
-- Non-MKV and multipart/disc releases are skipped rather than converted or
-  misrepresented as a complete canonical movie.
+- Unsupported containers and multipart/disc releases are skipped rather than
+  converted or misrepresented as a complete canonical movie.
 
 v2.4 safety, auditability, and performance
 --------------------------------------------
@@ -222,10 +238,17 @@ CREATE_SUBFOLDERS = True
 SKIP_TV_SHOWS = True
 MIN_MOVIE_SIZE_MB = 300
 
-# The requested canonical output is an MKV. This script never transcodes;
-# non-MKV sources are skipped instead of being renamed with a false extension.
+# Two containers are placed as-is: MKV, which the rest of the pipeline can
+# remux and inspect, and MP4, which Jellyfin direct-plays as happily but which
+# the MKV-only tools downstream (track cleaner, subtitle fetcher, 10-bit audit)
+# will leave alone. Anything else is left in the source folder: this script
+# never transcodes, and renaming a container it cannot rewrite would be a lie
+# about the file. MKV stays *canonical* - when a movie arrives in both, the MKV
+# is the one that is placed.
 CANONICAL_VIDEO_EXTENSION = ".mkv"
-VIDEO_EXTENSIONS = {CANONICAL_VIDEO_EXTENSION}
+VIDEO_EXTENSIONS = {CANONICAL_VIDEO_EXTENSION, ".mp4"}
+# What to call the accepted set in a message, in preference order.
+ACCEPTED_VIDEO_TEXT = "MKV or MP4"
 SUBTITLE_EXTENSIONS = {
     ".srt", ".sub", ".idx", ".ass", ".ssa", ".vtt", ".sup", ".smi",
 }
@@ -2031,17 +2054,48 @@ def should_replace(src: Path, dest: Path) -> tuple[bool, str]:
             return False, "already-linked"
     except OSError:
         pass
-    if src.suffix.casefold() == CANONICAL_VIDEO_EXTENSION and dest.suffix.casefold() == CANONICAL_VIDEO_EXTENSION:
+    if src.suffix.casefold() in VIDEO_EXTENSIONS and dest.suffix.casefold() in VIDEO_EXTENSIONS:
         return _movie_upgrade_decision(src, dest)
 
     # Non-movie sidecars retain their established behavior. The stricter probe
-    # policy applies only to replacement of the canonical MKV.
+    # policy applies only to replacement of a placed movie file.
     src_sz, dest_sz = file_size(src), file_size(dest)
     if src_sz > dest_sz:
         return True, f"src-larger ({src_sz} > {dest_sz})"
     if src_sz == dest_sz:
         return False, "same-size-exists"
     return False, f"dest-larger ({dest_sz} >= {src_sz})"
+
+def existing_other_container(dest: Path) -> Path | None:
+    """Return a feature already covering ``dest``'s movie in another container.
+
+    ``Title (Year)/Title (Year).mkv`` and ``Title (Year)/Title (Year).mp4`` are
+    two different destinations, so nothing else in the placement path stops one
+    folder from ending up with two features for one movie — exactly the layout
+    ``library_auditor.py`` reports as MULTIPLE_DIRECT_MOVIE_FILES, and exactly
+    the ambiguity Jellyfin resolves by guessing. The container that is already
+    in the library wins; the newcomer is declined and reported, never deleted.
+    """
+    if dest.suffix.lower() not in VIDEO_EXTENSIONS:
+        return None
+    stem = dest.stem.casefold()
+    try:
+        siblings = sorted(dest.parent.iterdir())
+    except OSError:
+        return None
+    for sibling in siblings:
+        if sibling.name == dest.name:
+            continue
+        if sibling.suffix.lower() not in VIDEO_EXTENSIONS:
+            continue
+        if sibling.stem.casefold() != stem:
+            continue
+        try:
+            if sibling.is_file():
+                return sibling
+        except OSError:
+            continue
+    return None
 
 def process_file_action(src: Path, dest: Path) -> bool:
     """Hardlink ``src`` to ``dest`` safely and idempotently.
@@ -2058,6 +2112,13 @@ def process_file_action(src: Path, dest: Path) -> bool:
         LOG.info("Already in place: %s", dest)
         record_outcome("skipped", "media placement", src=src, dest=dest, reason="already in place")
         return True
+
+    rival = existing_other_container(dest)
+    if rival is not None:
+        reason = f"{rival.name} already holds this movie in another container"
+        LOG.info("Skip %s (%s)", dest, reason)
+        record_outcome("skipped", "media placement", src=src, dest=dest, reason=reason)
+        return False
 
     mode = PROCESS_MODE
     replace, reason = should_replace(src, dest)
@@ -2132,9 +2193,9 @@ def handle_single_file(path: Path) -> None:
         # leftover, because it is expected to disappear on its own.
         LOG.info("Skipping junk / incomplete: %s", path.name)
         return
-    if path.suffix.lower() != CANONICAL_VIDEO_EXTENSION:
-        LOG.info("Skipping non-MKV file; no transcoding is performed: %s", path.name)
-        decline_source(path, "not an MKV; this tool never transcodes")
+    if path.suffix.lower() not in VIDEO_EXTENSIONS:
+        LOG.info("Skipping unsupported container; no transcoding is performed: %s", path.name)
+        decline_source(path, f"not an {ACCEPTED_VIDEO_TEXT}; this tool never transcodes")
         return
     if is_extra_video(path):
         LOG.info("Skipping extra/sample: %s", path.name)
@@ -2196,12 +2257,13 @@ def _group_videos(videos: Sequence[ScannedFile], root: Path) -> dict[tuple, list
         groups.setdefault(key, []).append((video, parsed))
     return groups
 
-# Non-MKV containers a finished movie can plausibly arrive in. Used only to
-# explain a decline precisely — this tool never transcodes, so these are always
-# left where they are. The vocabulary matches library_auditor.MOVIE_EXTENSIONS
-# so the two tools never disagree about what counts as a movie container.
+# Containers a finished movie can plausibly arrive in that this tool does not
+# place. Used only to explain a decline precisely — this tool never transcodes,
+# so these are always left where they are. The vocabulary matches
+# library_auditor.MOVIE_EXTENSIONS minus the two placed containers, so the two
+# tools never disagree about what counts as a movie container.
 OTHER_MOVIE_EXTENSIONS = frozenset({
-    ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".webm", ".mpg", ".mpeg", ".ts",
+    ".m4v", ".mov", ".avi", ".wmv", ".webm", ".mpg", ".mpeg", ".ts",
     ".m2ts", ".mts", ".vob", ".flv", ".ogv", ".3gp", ".asf", ".rm", ".rmvb",
     ".m2v", ".divx", ".f4v", ".mxf", ".dv", ".wtv", ".dvr-ms", ".iso", ".img",
     ".nrg",
@@ -2218,7 +2280,7 @@ def explain_no_canonical_video(root: Path) -> str:
     "items left in source" section trustworthy.
     """
     biggest_other = 0
-    biggest_mkv = 0
+    biggest_placeable = 0
     for _root, _dirs, files in os.walk(root, onerror=lambda _e: None):
         for filename in files:
             if is_skipped_junk_name(filename):
@@ -2234,20 +2296,21 @@ def explain_no_canonical_video(root: Path) -> str:
             if candidate.is_symlink() or not S_ISREG(st.st_mode):
                 continue
             if ext in VIDEO_EXTENSIONS:
-                biggest_mkv = max(biggest_mkv, st.st_size)
+                biggest_placeable = max(biggest_placeable, st.st_size)
             else:
                 biggest_other = max(biggest_other, st.st_size)
 
-    if biggest_mkv and biggest_mkv < CFG.min_movie_bytes:
+    if biggest_placeable and biggest_placeable < CFG.min_movie_bytes:
         return (
             f"smaller than the {CFG.min_movie_size_mb:.0f} MB minimum "
-            f"({biggest_mkv / (1024 * 1024):.1f} MB)"
+            f"({biggest_placeable / (1024 * 1024):.1f} MB)"
         )
     # `biggest_other and ...`: with a 0 MB size floor the comparison alone is
     # always true and would invent "not an MKV (0 MB)" for a folder holding no
     # other-container at all.
     if biggest_other and biggest_other >= CFG.min_movie_bytes:
-        return f"not an MKV ({biggest_other / (1024 * 1024):.0f} MB); this tool never transcodes"
+        return (f"not an {ACCEPTED_VIDEO_TEXT} ({biggest_other / (1024 * 1024):.0f} MB); "
+                "this tool never transcodes")
     return "no movie-sized video found inside"
 
 def handle_directory(path: Path) -> None:
@@ -2352,12 +2415,17 @@ def handle_directory(path: Path) -> None:
             decline_source(path, "multipart fragments; canonical output requires one complete MKV")
             continue
 
-        # One (or several unmarked) files of the same title: keep the largest.
-        best_video, _ = max(items, key=lambda ip: ip[0].size)
+        # One (or several unmarked) files of the same title: keep the best.
+        # MKV first — it is the canonical container and the only one the rest
+        # of the pipeline can remux, inspect and subtitle — then the largest.
+        best_video, _ = max(
+            items,
+            key=lambda ip: (ip[0].path.suffix.lower() == CANONICAL_VIDEO_EXTENSION, ip[0].size),
+        )
         if len(items) > 1:
             LOG.info(
-                "Multiple files for '%s'; keeping largest (%.1f MB)",
-                parsed.folder_name, best_video.size / (1024 * 1024),
+                "Multiple files for '%s'; keeping %s (%.1f MB)",
+                parsed.folder_name, best_video.path.name, best_video.size / (1024 * 1024),
             )
         LOG.info("Movie '%s' -> '%s'", best_video.path.name, parsed.folder_name)
         dest = dest_for(
@@ -2690,7 +2758,7 @@ def apply_env(cfg: Config) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Place one canonical MKV and English subtitles per movie folder.",
+        description="Place one movie file (MKV canonical, MP4 accepted) and English subtitles per movie folder.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         epilog='qBittorrent:  python movie_standardizer.py "%F"',
     )
@@ -2833,8 +2901,8 @@ def validate_automated_input(item_path: Path, cfg: Config) -> str | None:
             return "qBittorrent input must not be a symlink"
         if path_is_within(item_path, cfg.target_dir):
             return "qBittorrent input is inside the organized library"
-        if item_path.is_file() and item_path.suffix.lower() != CANONICAL_VIDEO_EXTENSION:
-            return "qBittorrent input is not an MKV movie file"
+        if item_path.is_file() and item_path.suffix.lower() not in VIDEO_EXTENSIONS:
+            return f"qBittorrent input is not an {ACCEPTED_VIDEO_TEXT} movie file"
     except OSError as exc:
         return f"could not validate qBittorrent input: {exc}"
     return None

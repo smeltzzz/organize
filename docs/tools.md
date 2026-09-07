@@ -15,7 +15,7 @@ For the order they run in and why that order is load-bearing, see
 | [`mkv_track_cleaner.py`](#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep one best audio, strip commentary, dubs and embedded subtitles | `mkvmerge` |
 | [`bitdepth.py`](#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed | `ffprobe` |
 | [`library_auditor.py`](#4--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
-| [`movie_standardizer.py`](#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names, hardlink into `Title (Year)/` | `ffprobe` (optional) |
+| [`movie_standardizer.py`](#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names, hardlink MKV/MP4 into `Title (Year)/` | `ffprobe` (optional) |
 | [`sync_subtitles.py`](#6--sync_subtitlespy--subtitle-timing-sync-ffsubsync) | Measure every sidecar against the audio and correct trustworthy drift | `ffsubsync` + `ffmpeg` |
 | [`jellyfin_one_shot.py`](#7--jellyfin_one_shotpy--the-never-stop-completer) | Loops the whole toolchain until the auditor reports 100% canonical | whatever its steps need |
 
@@ -207,11 +207,30 @@ returned in input order, so the report cannot tell how it was scheduled.
 
 ## 5 · `movie_standardizer.py` — the ingest hook
 
-Parses scene release names and places one canonical hardlinked MKV (plus any
+Parses scene release names and places one hardlinked movie file (plus any
 validated subtitle) per `Title (Year)/` folder. Hardlink-only: the download
 folder keeps seeding, the library uses 0 extra bytes. Skips TV, disc rips,
 and splits. Also finds duplicate folders of the same movie on request
 (`--deduplicate`, non-destructive by default).
+
+**MKV and MP4 are both placed; MKV is canonical.** Nothing is ever transcoded,
+so accepting a container means hardlinking it under its own extension: an MP4
+release lands as `Title (Year)/Title (Year).mp4`. Every other container
+(`.avi`, `.m4v`, `.ts`, disc images, …) is left in the download folder and
+named in the report, because renaming a file to a container it is not would be
+a lie about its contents. When one movie arrives as both an MKV and an MP4 the
+MKV is placed, and when a library folder already holds one of the two the other
+is declined and reported rather than added beside it — two features in one
+folder is exactly what `library_auditor.py` flags as
+`MULTIPLE_DIRECT_MOVIE_FILES`, and nothing here deletes the copy that is
+already there.
+
+Be clear-eyed about what an MP4 in the library gets you: it plays, and that is
+the whole of it. The rest of the pipeline is MKV-only by design —
+`library_auditor.py` reports it as `SINGLE_OTHER_CONTAINER`, and
+`mkv_track_cleaner.py` (mkvmerge remux), `subtitle_fetcher.py` and
+`bitdepth.py` skip it. A movie you want cleaned, subtitled and audited should
+still arrive as an MKV.
 
 ```bash
 python3 movie_standardizer.py --source /path/to/downloads --target /path/to/movies --dry-run

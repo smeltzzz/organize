@@ -74,8 +74,13 @@ def run_canonical_self_tests() -> int:
         dual_out = dst / "Dual Film (2021)" / "Dual Film (2021).mkv"
         _assert_eq(dual_out.read_bytes() if dual_out.exists() else b"", b"b" * 20, "largest MKV only", errors)
 
-        (src / "Unsupported.Film.2022.mp4").write_bytes(b"mp4")
-        handle_single_file(src / "Unsupported.Film.2022.mp4")
+        (src / "Mp4.Film.2022.mp4").write_bytes(b"mp4")
+        handle_single_file(src / "Mp4.Film.2022.mp4")
+        mp4_out = dst / "Mp4 Film (2022)" / "Mp4 Film (2022).mp4"
+        _assert_eq(mp4_out.exists(), True, "MP4 placed under its own extension", errors)
+
+        (src / "Unsupported.Film.2022.avi").write_bytes(b"avi")
+        handle_single_file(src / "Unsupported.Film.2022.avi")
         parts = src / "Parts"
         parts.mkdir()
         (parts / "Parts.Film.2023.cd1.mkv").write_bytes(b"one")
@@ -86,7 +91,7 @@ def run_canonical_self_tests() -> int:
         (disc / "BDMV" / "STREAM" / "00000.m2ts").write_bytes(b"disc")
         handle_directory(disc)
         if (dst / "Unsupported Film (2022)").exists() or (dst / "Parts Film (2023)").exists() or (dst / "Disc").exists():
-            errors.append("unsupported MP4, multipart, or disc release was emitted")
+            errors.append("unsupported container, multipart, or disc release was emitted")
 
         _assert_eq(is_english_subtitle(Path("Film.English.srt")), True, "english subtitle", errors)
         _assert_eq(is_english_subtitle(Path("Film.en.sdh.srt")), True, "english SDH subtitle", errors)
