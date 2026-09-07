@@ -10,6 +10,7 @@ python3 benchmarks/bench_audit_workers.py    # the audit, with and without laten
 python3 benchmarks/bench_triage_workers.py   # the fetcher's local pre-flight
 python3 benchmarks/bench_scrape_gaps.py      # per-host vs one shared rate limit
 python3 benchmarks/bench_keepalive.py        # connection reuse vs a socket per request
+python3 benchmarks/bench_provider_overlap.py # asking both providers at once
 ```
 
 None of them is part of the test suite: they measure wall-clock time, which is the

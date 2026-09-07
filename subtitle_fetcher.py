@@ -108,6 +108,7 @@ import urllib.request
 import uuid
 import zipfile
 from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -5181,6 +5182,89 @@ def run_summary(
     }
 
 
+def judge_moviehash_candidates(
+    candidates: Sequence[Candidate], cfg: Config, identity: MovieIdentity | None,
+) -> tuple[Candidate | None, str]:
+    """The verdict on an OpenSubtitles moviehash search: the pick, and why.
+
+    Shared by the serial and the overlapped tier-1 paths so the two cannot
+    drift: the same candidates must produce the same pick and the same
+    sentence in the report whichever thread fetched them.
+    """
+    pick = pick_candidate(candidates, cfg, identity=identity)
+    if pick is None:
+        return None, (
+            "no usable Blu-ray English moviehash-matched human SRT "
+            "naming the movie and its release year"
+        )
+    return pick, (
+        "moviehash match; Blu-ray release naming the movie and its release year; "
+        "highest download count"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Two providers, one wait
+# ---------------------------------------------------------------------------
+# Tier 1 asks two unrelated companies the same question about one movie:
+# OpenSubtitles for an exact moviehash match, SubDL for a scored release-name
+# match. Their answers are pooled and the best one wins, so *both* are always
+# asked whenever both are configured - which means the second lookup spent its
+# entire life waiting for the first one to come back from a different
+# continent, on a different connection, against a different rate limit.
+#
+# One of the two now runs on a single background worker while the other runs
+# here. What deliberately does *not* move is the money: SubDL's durable search
+# reservation (persisted with fsync before every outbound attempt), the ledger,
+# every download and every state checkpoint stay on the main thread, in library
+# order, exactly as before. That is why it is OpenSubtitles that is handed to
+# the worker - it is the tier-1 lookup with nothing durable to reserve - and
+# why the pool is one worker wide: this is about overlapping two waits, not
+# about issuing more requests than a serial run would.
+#
+# ``--workers 1`` turns it off along with every other thread in the tool.
+
+
+class SearchPool:
+    """The one place a provider request may leave the main thread."""
+
+    def __init__(self, *, enabled: bool) -> None:
+        self._pool = (
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="fetch-provider")
+            if enabled else None
+        )
+
+    @property
+    def enabled(self) -> bool:
+        return self._pool is not None
+
+    def start(self, work: Callable[[], list[Candidate]]) -> Future[list[Candidate]] | None:
+        """Begin a search in the background, or return None when disabled."""
+        if self._pool is None:
+            return None
+        return self._pool.submit(work)
+
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.shutdown(wait=True)
+            self._pool = None
+
+
+def drain_search(search: Future[list[Candidate]] | None) -> None:
+    """Wait for a search whose answer is no longer wanted, and drop it.
+
+    A movie can be abandoned between dispatch and pooling - an exhausted SubDL
+    cap, a SubDL error - and the background lookup must not outlive it into the
+    next movie's turn. Whatever it raises died with the movie it was for.
+    """
+    if search is None:
+        return
+    try:
+        search.result()
+    except Exception:  # noqa: BLE001 - the answer is being discarded, not read
+        pass
+
+
 def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     """Process one daily batch with independent provider quotas.
 
@@ -5221,6 +5305,14 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
     )
     active_providers = configured_providers(cfg)
     scrape_keys = active_scrape_sources(cfg)
+    # Both tier-1 lookups are issued for every movie that reaches tier 1 with
+    # the title/year fallback enabled, so the two waits can be one wait. The
+    # pool exists only when that is true; a one-provider run never starts a
+    # thread, and --workers 1 keeps the whole tool serial.
+    tier1_pool = SearchPool(enabled=(
+        open_client is not None and subdl_client is not None
+        and cfg.identity_fallback and cfg.workers != 1
+    ))
     # Dry runs spend no scraping requests: searches would count against the
     # real UTC caps, so the tier is skipped entirely (report says so).
     scrape_chain = build_scrape_chain(cfg, ledger, state) if not cfg.dry_run else None
@@ -5399,6 +5491,15 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         # OpenSubtitles' exact-moviehash match and SubDL's score-gated
         # filename match. Whichever qualifying release has the most downloads
         # wins, regardless of provider.
+        # Set when the OpenSubtitles lookup is running in the background; its
+        # result is collected below, after SubDL has been asked on this thread.
+        open_search: Future[list[Candidate]] | None = None
+        overlap_tier1 = (
+            tier1_pool.enabled
+            and open_tier_available and open_client is not None
+            and subdl_tier_available and subdl_client is not None
+            and identity is not None
+        )
         if open_tier_available and open_client is not None:
             providers_checked.append(PROVIDER_OPENSUBTITLES)
             emit(index, "SEARCH", video, "calculating moviehash and checking OpenSubtitles")
@@ -5422,29 +5523,36 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 results.append(result)
                 emit(index, "ERROR", video, str(exc))
                 continue
-            try:
-                candidates = open_client.search(movie_hash=digest, query=video.stem)
-                os_tier1 = pick_candidate(candidates, fetcher_cfg, identity=identity)
-            except (RuntimeError, ValueError) as exc:
-                if not subdl_tier_available:
-                    set_movie_status(
-                        record, "error", str(exc), attempts=int(record.get("attempts", 0) or 0) + 1,
-                        providers_checked=providers_checked,
-                    )
-                    ledger["errors"] += 1
-                    persist_state(state, cfg.log_file)
-                    result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
-                    results.append(result)
-                    emit(index, "ERROR", video, str(exc))
-                    continue
-                open_lookup_error = f"OpenSubtitles moviehash lookup failed: {exc}"
-                pool_reasons.append(open_lookup_error)
-                emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
-            if os_tier1 is not None:
-                os_tier1_reason = (
-                    "moviehash match; Blu-ray release naming the movie and its release year; "
-                    "highest download count"
+            if overlap_tier1:
+                # SubDL is going to be asked about this same movie in a moment
+                # whatever this returns, so start it and go. The answer is
+                # collected - and judged - on this thread, below.
+                open_search = tier1_pool.start(
+                    lambda client=open_client, movie_hash=digest, query=video.stem:
+                        client.search(movie_hash=movie_hash, query=query)
                 )
+            if open_search is None:
+                try:
+                    candidates = open_client.search(movie_hash=digest, query=video.stem)
+                    os_tier1, os_tier1_reason = judge_moviehash_candidates(
+                        candidates, fetcher_cfg, identity,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    if not subdl_tier_available:
+                        set_movie_status(
+                            record, "error", str(exc),
+                            attempts=int(record.get("attempts", 0) or 0) + 1,
+                            providers_checked=providers_checked,
+                        )
+                        ledger["errors"] += 1
+                        persist_state(state, cfg.log_file)
+                        result = JobResult(video, "error", str(exc), reason=REASON_ERROR)
+                        results.append(result)
+                        emit(index, "ERROR", video, str(exc))
+                        continue
+                    open_lookup_error = f"OpenSubtitles moviehash lookup failed: {exc}"
+                    pool_reasons.append(open_lookup_error)
+                    emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
 
         if os_tier1 is not None and (not cfg.identity_fallback or identity is None):
             # A strict hash match stands alone when nothing else may be
@@ -5512,12 +5620,14 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                     # The callback fires before an outbound request. This movie
                     # was not fully evaluated, so defer it rather than turning a
                     # temporary provider limit into a manual-review decision.
+                    drain_search(open_search)
                     detail = str(exc)
                     result = JobResult(video, "skip", detail, reason=REASON_QUOTA)
                     results.append(result)
                     emit(index, "SKIP", video, detail)
                     continue
                 except (RuntimeError, ValueError) as exc:
+                    drain_search(open_search)
                     detail = f"SubDL lookup failed: {exc}"
                     set_movie_status(
                         record, "error", detail, moviehash=digest,
@@ -5534,6 +5644,24 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 pool_reasons.append(
                     subdl_unavailable_reason(cfg, ledger, api_tiers_allowed=api_tiers_allowed)
                 )
+
+            if open_search is not None:
+                # Collect the lookup that has been running while SubDL was
+                # asked. The verdict is identical to the serial path's,
+                # including the note the report will carry.
+                try:
+                    os_tier1, os_tier1_reason = judge_moviehash_candidates(
+                        open_search.result(), fetcher_cfg, identity,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    # SubDL was always going to be asked as well, so a failed
+                    # hash lookup is a fallback note here, never the end of
+                    # this movie. (Serially this line is logged before SubDL
+                    # is asked; overlapped it can only be logged after, which
+                    # is the one ordering difference between the two paths.)
+                    open_lookup_error = f"OpenSubtitles moviehash lookup failed: {exc}"
+                    pool_reasons.append(open_lookup_error)
+                    emit(index, "FALLBACK", video, f"{open_lookup_error}; continuing to SubDL")
 
             tier1_entries: list[tuple[Candidate, str, str, str]] = []
             if os_tier1 is not None:
@@ -5827,6 +5955,8 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
         # which would be left claiming the download is still reserved.
         state.setdefault("_dirty_movies", set()).add(key)
         persist_state(state, cfg.log_file)
+
+    tier1_pool.close()
 
     summary = run_summary(
         cfg, ledger, results,

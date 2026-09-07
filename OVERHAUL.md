@@ -456,6 +456,51 @@ really for — is fixed either way.
 > so the saving is minutes of pure handshaking per run, and it compounds with
 > the per-host pacing rather than competing with it.
 
+> **Update — phase 9b: the two tier-1 lookups overlap, and the measurement is
+> less flattering than the idea.** Every movie that reaches the API tier with
+> the title/year fallback on is offered to *both* providers — OpenSubtitles for
+> the moviehash match, SubDL for the scored release match — and their answers
+> are pooled. Both lookups therefore always happen; the second one merely
+> waited for the first. It no longer does: OpenSubtitles' search runs on a
+> single background worker (`SearchPool`) while SubDL's runs on the main
+> thread, and the two are joined before anything is judged.
+>
+> **What did not move is the money.** SubDL's durable search reservation —
+> persisted with `fsync` *before* every outbound attempt — is the reason it is
+> SubDL that stays on the main thread: the tier-1 lookup with nothing to
+> reserve is the one that leaves. The ledger, every download and every state
+> checkpoint stay where they were, in library order, on one thread. The pool is
+> one worker wide (this is about overlapping two waits, not issuing more
+> requests), it is only created when both providers are configured *and* the
+> fallback is on, `--workers 1` disables it with everything else, and a movie
+> abandoned between dispatch and pooling drains its lookup rather than letting
+> it run into the next movie's turn.
+>
+> **The honest number** (`benchmarks/bench_provider_overlap.py`, two loopback
+> servers, the real token buckets, 20 movies at a 0.10 s host gap):
+>
+> | round trip | serial | overlapped | |
+> | ---: | ---: | ---: | :--- |
+> | 0.02 s | 1.94 s | 1.92 s | 1.0× — the courtesy gap dominates |
+> | 0.05 s | 2.02 s | 1.95 s | 1.0× — the courtesy gap dominates |
+> | 0.10 s | 4.02 s | 2.05 s | **2.0×** |
+> | 0.30 s | 12.04 s | 6.13 s | **2.0×** |
+>
+> The crossover is a round trip of about half the gap. Scaled to the shipped
+> 1.1 s per-host gap: a healthy provider answering in 0.25 s makes this change
+> worth **nothing measurable**, and that is the common case. It pays when a
+> provider goes slow — over 0.55 s — because the other provider's lookup no
+> longer queues behind it, and it caps the damage of a provider that is timing
+> out. That is a smaller prize than W4 originally implied, and the prize was
+> already claimed by the per-host buckets (3.2×) and parallel triage (6.3×).
+> It ships because it costs nothing, changes no verdict and no log line, and
+> removes a serialisation that only ever helped on a good day.
+>
+> Verified by running the same library at `--workers 1` and `--workers 8` and
+> diffing every result row, every log line and the whole summary; by a barrier
+> that only opens if the two lookups are genuinely in flight together; and by
+> 16 deliberate mutations, all killed.
+
 **Problem.** Only `bitdepth.py` has `--workers`. The two slowest steps are serial.
 
 | Step | Bound by | Today | Proposed default | Expected wall-clock |
@@ -468,7 +513,8 @@ really for — is fixed either way.
 
 Two details that matter:
 
-- **Rate limits become a shared token bucket, not serialism.** The fetcher's
+- **Rate limits become a shared token bucket, not serialism.** ✅ **Done
+  (phases 4b and 9b).** The fetcher's
   daily-quota accounting is the reason it is serial today. Move quota to the DB
   (W2) and gate requests through one `TokenBucket` per provider; parallelism
   then cannot overspend a quota, because reservation happens before dispatch.
@@ -1614,15 +1660,16 @@ Each phase is independently shippable and leaves the repo green.
 >
 > - ~~**HTTP keep-alive**~~ — **done, phase 9a.** See the W4 update above:
 >   `organizekit/core/nethttp.py`, 45 tests, 100% covered, 28 mutants killed.
+> - ~~**Concurrent provider requests**~~ — **done, phase 9b.** The two tier-1
+>   lookups overlap; spending stays on one thread. Measured neutral against
+>   healthy providers and 2× against slow ones, which is written up honestly in
+>   the W4 update rather than rounded up.
 >
-> The three still open, with the original reasoning:
+> The two still open, with the original reasoning:
 >
 > - **Adopting `LiveConsole`'s renderer in the other four tools** — a
 >   user-visible UI change, not code health. The *capability* half (colour, VT
 >   mode, glyphs, safe writes) is already shared.
-> - **Concurrent provider requests** — deprioritised; the per-host token
->   buckets that would make it safe exist, but a nightly run over a settled
->   library is not request-bound.
 > - **The last ~200 uncovered lines in `subtitle_fetcher.py`** — scattered in
 >   ones and twos across forty functions; there is no block left worth a phase.
 >

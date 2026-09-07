@@ -103,8 +103,19 @@ more than they save (0.06 s → 0.23 s, and it is 0.23 s); with a 5 ms round tri
 per folder — an HDD seek, or a library on SMB/NFS — it is **3.2 s serial →
 0.50 s at 8 workers (6.3×)**.
 
-Everything downstream of triage stays on the single main thread: the quota
-ledger, the provider tiers, every download, every state checkpoint. A worker
+**The two API lookups are one wait, not two.** A movie that reaches the API
+tier with the title/year fallback on is offered to both providers and the
+better answer wins, so both are always asked. OpenSubtitles' search now runs on
+one background worker while SubDL's runs on the main thread — where SubDL's
+durable search reservation stays, along with the ledger, the downloads and
+every checkpoint. Against healthy providers this changes nothing (the 1.1 s
+courtesy gap is the binding constraint, and it is unchanged); when a provider
+goes slow — over about half the gap — the tier costs one round trip instead of
+two (`benchmarks/bench_provider_overlap.py`). `--workers 1` restores the fully
+serial run.
+
+Everything else downstream of triage stays on the single main thread: the quota
+ledger, the scraping tier, every download, every state checkpoint. A worker
 never spends a request, and the pool works at most 32 movies ahead of the loop,
 so a run that stops on an exhausted quota has not read the whole library. The
 verdicts come back in input order, so the console, the log and the report are
