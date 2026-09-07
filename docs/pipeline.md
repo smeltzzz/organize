@@ -113,7 +113,7 @@ organize doctor --json | jq -r '.checks[] | select(.status != "ok") | "\(.status
 {
   "schema": 1,
   "tool": "organize",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "command": "doctor",
   "library": "/srv/media/Movies",
   "source": "/srv/torrents/final",
@@ -210,7 +210,7 @@ jq -s 'map(select(.event == "step_finished")) | sort_by(-.seconds) | .[0]' run.j
 ```
 
 ```json
-{"schema":1,"tool":"organize","version":"3.5.0","command":"run","event":"step_finished","time":"2026-09-06T03:12:44Z","step":"cleaner","status":"ran","exit_code":0,"seconds":812.4,"detail":""}
+{"schema":1,"tool":"organize","version":"3.6.0","command":"run","event":"step_finished","time":"2026-09-06T03:12:44Z","step":"cleaner","status":"ran","exit_code":0,"seconds":812.4,"detail":""}
 ```
 
 Every line carries the same envelope as the other commands, because a reader

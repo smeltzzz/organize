@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.6.0] - 2026-09-07
+
+**MP4 placement, the four deferred items, and a suite that runs on every
+platform its CI claims.** 3.5.0 cut the overhaul at phase 8; this is the rest
+of it.
 
 ### Added
 - **`movie_standardizer.py` places MP4 releases.** An `.mp4` download is now hardlinked into the library under its own extension — `Title (Year)/Title (Year).mp4` — instead of being left in the download folder as "not an MKV". Nothing is transcoded and nothing is renamed to a container it is not; the tool simply accepts a second container it can file honestly.
