@@ -362,6 +362,7 @@ class ChoosingAnOcrBackendTests(unittest.TestCase):
                          str(installed))
         self.assertIsNone(sf._resolve_program("", "SubtitleEdit", str(self.tmp / "absent")))
 
+    @unittest.skipIf(os.name == "nt", "the mono wrapper is the non-Windows branch")
     def test_a_windows_subtitle_edit_is_run_through_mono(self) -> None:
         """A .NET .exe is not directly runnable off Windows.
 
@@ -377,6 +378,7 @@ class ChoosingAnOcrBackendTests(unittest.TestCase):
         self.assertEqual(backend.program, ("/usr/bin/mono", str(exe)))
         self.assertIn("VOBSUB", backend.supports)
 
+    @unittest.skipIf(os.name == "nt", "the mono wrapper is the non-Windows branch")
     def test_subtitle_edit_without_mono_counts_as_not_installed(self) -> None:
         self.nothing_on_path()
         exe = self.program("SubtitleEdit.exe")

@@ -66,11 +66,11 @@ class BuildStepArgs(unittest.TestCase):
 
     def test_each_tool_gets_the_root_flag_it_actually_parses(self) -> None:
         # The cleaner is the odd one out: --dir, not --source.
-        self.assertEqual("/library", self._value(self._args("cleaner"), "--dir"))
+        self.assertEqual(str(self.library), self._value(self._args("cleaner"), "--dir"))
         self.assertNotIn("--source", self._args("cleaner"))
         for key in ("fetcher", "10bit", "sync", "auditor"):
             with self.subTest(step=key):
-                self.assertEqual("/library", self._value(self._args(key), "--source"))
+                self.assertEqual(str(self.library), self._value(self._args(key), "--source"))
 
     def test_every_step_but_the_fetcher_writes_the_shared_run_log(self) -> None:
         for key in ("cleaner", "10bit", "sync", "auditor"):

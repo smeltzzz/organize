@@ -142,7 +142,8 @@ class FindingTheMoviesTests(TempCase):
 
     def found(self, min_mb: float = 300) -> list[str]:
         videos = sf.discover_videos(self.library, int(min_mb * 1024 * 1024))
-        return [str(path.relative_to(self.library)) for path in videos]
+        # as_posix() so the expected strings read the same on every OS.
+        return [path.relative_to(self.library).as_posix() for path in videos]
 
     def test_a_canonical_movie_is_found(self) -> None:
         self.movie()

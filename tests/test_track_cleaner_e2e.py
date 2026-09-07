@@ -20,14 +20,13 @@ import json
 import os
 import signal
 import sqlite3
-import stat
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import fake_mkvmerge as fake
+import fakebin
 
 import mkv_track_cleaner as tc
 
@@ -97,17 +96,7 @@ class CleanerRunFixture(unittest.TestCase):
                 signal.signal(sig, handler)
 
     def _install_fake_mkvmerge(self) -> Path:
-        path = self.tmp / "mkvmerge"
-        path.write_text(
-            f"#!{sys.executable}\n"
-            "import sys\n"
-            f"sys.path.insert(0, {str(Path(fake.__file__).parent)!r})\n"
-            "import fake_mkvmerge\n"
-            "sys.exit(fake_mkvmerge.main())\n",
-            encoding="utf-8",
-        )
-        path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        return path
+        return fakebin.install_python_shim(self.tmp, "mkvmerge", "fake_mkvmerge")
 
     # -- helpers -----------------------------------------------------------
 

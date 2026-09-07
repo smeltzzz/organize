@@ -295,6 +295,11 @@ class CliWiringTests(unittest.TestCase):
             [sys.executable, "-c", "import organize; print(organize.SYM_OK, organize.HRULE)"],
             capture_output=True,
             text=True,
+            # The child prints what its own PYTHONIOENCODING says; decoding it
+            # with the parent's locale (cp1252 on Windows CI) makes a correct
+            # tick look like mojibake.
+            encoding="utf-8",
+            errors="replace",
             cwd=str(REPO_ROOT),
             env=env,
             check=True,

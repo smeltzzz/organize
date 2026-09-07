@@ -25,6 +25,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -305,6 +306,31 @@ class PrerequisiteChecksAgree(unittest.TestCase):
                 )
             finally:
                 mkv_track_cleaner.KNOWN_MKVMERGE_PATHS = original
+
+
+class WhereReportsGoTests(unittest.TestCase):
+    """The default output root has to exist on the machine running the tool."""
+
+    def test_a_posix_run_follows_the_state_convention(self) -> None:
+        with mock.patch.object(os, "name", "posix"), \
+             mock.patch.dict(os.environ, {"XDG_STATE_HOME": "/var/state"}):
+            self.assertEqual(core.default_reports_root(), Path("/var/state/organize"))
+
+    @unittest.skipUnless(os.name == "nt", "the Windows branch, on Windows")
+    def test_the_windows_default_is_a_place_that_exists(self) -> None:
+        """A Windows box with no E: used to get a default nothing could write.
+
+        Every tool then exited 2 while saving its own report - which is how
+        this was found, on CI runners that have no E: drive. The documented
+        tools directory is still preferred whenever that volume is there.
+        """
+        root = core.default_reports_root()
+        self.assertTrue(Path(f"{root.drive}\\").exists(),
+                        f"the default reports root is on a volume that is not there: {root}")
+        if Path("E:\\").exists():
+            self.assertEqual(root, Path(r"E:\torrents\tools\ReportsAndLogs"))
+        else:
+            self.assertEqual(root.name, "organize")
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ express that, and would quietly report a stale verdict as fresh.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 from collections.abc import Iterable, Iterator
@@ -192,13 +193,23 @@ class StateStore:
         self.tool = tool
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(self.path), timeout=5.0, isolation_level=None)
-        self._db.row_factory = sqlite3.Row
-        # WAL lets a reader (organize status) run while a tool is writing, and
-        # NORMAL sync is right for a cache that is rebuildable by definition.
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA synchronous=NORMAL")
-        self._db.executescript(_SCHEMA)
-        self._db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        try:
+            self._db.row_factory = sqlite3.Row
+            # WAL lets a reader (organize status) run while a tool is writing,
+            # and NORMAL sync is right for a cache that is rebuildable by
+            # definition.
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=NORMAL")
+            self._db.executescript(_SCHEMA)
+            self._db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        except BaseException:
+            # Opening a file that is not a database succeeds; reading it does
+            # not. `open_state` turns that into a cache miss, so this
+            # constructor must not leave the handle behind - on Windows an
+            # open handle means nothing can delete or replace the file.
+            with contextlib.suppress(sqlite3.Error, OSError):
+                self._db.close()
+            raise
 
     # -- lifecycle ---------------------------------------------------------
 

@@ -23,14 +23,13 @@ import io
 import json
 import os
 import sqlite3
-import stat
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import fake_ffprobe as fake
+import fakebin
 
 import bitdepth as bd
 from organizekit.core import MediaProbeCache
@@ -62,17 +61,7 @@ class InspectorRunFixture(unittest.TestCase):
         bd.log.file = self._saved_log_file
 
     def _install_fake_ffprobe(self) -> Path:
-        path = self.tmp / "ffprobe"
-        path.write_text(
-            f"#!{sys.executable}\n"
-            "import sys\n"
-            f"sys.path.insert(0, {str(Path(fake.__file__).parent)!r})\n"
-            "import fake_ffprobe\n"
-            "sys.exit(fake_ffprobe.main())\n",
-            encoding="utf-8",
-        )
-        path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        return path
+        return fakebin.install_python_shim(self.tmp, "ffprobe", "fake_ffprobe")
 
     def movie(self, name: str, payload: dict, size: int = 2 * 1024 * 1024) -> Path:
         path = self.library / name / f"{name}.mkv"

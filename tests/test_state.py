@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 from organizekit.core import (
     KIND_BITDEPTH,
@@ -265,6 +266,33 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],
                              state.SCHEMA_VERSION)
             self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
+
+
+class WhenTheFileIsNotADatabaseTests(unittest.TestCase):
+    """Opening garbage is a cache miss - and must not keep the file open."""
+
+    def test_the_connection_is_closed_before_the_error_escapes(self) -> None:
+        """sqlite3.connect() succeeds on any file; reading it is what fails.
+
+        Windows will not let anything delete or replace a file a handle is
+        still open on, so a constructor that raises half-way through has to
+        put its own connection back first.
+        """
+        opened: list[mock.MagicMock] = []
+
+        def connect(*_args: object, **_kwargs: object) -> mock.MagicMock:
+            conn = mock.MagicMock()
+            conn.executescript.side_effect = sqlite3.DatabaseError("file is not a database")
+            opened.append(conn)
+            return conn
+
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(state.sqlite3, "connect", connect):
+            broken = Path(td) / "state.db"
+            broken.write_bytes(b"not a database" * 50)
+            self.assertIsInstance(open_state(broken), NullStateStore)
+        self.assertEqual(len(opened), 1)
+        opened[0].close.assert_called_once()
 
 
 if __name__ == "__main__":

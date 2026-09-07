@@ -557,7 +557,7 @@ class RunSummaryTests(unittest.TestCase):
 
     def test_the_summary_says_which_day_it_belongs_to(self) -> None:
         self.assertEqual(self.summary()["utc_day"], TODAY)
-        self.assertEqual(self.summary()["ledger_log"], "/logs/ledger.json")
+        self.assertEqual(self.summary()["ledger_log"], str(Path("/logs/ledger.json")))
 
 
 if __name__ == "__main__":

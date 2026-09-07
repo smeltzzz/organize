@@ -347,7 +347,7 @@ class DirectoryCheckTests(unittest.TestCase):
     def test_missing_library_warns_and_names_the_env_var_and_flag(self) -> None:
         check = organize.check_library_directory(context(library="/no/such/library"))
         self.assertEqual(check.status, "warn")
-        self.assertIn("/no/such/library", check.message)
+        self.assertIn(str(Path("/no/such/library")), check.message)
         self.assertIn("ORGANIZE_LIBRARY", check.remedy)
         self.assertIn("--target", check.remedy)
 
@@ -566,8 +566,8 @@ class JsonDocumentTests(unittest.TestCase):
 
     def test_the_resolved_roots_are_reported_as_strings(self) -> None:
         document = self.document()
-        self.assertEqual(document["library"], "/lib")
-        self.assertEqual(document["source"], "/src")
+        self.assertEqual(document["library"], str(Path("/lib")))
+        self.assertEqual(document["source"], str(Path("/src")))
 
     def test_summary_counts_match_the_checks(self) -> None:
         self.assertEqual(
@@ -624,7 +624,9 @@ class JsonRenderTests(unittest.TestCase):
         self.assertEqual(code, document["exit_code"])
         self.assertNotIn("ORGANIZE", output)
         self.assertNotIn("Scorecard", output)
-        self.assertNotIn(organize.HRULE, output)
+        # A drawn rule, not the character: on a console without Unicode the
+        # rule is "-", which any JSON document is entitled to contain.
+        self.assertNotIn(organize.HRULE * 10, output)
 
     def test_the_json_run_reports_the_same_verdicts_as_the_human_run(self) -> None:
         """Two renderers, one set of checks - they must never disagree."""

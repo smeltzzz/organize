@@ -1036,9 +1036,13 @@ class ParallelMeasurementTests(unittest.TestCase):
         parallel_text = self.report.read_text(encoding="utf-8")
 
         def comparable(text: str) -> list[str]:
+            # Anything that names the run rather than its findings: the clock,
+            # the worker count and the paths. "Elapsed: 0.3s" is a label with
+            # a colon, so match the bare word - a slower machine (Windows CI)
+            # otherwise reports a difference that is not one.
             skip = ("Generated", "Elapsed", "Report", "Log", "Library", "Workers")
             return [line for line in text.splitlines()
-                    if not any(f"{word} " in line for word in skip)]
+                    if not any(word in line for word in skip)]
 
         self.assertEqual(comparable(serial), comparable(parallel_text))
 

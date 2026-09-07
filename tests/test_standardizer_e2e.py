@@ -114,11 +114,11 @@ class StandardizerRunFixture(unittest.TestCase):
     # -- looking at the result ---------------------------------------------
 
     def library_tree(self) -> list[str]:
-        return sorted(str(p.relative_to(self.library))
+        return sorted(p.relative_to(self.library).as_posix()
                       for p in self.library.rglob("*") if p.is_file())
 
     def source_tree(self) -> list[str]:
-        return sorted(str(p.relative_to(self.source))
+        return sorted(p.relative_to(self.source).as_posix()
                       for p in self.source.rglob("*") if p.is_file())
 
     def report_text(self) -> str:

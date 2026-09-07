@@ -128,7 +128,7 @@ class FetcherRunFixture(unittest.TestCase):
         return days.get(sf.utc_day(), {})
 
     def sidecars(self) -> list[str]:
-        return sorted(str(p.relative_to(self.library))
+        return sorted(p.relative_to(self.library).as_posix()
                       for p in self.library.rglob("*.srt"))
 
 

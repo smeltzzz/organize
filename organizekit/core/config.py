@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -137,7 +138,16 @@ def default_reports_root() -> Path:
     working directory.
     """
     if os.name == "nt":
-        return Path(r"E:\torrents\tools\ReportsAndLogs")
+        documented = Path(r"E:\torrents\tools\ReportsAndLogs")
+        # The documented location, but only if that volume is actually there.
+        # A Windows machine without an E: drive used to get a default nothing
+        # could be written to, and every tool exited 2 on its own report.
+        with contextlib.suppress(OSError):
+            if Path(f"{documented.drive}\\").exists():
+                return documented
+        local = (os.environ.get("LOCALAPPDATA") or "").strip()
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+        return base / "organize"
     state_home = (os.environ.get("XDG_STATE_HOME") or "").strip()
     base = Path(state_home) if state_home else Path.home() / ".local" / "state"
     return base / "organize"

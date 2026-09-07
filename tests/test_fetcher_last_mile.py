@@ -694,8 +694,9 @@ class ReportGroupingTests(unittest.TestCase):
                          "Dune (2021)")
 
     def test_a_path_outside_the_library_keeps_its_full_name(self) -> None:
-        self.assertEqual(sf.relative_text(Path("/elsewhere/Dune (2021).mkv"), Path("/library")),
-                         "/elsewhere/Dune (2021).mkv")
+        outsider = Path("/elsewhere/Dune (2021).mkv")
+        # str(Path(...)), not the literal: the separator is the platform's.
+        self.assertEqual(sf.relative_text(outsider, Path("/library")), str(outsider))
 
     def test_a_reason_nobody_knows_about_still_reaches_the_report(self) -> None:
         """A future status must show up as an error, never be dropped."""
