@@ -131,6 +131,7 @@ from organizekit.core import (
     default_tool_dir,
     describe_workers,
     enable_utf8_stdio,
+    ensure_pooled_opener,
     exact_external_english_srt_path,
     host_key,
     map_ordered,
@@ -352,6 +353,7 @@ class ScrapeTransport:
                  clock: Callable[[], float] | None = None) -> None:
         self.timeout = timeout
         self.gap = gap
+        ensure_pooled_opener()
         # ``sleep``/``clock`` are the test seam: pacing is arithmetic, and a
         # test should be able to prove it without spending the seconds.
         self.buckets = BucketRegistry(gap=gap, sleep=sleep, clock=clock)
@@ -1589,6 +1591,10 @@ class OpenSubtitlesClient:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.token: str | None = None
+        # Reuse the TCP+TLS connection between requests to the same host. This
+        # installs a urllib opener, so it changes nothing about how the calls
+        # below are written or tested (ORGANIZE_NO_KEEPALIVE=1 turns it off).
+        ensure_pooled_opener()
         # One bucket per host: the API and the download host it hands back are
         # different servers with separate limits, and a 429 from one of them
         # says nothing about the other.
@@ -2108,6 +2114,7 @@ class SubdlClient:
         before_search_request: Callable[[], None] | None = None,
     ) -> None:
         self.api_key = api_key.strip()
+        ensure_pooled_opener()
         # Queue mode supplies a durable reservation callback. Keep it optional
         # so this small client remains usable on its own and in focused tests.
         self._before_search_request = before_search_request

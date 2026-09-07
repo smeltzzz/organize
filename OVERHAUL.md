@@ -372,7 +372,7 @@ W2's single scan and shared probe cache, where it pays for itself; on its own it
 is risk without reward. The prerequisite-divergence bug — the thing W3 was
 really for — is fixed either way.
 
-### W4 · Concurrency and connection reuse — **landed for sync, audit, rate limiting and the fetcher's local triage**
+### W4 · Concurrency and connection reuse — **landed for sync, audit, rate limiting, the fetcher's local triage, and connection reuse**
 
 > **W4b update — the pacing half shipped, the threading half did not, and the
 > measurement says that was the right order.** The fetcher's scraping tier put
@@ -391,8 +391,8 @@ really for — is fixed either way.
 > the fetcher's per-movie loop persists a durable ledger after every step, and
 > that ledger — not the pacing — is what has to move into the state store
 > first. HTTP keep-alive (a pooled `http.client.HTTPSConnection` per host,
-> worth 100–300 ms per request) is also still open and is now the cheapest
-> remaining item in this section.
+> worth 100–300 ms per request) was the cheapest remaining item in this
+> section, and phase 9a below shipped it.
 
 > **Update — phase 4c: the fetcher's parallel half, and where it stops.**
 > Reading the code to move the quota ledger into the state store showed the
@@ -428,6 +428,34 @@ really for — is fixed either way.
 > reads as a smaller prize than it did: the per-host token buckets already took
 > the 3.2×, and this took the local sweep.
 
+> **Update — phase 9a: keep-alive shipped, and it is the whole handshake bill.**
+> The pool is `organizekit/core/nethttp.py`: one idle
+> `http.client.HTTPConnection`/`HTTPSConnection` per `(scheme, host)`, plugged
+> in as a pair of `urllib.request` handlers. That shape was chosen over
+> rewriting the five call sites because it changes *nothing* a caller or a test
+> can see — `urlopen` is still `urlopen`, an error is still an `HTTPError` with
+> a readable body, and every test that fakes the transport fakes it in the same
+> place. The three clients (`OpenSubtitlesClient`, `SubdlClient`,
+> `ScrapeTransport`) install it once, idempotently, and
+> `ORGANIZE_NO_KEEPALIVE=1` turns it off.
+>
+> The care is all in when a connection is *not* reused: the body must have been
+> read to the end (the fetcher's bounded reads stop early on an oversized
+> payload, and that socket is spent), the server must not have said
+> `Connection: close`, and an idle connection older than 30 s is dropped
+> unopened rather than gambled on. When a reused connection fails before any
+> response arrives — the race no pool can design away — the request is retried
+> once on a fresh connection; a *first* attempt is never retried, and neither is
+> a timeout. TLS keeps the verifying default context, and a test asserts it.
+>
+> Measured by `benchmarks/bench_keepalive.py`, which counts connections
+> server-side rather than trusting the client: 200 requests to one host go from
+> **200 connections to 1**. On loopback that is 0.10 s → 0.04 s (2.5×); with a
+> 120 ms handshake — one TCP round trip plus two TLS, at a realistic 40 ms RTT —
+> it is 24.3 s → 0.2 s. A 400-movie pass makes roughly 1,200 provider requests,
+> so the saving is minutes of pure handshaking per run, and it compounds with
+> the per-host pacing rather than competing with it.
+
 **Problem.** Only `bitdepth.py` has `--workers`. The two slowest steps are serial.
 
 | Step | Bound by | Today | Proposed default | Expected wall-clock |
@@ -449,10 +477,11 @@ Two details that matter:
   The multiple comes from running the *sources* concurrently at their own
   permitted rates, which is the token-bucket half of this item, not the thread
   half - so this work is now sequenced after W2 rather than before it.
-- **HTTP keep-alive.** Every provider call is a bare `urllib.request.urlopen`,
-  i.e. a fresh TCP + TLS handshake. A pooled `http.client.HTTPSConnection` per
-  host (stdlib) removes 100–300 ms per request. On 400 movies × ~3 requests
-  that alone is minutes.
+- **HTTP keep-alive.** ✅ **Done (phase 9a).** Every provider call was a bare
+  `urllib.request.urlopen`, i.e. a fresh TCP + TLS handshake. A pooled
+  `http.client.HTTPSConnection` per host (stdlib) removes it: 200 requests to
+  one host now open 1 connection instead of 200, which at a 120 ms handshake is
+  24.1 s not spent per 200 requests.
 
 Ordering safety is unaffected: parallelism is **within** a step, never across
 steps. The fetch-before-remux invariant lives at the step boundary.
@@ -1578,10 +1607,15 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**8c**~~ | ~~W7 the rest of the machine-readable output (a JSONL run stream, `run_summary.json`); the PyPI release: distribution `organizekit`, a complete sdist, a tag-triggered Trusted-Publishing workflow~~ **done** (the upload itself needs a maintainer with PyPI access) | +190, +51 tests | Low | ✅ |
 | ~~**8d**~~ | ~~W7 the shared console layer: colour capability, Windows VT mode, glyph support and safe raw writes decided once in `core/console.py` for both the CLI and `LiveConsole`~~ **done** (adopting the *renderer* in the other tools is a UI change, deferred) | −60, +32 tests | Low | ✅ |
 
-> **Where this ends (as of phase 6w).** Every numbered phase in the table
-> above is done except phase 7, which was taken out of scope by decision (code
-> health only, no new product features). What is deliberately *not* being done,
-> and why:
+> **Where this ended, and why it did not stay there (phase 9).** After phase 6w
+> four items were listed here as deliberately not done. The decision was
+> reversed: all four are being completed before the overhaul merges. Their
+> status is tracked below, and each is struck through as it lands.
+>
+> - ~~**HTTP keep-alive**~~ — **done, phase 9a.** See the W4 update above:
+>   `organizekit/core/nethttp.py`, 45 tests, 100% covered, 28 mutants killed.
+>
+> The three still open, with the original reasoning:
 >
 > - **Adopting `LiveConsole`'s renderer in the other four tools** — a
 >   user-visible UI change, not code health. The *capability* half (colour, VT
@@ -1589,9 +1623,6 @@ Each phase is independently shippable and leaves the repo green.
 > - **Concurrent provider requests** — deprioritised; the per-host token
 >   buckets that would make it safe exist, but a nightly run over a settled
 >   library is not request-bound.
-> - **HTTP keep-alive** — worth 100–300 ms per request and the cheapest
->   remaining speed item, but it means holding a connection pool open across a
->   run, which is state where there is currently none.
 > - **The last ~200 uncovered lines in `subtitle_fetcher.py`** — scattered in
 >   ones and twos across forty functions; there is no block left worth a phase.
 >

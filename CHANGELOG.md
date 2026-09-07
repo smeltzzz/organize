@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The fetcher stops re-handshaking with servers it is already talking to.** Every provider call went through `urllib.request.urlopen`, which closes the socket after each response — so asking OpenSubtitles for a hash match, then SubDL for a release match, then a scraped site for a page, paid three TCP handshakes and three TLS handshakes for three hosts it will ask again a second later. The requests, their order and the per-host pacing are unchanged; only the sockets are.
+  - `organizekit/core/nethttp.py` holds one idle connection per `(scheme, host)` and plugs in as a pair of `urllib` handlers, so no call site changed: `urlopen` is still `urlopen` and an HTTP error is still an `HTTPError` with a readable body.
+  - A connection is reused only when it is provably clean — body read to the end, no `Connection: close` from the server, socket still there, idle for under 30 s. A bounded read that stopped early (the fetcher refuses oversized payloads without reading them) closes the connection instead, because the rest of that body is still on the wire.
+  - A reused connection the server had already dropped is retried once on a fresh one. A *first* attempt is never retried, and neither is a timeout: both would report the real failure later and less honestly.
+  - HTTPS keeps the verifying default context — certificates and hostnames checked — and a test asserts it, because a connection pool is exactly where a disabled check would go unnoticed.
+  - Measured server-side by `benchmarks/bench_keepalive.py`: 200 requests to one host open **1 connection instead of 200**; 0.10 s → 0.04 s on loopback, and 24.3 s → 0.2 s once each new connection costs a realistic 120 ms of handshake. `ORGANIZE_NO_KEEPALIVE=1` restores the old behaviour.
+  - 45 tests against a real loopback server (a mock cannot hang up on you), 100% coverage of the new module, 28 deliberate mutations killed.
+
 ## [3.5.0] - 2026-09-06
 
 **The overhaul release.** Six months of prose in one line: the repo went from

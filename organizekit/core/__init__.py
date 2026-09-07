@@ -42,6 +42,13 @@ from .locking import (
     LockUnavailable,
     try_file_lock,
 )
+from .nethttp import (
+    KEEPALIVE_ENV,
+    ConnectionPool,
+    ensure_pooled_opener,
+    keepalive_disabled,
+    shared_pool,
+)
 from .parallel import (
     DEFAULT_WORKER_CAP,
     JobOutcome,
@@ -151,6 +158,11 @@ __all__ = [
     "iter_completed",
     "map_ordered",
     "resolve_workers",
+    "KEEPALIVE_ENV",
+    "ConnectionPool",
+    "ensure_pooled_opener",
+    "keepalive_disabled",
+    "shared_pool",
     "PREREQUISITES",
     "RUN_TOOL_VERB",
     "SCRAPING_DAILY_CAP",

@@ -54,6 +54,15 @@ Fetches one external `.eng.srt` per movie, and the goal is a subtitle beside
    Retry-After`, the whole bucket for that host is held back, because that
    header is about the server, not about the one unlucky request.
 
+   **And the connection is kept, not thrown away.** urllib closes the socket
+   after every response, so each request to a host the tool is about to ask
+   again paid a fresh TCP and TLS handshake. One connection per host is now
+   held open and reused (`organizekit/core/nethttp.py`): 200 requests to a host
+   open 1 connection instead of 200, worth about 120 ms a request on a real
+   network (`benchmarks/bench_keepalive.py`). The requests, their order and the
+   pacing above are identical; set `ORGANIZE_NO_KEEPALIVE=1` to go back to a
+   socket per request.
+
 **Before any of that, it looks inside the movie.** A Jellyfin MKV very often
 already carries the English subtitle as an embedded track, and that track is
 exact for this release: it costs no provider request, it cannot be the wrong
