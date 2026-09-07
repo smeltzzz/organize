@@ -1,16 +1,21 @@
 # Overhaul Plan — `organize`
 
-> **Status: Phases 1–5 are landed (W2 in part), and W4b's rate limiting with them** on `arena/01a07259-organize` — the
-> shared core (`organizekit/`) replaced 4,325 lines of vendored copies, the
-> tools' 2,229 lines of self-test code moved to `tests/selftests/`, and the
-> toolchain is now described exactly once in `organizekit/core/toolchain.py`
-> instead of once per orchestrator. Production Python is down from 26,458 to
-> 20,011 lines (−24%), coverage is up from 58% to 67%, the suite is green at
-> 697 tests, and the two slowest read paths now run in parallel
-> (`sync_subtitles.py` 3.6×, `library_auditor.py` up to 7.7× on network
-> storage). Phases 5–8 below
-> are still open; the numbers in the tables are the pre-work baseline unless
-> marked otherwise.
+> **Status: complete.** Every phase in this plan is landed on
+> `arena/01a07259-organize` (PR #34), including the four items that were once
+> listed as deliberately deferred. The shared core (`organizekit/`) replaced
+> 4,325 lines of vendored copies, the tools' 2,229 lines of self-test code
+> moved to `tests/selftests/`, and the toolchain is described exactly once in
+> `organizekit/core/toolchain.py` instead of once per orchestrator. Production
+> Python is down from 26,458 to 20,086 lines in the tools (plus 4,281 shared),
+> coverage is up from 58% to **91%** with `subtitle_fetcher.py` at **100%**,
+> and the suite is green at **2,123 tests** on Linux, macOS and Windows across
+> Python 3.11, 3.12 and 3.13. Nothing in this document is outstanding; the
+> numbers in the tables below are the pre-work baseline unless marked
+> otherwise.
+>
+> Out of scope by decision, not by fatigue: the W6 product features (phase 7)
+> and the generated standalone single-file build, which `organize.pyz`
+> replaced.
 >
 > **Phase 4 shipped for two of the four steps, and corrected the estimate for a
 > third.** The fetcher cannot be made 5–8× faster by threading it: every
@@ -1621,7 +1626,7 @@ Each phase is independently shippable and leaves the repo green.
 | ~~**2**~~ | ~~self-tests → `tests/`, thin smoke checks remain~~ **done** | −1,842 | Low | ✅ |
 | ~~**3**~~ | ~~W3 one Step registry; one argv builder; `.sh` → one `exec`~~ **done** | +58 (see note) | Med | ✅ |
 | ~~**4a**~~ | ~~W4 shared worker pool; `sync_subtitles` + `library_auditor` parallel~~ **done** | +330 | Med | ✅ |
-| ~~**4b**~~ | ~~W4 per-source token buckets for the fetcher~~ **done** (concurrent fetching and HTTP keep-alive still open) | +230 | Med | ✅ |
+| ~~**4b**~~ | ~~W4 per-source token buckets for the fetcher~~ **done** (concurrent fetching and HTTP keep-alive followed in phases 9a and 9b) | +230 | Med | ✅ |
 | ~~**4c**~~ | ~~W4 the fetcher's local pre-flight parallelised (`triage_movie` + `TriageQueue`, `--workers`)~~ **done**; the quota ledger stays in the log — spending is still serial, by decision | +300, +18 tests | Low | ✅ |
 | ~~**5**~~ | ~~W2 SQLite state cache + write-through + `organize status`~~ **done** (probe caches and the fetcher's quota ledger not yet moved in; `core/scan.py` rejected — see the W2 note) | +841 | Med-High | ✅ |
 | ~~**5b**~~ | ~~W2 the remux step publishes per-movie verdicts; `organize status` stops printing `Remux  not recorded yet`~~ **done** | +120, +26 tests | Low | ✅ |
