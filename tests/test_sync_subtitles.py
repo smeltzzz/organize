@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -1036,13 +1037,18 @@ class ParallelMeasurementTests(unittest.TestCase):
         parallel_text = self.report.read_text(encoding="utf-8")
 
         def comparable(text: str) -> list[str]:
-            # Anything that names the run rather than its findings: the clock,
-            # the worker count and the paths. "Elapsed: 0.3s" is a label with
-            # a colon, so match the bare word - a slower machine (Windows CI)
-            # otherwise reports a difference that is not one.
-            skip = ("Generated", "Elapsed", "Report", "Log", "Library", "Workers")
+            """Everything the report says except how long it took to say it.
+
+            Two runs of the same library differ in exactly three ways: the
+            clock, the worker count and the durations. Naming the labels one
+            by one was not enough - "Elapsed" was scrubbed and "Took" was not,
+            and a CI runner slow enough to spend 0.1s on a movie failed a test
+            about *ordering*. Any duration at all goes.
+            """
+            skip = ("Generated", "Report", "Log", "Library", "Workers")
             return [line for line in text.splitlines()
-                    if not any(word in line for word in skip)]
+                    if not any(word in line for word in skip)
+                    and not re.search(r"\d+\.\d+s", line)]
 
         self.assertEqual(comparable(serial), comparable(parallel_text))
 
