@@ -188,6 +188,28 @@ class HeldBackWorkflowPatchTests(unittest.TestCase):
                 self.assertIn("workflows", head)
                 self.assertIn("git apply", head)
 
+    def test_a_held_patch_names_the_distribution_this_repo_actually_builds(self) -> None:
+        """A patch is not compiled, so a rename cannot break it loudly.
+
+        The packaging job asks `importlib.metadata` for the installed
+        distribution by name. When the project was renamed to `organizekit`
+        the held patch kept asking for `organize`, and nothing said so until
+        the job would have run - after the merge, on someone else's morning.
+        """
+        name = ""
+        for line in (REPO / "pyproject.toml").read_text(encoding="utf-8").splitlines():
+            if line.startswith("name ="):
+                name = line.split("=", 1)[1].strip().strip('"')
+                break
+        self.assertTrue(name, "pyproject declares no distribution name")
+        for patch in self.patches():
+            body = patch.read_text(encoding="utf-8")
+            added = [line for line in body.splitlines()
+                     if line.startswith("+") and "m.version(" in line]
+            for line in added:
+                with self.subTest(patch=patch.name, line=line.strip()):
+                    self.assertIn(f"m.version('{name}')", line)
+
     def test_the_docs_index_lists_them(self) -> None:
         index = (DOCS / "README.md").read_text(encoding="utf-8")
         for patch in self.patches():
