@@ -166,20 +166,33 @@ class HeldBackWorkflowPatchTests(unittest.TestCase):
     `.github/workflows/*` changes live in `docs/*.patch` until someone applies
     them with a token that does. A patch nobody can apply any more is worse
     than no patch: it looks like the work is done.
+
+    There are three states, and all three are fine. A patch that applies
+    cleanly is waiting. A patch already present in the tree is *done* - the
+    maintainer applied it, and the suite must not go red the moment they do.
+    No patches at all means the whole arrangement is over, and this class
+    skips itself out of existence.
     """
 
     def patches(self) -> list[Path]:
         found = sorted(DOCS.glob("*.patch"))
-        self.assertTrue(found, "the held-back patches vanished; so should this test")
+        if not found:
+            self.skipTest("no patches are held any more; nothing to keep honest")
         return found
 
-    def test_every_held_patch_still_applies(self) -> None:
+    def _git_apply(self, patch: Path, *flags: str) -> int:
+        return subprocess.run(["git", "apply", "--check", *flags, str(patch)],
+                              cwd=str(REPO), capture_output=True, encoding="utf-8").returncode
+
+    def test_every_held_patch_either_applies_or_is_already_applied(self) -> None:
         for patch in self.patches():
             with self.subTest(patch=patch.name):
-                proc = subprocess.run(["git", "apply", "--check", str(patch)],
-                                      cwd=str(REPO), capture_output=True, encoding="utf-8")
-                self.assertEqual(proc.returncode, 0,
-                                 f"{patch.name} no longer applies:\n{proc.stderr}")
+                if self._git_apply(patch) == 0:
+                    continue  # still waiting for someone with the permission
+                self.assertEqual(
+                    self._git_apply(patch, "--reverse"), 0,
+                    f"{patch.name} neither applies nor is already applied; it has rotted",
+                )
 
     def test_every_held_patch_says_why_it_is_held(self) -> None:
         for patch in self.patches():
