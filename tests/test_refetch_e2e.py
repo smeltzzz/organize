@@ -414,5 +414,62 @@ class TheSecondProviderTests(RefetchFixture):
         self.assert_original_survived()
 
 
+def candidate_named(file_id: int | str, *, match_score: float | None = None) -> sf.Candidate:
+    """A plausible, fully populated pick with the identifier under test."""
+    return sf.Candidate(
+        file_id=file_id, release=GOOD_RELEASE, language="en", downloads=900,
+        moviehash_match=True, votes=10, rating=8.0, trusted=True,
+        hearing_impaired=False, machine_translated=False, ai_translated=False,
+        foreign_parts_only=False, feature_title="The Dark Knight", feature_year=2008,
+        subdl_match_score=match_score,
+    )
+
+
+class WhenThePlannerHandsBackSomethingImpossibleTests(RefetchFixture):
+    """The download leg re-checks what the planner chose.
+
+    These are the arms that only fire if a provider payload — or a future
+    change to a planner — produces a pick that cannot be downloaded. The rule
+    is the same as every other failure here: say why, and leave the caller's
+    subtitle exactly as it was.
+    """
+
+    def test_a_subdl_pick_with_no_download_reference_is_refused(self) -> None:
+        self.set_keys(subdl="test-subdl-key")
+        self.provider.hash_results = []
+        candidate = candidate_named("subdl:sub123", match_score=0.95)
+        with mock.patch.object(sf.SubdlClient, "search_filename",
+                               return_value=([candidate], {})):
+            ok, file_id, detail = self.refetch(provider=self.both)
+        self.assertFalse(ok)
+        self.assertEqual(file_id, "subdl:sub123")
+        self.assertIn("download reference is missing", detail)
+        self.assert_original_survived()
+
+    def test_an_opensubtitles_pick_with_a_non_numeric_id_is_refused(self) -> None:
+        """OpenSubtitles file ids are integers; anything else is not asked for."""
+        candidate = candidate_named("nine-thousand")
+        with mock.patch.object(sf, "pick_candidate", return_value=candidate):
+            ok, file_id, detail = self.refetch()
+        self.assertFalse(ok)
+        self.assertEqual(file_id, "nine-thousand")
+        self.assertIn("invalid file identifier", detail)
+        self.assert_original_survived()
+
+    def test_a_staging_file_that_cannot_be_cleaned_up_is_not_an_error(self) -> None:
+        """The swap already happened; a failed tidy-up must not undo the news."""
+        real_unlink = Path.unlink
+
+        def refuse_staging(self_path: Path, **kwargs: object) -> None:
+            if self_path.name.endswith(".refetch.tmp"):
+                raise OSError("the filesystem said no")
+            real_unlink(self_path, **kwargs)  # type: ignore[arg-type]
+
+        with mock.patch.object(Path, "unlink", refuse_staging):
+            ok, _file_id, detail = self.refetch()
+        self.assertTrue(ok, detail)
+        self.assertEqual(self.sidecar_text(), fake.SRT_TEXT)
+
+
 if __name__ == "__main__":  # pragma: no cover - convenience
     unittest.main()

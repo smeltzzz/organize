@@ -577,5 +577,40 @@ class TheSharedVerdictTests(unittest.TestCase):
         self.assertIn("no usable Blu-ray English moviehash-matched human SRT", empty[1])
 
 
+class ThePoolItselfTests(unittest.TestCase):
+    """`SearchPool` and `drain_search` on their own, both ways round.
+
+    The serial run is not a different code path — it is the same code path
+    with a pool that starts nothing — and an abandoned lookup's exception is
+    deliberately dropped, because the movie it belonged to is already gone.
+    """
+
+    def test_a_disabled_pool_starts_nothing(self) -> None:
+        pool = sf.SearchPool(enabled=False)
+        self.assertFalse(pool.enabled)
+        self.assertIsNone(pool.start(list))
+        pool.close()
+
+    def test_an_enabled_pool_runs_the_work_and_closes(self) -> None:
+        pool = sf.SearchPool(enabled=True)
+        self.addCleanup(pool.close)
+        future = pool.start(list)
+        self.assertIsNotNone(future)
+        assert future is not None
+        self.assertEqual(future.result(), [])
+
+    def test_draining_nothing_is_allowed(self) -> None:
+        sf.drain_search(None)
+
+    def test_an_abandoned_lookup_that_failed_does_not_reach_the_next_movie(self) -> None:
+        pool = sf.SearchPool(enabled=True)
+        self.addCleanup(pool.close)
+
+        def boom() -> list[Any]:
+            raise RuntimeError("the provider hung up on a movie nobody is waiting for")
+
+        sf.drain_search(pool.start(boom))
+
+
 if __name__ == "__main__":  # pragma: no cover - convenience
     unittest.main()

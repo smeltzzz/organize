@@ -1007,5 +1007,242 @@ class SyncSkipTests(unittest.TestCase):
         self.assertIn("Extracted (not synced)", text)
 
 
+class WhatTheContainerClaimsTests(unittest.TestCase):
+    """mkvmerge's JSON is a report about a file someone else made.
+
+    Matroska flags come in a modern and a legacy spelling, and are sometimes
+    strings rather than booleans; a track id is sometimes not a number at all.
+    None of that may become an exception, and none of it may quietly turn a
+    commentary or signs-only stream into this movie's English sidecar.
+    """
+
+    @staticmethod
+    def track(**props: object) -> dict:
+        base = {"codec_id": "S_TEXT/UTF8", "language": "eng"}
+        base.update(props)
+        return {"id": 2, "type": "subtitles", "properties": base}
+
+    def test_a_flag_written_as_a_word_is_still_a_flag(self) -> None:
+        for spelling in ("1", "true", "TRUE", " yes "):
+            with self.subTest(value=spelling):
+                self.assertTrue(sf.subtitle_track_is_forced(self.track(flag_forced=spelling)))
+
+    def test_a_string_that_is_not_a_flag_is_not_true(self) -> None:
+        self.assertFalse(sf.subtitle_track_is_forced(self.track(flag_forced="no")))
+
+    def test_the_commentary_flag_is_read_as_well_as_the_name(self) -> None:
+        self.assertTrue(sf.subtitle_track_is_commentary(self.track(flag_commentary=True)))
+        self.assertTrue(sf.subtitle_track_is_commentary(
+            self.track(track_name="Director's commentary")))
+        self.assertFalse(sf.subtitle_track_is_commentary(self.track(track_name="English")))
+
+    def test_the_hearing_impaired_flag_is_read_as_well_as_the_name(self) -> None:
+        self.assertTrue(sf.subtitle_track_is_sdh(self.track(flag_hearing_impaired=True)))
+
+    def test_a_track_with_an_unusable_id_is_not_a_candidate(self) -> None:
+        """An id that is not a number cannot be handed to mkvextract."""
+        tracks = [{"id": "two", "type": "subtitles",
+                   "properties": {"codec_id": "S_TEXT/UTF8", "language": "eng"}}]
+        self.assertEqual(sf.classify_embedded_subtitle_tracks(tracks), [])
+
+
+class ProbingTheContainerTests(unittest.TestCase):
+    """Three ways ``mkvmerge -J`` can answer that are not track information."""
+
+    def probe(self, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b"") -> tuple:
+        completed = subprocess.CompletedProcess(["mkvmerge"], returncode, stdout, stderr)
+        with mock.patch.object(subprocess, "run", return_value=completed):
+            return sf.probe_embedded_subtitle_tracks(Path("/library/Fake (2021).mkv"), "mkvmerge")
+
+    def test_a_movie_mkvmerge_cannot_read(self) -> None:
+        tracks, reason = self.probe(returncode=2, stderr=b"Error: no EBML head found")
+        self.assertIsNone(tracks)
+        self.assertIn("could not read the movie (exit 2)", reason)
+        self.assertIn("no EBML head found", reason)
+
+    def test_an_answer_that_is_not_json(self) -> None:
+        tracks, reason = self.probe(stdout=b"mkvmerge v82 ('Ridin')")
+        self.assertIsNone(tracks)
+        self.assertIn("unreadable track information", reason)
+
+    def test_an_answer_with_no_track_list(self) -> None:
+        tracks, reason = self.probe(stdout=b'{"container": {"recognized": true}}')
+        self.assertIsNone(tracks)
+        self.assertIn("no tracks", reason)
+
+    def test_entries_that_are_not_objects_are_dropped(self) -> None:
+        tracks, reason = self.probe(stdout=b'{"tracks": ["surprise", {"id": 1}]}')
+        self.assertEqual(tracks, [{"id": 1}])
+        self.assertEqual(reason, "")
+
+
+class ExtractionQualityGateTests(unittest.TestCase):
+    """The two refusals that only an extracted track can trigger."""
+
+    def test_a_track_bigger_than_the_safety_limit_is_refused(self) -> None:
+        with mock.patch.object(sf, "MAX_SUBTITLE_BYTES", 64):
+            ok, reason = sf.extracted_subtitle_quality(
+                "1\n00:00:01,000 --> 00:00:02,000\n" + "x" * 200 + "\n", min_cues=1)
+        self.assertFalse(ok)
+        self.assertIn("safety limit", reason)
+
+    def test_a_track_that_did_not_convert_is_refused(self) -> None:
+        ok, reason = sf.extracted_subtitle_quality("Dialogue: 0,0:00:01.50,...", min_cues=1)
+        self.assertFalse(ok)
+        self.assertIn("did not convert to valid SRT cues", reason)
+
+    def test_an_outcome_that_names_no_obstacle_was_possible(self) -> None:
+        self.assertTrue(sf.ExtractionOutcome().available)
+        self.assertFalse(sf.ExtractionOutcome(unavailable_reason="no MKVToolNix").available)
+
+
+class WhenExtractionCannotBeAttemptedTests(unittest.TestCase):
+    """Extraction that never starts still has to say why, in one sentence."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="no_extract_")
+        self.tmp = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        movie_dir = self.tmp / "library" / "Fake (2021)"
+        movie_dir.mkdir(parents=True)
+        self.movie = movie_dir / "Fake (2021).mkv"
+        self.movie.write_bytes(b"mkv-bytes")
+        self.dest = self.movie.with_name("Fake (2021).eng.srt")
+
+    def test_extraction_switched_off_is_not_an_error(self) -> None:
+        outcome = sf.extract_embedded_english_srt(
+            self.movie, self.dest, sf.ExtractOptions(enabled=False))
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.unavailable_reason, "embedded extraction is disabled")
+        self.assertFalse(outcome.available)
+
+    def test_a_container_that_cannot_be_probed_is_reported_not_guessed(self) -> None:
+        with mock.patch.object(sf, "find_mkvtoolnix_binary", fake_binaries), \
+             mock.patch.object(sf, "probe_embedded_subtitle_tracks",
+                               return_value=(None, "mkvmerge reported no tracks")):
+            outcome = sf.extract_embedded_english_srt(
+                self.movie, self.dest, sf.ExtractOptions())
+        self.assertFalse(outcome.ok)
+        self.assertIn("could not read the movie's tracks", outcome.unavailable_reason)
+        self.assertIn("mkvmerge reported no tracks", outcome.unavailable_reason)
+        self.assertFalse(self.dest.exists())
+
+    def test_an_image_only_movie_after_the_run_s_ocr_budget_is_spent(self) -> None:
+        """The limit is per run, so the reason names the limit, not the tools."""
+        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)), \
+             mock.patch.object(sf, "find_mkvtoolnix_binary", fake_binaries):
+            outcome = sf.extract_embedded_english_srt(
+                self.movie, self.dest, sf.ExtractOptions(min_cues=2, ocr_allowed=False))
+        self.assertFalse(outcome.ok)
+        self.assertIn("per-run OCR limit was reached",
+                      outcome.unavailable_reason or outcome.detail)
+        self.assertFalse(self.dest.exists())
+
+
+class OneTrackDirectlyTests(unittest.TestCase):
+    """``_extract_one_track`` alone: the arms the caller normally prevents.
+
+    The loop above it checks for a backend before it hands over an image
+    track, and the outer entry point checks for MKVToolNix before it starts.
+    These tests remove those guarantees, because a helper that trusts its
+    caller is a helper that breaks the day the caller changes.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="one_track_direct_")
+        self.tmp = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.movie = self.tmp / "Fake (2021).mkv"
+        self.movie.write_bytes(b"mkv-bytes")
+        self.dest = self.tmp / "Fake (2021).eng.srt"
+
+    def extract(self, track: sf.EmbeddedSubtitleTrack, *, backend: object = None,
+                binary: object = fake_binaries) -> sf.ExtractionOutcome:
+        with mock.patch.object(sf, "find_mkvtoolnix_binary", binary):
+            return sf._extract_one_track(
+                self.movie, self.dest, track, self.tmp,
+                sf.ExtractOptions(min_cues=2), backend=backend)  # type: ignore[arg-type]
+
+    def test_without_mkvextract_nothing_is_attempted(self) -> None:
+        track = sf.EmbeddedSubtitleTrack(2, "S_TEXT/UTF8", "eng", "English", "text", ".srt")
+        outcome = self.extract(track, binary=lambda *_a, **_k: "")
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.detail, "mkvextract is not installed")
+        self.assertFalse(self.dest.exists())
+
+    def test_an_image_track_with_no_backend_is_refused_not_attempted(self) -> None:
+        track = sf.EmbeddedSubtitleTrack(4, "S_HDMV/PGS", "eng", "English", "image", ".sup")
+        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)):
+            outcome = self.extract(track, backend=None)
+        self.assertFalse(outcome.ok)
+        self.assertIn("no OCR backend is available", outcome.detail)
+        self.assertFalse(self.dest.exists())
+
+
+class TheBytesThatCameOutTests(unittest.TestCase):
+    """mkvextract writes a file; what is in it is another question."""
+
+    class BytesRunner:
+        """Like FakeRunner, but the extracted track is raw bytes."""
+
+        def __init__(self, tracks: dict, payload: bytes) -> None:
+            self.tracks = tracks
+            self.payload = payload
+
+        def __call__(self, command, **_kwargs):
+            argv = [str(part) for part in command]
+            if "-J" in argv:
+                return subprocess.CompletedProcess(
+                    argv, 0, json.dumps(self.tracks).encode("utf-8"), b"")
+            if len(argv) > 1 and argv[1] == "tracks":
+                Path(argv[-1].split(":", 1)[1]).write_bytes(self.payload)
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="track_bytes_")
+        self.tmp = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self._saved_ledger = os.environ.get(sf.EXTRACTED_LEDGER_ENV)
+        os.environ[sf.EXTRACTED_LEDGER_ENV] = str(self.tmp / "extracted.json")
+        self.addCleanup(self._restore_ledger_env)
+        movie_dir = self.tmp / "library" / "Fake (2021)"
+        movie_dir.mkdir(parents=True)
+        self.movie = movie_dir / "Fake (2021).mkv"
+        self.movie.write_bytes(b"mkv-bytes")
+        self.dest = self.movie.with_name("Fake (2021).eng.srt")
+
+    def _restore_ledger_env(self) -> None:
+        if self._saved_ledger is None:
+            os.environ.pop(sf.EXTRACTED_LEDGER_ENV, None)
+        else:
+            os.environ[sf.EXTRACTED_LEDGER_ENV] = self._saved_ledger
+
+    def run_with(self, payload: bytes) -> sf.ExtractionOutcome:
+        tracks = {"tracks": [{"id": 3, "type": "subtitles", "properties": {
+            "codec_id": "S_TEXT/UTF8", "language": "eng", "track_name": "English"}}]}
+        with mock.patch.object(subprocess, "run", self.BytesRunner(tracks, payload)), \
+             mock.patch.object(sf, "find_mkvtoolnix_binary", fake_binaries):
+            return sf.extract_embedded_english_srt(
+                self.movie, self.dest, sf.ExtractOptions(min_cues=2))
+
+    def test_a_track_that_is_not_readable_text_is_refused(self) -> None:
+        """A gzip header on a Matroska track is nonsense, and unpacking it
+        fails; that is a refusal with a reason, not a traceback."""
+        outcome = self.run_with(b"\x1f\x8b" + b"\x00" * 64)
+        self.assertFalse(outcome.ok)
+        self.assertIn("not readable text", outcome.detail)
+        self.assertFalse(self.dest.exists())
+
+    def test_a_second_byte_order_mark_is_stripped_too(self) -> None:
+        """utf-8-sig removes one BOM; a doubled one must not reach the file."""
+        srt = ("1\n00:00:01,000 --> 00:00:02,000\nfirst line of speech\n\n"
+               "2\n00:00:03,000 --> 00:00:04,000\nsecond line of speech\n")
+        outcome = self.run_with("\ufeff\ufeff".encode("utf-8") + srt.encode("utf-8"))
+        self.assertTrue(outcome.ok, outcome.detail or outcome.unavailable_reason)
+        written = self.dest.read_text(encoding="utf-8")
+        self.assertFalse(written.startswith("\ufeff"), repr(written[:10]))
+        self.assertTrue(written.startswith("1\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

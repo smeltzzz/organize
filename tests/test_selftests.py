@@ -16,8 +16,12 @@ Two things this buys beyond tidiness:
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
+import sys
 import unittest
+from pathlib import Path
+from types import ModuleType
 
 from tests.selftests import (
     bitdepth_selftests,
@@ -42,6 +46,68 @@ SUITES = (
     ("subtitle_fetcher", subtitle_fetcher_selftests.run_self_tests),
     ("sync_subtitles", sync_subtitles_selftests.run_self_tests),
 )
+
+
+#: The field smoke test each tool still ships, by module name and the label
+#: its own suite prints. Rebinding (above) replaces ``tool.run_self_tests``
+#: with the moved suite for the rest of this process, so these bodies are
+#: reachable only from a clean import — see ShippedFieldSmokeTests.
+SHIPPED_SMOKE_TESTS = (
+    ("bitdepth", "run_self_tests"),
+    ("library_auditor", "run_self_tests"),
+    ("mkv_track_cleaner", "run_self_tests"),
+    ("movie_standardizer", "run_canonical_self_tests"),
+    ("subtitle_fetcher", "run_self_tests"),
+    ("sync_subtitles", "run_self_tests"),
+)
+
+
+def load_pristine(module_name: str) -> ModuleType:
+    """Import a second, unrebound copy of a tool module from its own file.
+
+    ``tests/selftests`` assigns each moved suite over the tool's
+    ``run_self_tests``, which is what makes the moved bodies run under the unit
+    suite — and what hides the shipped ``--self-test`` body from it. Executing
+    the file again under a different module name gives the real thing back;
+    coverage still attributes the lines to the tool, because it is the same
+    file.
+    """
+    path = Path(__file__).resolve().parent.parent / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(f"{module_name}__pristine", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    # ``dataclasses`` resolves string annotations through ``sys.modules``, so
+    # the copy has to be registered while its body runs. It is removed again
+    # immediately: nothing else may import a second copy of a tool by accident.
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return module
+
+
+class ShippedFieldSmokeTests(unittest.TestCase):
+    """``--self-test`` is what an operator runs on the NAS. It has to work.
+
+    It is also the one piece of every tool that the rest of the suite cannot
+    reach: importing ``tests.selftests`` rebinds ``tool.run_self_tests`` to the
+    moved suite, so from then on the shipped body is shadowed. Nothing but
+    ``organize.py test`` — a subprocess, invisible to coverage — ever ran it.
+    A field check nobody executes is a field check nobody can trust.
+    """
+
+    def test_every_tool_ships_a_field_smoke_test_that_passes(self) -> None:
+        for module_name, attribute in SHIPPED_SMOKE_TESTS:
+            with self.subTest(tool=module_name):
+                tool = load_pristine(module_name)
+                captured = io.StringIO()
+                with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+                    code = getattr(tool, attribute)()
+                printed = captured.getvalue()
+                self.assertEqual(0, code, f"{module_name} --self-test failed:\n{printed}")
+                self.assertIn("SELF-TEST PASSED", printed)
+                self.assertIn(f"{module_name}.py", printed)
 
 
 class MovedSelfTestsStillPass(unittest.TestCase):

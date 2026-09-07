@@ -350,6 +350,20 @@ class Addic7edTests(unittest.TestCase):
         found = self.search(ADDIC7ED_SEARCH, addic7ed_movie_page(rows))
         self.assertEqual(len(found), sf.SCRAPE_MAX_CANDIDATES_PER_SOURCE * 2)
 
+    def test_the_download_carries_the_referer_the_search_recorded(self) -> None:
+        """Addic7ed serves an error page to a download with no Referer."""
+        candidate = sf.ScrapeCandidate(provider=sf.PROVIDER_ADDIC7ED, file_id="/original/4321/1",
+                                       extra={"referer": "https://www.addic7ed.com/show/9"})
+        transport = Pages({"/original/4321/1": SRT})
+        self.assertEqual(self.source.fetch(candidate, transport).decode("utf-8"), SRT)
+
+    def test_a_download_that_is_not_a_subtitle_is_refused(self) -> None:
+        candidate = sf.ScrapeCandidate(provider=sf.PROVIDER_ADDIC7ED, file_id="/original/4321/1")
+        transport = Pages({"/original/4321/1": "<html>too many downloads today</html>"})
+        with self.assertRaises(sf.CandidateRejected) as caught:
+            self.source.fetch(candidate, transport)
+        self.assertIn("not a valid SRT", str(caught.exception))
+
 
 def subsource_movie_page(*ids: int) -> str:
     rows = "".join(f'<a href="/subtitle/the-dark-knight/english/{n}">English</a>' for n in ids)
@@ -391,6 +405,43 @@ class SubSourceTests(unittest.TestCase):
         }
         found = self.search(pages)
         self.assertEqual(len(found), 1, "a close-enough title from the search page is used")
+
+    def test_a_movie_page_that_lists_everything_is_cut_off(self) -> None:
+        page = subsource_movie_page(*range(50))
+        found = self.search({"/subtitles/the-dark-knight-2008": page})
+        self.assertEqual(len(found), sf.SCRAPE_MAX_CANDIDATES_PER_SOURCE)
+
+    def flaky_first(self, pages: dict[str, Any]) -> Pages:
+        """A transport whose first request fails — the guessed URL and the
+        search hit are the same page, so this is the only way to reach the
+        search-page branch for a movie SubSource really does have."""
+        class FlakyFirst(Pages):
+            def _open(self, url: str, data: bytes | None, headers: dict[str, str]) -> bytes:
+                if not self.requests:
+                    self.requests.append(url)
+                    raise sf.ScrapeSourceError("HTTP 502 for /subtitles/the-dark-knight-2008")
+                return super()._open(url, data, headers)
+
+        return FlakyFirst(pages)
+
+    def test_a_guess_that_fails_once_is_still_read_from_the_search_page(self) -> None:
+        self.transport = self.flaky_first({
+            "/search?q=": '<a href="/subtitles/the-dark-knight-2008">The Dark Knight</a>',
+            "/subtitles/the-dark-knight-2008": subsource_movie_page(5),
+        })
+        found = self.source.search(IDENTITY, self.transport)
+        self.assertEqual([c.file_id for c in found], ["/subtitle/the-dark-knight/english/5"])
+
+    def test_a_second_movie_page_that_is_down_costs_only_its_own_rows(self) -> None:
+        self.transport = self.flaky_first({
+            "/search?q=": ('<a href="/subtitles/the-dark-knight-2008">one</a>'
+                           '<a href="/subtitles/the-dark-knight-imax-2008">two</a>'),
+            "/subtitles/the-dark-knight-2008": subsource_movie_page(1),
+            # the imax page is a 404 from this transport: one source, one
+            # broken page, and the rows that did load still count.
+        })
+        found = self.source.search(IDENTITY, self.transport)
+        self.assertEqual([c.file_id for c in found], ["/subtitle/the-dark-knight/english/1"])
 
     def test_a_search_hit_for_a_different_film_is_ignored(self) -> None:
         found = self.search({
@@ -456,6 +507,40 @@ def yify_row(language: str = "English", rating: str = "5", href: str = "/subtitl
     )
 
 
+def yify_card(title: str = "The Dark Knight", year: str = "2008",
+              href: str = "/movie-imdb/tt0468569") -> str:
+    return (f'<div class="media-body"><a href="{href}">'
+            f'<h3 itemprop="name">{title}</h3></a>'
+            f'<span class="movinfo-section">{year}</span></div>')
+
+
+class YifySearchTests(unittest.TestCase):
+    """YIFY's search page is a wall of cards; only complete ones count."""
+
+    def setUp(self) -> None:
+        self.source = sf.YifySubtitlesSource()
+
+    def search(self, page: str) -> list[sf.ScrapeCandidate]:
+        return self.source.search(IDENTITY, Pages({"/search?q=": page}))
+
+    def test_a_complete_card_becomes_a_candidate(self) -> None:
+        found = self.search(yify_card())
+        self.assertEqual([c.file_id for c in found], ["/movie-imdb/tt0468569"])
+        self.assertEqual(found[0].feature_year, 2008)
+
+    def test_a_card_with_no_year_on_it_is_skipped(self) -> None:
+        card = ('<div class="media-body"><a href="/movie-imdb/tt1">'
+                '<h3 itemprop="name">The Dark Knight</h3></a></div>')
+        self.assertEqual(self.search(card), [])
+
+    def test_the_same_movie_carded_twice_is_one_candidate(self) -> None:
+        self.assertEqual(len(self.search(yify_card() + yify_card())), 1)
+
+    def test_a_search_page_that_lists_everything_is_cut_off(self) -> None:
+        cards = "".join(yify_card(href=f"/movie-imdb/tt{n}") for n in range(200))
+        self.assertEqual(len(self.search(cards)), sf.SCRAPE_MAX_CANDIDATES_PER_SOURCE * 2)
+
+
 class YifySubtitlesTests(unittest.TestCase):
     """YIFY's movie page ranks its own subtitles; the highest rated English wins."""
 
@@ -504,6 +589,205 @@ class YifySubtitlesTests(unittest.TestCase):
     def test_a_page_with_no_english_rows_is_a_refusal_not_a_crash(self) -> None:
         with self.assertRaises(sf.CandidateRejected):
             self.fetch("<tr><td>nothing here</td></tr>")
+
+
+class Subf2mTests(unittest.TestCase):
+    """Subf2m: a title search, a movie page, a download page, then a zip.
+
+    Four requests deep, and each of the three pages can have moved. What is
+    pinned here is that a layout change is a *refusal*, not a wrong subtitle.
+    """
+
+    def setUp(self) -> None:
+        self.source = sf.Subf2meSource()
+
+    def search(self, page: str) -> list[sf.ScrapeCandidate]:
+        self.transport = Pages({"/subtitles/searchbytitle": page})
+        return self.source.search(IDENTITY, self.transport)
+
+    def test_a_result_for_this_year_becomes_a_candidate(self) -> None:
+        page = ('<div class="search-result"><ul>'
+                '<li><a href="/subtitles/the-dark-knight">The Dark Knight (2008)</a></li>'
+                "</ul></div>")
+        found = self.search(page)
+        self.assertEqual([c.file_id for c in found], ["/subtitles/the-dark-knight"])
+        self.assertEqual(found[0].feature_year, 2008)
+
+    def test_a_page_with_no_result_block_yields_nothing(self) -> None:
+        self.assertEqual(self.search("<html><body>nothing today</body></html>"), [])
+
+    def test_a_result_block_with_no_list_is_still_read(self) -> None:
+        """The site sometimes drops the <ul>; the first 4 kB is scanned instead."""
+        page = ('<div class="search-result">'
+                '<a href="/subtitles/the-dark-knight">The Dark Knight (2008)</a>')
+        self.assertEqual(len(self.search(page)), 1)
+
+    def test_a_result_for_another_year_is_not_a_candidate(self) -> None:
+        page = ('<div class="search-result"><ul>'
+                '<li><a href="/subtitles/batman-begins">Batman Begins (2005)</a></li>'
+                "</ul></div>")
+        self.assertEqual(self.search(page), [])
+
+    def test_a_site_that_lists_everything_is_cut_off(self) -> None:
+        rows = "".join(
+            f'<li><a href="/subtitles/copy-{n}">The Dark Knight (2008)</a></li>'
+            for n in range(200)
+        )
+        found = self.search(f'<div class="search-result"><ul>{rows}</ul></div>')
+        self.assertEqual(len(found), sf.SCRAPE_MAX_CANDIDATES_PER_SOURCE * 2)
+
+    def _fetch(self, pages: dict[str, Any]) -> bytes:
+        self.transport = Pages(pages)
+        candidate = sf.ScrapeCandidate(provider=sf.PROVIDER_SUBF2ME,
+                                       file_id="/subtitles/the-dark-knight")
+        return self.source.fetch(candidate, self.transport)
+
+    def test_the_first_download_row_leads_to_the_zip(self) -> None:
+        raw = self._fetch({
+            "/subtitles/the-dark-knight/en": (
+                '<li class="item"><a class="download icon-download" '
+                'href="/download/1">get</a></li>'),
+            "/download/1": '<div class="download"><a href="/dl/1">download</a></div>',
+            "/dl/1": zipped(),
+        })
+        self.assertEqual(raw.decode("utf-8"), SRT)
+
+    def test_a_movie_page_with_no_download_rows_is_a_source_error(self) -> None:
+        with self.assertRaises(sf.ScrapeSourceError) as caught:
+            self._fetch({"/subtitles/the-dark-knight/en": "<div>no rows</div>"})
+        self.assertIn("no download rows", str(caught.exception))
+
+    def test_a_download_page_with_no_link_is_a_source_error(self) -> None:
+        with self.assertRaises(sf.ScrapeSourceError) as caught:
+            self._fetch({
+                "/subtitles/the-dark-knight/en": (
+                    '<li class="item"><a class="download" href="/subtitles/x/english/1">get</a></li>'),
+                "/subtitles/x/english/1": "<div class=\"download\">gone</div>",
+            })
+        self.assertIn("no download link", str(caught.exception))
+
+
+class SubsunacsTests(unittest.TestCase):
+    """Subsunacs cannot scope a search to English, so the page is re-checked.
+
+    The catalogue is Bulgarian. Every guard here exists to stop a Bulgarian
+    subtitle — or the right title from the wrong year — becoming this movie's
+    English sidecar.
+    """
+
+    def setUp(self) -> None:
+        self.source = sf.SubsunacsSource()
+        self.candidate = sf.ScrapeCandidate(
+            provider=sf.PROVIDER_SUBSUNACS, file_id="/subtitles/dark-knight-1/",
+            release="The Dark Knight", feature_title="The Dark Knight", feature_year=2008)
+
+    def test_a_result_row_becomes_a_candidate(self) -> None:
+        page = ('<a href="/subtitles/dark-knight-1/">The Dark Knight</a> <span>(2008)</span>')
+        found = self.source.search(IDENTITY, Pages({"/search.php": page}))
+        self.assertEqual([c.file_id for c in found], ["/subtitles/dark-knight-1/"])
+
+    def test_the_same_row_twice_is_one_candidate(self) -> None:
+        row = '<a href="/subtitles/dark-knight-1/">The Dark Knight</a> <span>(2008)</span>'
+        found = self.source.search(IDENTITY, Pages({"/search.php": row + row}))
+        self.assertEqual(len(found), 1)
+
+    def test_a_search_that_lists_everything_is_cut_off(self) -> None:
+        rows = "".join(
+            f'<a href="/subtitles/copy-{n}/">The Dark Knight</a> <span>(2008)</span>'
+            for n in range(200))
+        found = self.source.search(IDENTITY, Pages({"/search.php": rows}))
+        self.assertEqual(len(found), sf.SCRAPE_MAX_CANDIDATES_PER_SOURCE * 2)
+
+    def _page(self, *, language: str = "Английски", title: str = "The Dark Knight",
+              year: int = 2008, entry: bool = True) -> str:
+        entry_html = ('<a href="/getentry.php?id=1&amp;ei=0">download</a>' if entry else "")
+        return (f"<h1>{title} ({year})</h1>Език: {language} / 2008{entry_html}")
+
+    def _fetch(self, page: str, payload: Any = None) -> bytes:
+        pages: dict[str, Any] = {"/subtitles/dark-knight-1/": page}
+        pages["/getentry.php"] = SRT.encode("utf-8") if payload is None else payload
+        return self.source.fetch(self.candidate, Pages(pages))
+
+    def test_an_english_page_downloads_the_archive_entry(self) -> None:
+        self.assertEqual(self._fetch(self._page()).decode("utf-8"), SRT)
+
+    def test_a_bulgarian_subtitle_is_refused_by_its_own_page(self) -> None:
+        with self.assertRaises(sf.CandidateRejected) as caught:
+            self._fetch(self._page(language="Български"))
+        self.assertIn("not English", str(caught.exception))
+
+    def test_a_page_for_another_year_is_refused(self) -> None:
+        with self.assertRaises(sf.CandidateRejected) as caught:
+            self._fetch(self._page(year=2005))
+        self.assertIn("year does not match", str(caught.exception))
+
+    def test_a_page_for_another_film_is_refused(self) -> None:
+        with self.assertRaises(sf.CandidateRejected) as caught:
+            self._fetch(self._page(title="The Hangover"))
+        self.assertIn("title does not match", str(caught.exception))
+
+    def test_a_page_with_no_archive_entry_is_a_source_error(self) -> None:
+        with self.assertRaises(sf.ScrapeSourceError) as caught:
+            self._fetch(self._page(entry=False))
+        self.assertIn("no archive entry", str(caught.exception))
+
+    def test_a_payload_that_is_not_an_srt_is_refused(self) -> None:
+        with self.assertRaises(sf.CandidateRejected) as caught:
+            self._fetch(self._page(), payload=b"<html>not a subtitle</html>")
+        self.assertIn("not a valid SRT", str(caught.exception))
+
+
+class SubsSabTests(unittest.TestCase):
+    """Subs.sab.bz publishes no language metadata, so the bytes are judged."""
+
+    def setUp(self) -> None:
+        self.source = sf.SubsSabSource()
+        self.candidate = sf.ScrapeCandidate(provider=sf.PROVIDER_SUBSAB, file_id="42")
+
+    def search(self, page: str) -> list[sf.ScrapeCandidate]:
+        return self.source.search(IDENTITY, Pages({"/index.php": page}))
+
+    def test_an_attachment_row_becomes_a_candidate(self) -> None:
+        page = '<a href="index.php?act=download&attach_id=42">The Dark Knight (2008)</a>'
+        found = self.search(page)
+        self.assertEqual([c.file_id for c in found], ["42"])
+        self.assertEqual(found[0].feature_year, 2008)
+
+    def test_the_same_attachment_twice_is_one_candidate(self) -> None:
+        row = '<a href="index.php?attach_id=42">The Dark Knight (2008)</a>'
+        self.assertEqual(len(self.search(row + row)), 1)
+
+    def test_a_row_with_no_readable_title_falls_back_to_the_movie_asked_for(self) -> None:
+        found = self.search('<a href="index.php?attach_id=7">download</a>')
+        self.assertEqual(found[0].feature_title, IDENTITY.title)
+        self.assertEqual(found[0].feature_year, IDENTITY.year)
+
+    def test_a_page_full_of_attachments_is_cut_off(self) -> None:
+        rows = "".join(f'<a href="index.php?attach_id={n}">x (2008)</a>' for n in range(200))
+        self.assertEqual(len(self.search(rows)), sf.SCRAPE_MAX_CANDIDATES_PER_SOURCE * 2)
+
+    def _fetch(self, payload: bytes) -> bytes:
+        return self.source.fetch(self.candidate, Pages({"attach_id=42": payload}))
+
+    def test_an_english_srt_is_accepted(self) -> None:
+        self.assertEqual(self._fetch(SRT.encode("utf-8")).decode("utf-8"), SRT)
+
+    def test_a_payload_that_is_not_text_is_refused(self) -> None:
+        with self.assertRaises(sf.CandidateRejected) as caught:
+            self._fetch(b"\x00\x81\xfe" * 40)
+        self.assertIn("not text", str(caught.exception))
+
+    def test_a_cyrillic_subtitle_is_refused(self) -> None:
+        cyrillic = SRT.replace("You either die a hero.", "Или умираш като герой") \
+                      .replace("Or you live long enough.", "или живееш достатъчно дълго")
+        with self.assertRaises(sf.CandidateRejected) as caught:
+            self._fetch(cyrillic.encode("utf-8"))
+        self.assertIn("Cyrillic", str(caught.exception))
+
+    def test_a_payload_that_is_not_an_srt_is_refused(self) -> None:
+        with self.assertRaises(sf.CandidateRejected) as caught:
+            self._fetch(b"<html>not a subtitle</html>")
+        self.assertIn("not a valid SRT", str(caught.exception))
 
 
 class TheChainDecidesWhoToTrustTests(unittest.TestCase):
@@ -591,6 +875,39 @@ class TheChainDecidesWhoToTrustTests(unittest.TestCase):
         chain = self.chain()
         with self.assertRaises(ValueError):
             chain.search("a-site-that-does-not-exist", IDENTITY)
+
+    def test_downloading_from_a_source_nobody_configured_is_refused(self) -> None:
+        chain = self.chain()
+        candidate = sf.ScrapeCandidate(provider="a-site-that-does-not-exist", file_id="1")
+        with self.assertRaises(ValueError) as caught:
+            chain.fetch("a-site-that-does-not-exist", candidate)
+        self.assertIn("unknown scraped source", str(caught.exception))
+
+    def test_a_source_switched_off_this_run_is_not_downloaded_from(self) -> None:
+        """The breaker covers the download leg too, not only the search leg."""
+        chain = self.chain()
+        chain.health[sf.PROVIDER_SUBF2ME].disabled_reason = "3 consecutive hard failures"
+        candidate = sf.ScrapeCandidate(provider=sf.PROVIDER_SUBF2ME, file_id="1")
+        with self.assertRaises(sf.SourceUnavailable) as caught:
+            chain.fetch(sf.PROVIDER_SUBF2ME, candidate)
+        self.assertIn("source disabled this run", str(caught.exception))
+        self.assertIn("3 consecutive hard failures", str(caught.exception))
+
+    def test_a_download_leg_that_crashes_the_adapter_is_a_parse_failure(self) -> None:
+        chain = self.chain()
+        candidate = sf.ScrapeCandidate(provider=sf.PROVIDER_SUBF2ME, file_id="1")
+        with (self.source_raising(AttributeError("'NoneType' has no attribute 'group'")),
+              self.assertRaises(sf.SourceUnavailable) as caught):
+            chain.fetch(sf.PROVIDER_SUBF2ME, candidate)
+        self.assertIn("unparseable response", str(caught.exception))
+        health = chain.health[sf.PROVIDER_SUBF2ME]
+        self.assertEqual((health.parse_failures, health.hard_failures), (1, 0))
+
+    def test_a_disabled_source_drops_out_of_the_enabled_list(self) -> None:
+        chain = self.chain()
+        self.assertEqual(chain.enabled_keys(), [sf.PROVIDER_SUBF2ME, sf.PROVIDER_PODNAPISI])
+        chain.health[sf.PROVIDER_SUBF2ME].disabled_reason = "3 consecutive hard failures"
+        self.assertEqual(chain.enabled_keys(), [sf.PROVIDER_PODNAPISI])
 
     def test_the_daily_cap_stops_a_search_before_it_leaves(self) -> None:
         chain = sf.ScrapeChain(keys=(sf.PROVIDER_SUBF2ME,), transport=Pages(),

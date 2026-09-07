@@ -285,6 +285,34 @@ class DownloadSafetyTests(_ClientFixture):
         with self.assertRaisesRegex(RuntimeError, "--auth-mode user"):
             self._download(http_error(403, b"anonymous downloads disabled"))
 
+    def test_user_mode_logs_in_before_the_first_download(self) -> None:
+        """In user mode the download is authenticated, so a missing JWT is
+        fetched first — one login, then the download, then the file."""
+        self.cfg.auth_mode = sf.AUTH_MODE_USER
+        self.cfg.username, self.cfg.password = "user", "pass"
+        self.assertIsNone(self.client.token)
+        self._download(json_response({"token": "fresh"}),
+                       json_response({"link": "https://dl.opensubtitles.com/f/42.srt"}),
+                       Response(SRT.encode("utf-8")))
+        self.assertEqual(self.client.token, "fresh")
+        self.assertEqual(self.dest.read_text(encoding="utf-8"), SRT)
+
+    def test_user_mode_with_a_token_already_in_hand_does_not_log_in_again(self) -> None:
+        self.cfg.auth_mode = sf.AUTH_MODE_USER
+        self.client.token = "still-good"
+        self._download(json_response({"link": "https://dl.opensubtitles.com/f/42.srt"}),
+                       Response(SRT.encode("utf-8")))
+        self.assertEqual(self.dest.read_text(encoding="utf-8"), SRT)
+
+    def test_a_subtitle_that_will_not_decompress_is_not_written(self) -> None:
+        """The provider may gzip the file; a corrupt one is a failed download,
+        not a traceback and not a half-written sidecar."""
+        broken_gzip = b"\x1f\x8b" + b"\x00" * 40
+        with self.assertRaisesRegex(RuntimeError, "could not be decompressed"):
+            self._download(json_response({"link": "https://dl.opensubtitles.com/f/42.srt"}),
+                           Response(broken_gzip))
+        self.assertFalse(self.dest.exists())
+
     def test_an_unsupported_auth_mode_is_refused(self) -> None:
         self.cfg.auth_mode = "telepathy"
         with self.assertRaisesRegex(RuntimeError, "unsupported authentication mode"):

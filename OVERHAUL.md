@@ -1680,10 +1680,22 @@ Each phase is independently shippable and leaves the repo green.
 >   `--json` documents are byte-for-byte what they were. Tests assert that per
 >   tool, not just per class.
 >
-> The one still open:
+> - ~~**The last ~200 uncovered lines in `subtitle_fetcher.py`**~~ — **done,
+>   phase 9d.** They were scattered in ones and twos across forty functions,
+>   which is why no earlier phase claimed them: the refusal arms of pure
+>   helpers, the malformed-document paths in the format converters, the three
+>   scrape adapters that had no suite of their own, the "MKVToolNix answered
+>   something impossible" arms of the extraction path, and the download leg's
+>   last few errors. +194 tests took the file from **94% to 100%**, with seven
+>   provably unreachable defensive lines marked `# pragma: no cover` and a
+>   reason each, rather than left as a number nobody can act on.
 >
-> - **The last ~200 uncovered lines in `subtitle_fetcher.py`** — scattered in
->   ones and twos across forty functions; there is no block left worth a phase.
+>   One systemic gap fell out of it: `tests/selftests` rebinds each tool's
+>   `run_self_tests`, so the `--self-test` body every tool *ships* — the one an
+>   operator runs on the NAS — was executed by nothing the unit suite measured.
+>   All six now run from a clean import in `tests/test_selftests.py`.
+>
+> **All four deferred items are done. Nothing is deliberately left undone.**
 
 **Net: ~26,500 → ~23,000 production lines** (phases 1–3 measured: 26,458 →
 20,011) that do substantially more, run
@@ -1720,8 +1732,8 @@ state in one sentence, it is the wrong change.*
 | :--- | ---: | ---: | ---: |
 | Production lines | 26,458 | 21,462 (20,011 after phase 3; W2/W4b added back) | ~23,000 |
 | Duplicated lines | 4,325 | ~0 | **0** (generated) |
-| Coverage | 58% | **84%** (cleaner 81%, inspector 93%, standardizer 85%, fetcher 82%) | ≥75%, cleaner ≥80% ✅ |
-| Test runtime | 6.7 s | 22.5 s (1,800 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ just over |
+| Coverage | 58% | **91%** (cleaner 82%, inspector 95%, standardizer 86%, fetcher **100%**) | ≥75%, cleaner ≥80% ✅ |
+| Test runtime | 6.7 s | 32 s (2,116 tests, incl. building and running the zipapp) | ≤15 s (with property + fault-injection tests) ⚠ over, by choice: the tests bought are worth the seconds |
 | 500-movie cold pass | hours | not re-measured | **≤ 1/4 of today** |
 | 500-movie no-op pass | full 5-tool sweep | `organize status`, one audit | **< 5 s** (DB query) |
 | Sources of truth for step order | 4 | 1 (`core/toolchain.py`) | 1 |

@@ -747,7 +747,7 @@ class Addic7edSource(BaseSource):
         header_title = re.sub(r"\s+", " ", unescape(strip_tags(header_m.group("title")))).strip() if header_m else ""
         try:
             header_year = int(header_m.group("year")) if header_m else 0
-        except ValueError:
+        except ValueError:  # pragma: no cover - the pattern captures \d{4}
             header_year = 0
         cands: list[ScrapeCandidate] = []
         version_re = re.compile(r"Version\s+([^,<]+),")
@@ -1009,7 +1009,7 @@ class YifySubtitlesSource(BaseSource):
             numbers = re.findall(r"-?\d+(?:\.\d+)?", cell_m.group(1)) if cell_m else []
             try:
                 rating = float(numbers[-1]) if numbers else 0.0
-            except ValueError:
+            except ValueError:  # pragma: no cover - the pattern captures a number
                 rating = 0.0
             if rating < 0:
                 continue
@@ -1671,7 +1671,7 @@ class OpenSubtitlesClient:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 raise last_err from exc
-        else:
+        else:  # pragma: no cover - the last attempt always raises
             raise last_err or RuntimeError(f"request failed {path}")
 
         if not raw.strip():
@@ -2187,7 +2187,7 @@ class SubdlClient:
                     time.sleep(1.5 * (attempt + 1))
                     continue
                 raise last_error from exc
-        else:
+        else:  # pragma: no cover - the last attempt always raises
             raise last_error or RuntimeError("SubDL API request failed")
 
         try:
@@ -5908,7 +5908,7 @@ def queue_run(cfg: QueueConfig) -> tuple[list[JobResult], dict[str, Any]]:
                 # The chain already downloaded and validated these bytes
                 # (valid_srt_bytes); the shared sidecar contract is applied
                 # here exactly as for the API providers.
-                if scrape_download is None:
+                if scrape_download is None:  # pragma: no cover - set with the pick
                     raise RuntimeError("scraping candidate download reference is missing")
                 if len(scrape_download) > MAX_SUBTITLE_BYTES:
                     raise RuntimeError(f"subtitle exceeds {MAX_SUBTITLE_BYTES} byte safety limit")

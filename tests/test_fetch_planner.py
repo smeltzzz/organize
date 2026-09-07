@@ -184,6 +184,10 @@ class HasNewProviderTests(unittest.TestCase):
         self.assertFalse(self.check(record(scrape_checked=True),
                                     providers=(sf.PROVIDER_OPENSUBTITLES,), scrape=()))
 
+    def test_a_legacy_record_that_never_saw_the_scraping_tier_is_revisited(self) -> None:
+        """No providers_checked list at all: the seven sites are new to it."""
+        self.assertTrue(self.check(record(), providers=(sf.PROVIDER_OPENSUBTITLES,)))
+
     def test_an_empty_history_list_makes_every_provider_new(self) -> None:
         self.assertTrue(self.check(record(providers_checked=[]), scrape=()))
 
