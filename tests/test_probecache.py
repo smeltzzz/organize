@@ -23,8 +23,9 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from organizekit.core import MediaProbeCache, open_probe_cache, path_norm, probe_cache_path
+from organizekit.core import MediaProbeCache, open_probe_cache, path_norm, probe_cache_path, probecache
 
 PAYLOAD = {"streams": [{"codec_type": "video", "bits_per_raw_sample": "8"}]}
 
@@ -148,6 +149,29 @@ class WhatItStoresTests(ProbeCacheFixture):
 
 class WhenTheStorageIsBrokenTests(ProbeCacheFixture):
     """Every one of these is a cache miss. None of them is an error."""
+
+
+    def test_a_broken_database_does_not_keep_the_file_open(self) -> None:
+        """The handle must go back before the miss is reported.
+
+        Connecting to a file that is not a database succeeds; the first
+        statement is what raises. Windows will not let anything delete or
+        replace a file while a handle is open on it, so a cache miss that
+        leaks its connection makes the whole temp directory undeletable.
+        """
+        opened: list[mock.MagicMock] = []
+
+        def connect(*_args: object, **_kwargs: object) -> mock.MagicMock:
+            conn = mock.MagicMock()
+            conn.executescript.side_effect = sqlite3.DatabaseError("file is not a database")
+            opened.append(conn)
+            return conn
+
+        self.db.write_bytes(b"not a database" * 50)
+        with mock.patch.object(probecache.sqlite3, "connect", connect):
+            self.assertEqual(len(self.cache()), 0, "a broken cache is an empty one")
+        self.assertEqual(len(opened), 1)
+        opened[0].close.assert_called_once()
 
     def test_a_file_that_is_not_a_database_is_a_miss(self) -> None:
         self.db.write_bytes(b"this is not a database")

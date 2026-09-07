@@ -311,6 +311,7 @@ class PrerequisiteChecksAgree(unittest.TestCase):
 class WhereReportsGoTests(unittest.TestCase):
     """The default output root has to exist on the machine running the tool."""
 
+    @unittest.skipIf(os.name == "nt", "PosixPath cannot be built on Windows")
     def test_a_posix_run_follows_the_state_convention(self) -> None:
         with mock.patch.object(os, "name", "posix"), \
              mock.patch.dict(os.environ, {"XDG_STATE_HOME": "/var/state"}):

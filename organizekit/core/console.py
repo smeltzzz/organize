@@ -152,7 +152,14 @@ def color_enabled(*, use_color: bool | None = None, stream: object | None = None
     if use_color is False:
         return False
     if use_color is True or forced:
-        return enable_windows_vt()
+        if enable_windows_vt():
+            return True
+        # VT was refused, and where that happened decides what it meant. A
+        # real console that will not take escapes would print them as text,
+        # so the refusal stands. A pipe has no console to configure at all -
+        # `GetConsoleMode` simply fails - and a pipe is the case FORCE_COLOR
+        # exists for, so the explicit request wins there.
+        return not is_tty
     if os.environ.get("NO_COLOR") or (os.environ.get("TERM", "") or "").lower() == "dumb":
         return False
     return is_tty and enable_windows_vt()

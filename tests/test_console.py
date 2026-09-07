@@ -279,6 +279,26 @@ class PrintTextTests(unittest.TestCase):
         self.assertNotIn("✔", stream.getvalue(), "the raw write never landed")
 
 
+class ForcedColourTests(unittest.TestCase):
+    """An explicit request beats what the console will admit to."""
+
+    def test_force_color_survives_a_console_that_cannot_take_vt_mode(self) -> None:
+        """On Windows a redirected stdout is not a console at all.
+
+        `GetConsoleMode` fails for a pipe, so asking whether VT mode could be
+        enabled answers "no" - which is precisely the case FORCE_COLOR exists
+        to override, and the CLI used to drop the colour anyway.
+        """
+        with mock.patch.object(console_mod, "enable_windows_vt", return_value=False), \
+             mock.patch.dict(os.environ, {"FORCE_COLOR": "1"}, clear=False):
+            piped, terminal = FakeStream(tty=False), FakeStream(tty=True)
+            self.assertTrue(color_enabled(stream=piped), "FORCE_COLOR into a pipe")
+            self.assertTrue(color_enabled(use_color=True, stream=piped), "--color into a pipe")
+            self.assertFalse(color_enabled(use_color=False, stream=piped), "--no-color wins")
+            self.assertFalse(color_enabled(use_color=True, stream=terminal),
+                             "a real console that refuses VT would show the escapes")
+
+
 class CliWiringTests(unittest.TestCase):
     """The CLI reads these helpers at import time; check what it concluded.
 

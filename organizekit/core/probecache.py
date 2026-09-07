@@ -82,9 +82,18 @@ class _SqliteBackend:
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(str(self.path), timeout=5.0, isolation_level=None)
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA synchronous=NORMAL")
-        db.executescript(PROBE_SCHEMA)
+        try:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=NORMAL")
+            db.executescript(PROBE_SCHEMA)
+        except BaseException:
+            # Connecting to a file that is not a database succeeds; the first
+            # statement is what fails. The callers treat that as a cache miss,
+            # so the handle must not outlive the attempt - on Windows an open
+            # handle stops anything from deleting or replacing the file.
+            with contextlib.suppress(sqlite3.Error, OSError):
+                db.close()
+            raise
         return db
 
     def load(self) -> dict[str, dict[str, Any]]:
