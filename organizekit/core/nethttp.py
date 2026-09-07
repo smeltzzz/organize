@@ -84,6 +84,10 @@ _STALE_ERRORS = (
     http.client.CannotSendRequest,
     ConnectionResetError,
     BrokenPipeError,
+    # Windows reports a dropped keep-alive socket as WinError 10053, "an
+    # established connection was aborted", rather than a reset. Same event,
+    # different name, and still only retried on a connection this run reused.
+    ConnectionAbortedError,
 )
 
 

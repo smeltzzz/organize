@@ -15,6 +15,7 @@ upgrading costs nobody a full re-probe.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -42,7 +43,7 @@ class ProbeCacheFixture(unittest.TestCase):
     def rows(self) -> list[tuple[str, str]]:
         if not self.db.exists():
             return []
-        with sqlite3.connect(self.db) as db:
+        with contextlib.closing(sqlite3.connect(self.db)) as db:
             return [(row[0], row[1]) for row in
                     db.execute("SELECT tool, path_key FROM probe ORDER BY path_key")]
 
@@ -169,8 +170,9 @@ class WhenTheStorageIsBrokenTests(ProbeCacheFixture):
         cache = self.cache()
         cache.put("/m/a.mkv", 10, 1, PAYLOAD)
         cache.save()
-        with sqlite3.connect(self.db) as db:
+        with contextlib.closing(sqlite3.connect(self.db)) as db:
             db.execute("UPDATE probe SET payload='<not json>'")
+            db.commit()
         self.assertIsNone(self.cache().get("/m/a.mkv", 10, 1))
 
     def test_a_directory_where_the_database_should_be_is_a_miss(self) -> None:

@@ -312,7 +312,7 @@ class MetadataCacheInTheStateDbTests(CleanerRunFixture):
     def probe_rows(self) -> list[str]:
         if not self.state_db.exists():
             return []
-        with sqlite3.connect(self.state_db) as db:
+        with contextlib.closing(sqlite3.connect(self.state_db)) as db:
             return [row[0] for row in db.execute("SELECT tool FROM probe")]
 
     def test_the_payload_is_stored_in_the_state_database(self) -> None:

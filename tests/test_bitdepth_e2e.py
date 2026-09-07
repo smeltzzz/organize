@@ -256,7 +256,7 @@ class ProbeCacheInTheStateDbTests(InspectorRunFixture):
     def probe_rows(self) -> list[tuple[str, str]]:
         if not self.state_db.exists():
             return []
-        with sqlite3.connect(self.state_db) as db:
+        with contextlib.closing(sqlite3.connect(self.state_db)) as db:
             return [(row[0], row[1]) for row in
                     db.execute("SELECT tool, path_key FROM probe").fetchall()]
 

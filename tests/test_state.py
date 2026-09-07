@@ -7,6 +7,7 @@ that are no longer on disk.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import tempfile
@@ -260,7 +261,7 @@ class StateStoreTests(unittest.TestCase):
     def test_schema_is_versioned_and_in_wal_mode(self) -> None:
         store = self._store()
         store.record(self.movie, KIND_SYNC, "synced")
-        with sqlite3.connect(self.db) as db:
+        with contextlib.closing(sqlite3.connect(self.db)) as db:
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],
                              state.SCHEMA_VERSION)
             self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")

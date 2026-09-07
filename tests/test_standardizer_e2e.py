@@ -124,6 +124,9 @@ class StandardizerRunFixture(unittest.TestCase):
     def report_text(self) -> str:
         return self.report.read_text(encoding="utf-8") if self.report.exists() else ""
 
+    def log_text(self) -> str:
+        return self.log.read_text(encoding="utf-8") if self.log.exists() else ""
+
     def reasons(self) -> str:
         return " | ".join(event.get("reason", "") for event in ms.RUN_EVENTS)
 
@@ -325,7 +328,11 @@ class DryRunTests(StandardizerRunFixture):
 
     def test_what_would_have_happened_is_still_reported(self) -> None:
         self.assertEqual(self.run_main("--dry-run"), 0)
-        self.assertIn("Heat (1995)", self.report_text())
+        self.assertIn("DRY-RUN", self.report_text())
+        # The ledger's path column elides from the left, and a macOS temp
+        # directory is 50 characters before the library even begins, so the
+        # movie's name is asserted where it is never elided: the log.
+        self.assertIn("Heat (1995)", self.log_text())
         self.assertIn("dry run", self.reasons())
 
 

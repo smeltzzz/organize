@@ -19,6 +19,7 @@ unknown keeps the existing movie.**
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import subprocess
@@ -430,6 +431,12 @@ class ShouldReplaceTests(unittest.TestCase):
         self.addCleanup(self._restore)
 
     def _restore(self) -> None:
+        # Close anything a run installed: Windows will not delete a log file
+        # that still has an open handle on it.
+        for handler in ms.LOG.handlers[:]:
+            ms.LOG.removeHandler(handler)
+            with contextlib.suppress(OSError):
+                handler.close()
         ms.LOG.handlers, ms.LOG.propagate = self._logging
         ms.CFG = self._saved_cfg
         self._td.cleanup()

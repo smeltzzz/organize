@@ -12,6 +12,7 @@ a non-terminal run contains no trace of it.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import tempfile
@@ -29,6 +30,20 @@ from organizekit.core import RunLog
 from organizekit.core.live import LiveLine, ellipsize, format_left, strip_ansi
 
 VALID_SRT = "1\n00:00:00,000 --> 00:00:01,000\nEnglish dialogue\n"
+
+
+def close_standardizer_log() -> None:
+    """Release the log file the standardizer's stdlib logger holds open.
+
+    Windows refuses to delete a file another handle still has open, so a
+    temporary directory that outlived an ``ms.main()`` call cannot be cleaned
+    up until the handler is closed. Everywhere else this is invisible, which
+    is exactly why it has to be done deliberately.
+    """
+    for handler in ms.LOG.handlers[:]:
+        ms.LOG.removeHandler(handler)
+        with contextlib.suppress(OSError):
+            handler.close()
 
 
 class FakeTTY(io.StringIO):
@@ -319,6 +334,7 @@ class NonTerminalRunsAreUnchangedTests(unittest.TestCase):
         self._td = tempfile.TemporaryDirectory(prefix="live_tool_")
         self.root = Path(self._td.name)
         self.addCleanup(self._td.cleanup)
+        self.addCleanup(close_standardizer_log)
         self.library = self.root / "library"
         self.library.mkdir()
         for name in ("Alpha (2001)", "Bravo (2002)", "Charlie (2003)"):
@@ -371,6 +387,7 @@ class TerminalRunsDrawTests(unittest.TestCase):
         self._td = tempfile.TemporaryDirectory(prefix="live_tty_")
         self.root = Path(self._td.name)
         self.addCleanup(self._td.cleanup)
+        self.addCleanup(close_standardizer_log)
         self.library = self.root / "library"
         self.library.mkdir()
         for name in ("Alpha (2001)", "Bravo (2002)"):

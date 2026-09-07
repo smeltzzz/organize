@@ -14,6 +14,7 @@ three maintenance modes (REPORT, QUARANTINE, DELETE).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import tempfile
@@ -67,6 +68,12 @@ class _StandardizerFixture(unittest.TestCase):
         self.addCleanup(self._restore)
 
     def _restore(self) -> None:
+        # Close anything a run installed: Windows will not delete a log file
+        # that still has an open handle on it.
+        for handler in ms.LOG.handlers[:]:
+            ms.LOG.removeHandler(handler)
+            with contextlib.suppress(OSError):
+                handler.close()
         ms.LOG.handlers, ms.LOG.propagate = self._logging
         ms.CFG, ms.RUN_SUMMARY, ms.RUN_EVENTS = self._saved
         self._td.cleanup()

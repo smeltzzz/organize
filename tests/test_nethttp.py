@@ -218,6 +218,37 @@ class WhenAConnectionMustNotBeReusedTests(ServerCase):
             handler.http_open(request)
         self.assertEqual(attempts, ["sent", "sent", "sent"], "one retry, then give up")
 
+    def test_the_windows_name_for_a_dropped_socket_is_also_retried(self) -> None:
+        """WinError 10053 is the same event as a reset, under another name.
+
+        Linux reports a keep-alive socket the peer dropped as a reset or a
+        remote disconnection; Windows raises ConnectionAbortedError instead.
+        A pool that did not know that would turn every Windows race into a
+        failed request.
+        """
+        attempts: list[str] = []
+
+        class Aborted:
+            sock = FakeSocket()
+            timeout = 5
+
+            def request(self, *_args: object, **_kwargs: object) -> None:
+                attempts.append("sent")
+                raise ConnectionAbortedError(
+                    10053, "An established connection was aborted")
+
+            def close(self) -> None:
+                return
+
+        handler = nethttp.PooledHTTPHandler(self.pool)
+        request = urllib.request.Request(self.base + "/ok")
+        request.timeout = 5
+        self.pool.give(("http", request.host), Aborted())
+        with handler.http_open(request) as response:
+            self.assertEqual(response.read(), b"hello", "the retry answered the caller")
+        self.assertEqual(attempts, ["sent"], "the pooled connection was tried once")
+        self.assertEqual(self.server.connections, 1, "then a fresh one carried the request")
+
     def test_a_timeout_on_a_reused_connection_is_not_retried(self) -> None:
         """Retrying a timeout would double the wait and report it later."""
         attempts: list[str] = []
