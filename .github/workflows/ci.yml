@@ -37,12 +37,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Byte-compile every script (syntax gate)
+      - name: Byte-compile the package and every script (syntax gate)
         run: >-
-          python -m compileall -q
+          python -m compileall -q organizekit
           organize.py pipeline.py jellyfin_one_shot.py bitdepth.py
           library_auditor.py mkv_track_cleaner.py movie_standardizer.py
           subtitle_fetcher.py sync_subtitles.py
+
+      - name: A clone must run with no install and no PYTHONPATH
+        run: python -c "import bitdepth, organizekit.core; assert bitdepth.Report is organizekit.core.Report"
 
       - name: Built-in self-tests (one per tool)
         run: python organize.py test
@@ -67,6 +70,12 @@ jobs:
   coverage:
     # A floor, not a target. Raise `--fail-under` whenever the real number
     # comfortably clears it so coverage can only ratchet upwards.
+    # 55 -> 65 when the tools' self-tests moved into tests/selftests/: they had
+    # always been production lines that the unit suite never executed, which
+    # depressed the number by ~9 points while testing nothing extra.
+    # 65 -> 72 with the crash-safety, end-to-end and destructive-path suites.
+    # The suite measures 75% on this runner; the floor keeps a few points of
+    # slack because the end-to-end remux tests are skipped off POSIX.
     name: Coverage gate
     runs-on: ubuntu-latest
     steps:
@@ -80,7 +89,7 @@ jobs:
       - name: Report and enforce the floor
         run: |
           python -m coverage report
-          python -m coverage report --fail-under=55
+          python -m coverage report --fail-under=88
 
   packaging:
     # Regression guard for the broken console entry point: pyproject declared
@@ -111,16 +120,53 @@ jobs:
           organize doctor
           organize audit --help
         shell: bash
-      - name: The wheel's version must match organize.VERSION
+      - name: The shared core must be importable from the wheel
+        working-directory: ${{ runner.temp }}
+        run: python -c "import organizekit.core as c; assert c.Report and c.atomic_write_text"
+        shell: bash
+      - name: The wheel's version must match organizekit.VERSION
         working-directory: ${{ runner.temp }}
         run: |
           python -c "
-          import importlib.metadata as m, organize, sys
-          wheel, src = m.version('organize'), organize.VERSION
+          import importlib.metadata as m, organizekit, sys
+          wheel, src = m.version('organizekit'), organizekit.VERSION
           print(f'wheel={wheel} source={src}')
           sys.exit(0 if wheel == src else 1)
           "
         shell: bash
+
+  single-file:
+    # The other install path: one file copied to a machine with nothing on it
+    # but Python. The archive has no script files in it, so this is also the
+    # regression guard for the launcher - a step that cannot start is the
+    # failure mode, and only a real archive shows it.
+    name: Single-file build (organize.pyz)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build the archive
+        run: python scripts/build_pyz.py
+        shell: bash
+      - name: It must work from OUTSIDE the source tree
+        run: |
+          cp dist/organize.pyz "${{ runner.temp }}/organize.pyz"
+          cd "${{ runner.temp }}"
+          python organize.pyz --version
+          python organize.pyz doctor
+          python organize.pyz test
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: organize-pyz
+          path: dist/organize.pyz
 
   doctor-smoke:
     # Verifies the unified CLI boots and the diagnostic doctor runs green-box
