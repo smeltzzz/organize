@@ -152,7 +152,10 @@ class TriageQueueTests(unittest.TestCase):
             self.assertEqual(len(started), 4, "the rest of the chunk was already in hand")
             queue.at(5)
             self.assertEqual(len(started), 8)
-            self.assertEqual(started, videos[:8])
+            # Four workers start their movies in whatever order the OS
+            # schedules them, so compare the set: what is pinned is *which*
+            # movies were touched - the first two chunks and nothing beyond.
+            self.assertEqual(sorted(started), videos[:8])
 
     def test_a_short_final_chunk_is_handled(self) -> None:
         videos = self.videos(3)

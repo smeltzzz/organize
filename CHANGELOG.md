@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Measured server-side by `benchmarks/bench_keepalive.py`: 200 requests to one host open **1 connection instead of 200**; 0.10 s → 0.04 s on loopback, and 24.3 s → 0.2 s once each new connection costs a realistic 120 ms of handshake. `ORGANIZE_NO_KEEPALIVE=1` restores the old behaviour.
   - 45 tests against a real loopback server (a mock cannot hang up on you), 100% coverage of the new module, 28 deliberate mutations killed.
 
+### Fixed
+- **A test that asserted a thread-scheduling accident.** `test_the_pool_never_works_more_than_one_chunk_ahead` compared the *order* in which four triage workers started their movies. That order is the OS's to choose: the test passed on Linux and failed on macOS, Windows and 3.13. It now compares the set — which is the actual invariant (the first two chunks, and nothing beyond).
+- **The held CI patch checked the wrong distribution name.** `docs/ci-workflow.patch` still read `importlib.metadata.version('organize')` after the distribution was renamed to `organizekit`, so the packaging job would have failed the moment the patch was applied. It also raises the coverage floor from 74% to 88%, comfortably under the measured 91%.
+
 ## [3.5.0] - 2026-09-06
 
 **The overhaul release.** Six months of prose in one line: the repo went from

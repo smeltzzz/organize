@@ -63,7 +63,7 @@ index 5b752f0..a58f773 100644
          run: |
            python -m coverage report
 -          python -m coverage report --fail-under=55
-+          python -m coverage report --fail-under=74
++          python -m coverage report --fail-under=88
  
    packaging:
      # Regression guard for the broken console entry point: pyproject declared
@@ -83,7 +83,7 @@ index 5b752f0..a58f773 100644
 -          import importlib.metadata as m, organize, sys
 -          wheel, src = m.version('organize'), organize.VERSION
 +          import importlib.metadata as m, organizekit, sys
-+          wheel, src = m.version('organize'), organizekit.VERSION
++          wheel, src = m.version('organizekit'), organizekit.VERSION
            print(f'wheel={wheel} source={src}')
            sys.exit(0 if wheel == src else 1)
            "
