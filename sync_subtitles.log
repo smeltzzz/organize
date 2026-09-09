@@ -1,0 +1,1362 @@
+2026-09-07 01:33:15 [INFO] Found 382 movie file(s) and 381 syncable subtitle sidecar(s).
+2026-09-07 01:33:15 [INFO] Measuring 381 sidecar(s) with 4 workers; each one is an independent ffsubsync run.
+2026-09-07 01:33:15 [INFO] [1/381] syncing 10 Cloverfield Lane (2016).eng.srt against 10 Cloverfield Lane (2016).mkv
+2026-09-07 01:33:15 [INFO] [2/381] syncing 10 Things I Hate About You (1999).eng.srt against 10 Things I Hate About You (1999).mkv
+2026-09-07 01:33:15 [INFO] [3/381] syncing 12 Years a Slave (2013).eng.srt against 12 Years a Slave (2013).mkv
+2026-09-07 01:33:15 [INFO] [4/381] syncing 13 Hours - The Secret Soldiers of Benghazi (2016).eng.srt against 13 Hours - The Secret Soldiers of Benghazi (2016).mkv
+2026-09-07 01:45:55 [INFO] ffsubsync measured: offset -0.040s, framerate x1.000, score 316097.0
+2026-09-07 01:45:55 [INFO] [5/381] syncing 1917 (2019).eng.srt against 1917 (2019).mkv
+2026-09-07 01:45:55 [INFO] [1/381] IN_SYNC  10 Cloverfield Lane (2016).eng.srt in 759.3s (already aligned (offset -0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 01:48:49 [INFO] ffsubsync measured: offset -0.040s, framerate x1.000, score 347638.0
+2026-09-07 01:48:49 [INFO] [6/381] syncing 2001 - A Space Odyssey (1968).eng.srt against 2001 - A Space Odyssey (1968).mkv
+2026-09-07 01:48:49 [INFO] [3/381] IN_SYNC  12 Years a Slave (2013).eng.srt in 933.8s (already aligned (offset -0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 01:53:15 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 129554.0
+2026-09-07 01:53:15 [INFO] [7/381] syncing 21 Jump Street (2012).eng.srt against 21 Jump Street (2012).mkv
+2026-09-07 01:53:15 [INFO] [2/381] IN_SYNC  10 Things I Hate About You (1999).eng.srt in 1200.0s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 01:58:50 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 112280.0
+2026-09-07 01:58:50 [INFO] [8/381] syncing 22 Jump Street (2014).eng.srt against 22 Jump Street (2014).mkv
+2026-09-07 01:58:50 [INFO] [4/381] IN_SYNC  13 Hours - The Secret Soldiers of Benghazi (2016).eng.srt in 1535.0s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 02:02:31 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 246485.0
+2026-09-07 02:02:31 [INFO] [9/381] syncing 300 (2006).eng.srt against 300 (2006).mkv
+2026-09-07 02:02:31 [INFO] [5/381] IN_SYNC  1917 (2019).eng.srt in 996.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 02:06:32 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 410909.0
+2026-09-07 02:06:32 [INFO] [10/381] syncing 42 (2013).eng.sdh.srt against 42 (2013).mkv
+2026-09-07 02:06:32 [INFO] [6/381] IN_SYNC  2001 - A Space Odyssey (1968).eng.srt in 1063.1s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 02:06:54 [INFO] ffsubsync measured: offset +0.060s, framerate x1.000, score 43037.0
+2026-09-07 02:06:54 [INFO] [11/381] syncing 50 First Dates (2004).eng.srt against 50 First Dates (2004).mkv
+2026-09-07 02:06:54 [INFO] [7/381] IN_SYNC  21 Jump Street (2012).eng.srt in 818.2s (already aligned (offset +0.060s, below the 0.1s threshold); original untouched)
+2026-09-07 02:13:30 [INFO] ffsubsync measured: offset +0.070s, framerate x1.000, score 20538.0
+2026-09-07 02:13:31 [INFO] [12/381] syncing 500 Days of Summer (2009).eng.srt against 500 Days of Summer (2009).mkv
+2026-09-07 02:13:31 [INFO] [8/381] IN_SYNC  22 Jump Street (2014).eng.srt in 880.1s (already aligned (offset +0.070s, below the 0.1s threshold); original untouched)
+2026-09-07 02:18:50 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 182992.0
+2026-09-07 02:18:50 [INFO] [13/381] syncing 8 Mile (2002).eng.srt against 8 Mile (2002).mkv
+2026-09-07 02:18:50 [INFO] [9/381] IN_SYNC  300 (2006).eng.srt in 978.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 02:21:59 [INFO] ffsubsync measured: offset +0.090s, framerate x1.000, score 162554.0
+2026-09-07 02:21:59 [INFO] [14/381] syncing 9 (2009).eng.srt against 9 (2009).mkv
+2026-09-07 02:21:59 [INFO] [10/381] IN_SYNC  42 (2013).eng.sdh.srt in 927.2s (already aligned (offset +0.090s, below the 0.1s threshold); original untouched)
+2026-09-07 02:23:29 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score 57862.0
+2026-09-07 02:23:29 [INFO] [15/381] syncing A Beautiful Mind (2001).eng.srt against A Beautiful Mind (2001).mkv
+2026-09-07 02:23:29 [INFO] [11/381] IN_SYNC  50 First Dates (2004).eng.srt in 995.5s (already aligned (offset -0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 02:23:47 [INFO] ffsubsync measured: offset -0.070s, framerate x1.000, score 68110.0
+2026-09-07 02:23:47 [INFO] [16/381] syncing A Christmas Story (1983).eng.srt against A Christmas Story (1983).mkv
+2026-09-07 02:23:47 [INFO] [12/381] IN_SYNC  500 Days of Summer (2009).eng.srt in 616.8s (already aligned (offset -0.070s, below the 0.1s threshold); original untouched)
+2026-09-07 02:29:11 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score 169258.0
+2026-09-07 02:29:11 [INFO] [17/381] syncing A I Artificial Intelligence (2001).eng.srt against A I Artificial Intelligence (2001).mkv
+2026-09-07 02:29:11 [INFO] [14/381] IN_SYNC  9 (2009).eng.srt in 431.4s (already aligned (offset -0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 02:33:50 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 92126.0
+2026-09-07 02:33:50 [INFO] [18/381] syncing A Quiet Place (2018).eng.srt against A Quiet Place (2018).mkv
+2026-09-07 02:33:50 [INFO] [13/381] IN_SYNC  8 Mile (2002).eng.srt in 899.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 02:37:23 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 187107.0
+2026-09-07 02:37:23 [INFO] [19/381] syncing A Quiet Place Part II (2021).eng.srt against A Quiet Place Part II (2021).mkv
+2026-09-07 02:37:23 [INFO] [16/381] IN_SYNC  A Christmas Story (1983).eng.srt in 816.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 02:39:22 [INFO] ffsubsync measured: offset +38.920s, framerate x1.043, score 401559.9
+2026-09-07 02:39:25 [INFO] fetched replacement subtitle id=1234705 (A.Quiet.Place.2018.1080p.WEB-DL.DD5.1.H264-FGT); retrying ffsubsync
+2026-09-07 02:39:48 [INFO] ffsubsync measured: offset +57.760s, framerate x1.043, score 404595.0
+2026-09-07 02:39:51 [INFO] fetched replacement subtitle id=4777493 (A.Quiet.Place.2018.1080p.BluRay.x264-.YTS.AM); retrying ffsubsync
+2026-09-07 02:40:14 [INFO] ffsubsync measured: offset +15.100s, framerate x1.043, score 386996.5
+2026-09-07 02:40:14 [INFO] [20/381] syncing About Time (2013).eng.srt against About Time (2013).mkv
+2026-09-07 02:40:14 [INFO] [18/381] SYNCED   A Quiet Place (2018).eng.srt in 384.2s (offset +15.100s, framerate x1.043)
+2026-09-07 02:46:54 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 224329.0
+2026-09-07 02:46:54 [INFO] [21/381] syncing Accepted (2006).eng.srt against Accepted (2006).mkv
+2026-09-07 02:46:54 [INFO] [17/381] IN_SYNC  A I Artificial Intelligence (2001).eng.srt in 1063.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 02:53:30 [INFO] [22/381] syncing Air (2023).eng.sdh.srt against Air (2023).mkv
+2026-09-07 02:53:30 [INFO] [15/381] FAILED   A Beautiful Mind (2001).eng.srt in 1800.1s (ffsubsync timed out after 1800s)
+2026-09-07 02:54:31 [INFO] ffsubsync measured: offset +41.000s, framerate x1.043, score 416131.1
+2026-09-07 02:54:34 [INFO] fetched replacement subtitle id=subdl:url:e7db8ae5ea255b31ebd368fe (A.Quite.Place.Part.II.720p.WEBRip.x264-[YTS.LT]); retrying ffsubsync
+2026-09-07 02:57:37 [INFO] ffsubsync measured: offset -0.040s, framerate x1.000, score 99985.0
+2026-09-07 02:57:38 [INFO] [23/381] syncing Aladdin (1992).eng.srt against Aladdin (1992).mkv
+2026-09-07 02:57:38 [INFO] [20/381] IN_SYNC  About Time (2013).eng.srt in 1043.7s (already aligned (offset -0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 03:09:48 [INFO] ffsubsync measured: offset +26.590s, framerate x1.043, score 393969.9
+2026-09-07 03:09:48 [INFO] [24/381] syncing Alien (1979).eng.sdh.srt against Alien (1979).mkv
+2026-09-07 03:09:48 [INFO] [19/381] SYNCED   A Quiet Place Part II (2021).eng.srt in 1945.0s (offset +26.590s, framerate x1.043)
+2026-09-07 03:11:54 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 40669.0
+2026-09-07 03:11:54 [INFO] [25/381] syncing Aliens (1986).eng.srt against Aliens (1986).mkv
+2026-09-07 03:11:54 [INFO] [22/381] IN_SYNC  Air (2023).eng.sdh.srt in 1104.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 03:12:09 [INFO] ffsubsync measured: offset -0.060s, framerate x1.000, score -20374.0
+2026-09-07 03:12:12 [INFO] fetched replacement subtitle id=5307978 (Accepted.2006.1080p.BluRay.H264.AAC-RARBG.en); retrying ffsubsync
+2026-09-07 03:14:25 [INFO] ffsubsync measured: offset +0.210s, framerate x1.000, score -102263.0
+2026-09-07 03:14:28 [INFO] fetched replacement subtitle id=326032 (Aladdin.1992.1080p.BluRay.X264-AMIABLE); retrying ffsubsync
+2026-09-07 03:29:10 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 258564.0
+2026-09-07 03:29:10 [INFO] [26/381] syncing All Quiet on the Western Front (2022).eng.sdh.srt against All Quiet on the Western Front (2022).mkv
+2026-09-07 03:29:10 [INFO] [24/381] IN_SYNC  Alien (1979).eng.sdh.srt in 1161.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 03:30:46 [INFO] ffsubsync measured: offset +5.150s, framerate x1.000, score -126608.0
+2026-09-07 03:30:49 [INFO] fetched replacement subtitle id=8223655 (Aladdin.1992.REPACK.1080p.BluRay.x264.AAC5.1-[YTS.MX].en); retrying ffsubsync
+2026-09-07 03:38:56 [INFO] ffsubsync measured: offset -0.950s, framerate x1.000, score -1139.0
+2026-09-07 03:38:59 [INFO] fetched replacement subtitle id=8258576 (Accepted.2006.1080p.BluRay.x264.DTS-FGT.eng); retrying ffsubsync
+2026-09-07 03:40:26 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 274538.0
+2026-09-07 03:40:26 [INFO] [27/381] syncing American History X (1998).eng.srt against American History X (1998).mkv
+2026-09-07 03:40:26 [INFO] [25/381] IN_SYNC  Aliens (1986).eng.srt in 1711.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 03:45:19 [INFO] ffsubsync measured: offset +5.130s, framerate x1.000, score -52705.0
+2026-09-07 03:45:22 [INFO] fetched replacement subtitle id=4947207 (Aladdin.1992.1080p.BluRay.H264.AAC-RARBG); retrying ffsubsync
+2026-09-07 03:53:26 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 522705.0
+2026-09-07 03:53:27 [INFO] [28/381] syncing American Pie (1999).eng.srt against American Pie (1999).mkv
+2026-09-07 03:53:27 [INFO] [26/381] IN_SYNC  All Quiet on the Western Front (2022).eng.sdh.srt in 1457.4s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 04:00:05 [INFO] ffsubsync measured: offset +37.710s, framerate x1.043, score 317887.9
+2026-09-07 04:00:08 [INFO] fetched replacement subtitle id=326403 (Aladdin.1992.1080p.BluRay.x264.anoXmous_eng); retrying ffsubsync
+2026-09-07 04:02:16 [INFO] ffsubsync measured: offset -0.040s, framerate x1.000, score -46606.0
+2026-09-07 04:02:19 [INFO] [29/381] syncing American Psycho (2000).eng.srt against American Psycho (2000).mkv
+2026-09-07 04:02:19 [INFO] [21/381] REVIEW   Accepted (2006).eng.srt in 4521.9s (ffsubsync's quality gate rejected the alignment; original kept for review; replacement fetch stopped: no unused qualifying English SRT for a replacement fetch)
+2026-09-07 04:03:55 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 122808.0
+2026-09-07 04:03:56 [INFO] [30/381] syncing American Sniper (2014).eng.srt against American Sniper (2014).mkv
+2026-09-07 04:03:56 [INFO] [27/381] IN_SYNC  American History X (1998).eng.srt in 1409.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 04:07:34 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 27101.0
+2026-09-07 04:07:35 [INFO] [31/381] syncing Annihilation (2018).eng.srt against Annihilation (2018).mkv
+2026-09-07 04:07:35 [INFO] [28/381] IN_SYNC  American Pie (1999).eng.srt in 847.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 04:16:55 [INFO] ffsubsync measured: offset +5.120s, framerate x1.000, score -78348.0
+2026-09-07 04:16:58 [INFO] fetched replacement subtitle id=5076465 (Aladdin.1992.1080p.BluRay.x264.DTS-HD.MA.7.1-SWTYBLZ); retrying ffsubsync
+2026-09-07 04:18:42 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 202395.0
+2026-09-07 04:18:42 [INFO] [32/381] syncing Apollo 13 (1995).eng.sdh.srt against Apollo 13 (1995).mkv
+2026-09-07 04:18:42 [INFO] [30/381] IN_SYNC  American Sniper (2014).eng.srt in 886.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 04:19:26 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 62175.0
+2026-09-07 04:19:26 [INFO] [33/381] syncing Arrival (2016).eng.srt against Arrival (2016).mkv
+2026-09-07 04:19:26 [INFO] [29/381] IN_SYNC  American Psycho (2000).eng.srt in 1027.1s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 04:23:54 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 380682.0
+2026-09-07 04:23:54 [INFO] [34/381] syncing Avatar (2009).eng.srt against Avatar (2009).mkv
+2026-09-07 04:23:54 [INFO] [31/381] IN_SYNC  Annihilation (2018).eng.srt in 979.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 04:31:30 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 171017.0
+2026-09-07 04:31:30 [INFO] [35/381] syncing Avengers Age of Ultron (2015).eng.srt against Avengers Age of Ultron (2015).mkv
+2026-09-07 04:31:30 [INFO] [33/381] IN_SYNC  Arrival (2016).eng.srt in 724.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 04:32:50 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 71649.0
+2026-09-07 04:32:50 [INFO] [36/381] syncing Avengers Endgame (2019).eng.srt against Avengers Endgame (2019).mkv
+2026-09-07 04:32:50 [INFO] [32/381] IN_SYNC  Apollo 13 (1995).eng.sdh.srt in 847.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 04:35:48 [INFO] ffsubsync measured: offset +4.450s, framerate x1.000, score -101908.0
+2026-09-07 04:35:50 [INFO] fetched replacement subtitle id=8322715 (Aladdin (1992) {imdb-tt0103639} [Bluray-1080p][DTS 5.1][x264]-DON.en); retrying ffsubsync
+2026-09-07 04:41:34 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score 351169.0
+2026-09-07 04:41:34 [INFO] [37/381] syncing Avengers Infinity War (2018).eng.srt against Avengers Infinity War (2018).mkv
+2026-09-07 04:41:34 [INFO] [34/381] IN_SYNC  Avatar (2009).eng.srt in 1060.1s (already aligned (offset -0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 04:42:11 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 144100.0
+2026-09-07 04:42:12 [INFO] [38/381] syncing Back to the Future (1985).eng.srt against Back to the Future (1985).mkv
+2026-09-07 04:42:12 [INFO] [35/381] IN_SYNC  Avengers Age of Ultron (2015).eng.srt in 641.1s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 04:44:20 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 336417.0
+2026-09-07 04:44:21 [INFO] [39/381] syncing Back to the Future Part II (1989).eng.srt against Back to the Future Part II (1989).mkv
+2026-09-07 04:44:21 [INFO] [36/381] IN_SYNC  Avengers Endgame (2019).eng.srt in 690.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 04:50:24 [INFO] ffsubsync measured: offset +5.150s, framerate x1.000, score -126608.0
+2026-09-07 04:50:27 [INFO] fetched replacement subtitle id=8119206 (Aladdin.1992.35mm.1080p.Dolby.Stereo.v1.0); retrying ffsubsync
+2026-09-07 04:52:02 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 229622.0
+2026-09-07 04:52:02 [INFO] [40/381] syncing Back to the Future Part III (1990).eng.srt against Back to the Future Part III (1990).mkv
+2026-09-07 04:52:02 [INFO] [37/381] IN_SYNC  Avengers Infinity War (2018).eng.srt in 627.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 05:01:21 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score 129457.0
+2026-09-07 05:01:22 [INFO] [41/381] syncing Backrooms (2026).eng.sdh.srt against Backrooms (2026).mkv
+2026-09-07 05:01:22 [INFO] [39/381] IN_SYNC  Back to the Future Part II (1989).eng.srt in 1021.0s (already aligned (offset -0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 05:02:30 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 131625.0
+2026-09-07 05:02:30 [INFO] [42/381] syncing Barbie (2023).eng.srt against Barbie (2023).mkv
+2026-09-07 05:02:30 [INFO] [38/381] IN_SYNC  Back to the Future (1985).eng.srt in 1218.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 05:05:58 [INFO] ffsubsync measured: offset +22.050s, framerate x1.000, score -128178.0
+2026-09-07 05:06:01 [INFO] fetched replacement subtitle id=11412106 (Aladdin.1992.Bluray.1080p.h264.OCR.Synced.eng.BKG); retrying ffsubsync
+2026-09-07 05:08:52 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 191783.0
+2026-09-07 05:08:52 [INFO] [43/381] syncing Batman Begins (2005).eng.srt against Batman Begins (2005).mkv
+2026-09-07 05:08:52 [INFO] [40/381] IN_SYNC  Back to the Future Part III (1990).eng.srt in 1009.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 05:12:35 [INFO] ffsubsync measured: offset -0.070s, framerate x1.000, score 34255.0
+2026-09-07 05:12:35 [INFO] [44/381] syncing Bee Movie (2007).eng.srt against Bee Movie (2007).mkv
+2026-09-07 05:12:35 [INFO] [42/381] IN_SYNC  Barbie (2023).eng.srt in 604.6s (already aligned (offset -0.070s, below the 0.1s threshold); original untouched)
+2026-09-07 05:21:03 [INFO] ffsubsync measured: offset +0.200s, framerate x1.000, score -96057.0
+2026-09-07 05:21:07 [INFO] fetched replacement subtitle id=323280 (Aladdin.1992.1080p.BluRay.x264-AMIABLE.English); retrying ffsubsync
+2026-09-07 05:21:32 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 315917.0
+2026-09-07 05:21:33 [INFO] [45/381] syncing Black Hawk Down (2001).eng.srt against Black Hawk Down (2001).mkv
+2026-09-07 05:21:33 [INFO] [41/381] IN_SYNC  Backrooms (2026).eng.sdh.srt in 1211.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 05:22:00 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 88392.0
+2026-09-07 05:22:00 [INFO] [46/381] syncing Black Panther (2018).eng.srt against Black Panther (2018).mkv
+2026-09-07 05:22:00 [INFO] [44/381] IN_SYNC  Bee Movie (2007).eng.srt in 565.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 05:29:35 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 131885.0
+2026-09-07 05:29:35 [INFO] [47/381] syncing Blade Runner (1982).eng.srt against Blade Runner (1982).mkv
+2026-09-07 05:29:35 [INFO] [43/381] IN_SYNC  Batman Begins (2005).eng.srt in 1243.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 05:37:24 [INFO] ffsubsync measured: offset +5.120s, framerate x1.000, score -78348.0
+2026-09-07 05:37:27 [INFO] fetched replacement subtitle id=325991 (Aladdin.1992.1080p.BluRay.X264-AMIABLE-HI); retrying ffsubsync
+2026-09-07 05:37:50 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 338272.0
+2026-09-07 05:37:50 [INFO] [48/381] syncing Blade Runner 2049 (2017).eng.srt against Blade Runner 2049 (2017).mkv
+2026-09-07 05:37:50 [INFO] [46/381] IN_SYNC  Black Panther (2018).eng.srt in 950.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 05:45:47 [INFO] ffsubsync measured: offset -0.090s, framerate x1.000, score 355916.0
+2026-09-07 05:45:47 [INFO] [49/381] syncing Blended (2014).eng.srt against Blended (2014).mkv
+2026-09-07 05:45:47 [INFO] [47/381] IN_SYNC  Blade Runner (1982).eng.srt in 971.3s (already aligned (offset -0.090s, below the 0.1s threshold); original untouched)
+2026-09-07 05:45:53 [INFO] ffsubsync measured: offset -0.040s, framerate x1.000, score 203139.0
+2026-09-07 05:45:53 [INFO] [50/381] syncing Bohemian Rhapsody (2018).eng.srt against Bohemian Rhapsody (2018).mkv
+2026-09-07 05:45:53 [INFO] [45/381] IN_SYNC  Black Hawk Down (2001).eng.srt in 1460.2s (already aligned (offset -0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 05:54:35 [INFO] ffsubsync measured: offset +5.150s, framerate x1.000, score -130704.0
+2026-09-07 05:54:35 [INFO] [51/381] syncing Borat (2006).eng.srt against Borat (2006).mkv
+2026-09-07 05:54:35 [INFO] [23/381] REVIEW   Aladdin (1992).eng.srt in 10617.1s (ffsubsync's quality gate rejected the alignment; original kept for review)
+2026-09-07 05:56:29 [INFO] ffsubsync measured: offset +0.070s, framerate x1.000, score 23543.0
+2026-09-07 05:56:29 [INFO] [52/381] syncing Boyhood (2014).eng.srt against Boyhood (2014).mkv
+2026-09-07 05:56:29 [INFO] [49/381] IN_SYNC  Blended (2014).eng.srt in 642.1s (already aligned (offset +0.070s, below the 0.1s threshold); original untouched)
+2026-09-07 06:03:10 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 492110.0
+2026-09-07 06:03:10 [INFO] [53/381] syncing Boyz N the Hood (1991).eng.srt against Boyz N the Hood (1991).mkv
+2026-09-07 06:03:10 [INFO] [48/381] IN_SYNC  Blade Runner 2049 (2017).eng.srt in 1520.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 06:06:51 [INFO] ffsubsync measured: offset -0.030s, framerate x1.000, score 51263.0
+2026-09-07 06:06:51 [INFO] [54/381] syncing Braveheart (1995).eng.srt against Braveheart (1995).mkv
+2026-09-07 06:06:51 [INFO] [51/381] IN_SYNC  Borat (2006).eng.srt in 736.0s (already aligned (offset -0.030s, below the 0.1s threshold); original untouched)
+2026-09-07 06:07:56 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 176443.0
+2026-09-07 06:07:56 [INFO] [55/381] syncing Bugonia (2025).eng.srt against Bugonia (2025).mkv
+2026-09-07 06:07:56 [INFO] [50/381] IN_SYNC  Bohemian Rhapsody (2018).eng.srt in 1323.4s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 06:19:40 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 44646.0
+2026-09-07 06:19:40 [INFO] [56/381] syncing Captain America Civil War (2016).eng.srt against Captain America Civil War (2016).mkv
+2026-09-07 06:19:40 [INFO] [52/381] IN_SYNC  Boyhood (2014).eng.srt in 1391.2s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 06:21:53 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 131585.0
+2026-09-07 06:21:53 [INFO] [57/381] syncing Captain America The First Avenger (2011).eng.srt against Captain America The First Avenger (2011).mkv
+2026-09-07 06:21:53 [INFO] [53/381] IN_SYNC  Boyz N the Hood (1991).eng.srt in 1122.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 06:25:28 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 108335.0
+2026-09-07 06:25:28 [INFO] [58/381] syncing Captain America The Winter Soldier (2014).eng.srt against Captain America The Winter Soldier (2014).mkv
+2026-09-07 06:25:28 [INFO] [55/381] IN_SYNC  Bugonia (2025).eng.srt in 1051.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 06:28:19 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 282277.0
+2026-09-07 06:28:19 [INFO] [59/381] syncing Cars (2006).eng.srt against Cars (2006).mkv
+2026-09-07 06:28:19 [INFO] [57/381] IN_SYNC  Captain America The First Avenger (2011).eng.srt in 386.5s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 06:29:14 [INFO] ffsubsync measured: offset +0.070s, framerate x1.000, score 239435.0
+2026-09-07 06:29:14 [INFO] [60/381] syncing Casino Royale (2006).eng.srt against Casino Royale (2006).mkv
+2026-09-07 06:29:14 [INFO] [56/381] IN_SYNC  Captain America Civil War (2016).eng.srt in 573.7s (already aligned (offset +0.070s, below the 0.1s threshold); original untouched)
+2026-09-07 06:31:46 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score 257398.0
+2026-09-07 06:31:46 [INFO] [61/381] syncing Cast Away (2000).eng.srt against Cast Away (2000).mkv
+2026-09-07 06:31:46 [INFO] [58/381] IN_SYNC  Captain America The Winter Soldier (2014).eng.srt in 377.5s (already aligned (offset -0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 06:32:48 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 535189.0
+2026-09-07 06:32:48 [INFO] [62/381] syncing Catch Me If You Can (2002).eng.srt against Catch Me If You Can (2002).mkv
+2026-09-07 06:32:48 [INFO] [54/381] IN_SYNC  Braveheart (1995).eng.srt in 1557.3s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 06:39:45 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 64428.0
+2026-09-07 06:39:45 [INFO] [63/381] syncing Charlie and the Chocolate Factory (2005).eng.srt against Charlie and the Chocolate Factory (2005).mkv
+2026-09-07 06:39:45 [INFO] [59/381] IN_SYNC  Cars (2006).eng.srt in 685.8s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 06:51:27 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 377800.0
+2026-09-07 06:51:27 [INFO] [64/381] syncing Chicken Little (2005).eng.srt against Chicken Little (2005).mkv
+2026-09-07 06:51:27 [INFO] [60/381] IN_SYNC  Casino Royale (2006).eng.srt in 1333.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 06:51:47 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 143148.0
+2026-09-07 06:51:47 [INFO] [65/381] syncing Children of Men (2006).eng.srt against Children of Men (2006).mkv
+2026-09-07 06:51:47 [INFO] [62/381] IN_SYNC  Catch Me If You Can (2002).eng.srt in 1138.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 06:55:40 [INFO] ffsubsync measured: offset -0.020s, framerate x1.000, score 136973.0
+2026-09-07 06:55:40 [INFO] [66/381] syncing Chronicle (2012).eng.srt against Chronicle (2012).mkv
+2026-09-07 06:55:40 [INFO] [63/381] IN_SYNC  Charlie and the Chocolate Factory (2005).eng.srt in 954.9s (already aligned (offset -0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 06:56:18 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score 410854.0
+2026-09-07 06:56:18 [INFO] [67/381] syncing Civil War (2024).eng.srt against Civil War (2024).mkv
+2026-09-07 06:56:18 [INFO] [61/381] IN_SYNC  Cast Away (2000).eng.srt in 1472.5s (already aligned (offset -0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 06:59:29 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 129220.0
+2026-09-07 06:59:29 [INFO] [68/381] syncing Cloudy with a Chance of Meatballs (2009).eng.srt against Cloudy with a Chance of Meatballs (2009).mkv
+2026-09-07 06:59:29 [INFO] [64/381] IN_SYNC  Chicken Little (2005).eng.srt in 481.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:05:59 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 33508.0
+2026-09-07 07:05:59 [INFO] [69/381] syncing Cloverfield (2008).eng.srt against Cloverfield (2008).mkv
+2026-09-07 07:05:59 [INFO] [66/381] IN_SYNC  Chronicle (2012).eng.srt in 618.8s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 07:06:54 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 125005.0
+2026-09-07 07:06:54 [INFO] [70/381] syncing Coach Carter (2005).eng.srt against Coach Carter (2005).mkv
+2026-09-07 07:06:54 [INFO] [65/381] IN_SYNC  Children of Men (2006).eng.srt in 907.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:10:22 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 40888.0
+2026-09-07 07:10:22 [INFO] [71/381] syncing Coco (2017).eng.srt against Coco (2017).mkv
+2026-09-07 07:10:22 [INFO] [68/381] IN_SYNC  Cloudy with a Chance of Meatballs (2009).eng.srt in 653.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:13:21 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 306906.0
+2026-09-07 07:13:21 [INFO] [72/381] syncing Contact (1997).eng.srt against Contact (1997).mkv
+2026-09-07 07:13:21 [INFO] [67/381] IN_SYNC  Civil War (2024).eng.srt in 1022.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:19:04 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 37794.0
+2026-09-07 07:19:04 [INFO] [73/381] syncing Contagion (2011).eng.srt against Contagion (2011).mkv
+2026-09-07 07:19:04 [INFO] [69/381] IN_SYNC  Cloverfield (2008).eng.srt in 785.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:22:41 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 58311.0
+2026-09-07 07:22:41 [INFO] [74/381] syncing Coraline (2009).eng.srt against Coraline (2009).mkv
+2026-09-07 07:22:41 [INFO] [71/381] IN_SYNC  Coco (2017).eng.srt in 738.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:22:49 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 62844.0
+2026-09-07 07:22:49 [INFO] [75/381] syncing Crazy Rich Asians (2018).eng.srt against Crazy Rich Asians (2018).mkv
+2026-09-07 07:22:49 [INFO] [70/381] IN_SYNC  Coach Carter (2005).eng.srt in 954.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:30:55 [INFO] ffsubsync measured: offset -0.030s, framerate x1.000, score 123718.0
+2026-09-07 07:30:55 [INFO] [76/381] syncing Creed (2015).eng.srt against Creed (2015).mkv
+2026-09-07 07:30:55 [INFO] [73/381] IN_SYNC  Contagion (2011).eng.srt in 710.5s (already aligned (offset -0.030s, below the 0.1s threshold); original untouched)
+2026-09-07 07:30:55 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 225292.0
+2026-09-07 07:30:55 [INFO] [77/381] syncing Dawn of the Planet of the Apes (2014).eng.srt against Dawn of the Planet of the Apes (2014).mkv
+2026-09-07 07:30:55 [INFO] [72/381] IN_SYNC  Contact (1997).eng.srt in 1054.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:35:31 [INFO] ffsubsync measured: offset +0.060s, framerate x1.000, score 227750.0
+2026-09-07 07:35:31 [INFO] [78/381] syncing Dead Poets Society (1989).eng.srt against Dead Poets Society (1989).mkv
+2026-09-07 07:35:31 [INFO] [74/381] IN_SYNC  Coraline (2009).eng.srt in 769.9s (already aligned (offset +0.060s, below the 0.1s threshold); original untouched)
+2026-09-07 07:36:19 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 21958.0
+2026-09-07 07:36:19 [INFO] [79/381] syncing Deadpool (2016).eng.srt against Deadpool (2016).mkv
+2026-09-07 07:36:19 [INFO] [75/381] IN_SYNC  Crazy Rich Asians (2018).eng.srt in 810.2s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 07:45:23 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 362680.0
+2026-09-07 07:45:23 [INFO] [80/381] syncing Deadpool 2 (2018).eng.srt against Deadpool 2 (2018).mkv
+2026-09-07 07:45:23 [INFO] [77/381] IN_SYNC  Dawn of the Planet of the Apes (2014).eng.srt in 867.2s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 07:46:15 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 159806.0
+2026-09-07 07:46:15 [INFO] [81/381] syncing Despicable Me (2010).eng.srt against Despicable Me (2010).mkv
+2026-09-07 07:46:15 [INFO] [76/381] IN_SYNC  Creed (2015).eng.srt in 920.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:47:10 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score 116076.0
+2026-09-07 07:47:10 [INFO] [82/381] syncing Die Hard (1988).eng.srt against Die Hard (1988).mkv
+2026-09-07 07:47:10 [INFO] [79/381] IN_SYNC  Deadpool (2016).eng.srt in 650.8s (already aligned (offset -0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 07:47:21 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 86503.0
+2026-09-07 07:47:21 [INFO] [83/381] syncing District 9 (2009).eng.srt against District 9 (2009).mkv
+2026-09-07 07:47:21 [INFO] [78/381] IN_SYNC  Dead Poets Society (1989).eng.srt in 709.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 07:57:10 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 171451.0
+2026-09-07 07:57:10 [INFO] [84/381] syncing Django Unchained (2012).eng.srt against Django Unchained (2012).mkv
+2026-09-07 07:57:10 [INFO] [81/381] IN_SYNC  Despicable Me (2010).eng.srt in 655.7s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 08:01:41 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 46493.0
+2026-09-07 08:01:41 [INFO] [85/381] syncing Donnie Darko (2001).eng.srt against Donnie Darko (2001).mkv
+2026-09-07 08:01:41 [INFO] [83/381] IN_SYNC  District 9 (2009).eng.srt in 860.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 08:02:27 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 695.0
+2026-09-07 08:02:27 [INFO] [86/381] syncing Dune (2021).eng.srt against Dune (2021).mkv
+2026-09-07 08:02:27 [INFO] [80/381] IN_SYNC  Deadpool 2 (2018).eng.srt in 1023.9s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 08:06:02 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 228469.0
+2026-09-07 08:06:02 [INFO] [87/381] syncing Dune - Part Two (2024).eng.srt against Dune - Part Two (2024).mkv
+2026-09-07 08:06:02 [INFO] [82/381] IN_SYNC  Die Hard (1988).eng.srt in 1132.1s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 08:08:37 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 294467.0
+2026-09-07 08:08:37 [INFO] [88/381] syncing Dunkirk (2017).eng.srt against Dunkirk (2017).mkv
+2026-09-07 08:08:37 [INFO] [84/381] IN_SYNC  Django Unchained (2012).eng.srt in 686.4s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 08:15:46 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 169209.0
+2026-09-07 08:15:47 [INFO] [89/381] syncing E T the Extra-Terrestrial (1982).eng.srt against E T the Extra-Terrestrial (1982).mkv
+2026-09-07 08:15:47 [INFO] [85/381] IN_SYNC  Donnie Darko (2001).eng.srt in 845.9s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 08:25:10 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 307082.0
+2026-09-07 08:25:11 [INFO] [90/381] syncing Easy A (2010).eng.srt against Easy A (2010).mkv
+2026-09-07 08:25:11 [INFO] [88/381] IN_SYNC  Dunkirk (2017).eng.srt in 994.0s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 08:31:24 [INFO] ffsubsync measured: offset +0.050s, framerate x1.000, score 303119.0
+2026-09-07 08:31:24 [INFO] [91/381] syncing Edge of Tomorrow (2014).eng.srt against Edge of Tomorrow (2014).mkv
+2026-09-07 08:31:24 [INFO] [89/381] IN_SYNC  E T the Extra-Terrestrial (1982).eng.srt in 937.5s (already aligned (offset +0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 08:32:28 [INFO] [92/381] syncing Edward Scissorhands (1990).eng.srt against Edward Scissorhands (1990).mkv
+2026-09-07 08:32:28 [INFO] [86/381] FAILED   Dune (2021).eng.srt in 1800.1s (ffsubsync timed out after 1800s)
+2026-09-07 08:33:35 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 515495.0
+2026-09-07 08:33:35 [INFO] [93/381] syncing Elemental (2023).eng.srt against Elemental (2023).mkv
+2026-09-07 08:33:35 [INFO] [87/381] IN_SYNC  Dune - Part Two (2024).eng.srt in 1653.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 08:36:44 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 1754.0
+2026-09-07 08:36:44 [INFO] [94/381] syncing Elysium (2013).eng.srt against Elysium (2013).mkv
+2026-09-07 08:36:44 [INFO] [90/381] IN_SYNC  Easy A (2010).eng.srt in 693.0s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 08:46:10 [INFO] ffsubsync measured: offset +0.090s, framerate x1.000, score 200396.0
+2026-09-07 08:46:10 [INFO] [95/381] syncing Enchanted (2007).eng.srt against Enchanted (2007).mkv
+2026-09-07 08:46:10 [INFO] [91/381] IN_SYNC  Edge of Tomorrow (2014).eng.srt in 885.9s (already aligned (offset +0.090s, below the 0.1s threshold); original untouched)
+2026-09-07 08:48:28 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 235298.0
+2026-09-07 08:48:28 [INFO] [96/381] syncing Enemy (2013).eng.srt against Enemy (2013).mkv
+2026-09-07 08:48:28 [INFO] [92/381] IN_SYNC  Edward Scissorhands (1990).eng.srt in 960.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 08:48:47 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 164683.0
+2026-09-07 08:48:47 [INFO] [97/381] syncing Eternal Sunshine of the Spotless Mind (2004).eng.srt against Eternal Sunshine of the Spotless Mind (2004).mkv
+2026-09-07 08:48:47 [INFO] [93/381] IN_SYNC  Elemental (2023).eng.srt in 911.8s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 08:49:29 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score 140669.0
+2026-09-07 08:49:29 [INFO] [98/381] syncing Ex Machina (2015).eng.srt against Ex Machina (2015).mkv
+2026-09-07 08:49:29 [INFO] [94/381] IN_SYNC  Elysium (2013).eng.srt in 765.5s (already aligned (offset +0.030s, below the 0.1s threshold); original untouched)
+2026-09-07 08:54:39 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 340665.0
+2026-09-07 08:54:39 [INFO] [99/381] syncing Fargo (1996).eng.srt against Fargo (1996).mkv
+2026-09-07 08:54:39 [INFO] [96/381] IN_SYNC  Enemy (2013).eng.srt in 370.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 08:57:50 [INFO] ffsubsync measured: offset -0.390s, framerate x1.000, score -112175.0
+2026-09-07 08:57:53 [INFO] fetched replacement subtitle id=3777702 (Enchanted.2007.BluRay.1080p.x264.DTS-WiKi.ENG); retrying ffsubsync
+2026-09-07 09:01:59 [INFO] ffsubsync measured: offset +0.070s, framerate x1.000, score 273869.0
+2026-09-07 09:01:59 [INFO] [100/381] syncing Fast Five (2011).eng.srt against Fast Five (2011).mkv
+2026-09-07 09:01:59 [INFO] [98/381] IN_SYNC  Ex Machina (2015).eng.srt in 749.4s (already aligned (offset +0.070s, below the 0.1s threshold); original untouched)
+2026-09-07 09:05:26 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 51300.0
+2026-09-07 09:05:26 [INFO] [101/381] syncing Ferris Bueller's Day Off (1986).eng.srt against Ferris Bueller's Day Off (1986).mkv
+2026-09-07 09:05:26 [INFO] [97/381] IN_SYNC  Eternal Sunshine of the Spotless Mind (2004).eng.srt in 999.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 09:08:47 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 167614.0
+2026-09-07 09:08:47 [INFO] [102/381] syncing Fight Club (1999).eng.srt against Fight Club (1999).mkv
+2026-09-07 09:08:47 [INFO] [99/381] IN_SYNC  Fargo (1996).eng.srt in 848.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 09:11:23 [INFO] ffsubsync measured: offset -0.150s, framerate x1.000, score -102971.0
+2026-09-07 09:11:26 [INFO] fetched replacement subtitle id=3780498 (Disney.Presents.Enchanted.2007.1080p.BluRay.H264.AAC-RARBG Eng); retrying ffsubsync
+2026-09-07 09:18:41 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 183657.0
+2026-09-07 09:18:42 [INFO] [103/381] syncing Finding Nemo (2003).eng.srt against Finding Nemo (2003).mkv
+2026-09-07 09:18:42 [INFO] [101/381] IN_SYNC  Ferris Bueller's Day Off (1986).eng.srt in 795.2s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 09:22:03 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score 277060.0
+2026-09-07 09:22:03 [INFO] [104/381] syncing First Man (2018).eng.srt against First Man (2018).mkv
+2026-09-07 09:22:03 [INFO] [100/381] IN_SYNC  Fast Five (2011).eng.srt in 1204.2s (already aligned (offset -0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 09:25:38 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score -108725.0
+2026-09-07 09:25:41 [INFO] fetched replacement subtitle id=3780277 (Enchanted.2007.1080p.BluRay.x264.anoXmous_eng); retrying ffsubsync
+2026-09-07 09:26:35 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 34834.0
+2026-09-07 09:26:35 [INFO] [105/381] syncing Ford v Ferrari (2019).eng.srt against Ford v Ferrari (2019).mkv
+2026-09-07 09:26:35 [INFO] [102/381] IN_SYNC  Fight Club (1999).eng.srt in 1067.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 09:33:16 [INFO] ffsubsync measured: offset -0.030s, framerate x1.000, score -19630.0
+2026-09-07 09:33:20 [INFO] fetched replacement subtitle id=1264727 (Finding.Nemo.2003.1080p.bLUrAY.x264.anoXmous_eng); retrying ffsubsync
+2026-09-07 09:38:37 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score -109466.0
+2026-09-07 09:38:40 [INFO] fetched replacement subtitle id=3777684 (Enchanted.2007.BluRay.1080p.x264.DTS-WiKi.ENG_HI); retrying ffsubsync
+2026-09-07 09:40:01 [INFO] ffsubsync measured: offset -0.020s, framerate x1.000, score 209362.0
+2026-09-07 09:40:01 [INFO] [106/381] syncing Forrest Gump (1994).eng.srt against Forrest Gump (1994).mkv
+2026-09-07 09:40:01 [INFO] [104/381] IN_SYNC  First Man (2018).eng.srt in 1078.1s (already aligned (offset -0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 09:48:49 [INFO] ffsubsync measured: offset -0.990s, framerate x1.000, score -137655.0
+2026-09-07 09:48:52 [INFO] fetched replacement subtitle id=1267803 (Finding Nemo (2003) 1080p 5.1 Blu-ray-eng); retrying ffsubsync
+2026-09-07 09:49:40 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 222153.0
+2026-09-07 09:49:40 [INFO] [107/381] syncing Fractured (2019).eng.srt against Fractured (2019).mkv
+2026-09-07 09:49:40 [INFO] [105/381] IN_SYNC  Ford v Ferrari (2019).eng.srt in 1385.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 09:52:36 [INFO] ffsubsync measured: offset -0.130s, framerate x1.000, score -108567.0
+2026-09-07 09:52:38 [INFO] fetched replacement subtitle id=3777390 (Enchanted.2007.BluRay.720p.BluRay.x264-REFiNED); retrying ffsubsync
+2026-09-07 09:55:15 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 135914.0
+2026-09-07 09:55:15 [INFO] [108/381] syncing Fury (2014).eng.srt against Fury (2014).mkv
+2026-09-07 09:55:15 [INFO] [107/381] IN_SYNC  Fractured (2019).eng.srt in 334.6s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 10:02:13 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 113558.0
+2026-09-07 10:02:13 [INFO] [109/381] syncing Get Out (2017).eng.srt against Get Out (2017).mkv
+2026-09-07 10:02:13 [INFO] [106/381] IN_SYNC  Forrest Gump (1994).eng.srt in 1331.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 10:02:18 [INFO] ffsubsync measured: offset -0.260s, framerate x1.000, score -115538.0
+2026-09-07 10:02:21 [INFO] fetched replacement subtitle id=1267137 (Finding.Nemo.2003.BluRay.1080p.AC3.2Audio.x264-CHD-eng); retrying ffsubsync
+2026-09-07 10:04:23 [INFO] ffsubsync measured: offset -0.390s, framerate x1.000, score -112175.0
+2026-09-07 10:04:25 [INFO] [110/381] syncing Ghostbusters (1984).eng.srt against Ghostbusters (1984).mkv
+2026-09-07 10:04:25 [INFO] [95/381] REVIEW   Enchanted (2007).eng.srt in 4692.3s (ffsubsync's quality gate rejected the alignment; original kept for review; replacement fetch stopped: no unused qualifying English SRT for a replacement fetch)
+2026-09-07 10:11:16 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 280918.0
+2026-09-07 10:11:16 [INFO] [111/381] syncing Gladiator (2000).eng.srt against Gladiator (2000).mkv
+2026-09-07 10:11:16 [INFO] [108/381] IN_SYNC  Fury (2014).eng.srt in 960.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 10:13:04 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 234394.0
+2026-09-07 10:13:04 [INFO] [112/381] syncing Gone Girl (2014).eng.srt against Gone Girl (2014).mkv
+2026-09-07 10:13:04 [INFO] [109/381] IN_SYNC  Get Out (2017).eng.srt in 650.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 10:17:16 [INFO] ffsubsync measured: offset +0.150s, framerate x1.000, score -18458.0
+2026-09-07 10:17:18 [INFO] fetched replacement subtitle id=11506179 (Finding.Nemo.2003.1080p.BluRay.x265-YAWNTiC_eng); retrying ffsubsync
+2026-09-07 10:19:12 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 144060.0
+2026-09-07 10:19:12 [INFO] [113/381] syncing Good Will Hunting (1997).eng.srt against Good Will Hunting (1997).mkv
+2026-09-07 10:19:12 [INFO] [110/381] IN_SYNC  Ghostbusters (1984).eng.srt in 886.7s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 10:25:57 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 31849.0
+2026-09-07 10:25:57 [INFO] [114/381] syncing Goodfellas (1990).eng.srt against Goodfellas (1990).mkv
+2026-09-07 10:25:57 [INFO] [112/381] IN_SYNC  Gone Girl (2014).eng.srt in 773.2s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 10:31:17 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 248948.0
+2026-09-07 10:31:17 [INFO] [115/381] syncing Gravity (2013).eng.srt against Gravity (2013).mkv
+2026-09-07 10:31:17 [INFO] [111/381] IN_SYNC  Gladiator (2000).eng.srt in 1200.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 10:32:20 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score -17527.0
+2026-09-07 10:32:22 [INFO] fetched replacement subtitle id=8542616 (Finding Nemo (2003) Bluray-1080p.en); retrying ffsubsync
+2026-09-07 10:42:00 [INFO] ffsubsync measured: offset -0.090s, framerate x1.000, score 106351.0
+2026-09-07 10:42:00 [INFO] [116/381] syncing Green Book (2018).eng.srt against Green Book (2018).mkv
+2026-09-07 10:42:00 [INFO] [113/381] IN_SYNC  Good Will Hunting (1997).eng.srt in 1367.3s (already aligned (offset -0.090s, below the 0.1s threshold); original untouched)
+2026-09-07 10:43:30 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 192581.0
+2026-09-07 10:43:30 [INFO] [117/381] syncing Greenland (2020).eng.srt against Greenland (2020).mkv
+2026-09-07 10:43:30 [INFO] [115/381] IN_SYNC  Gravity (2013).eng.srt in 733.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 10:46:00 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 83129.0
+2026-09-07 10:46:00 [INFO] [118/381] syncing Groundhog Day (1993).eng.srt against Groundhog Day (1993).mkv
+2026-09-07 10:46:00 [INFO] [114/381] IN_SYNC  Goodfellas (1990).eng.srt in 1202.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 10:47:39 [INFO] ffsubsync measured: offset -0.030s, framerate x1.000, score -19630.0
+2026-09-07 10:47:42 [INFO] fetched replacement subtitle id=5094148 (Finding.Nemo.2003.1080p.Blu-ray.AVC.TrueHD.7.1-Fansub.English); retrying ffsubsync
+2026-09-07 10:56:08 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 36708.0
+2026-09-07 10:56:10 [INFO] [119/381] syncing Grown Ups (2010).eng.srt against Grown Ups (2010).mkv
+2026-09-07 10:56:10 [INFO] [116/381] IN_SYNC  Green Book (2018).eng.srt in 850.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 11:02:30 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 95260.0
+2026-09-07 11:02:30 [INFO] [120/381] syncing Guardians of the Galaxy (2014).eng.srt against Guardians of the Galaxy (2014).mkv
+2026-09-07 11:02:30 [INFO] [117/381] IN_SYNC  Greenland (2020).eng.srt in 1140.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 11:02:31 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 53675.0
+2026-09-07 11:02:31 [INFO] [121/381] syncing Hacksaw Ridge (2016).eng.srt against Hacksaw Ridge (2016).mkv
+2026-09-07 11:02:31 [INFO] [118/381] IN_SYNC  Groundhog Day (1993).eng.srt in 991.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 11:04:55 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score -22688.0
+2026-09-07 11:04:58 [INFO] fetched replacement subtitle id=11506180 (Finding.Nemo.2003.1080p.BluRay.x265-YAWNTiC_eng SDH); retrying ffsubsync
+2026-09-07 11:09:53 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 25168.0
+2026-09-07 11:09:54 [INFO] [122/381] syncing Happy Feet (2006).eng.srt against Happy Feet (2006).mkv
+2026-09-07 11:09:54 [INFO] [119/381] IN_SYNC  Grown Ups (2010).eng.srt in 824.0s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 11:13:45 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 171488.0
+2026-09-07 11:13:45 [INFO] [123/381] syncing Happy Gilmore (1996).eng.srt against Happy Gilmore (1996).mkv
+2026-09-07 11:13:45 [INFO] [120/381] IN_SYNC  Guardians of the Galaxy (2014).eng.srt in 674.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 11:19:03 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 267990.0
+2026-09-07 11:19:03 [INFO] [124/381] syncing Harry Potter and the Chamber of Secrets (2002).eng.srt against Harry Potter and the Chamber of Secrets (2002).mkv
+2026-09-07 11:19:03 [INFO] [121/381] IN_SYNC  Hacksaw Ridge (2016).eng.srt in 992.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 11:19:55 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score -22752.0
+2026-09-07 11:19:58 [INFO] fetched replacement subtitle id=1265063 (Finding.Nemo.2003.Bluray.english); retrying ffsubsync
+2026-09-07 11:20:58 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 76371.0
+2026-09-07 11:20:58 [INFO] [125/381] syncing Harry Potter and the Deathly Hallows - Part 1 (2010).eng.srt against Harry Potter and the Deathly Hallows - Part 1 (2010).mkv
+2026-09-07 11:20:58 [INFO] [122/381] IN_SYNC  Happy Feet (2006).eng.srt in 664.3s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 11:28:05 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 142193.0
+2026-09-07 11:28:05 [INFO] [126/381] syncing Harry Potter and the Deathly Hallows - Part 2 (2011).eng.srt against Harry Potter and the Deathly Hallows - Part 2 (2011).mkv
+2026-09-07 11:28:05 [INFO] [123/381] IN_SYNC  Happy Gilmore (1996).eng.srt in 860.2s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 11:34:13 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score -16032.0
+2026-09-07 11:34:16 [INFO] fetched replacement subtitle id=4878903 (Finding.Nemo.2003.720p.BluRay.AC3.x264-HDMaNiAcS); retrying ffsubsync
+2026-09-07 11:35:05 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 241799.0
+2026-09-07 11:35:05 [INFO] [127/381] syncing Harry Potter and the Goblet of Fire (2005).eng.srt against Harry Potter and the Goblet of Fire (2005).mkv
+2026-09-07 11:35:05 [INFO] [125/381] IN_SYNC  Harry Potter and the Deathly Hallows - Part 1 (2010).eng.srt in 846.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 11:39:23 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 232085.0
+2026-09-07 11:39:23 [INFO] [128/381] syncing Harry Potter and the Half-Blood Prince (2009).eng.srt against Harry Potter and the Half-Blood Prince (2009).mkv
+2026-09-07 11:39:23 [INFO] [124/381] IN_SYNC  Harry Potter and the Chamber of Secrets (2002).eng.srt in 1219.8s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 11:40:19 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 292238.0
+2026-09-07 11:40:19 [INFO] [129/381] syncing Harry Potter and the Order of the Phoenix (2007).eng.srt against Harry Potter and the Order of the Phoenix (2007).mkv
+2026-09-07 11:40:19 [INFO] [126/381] IN_SYNC  Harry Potter and the Deathly Hallows - Part 2 (2011).eng.srt in 734.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 11:47:52 [INFO] ffsubsync measured: offset +21.080s, framerate x1.000, score -2337.0
+2026-09-07 11:47:54 [INFO] fetched replacement subtitle id=11913434 (Finding Nemo (2003) Bluray-2160p.en); retrying ffsubsync
+2026-09-07 11:52:27 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 178143.0
+2026-09-07 11:52:27 [INFO] [130/381] syncing Harry Potter and the Prisoner of Azkaban (2004).eng.srt against Harry Potter and the Prisoner of Azkaban (2004).mkv
+2026-09-07 11:52:27 [INFO] [129/381] IN_SYNC  Harry Potter and the Order of the Phoenix (2007).eng.srt in 728.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 11:54:02 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 230461.0
+2026-09-07 11:54:02 [INFO] [131/381] syncing Harry Potter and the Sorcerer's Stone (2001).eng.srt against Harry Potter and the Sorcerer's Stone (2001).mkv
+2026-09-07 11:54:02 [INFO] [128/381] IN_SYNC  Harry Potter and the Half-Blood Prince (2009).eng.srt in 878.5s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 11:54:20 [INFO] ffsubsync measured: offset -0.060s, framerate x1.000, score 223094.0
+2026-09-07 11:54:21 [INFO] [132/381] syncing Heat (1995).eng.srt against Heat (1995).mkv
+2026-09-07 11:54:21 [INFO] [127/381] IN_SYNC  Harry Potter and the Goblet of Fire (2005).eng.srt in 1155.4s (already aligned (offset -0.060s, below the 0.1s threshold); original untouched)
+2026-09-07 12:01:19 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score -24072.0
+2026-09-07 12:01:19 [INFO] [133/381] syncing Her (2013).eng.srt against Her (2013).mkv
+2026-09-07 12:01:19 [INFO] [103/381] REVIEW   Finding Nemo (2003).eng.srt in 9757.5s (ffsubsync's quality gate rejected the alignment; original kept for review)
+2026-09-07 12:06:21 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 168965.0
+2026-09-07 12:06:21 [INFO] [134/381] syncing Hercules (1997).eng.srt against Hercules (1997).mkv
+2026-09-07 12:06:21 [INFO] [130/381] IN_SYNC  Harry Potter and the Prisoner of Azkaban (2004).eng.srt in 833.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 12:06:51 [INFO] ffsubsync measured: offset +0.090s, framerate x1.000, score 39724.0
+2026-09-07 12:06:51 [INFO] [135/381] syncing Hereditary (2018).eng.srt against Hereditary (2018).mkv
+2026-09-07 12:06:51 [INFO] [133/381] IN_SYNC  Her (2013).eng.srt in 332.1s (already aligned (offset +0.090s, below the 0.1s threshold); original untouched)
+2026-09-07 12:11:31 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 185606.0
+2026-09-07 12:11:32 [INFO] [136/381] syncing Hidden Figures (2016).eng.srt against Hidden Figures (2016).mkv
+2026-09-07 12:11:32 [INFO] [131/381] IN_SYNC  Harry Potter and the Sorcerer's Stone (2001).eng.srt in 1049.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 12:14:43 [INFO] ffsubsync measured: offset +19.150s, framerate x1.000, score -42265.0
+2026-09-07 12:14:46 [INFO] fetched replacement subtitle id=10868817 (Hercules.1997.1080p.BluRay.x264-[YTS.AG]); retrying ffsubsync
+2026-09-07 12:18:42 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 436278.0
+2026-09-07 12:18:42 [INFO] [137/381] syncing Holes (2003).eng.srt against Holes (2003).mkv
+2026-09-07 12:18:42 [INFO] [132/381] IN_SYNC  Heat (1995).eng.srt in 1461.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 12:19:20 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 398541.0
+2026-09-07 12:19:20 [INFO] [138/381] syncing Home Alone (1990).eng.srt against Home Alone (1990).mkv
+2026-09-07 12:19:20 [INFO] [135/381] IN_SYNC  Hereditary (2018).eng.srt in 748.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 12:22:14 [INFO] ffsubsync measured: offset -0.060s, framerate x1.000, score -41391.0
+2026-09-07 12:22:17 [INFO] fetched replacement subtitle id=245307 (Hercules.1997.1080p.BluRay.x264-AMIABLE.English); retrying ffsubsync
+2026-09-07 12:24:46 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score 93887.0
+2026-09-07 12:24:46 [INFO] [139/381] syncing Home Alone 2 - Lost in New York (1992).eng.srt against Home Alone 2 - Lost in New York (1992).mkv
+2026-09-07 12:24:46 [INFO] [136/381] IN_SYNC  Hidden Figures (2016).eng.srt in 794.6s (already aligned (offset +0.030s, below the 0.1s threshold); original untouched)
+2026-09-07 12:31:39 [INFO] ffsubsync measured: offset +0.150s, framerate x1.000, score -100517.0
+2026-09-07 12:31:42 [INFO] fetched replacement subtitle id=241025 (Hercules.1997.720p.BRrip.x264.GAZ.YIFY); retrying ffsubsync
+2026-09-07 12:34:17 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 109565.0
+2026-09-07 12:34:17 [INFO] [140/381] syncing How to Train Your Dragon (2010).eng.srt against How to Train Your Dragon (2010).mkv
+2026-09-07 12:34:17 [INFO] [138/381] IN_SYNC  Home Alone (1990).eng.srt in 897.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 12:39:17 [INFO] ffsubsync measured: offset +17.190s, framerate x1.043, score -45769.5
+2026-09-07 12:39:20 [INFO] fetched replacement subtitle id=244438 (Hercules 1997 BRRip 720p[Dual Audio][Eng Hindi]Current_HD); retrying ffsubsync
+2026-09-07 12:41:41 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score 88813.0
+2026-09-07 12:41:41 [INFO] [141/381] syncing I Am Legend (2007).eng.srt against I Am Legend (2007).mkv
+2026-09-07 12:41:41 [INFO] [137/381] IN_SYNC  Holes (2003).eng.srt in 1379.3s (already aligned (offset +0.030s, below the 0.1s threshold); original untouched)
+2026-09-07 12:42:51 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score 103982.0
+2026-09-07 12:42:51 [INFO] [142/381] syncing I, Robot (2004).eng.srt against I, Robot (2004).mkv
+2026-09-07 12:42:51 [INFO] [139/381] IN_SYNC  Home Alone 2 - Lost in New York (1992).eng.srt in 1084.9s (already aligned (offset -0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 12:44:11 [INFO] ffsubsync measured: offset +0.050s, framerate x1.000, score 177620.0
+2026-09-07 12:44:11 [INFO] [140/381] IN_SYNC  How to Train Your Dragon (2010).eng.srt in 593.8s (already aligned (offset +0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 12:44:11 [INFO] [143/381] syncing I, Tonya (2017).eng.srt against I, Tonya (2017).mkv
+2026-09-07 12:49:33 [INFO] ffsubsync measured: offset +19.270s, framerate x1.000, score -57075.0
+2026-09-07 12:49:36 [INFO] fetched replacement subtitle id=247170 (Hercules.1997.720p.BRrip.x264.GAZ.YIFY); retrying ffsubsync
+2026-09-07 12:53:21 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 265461.0
+2026-09-07 12:53:22 [INFO] [144/381] syncing Ice Age (2002).eng.srt against Ice Age (2002).mkv
+2026-09-07 12:53:22 [INFO] [141/381] IN_SYNC  I Am Legend (2007).eng.srt in 700.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 12:56:51 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 237606.0
+2026-09-07 12:56:51 [INFO] [145/381] syncing Idiocracy (2006).eng.srt against Idiocracy (2006).mkv
+2026-09-07 12:56:51 [INFO] [143/381] IN_SYNC  I, Tonya (2017).eng.srt in 759.0s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 12:57:20 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 106370.0
+2026-09-07 12:57:20 [INFO] [146/381] syncing Inception (2010).eng.srt against Inception (2010).mkv
+2026-09-07 12:57:20 [INFO] [142/381] IN_SYNC  I, Robot (2004).eng.srt in 868.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 13:00:44 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 170751.0
+2026-09-07 13:00:44 [INFO] [147/381] syncing Incredibles 2 (2018).eng.srt against Incredibles 2 (2018).mkv
+2026-09-07 13:00:44 [INFO] [144/381] IN_SYNC  Ice Age (2002).eng.srt in 442.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 13:01:54 [INFO] ffsubsync measured: offset +19.150s, framerate x1.000, score -42265.0
+2026-09-07 13:01:57 [INFO] fetched replacement subtitle id=245686 (Hercules [1997] 720p Blu-Ray x264 AC3 By ali1997 (PimpRG)); retrying ffsubsync
+2026-09-07 13:02:40 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 26497.0
+2026-09-07 13:02:40 [INFO] [148/381] syncing Independence Day (1996).eng.srt against Independence Day (1996).mkv
+2026-09-07 13:02:40 [INFO] [145/381] IN_SYNC  Idiocracy (2006).eng.srt in 349.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 13:14:14 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 7469.0
+2026-09-07 13:14:14 [INFO] [149/381] syncing Indiana Jones and the Last Crusade (1989).eng.srt against Indiana Jones and the Last Crusade (1989).mkv
+2026-09-07 13:14:14 [INFO] [147/381] IN_SYNC  Incredibles 2 (2018).eng.srt in 809.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 13:14:17 [INFO] ffsubsync measured: offset +0.140s, framerate x1.000, score -7142.0
+2026-09-07 13:14:18 [INFO] fetched replacement subtitle id=subdl:url:ee4fffc1ab673c7af7da6dc7 (Hercules 1997); retrying ffsubsync
+2026-09-07 13:19:19 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 102962.0
+2026-09-07 13:19:19 [INFO] [150/381] syncing Indiana Jones and the Raiders of the Lost Ark (1981).eng.srt against Indiana Jones and the Raiders of the Lost Ark (1981).mkv
+2026-09-07 13:19:19 [INFO] [146/381] IN_SYNC  Inception (2010).eng.srt in 1319.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 13:22:49 [INFO] ffsubsync measured: offset +17.190s, framerate x1.043, score -83087.6
+2026-09-07 13:22:53 [INFO] [151/381] syncing Indiana Jones and the Temple of Doom (1984).eng.srt against Indiana Jones and the Temple of Doom (1984).mkv
+2026-09-07 13:22:53 [INFO] [134/381] REVIEW   Hercules (1997).eng.srt in 4588.3s (ffsubsync's quality gate rejected the alignment; original kept for review; replacement fetch stopped: no unused qualifying English SRT for a replacement fetch)
+2026-09-07 13:25:31 [INFO] ffsubsync measured: offset -52.600s, framerate x1.043, score 115788.7
+2026-09-07 13:25:35 [INFO] fetched replacement subtitle id=367330 (Independence.Day.1996.1080p.BluRay.DTS.x264-HDME.ENG); retrying ffsubsync
+2026-09-07 13:35:43 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 178869.0
+2026-09-07 13:35:43 [INFO] [152/381] syncing Inglourious Basterds (2009).eng.srt against Inglourious Basterds (2009).mkv
+2026-09-07 13:35:43 [INFO] [149/381] IN_SYNC  Indiana Jones and the Last Crusade (1989).eng.srt in 1289.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 13:40:13 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 317010.0
+2026-09-07 13:40:13 [INFO] [153/381] syncing Insomnia (2002).eng.srt against Insomnia (2002).mkv
+2026-09-07 13:40:13 [INFO] [151/381] IN_SYNC  Indiana Jones and the Temple of Doom (1984).eng.srt in 1040.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 13:40:22 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 330648.0
+2026-09-07 13:40:22 [INFO] [154/381] syncing Interstellar (2014).eng.srt against Interstellar (2014).mkv
+2026-09-07 13:40:22 [INFO] [150/381] IN_SYNC  Indiana Jones and the Raiders of the Lost Ark (1981).eng.srt in 1262.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 13:49:26 [INFO] ffsubsync measured: offset +55.350s, framerate x1.043, score 42782.0
+2026-09-07 13:49:28 [INFO] fetched replacement subtitle id=378806 (Independence Day (1996).BRRip.1080p.Dual.[Hindi-Eng].AAC); retrying ffsubsync
+2026-09-07 13:50:48 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 425964.0
+2026-09-07 13:50:48 [INFO] [155/381] syncing Into the Wild (2007).eng.srt against Into the Wild (2007).mkv
+2026-09-07 13:50:48 [INFO] [152/381] IN_SYNC  Inglourious Basterds (2009).eng.srt in 904.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 13:58:42 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 141227.0
+2026-09-07 13:58:42 [INFO] [156/381] syncing Iron Man (2008).eng.srt against Iron Man (2008).mkv
+2026-09-07 13:58:42 [INFO] [153/381] IN_SYNC  Insomnia (2002).eng.srt in 1108.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 14:01:30 [INFO] ffsubsync measured: offset -0.030s, framerate x1.000, score 126071.0
+2026-09-07 14:01:30 [INFO] [157/381] syncing Iron Man 2 (2010).eng.srt against Iron Man 2 (2010).mkv
+2026-09-07 14:01:30 [INFO] [154/381] IN_SYNC  Interstellar (2014).eng.srt in 1268.3s (already aligned (offset -0.030s, below the 0.1s threshold); original untouched)
+2026-09-07 14:09:54 [INFO] ffsubsync measured: offset +20.500s, framerate x1.043, score 32457.8
+2026-09-07 14:09:54 [INFO] [158/381] syncing IT (2017).eng.srt against IT (2017).mkv
+2026-09-07 14:09:54 [INFO] [148/381] SYNCED   Independence Day (1996).eng.srt in 4033.6s (offset +20.500s, framerate x1.043)
+2026-09-07 14:12:55 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 335695.0
+2026-09-07 14:12:55 [INFO] [159/381] syncing James and the Giant Peach (1996).eng.srt against James and the Giant Peach (1996).mkv
+2026-09-07 14:12:55 [INFO] [155/381] IN_SYNC  Into the Wild (2007).eng.srt in 1326.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 14:16:13 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 147316.0
+2026-09-07 14:16:13 [INFO] [160/381] syncing Jaws (1975).eng.srt against Jaws (1975).mkv
+2026-09-07 14:16:13 [INFO] [157/381] IN_SYNC  Iron Man 2 (2010).eng.srt in 882.6s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 14:17:09 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 165893.0
+2026-09-07 14:17:09 [INFO] [161/381] syncing Jimmy Neutron Boy Genius (2001).eng.srt against Jimmy Neutron Boy Genius (2001).mkv
+2026-09-07 14:17:09 [INFO] [156/381] IN_SYNC  Iron Man (2008).eng.srt in 1107.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 14:18:45 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 309596.0
+2026-09-07 14:18:45 [INFO] [162/381] syncing John Q (2002).eng.srt against John Q (2002).mkv
+2026-09-07 14:18:45 [INFO] [158/381] IN_SYNC  IT (2017).eng.srt in 531.1s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 14:25:31 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 3313.0
+2026-09-07 14:25:31 [INFO] [163/381] syncing Joker (2019).eng.srt against Joker (2019).mkv
+2026-09-07 14:25:31 [INFO] [159/381] IN_SYNC  James and the Giant Peach (1996).eng.srt in 756.3s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 14:30:48 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 77989.0
+2026-09-07 14:30:48 [INFO] [164/381] syncing Jumanji (1995).eng.srt against Jumanji (1995).mkv
+2026-09-07 14:30:48 [INFO] [161/381] IN_SYNC  Jimmy Neutron Boy Genius (2001).eng.srt in 818.3s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 14:34:47 [INFO] ffsubsync measured: offset -0.040s, framerate x1.000, score 30303.0
+2026-09-07 14:34:47 [INFO] [165/381] syncing Juno (2007).eng.srt against Juno (2007).mkv
+2026-09-07 14:34:47 [INFO] [162/381] IN_SYNC  John Q (2002).eng.srt in 962.2s (already aligned (offset -0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 14:36:32 [INFO] ffsubsync measured: offset +0.060s, framerate x1.000, score 210839.0
+2026-09-07 14:36:32 [INFO] [166/381] syncing Jurassic Park (1993).eng.srt against Jurassic Park (1993).mkv
+2026-09-07 14:36:32 [INFO] [160/381] IN_SYNC  Jaws (1975).eng.srt in 1218.9s (already aligned (offset +0.060s, below the 0.1s threshold); original untouched)
+2026-09-07 14:41:24 [INFO] ffsubsync measured: offset -0.030s, framerate x1.000, score 234126.0
+2026-09-07 14:41:24 [INFO] [167/381] syncing Jurassic World (2015).eng.srt against Jurassic World (2015).mkv
+2026-09-07 14:41:24 [INFO] [163/381] IN_SYNC  Joker (2019).eng.srt in 952.5s (already aligned (offset -0.030s, below the 0.1s threshold); original untouched)
+2026-09-07 14:46:39 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 176793.0
+2026-09-07 14:46:40 [INFO] [168/381] syncing Kick-Ass (2010).eng.srt against Kick-Ass (2010).mkv
+2026-09-07 14:46:40 [INFO] [164/381] IN_SYNC  Jumanji (1995).eng.srt in 951.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 14:50:04 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 261071.0
+2026-09-07 14:50:04 [INFO] [169/381] syncing King Richard (2021).eng.srt against King Richard (2021).mkv
+2026-09-07 14:50:04 [INFO] [165/381] IN_SYNC  Juno (2007).eng.srt in 916.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 15:03:11 [INFO] ffsubsync measured: offset -0.020s, framerate x1.000, score 232027.0
+2026-09-07 15:03:11 [INFO] [170/381] syncing Knives Out (2019).eng.srt against Knives Out (2019).mkv
+2026-09-07 15:03:11 [INFO] [168/381] IN_SYNC  Kick-Ass (2010).eng.srt in 991.3s (already aligned (offset -0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 15:03:58 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 195564.0
+2026-09-07 15:03:58 [INFO] [171/381] syncing Knowing (2009).eng.srt against Knowing (2009).mkv
+2026-09-07 15:03:58 [INFO] [167/381] IN_SYNC  Jurassic World (2015).eng.srt in 1354.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 15:06:33 [INFO] [172/381] syncing Kung Fu Panda (2008).eng.srt against Kung Fu Panda (2008).mkv
+2026-09-07 15:06:33 [INFO] [166/381] FAILED   Jurassic Park (1993).eng.srt in 1800.7s (ffsubsync timed out after 1800s)
+2026-09-07 15:11:30 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 72000.0
+2026-09-07 15:11:30 [INFO] [173/381] syncing Legally Blonde (2001).eng.srt against Legally Blonde (2001).mkv
+2026-09-07 15:11:30 [INFO] [169/381] IN_SYNC  King Richard (2021).eng.srt in 1286.1s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 15:13:12 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 251969.0
+2026-09-07 15:13:12 [INFO] [174/381] syncing Logan (2017).eng.srt against Logan (2017).mkv
+2026-09-07 15:13:12 [INFO] [171/381] IN_SYNC  Knowing (2009).eng.srt in 553.1s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 15:18:36 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 121278.0
+2026-09-07 15:18:37 [INFO] [175/381] syncing Lone Survivor (2013).eng.srt against Lone Survivor (2013).mkv
+2026-09-07 15:18:37 [INFO] [172/381] IN_SYNC  Kung Fu Panda (2008).eng.srt in 723.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 15:19:51 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 9898.0
+2026-09-07 15:19:51 [INFO] [176/381] syncing Madagascar (2005).eng.srt against Madagascar (2005).mkv
+2026-09-07 15:19:51 [INFO] [170/381] IN_SYNC  Knives Out (2019).eng.srt in 999.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 15:28:24 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 91400.0
+2026-09-07 15:28:24 [INFO] [177/381] syncing Magnolia (1999).eng.srt against Magnolia (1999).mkv
+2026-09-07 15:28:24 [INFO] [173/381] IN_SYNC  Legally Blonde (2001).eng.srt in 1014.0s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 15:29:51 [INFO] ffsubsync measured: offset -0.060s, framerate x1.000, score 64918.0
+2026-09-07 15:29:51 [INFO] [178/381] syncing Marty Supreme (2025).eng.srt against Marty Supreme (2025).mkv
+2026-09-07 15:29:51 [INFO] [176/381] IN_SYNC  Madagascar (2005).eng.srt in 600.0s (already aligned (offset -0.060s, below the 0.1s threshold); original untouched)
+2026-09-07 15:32:55 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score 361758.0
+2026-09-07 15:32:55 [INFO] [179/381] syncing Mean Girls (2004).eng.srt against Mean Girls (2004).mkv
+2026-09-07 15:32:55 [INFO] [174/381] IN_SYNC  Logan (2017).eng.srt in 1183.1s (already aligned (offset +0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 15:34:31 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 276516.0
+2026-09-07 15:34:31 [INFO] [180/381] syncing Meet the Robinsons (2007).eng.srt against Meet the Robinsons (2007).mkv
+2026-09-07 15:34:31 [INFO] [175/381] IN_SYNC  Lone Survivor (2013).eng.srt in 954.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 15:42:15 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 76458.0
+2026-09-07 15:42:15 [INFO] [181/381] syncing Megamind (2010).eng.srt against Megamind (2010).mkv
+2026-09-07 15:42:15 [INFO] [180/381] IN_SYNC  Meet the Robinsons (2007).eng.srt in 463.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 15:48:08 [INFO] ffsubsync measured: offset -0.060s, framerate x1.000, score 22774.0
+2026-09-07 15:48:09 [INFO] [182/381] syncing Memento (2000).eng.srt against Memento (2000).mkv
+2026-09-07 15:48:09 [INFO] [179/381] IN_SYNC  Mean Girls (2004).eng.srt in 913.7s (already aligned (offset -0.060s, below the 0.1s threshold); original untouched)
+2026-09-07 15:53:43 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 17477.0
+2026-09-07 15:53:43 [INFO] [183/381] syncing Minority Report (2002).eng.srt against Minority Report (2002).mkv
+2026-09-07 15:53:43 [INFO] [177/381] IN_SYNC  Magnolia (1999).eng.srt in 1519.2s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 15:55:23 [INFO] ffsubsync measured: offset -0.170s, framerate x1.000, score -39637.0
+2026-09-07 15:55:27 [INFO] fetched replacement subtitle id=11797357 (Marty.Supreme.2025.1080p.AMZN.WEB-DL.DDP5.1.Atmos.H); retrying ffsubsync
+2026-09-07 15:56:30 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 56350.0
+2026-09-07 15:56:30 [INFO] [184/381] syncing Mission - Impossible - Fallout (2018).eng.srt against Mission - Impossible - Fallout (2018).mkv
+2026-09-07 15:56:30 [INFO] [181/381] IN_SYNC  Megamind (2010).eng.srt in 854.3s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 15:57:53 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 229257.0
+2026-09-07 15:57:53 [INFO] [185/381] syncing Monsters University (2013).eng.srt against Monsters University (2013).mkv
+2026-09-07 15:57:53 [INFO] [182/381] IN_SYNC  Memento (2000).eng.srt in 584.1s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 16:08:49 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 169386.0
+2026-09-07 16:08:50 [INFO] [186/381] syncing Monsters, Inc (2001).eng.srt against Monsters, Inc (2001).mkv
+2026-09-07 16:08:50 [INFO] [185/381] IN_SYNC  Monsters University (2013).eng.srt in 657.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 16:13:34 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 235774.0
+2026-09-07 16:13:34 [INFO] [187/381] syncing Moon (2009).eng.srt against Moon (2009).mkv
+2026-09-07 16:13:34 [INFO] [184/381] IN_SYNC  Mission - Impossible - Fallout (2018).eng.srt in 1024.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 16:14:17 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 135842.0
+2026-09-07 16:14:18 [INFO] [188/381] syncing Mulan (1998).eng.srt against Mulan (1998).mkv
+2026-09-07 16:14:18 [INFO] [183/381] IN_SYNC  Minority Report (2002).eng.srt in 1234.0s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 16:20:02 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score -3682.0
+2026-09-07 16:20:07 [INFO] fetched replacement subtitle id=11053121 (Monsters.Inc.2001.1080p.BluRay.x265-YAWNTiC_eng SDH); retrying ffsubsync
+2026-09-07 16:21:26 [INFO] ffsubsync measured: offset +0.110s, framerate x0.999, score -84281.0
+2026-09-07 16:21:28 [INFO] fetched replacement subtitle id=11896777 (Marty.Supreme.2025.1080p.WEB.DL.x265.6CH-Pahe); retrying ffsubsync
+2026-09-07 16:24:18 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 271960.0
+2026-09-07 16:24:18 [INFO] [189/381] syncing Napoleon Dynamite (2004).eng.srt against Napoleon Dynamite (2004).mkv
+2026-09-07 16:24:18 [INFO] [187/381] IN_SYNC  Moon (2009).eng.srt in 643.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 16:26:12 [INFO] ffsubsync measured: offset -0.060s, framerate x1.000, score 70274.0
+2026-09-07 16:26:12 [INFO] [190/381] syncing National Lampoon's Christmas Vacation (1989).eng.srt against National Lampoon's Christmas Vacation (1989).mkv
+2026-09-07 16:26:12 [INFO] [188/381] IN_SYNC  Mulan (1998).eng.srt in 714.0s (already aligned (offset -0.060s, below the 0.1s threshold); original untouched)
+2026-09-07 16:31:15 [INFO] ffsubsync measured: offset -0.140s, framerate x1.000, score 60601.0
+2026-09-07 16:31:15 [INFO] [191/381] syncing National Treasure (2004).eng.srt against National Treasure (2004).mkv
+2026-09-07 16:31:15 [INFO] [186/381] SYNCED   Monsters, Inc (2001).eng.srt in 1345.3s (offset -0.140s, framerate x1.000)
+2026-09-07 16:36:57 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 134076.0
+2026-09-07 16:36:57 [INFO] [192/381] syncing National Treasure Book of Secrets (2007).eng.srt against National Treasure Book of Secrets (2007).mkv
+2026-09-07 16:36:57 [INFO] [189/381] IN_SYNC  Napoleon Dynamite (2004).eng.srt in 758.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 16:37:33 [INFO] ffsubsync measured: offset +0.070s, framerate x1.000, score 167736.0
+2026-09-07 16:37:33 [INFO] [193/381] syncing Night at the Museum (2006).eng.srt against Night at the Museum (2006).mkv
+2026-09-07 16:37:33 [INFO] [190/381] IN_SYNC  National Lampoon's Christmas Vacation (1989).eng.srt in 681.3s (already aligned (offset +0.070s, below the 0.1s threshold); original untouched)
+2026-09-07 16:44:23 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 69367.0
+2026-09-07 16:44:24 [INFO] [194/381] syncing Nightcrawler (2014).eng.srt against Nightcrawler (2014).mkv
+2026-09-07 16:44:24 [INFO] [191/381] IN_SYNC  National Treasure (2004).eng.srt in 788.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 16:45:34 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score -39672.0
+2026-09-07 16:45:37 [INFO] fetched replacement subtitle id=11797358 (Marty.Supreme.2025.1080p.AMZN.WEB-DL.DDP5.1.Atmos.H); retrying ffsubsync
+2026-09-07 16:48:34 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 153920.0
+2026-09-07 16:48:34 [INFO] [195/381] syncing No Country for Old Men (2007).eng.srt against No Country for Old Men (2007).mkv
+2026-09-07 16:48:34 [INFO] [192/381] IN_SYNC  National Treasure Book of Secrets (2007).eng.srt in 697.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 16:53:22 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 175308.0
+2026-09-07 16:53:22 [INFO] [196/381] syncing Now You See Me (2013).eng.srt against Now You See Me (2013).mkv
+2026-09-07 16:53:22 [INFO] [193/381] IN_SYNC  Night at the Museum (2006).eng.srt in 948.8s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 16:59:48 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 154058.0
+2026-09-07 16:59:49 [INFO] [197/381] syncing Oblivion (2013).eng.srt against Oblivion (2013).mkv
+2026-09-07 16:59:49 [INFO] [194/381] IN_SYNC  Nightcrawler (2014).eng.srt in 925.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 17:04:27 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score 336018.0
+2026-09-07 17:04:27 [INFO] [198/381] syncing Obsession (2026).eng.srt against Obsession (2026).mkv
+2026-09-07 17:04:27 [INFO] [195/381] IN_SYNC  No Country for Old Men (2007).eng.srt in 953.1s (already aligned (offset -0.080s, below the 0.1s threshold); original untouched)
+2026-09-07 17:08:20 [INFO] ffsubsync measured: offset +0.100s, framerate x0.999, score -92769.0
+2026-09-07 17:08:23 [INFO] fetched replacement subtitle id=12101491 ([FIXED+JPN]Marty.Supreme.2025.2160p.UHD.BluRay.REMUX.DV.P7.HDR.MULTi.); retrying ffsubsync
+2026-09-07 17:12:32 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 292452.0
+2026-09-07 17:12:32 [INFO] [199/381] syncing October Sky (1999).eng.srt against October Sky (1999).mkv
+2026-09-07 17:12:32 [INFO] [197/381] IN_SYNC  Oblivion (2013).eng.srt in 763.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 17:15:11 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 36869.0
+2026-09-07 17:15:11 [INFO] [200/381] syncing Office Space (1999).eng.srt against Office Space (1999).mkv
+2026-09-07 17:15:11 [INFO] [196/381] IN_SYNC  Now You See Me (2013).eng.srt in 1309.2s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 17:18:35 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 172711.0
+2026-09-07 17:18:35 [INFO] [201/381] syncing One Flew Over the Cuckoo's Nest (1975).eng.srt against One Flew Over the Cuckoo's Nest (1975).mkv
+2026-09-07 17:18:35 [INFO] [198/381] IN_SYNC  Obsession (2026).eng.srt in 847.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 17:25:18 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 43875.0
+2026-09-07 17:25:19 [INFO] [202/381] syncing Open Season (2006).eng.srt against Open Season (2006).mkv
+2026-09-07 17:25:19 [INFO] [200/381] IN_SYNC  Office Space (1999).eng.srt in 608.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 17:25:39 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 143556.0
+2026-09-07 17:25:39 [INFO] [203/381] syncing Oppenheimer (2023).eng.srt against Oppenheimer (2023).mkv
+2026-09-07 17:25:39 [INFO] [199/381] IN_SYNC  October Sky (1999).eng.srt in 787.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 17:32:38 [INFO] ffsubsync measured: offset -0.030s, framerate x1.000, score -157214.0
+2026-09-07 17:32:43 [INFO] fetched replacement subtitle id=12431950 (Marty.Supreme.2025.2160p.UHD.BluRay.REMUX.DV.P7.HDR.MULTi); retrying ffsubsync
+2026-09-07 17:34:07 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 51802.0
+2026-09-07 17:34:07 [INFO] [204/381] syncing Osmosis Jones (2001).eng.sdh.srt against Osmosis Jones (2001).mkv
+2026-09-07 17:34:07 [INFO] [202/381] IN_SYNC  Open Season (2006).eng.srt in 527.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 17:37:37 [INFO] ffsubsync measured: offset +23.050s, framerate x1.000, score -132307.0
+2026-09-07 17:37:41 [INFO] fetched replacement subtitle id=8384207 (Oppenheimer.2023.1080p.BluRay.x264.AAC5.1-[YTS); retrying ffsubsync
+2026-09-07 17:41:05 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 169738.0
+2026-09-07 17:41:05 [INFO] [205/381] syncing Over the Hedge (2006).eng.srt against Over the Hedge (2006).mkv
+2026-09-07 17:41:05 [INFO] [201/381] IN_SYNC  One Flew Over the Cuckoo's Nest (1975).eng.srt in 1349.8s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 17:43:14 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 90506.0
+2026-09-07 17:43:14 [INFO] [206/381] syncing Parasite (2019).eng.srt against Parasite (2019).mkv
+2026-09-07 17:43:14 [INFO] [204/381] IN_SYNC  Osmosis Jones (2001).eng.sdh.srt in 547.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 17:48:40 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 93868.0
+2026-09-07 17:48:40 [INFO] [207/381] syncing Pearl (2022).eng.srt against Pearl (2022).mkv
+2026-09-07 17:48:40 [INFO] [205/381] IN_SYNC  Over the Hedge (2006).eng.srt in 454.6s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 17:51:00 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score -159230.0
+2026-09-07 17:51:03 [INFO] fetched replacement subtitle id=8371858 (Oppenheimer.2023.1080p.MA.WEB-DL.DDP5.1.Atmos.H.264); retrying ffsubsync
+2026-09-07 17:55:57 [INFO] ffsubsync measured: offset -0.160s, framerate x1.000, score -12434.0
+2026-09-07 17:56:00 [INFO] fetched replacement subtitle id=12462810 (Marty Supreme 2025 USA A24 BluRay 2160p TrueHD7.1 DoVi HDR10 x265 10bit-CHD_track6_[eng]-eng); retrying ffsubsync
+2026-09-07 17:56:58 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 175123.0
+2026-09-07 17:56:58 [INFO] [208/381] syncing Pineapple Express (2008).eng.srt against Pineapple Express (2008).mkv
+2026-09-07 17:56:58 [INFO] [206/381] IN_SYNC  Parasite (2019).eng.srt in 823.8s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 18:04:35 [INFO] ffsubsync measured: offset -0.670s, framerate x1.000, score -158885.0
+2026-09-07 18:04:39 [INFO] fetched replacement subtitle id=8384554 (Oppenheimer.2023.1080p.BluRay.x264-Will1869); retrying ffsubsync
+2026-09-07 18:06:59 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score 299922.0
+2026-09-07 18:06:59 [INFO] [209/381] syncing Pirates of the Caribbean At World's End (2007).eng.srt against Pirates of the Caribbean At World's End (2007).mkv
+2026-09-07 18:06:59 [INFO] [207/381] IN_SYNC  Pearl (2022).eng.srt in 1099.3s (already aligned (offset -0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 18:11:42 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 115607.0
+2026-09-07 18:11:43 [INFO] [210/381] syncing Pirates of the Caribbean Dead Man's Chest (2006).eng.srt against Pirates of the Caribbean Dead Man's Chest (2006).mkv
+2026-09-07 18:11:43 [INFO] [208/381] IN_SYNC  Pineapple Express (2008).eng.srt in 884.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 18:17:38 [INFO] ffsubsync measured: offset -0.170s, framerate x1.000, score -39637.0
+2026-09-07 18:17:41 [INFO] [211/381] syncing Pirates of the Caribbean The Curse of the Black Pearl (2003).eng.srt against Pirates of the Caribbean The Curse of the Black Pearl (2003).mkv
+2026-09-07 18:17:41 [INFO] [178/381] REVIEW   Marty Supreme (2025).eng.srt in 10067.1s (ffsubsync's quality gate rejected the alignment; original kept for review; replacement fetch stopped: no unused qualifying English SRT for a replacement fetch)
+2026-09-07 18:17:47 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -36999.0
+2026-09-07 18:17:48 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 111175.0
+2026-09-07 18:17:48 [INFO] [212/381] syncing Pitch Perfect (2012).eng.srt against Pitch Perfect (2012).mkv
+2026-09-07 18:17:48 [INFO] [209/381] IN_SYNC  Pirates of the Caribbean At World's End (2007).eng.srt in 649.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 18:17:49 [INFO] fetched replacement subtitle id=8741566 (Oppenheimer.2023.IMAX.1080p.BluRay.CXWONG.en); retrying ffsubsync
+2026-09-07 18:21:54 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 244359.0
+2026-09-07 18:21:54 [INFO] [213/381] syncing Prisoners (2013).eng.srt against Prisoners (2013).mkv
+2026-09-07 18:21:54 [INFO] [210/381] IN_SYNC  Pirates of the Caribbean Dead Man's Chest (2006).eng.srt in 611.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 18:28:42 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -3677.0
+2026-09-07 18:28:45 [INFO] fetched replacement subtitle id=8542672 (Oppenheimer (2023) Bluray-1080p Proper.en); retrying ffsubsync
+2026-09-07 18:29:43 [INFO] ffsubsync measured: offset -0.060s, framerate x1.000, score 304463.0
+2026-09-07 18:29:43 [INFO] [214/381] syncing Project Hail Mary (2026).eng.srt against Project Hail Mary (2026).mkv
+2026-09-07 18:29:43 [INFO] [213/381] IN_SYNC  Prisoners (2013).eng.srt in 469.1s (already aligned (offset -0.060s, below the 0.1s threshold); original untouched)
+2026-09-07 18:30:24 [INFO] ffsubsync measured: offset +0.060s, framerate x1.000, score 133686.0
+2026-09-07 18:30:24 [INFO] [215/381] syncing Project X (2012).eng.srt against Project X (2012).mkv
+2026-09-07 18:30:24 [INFO] [212/381] IN_SYNC  Pitch Perfect (2012).eng.srt in 755.6s (already aligned (offset +0.060s, below the 0.1s threshold); original untouched)
+2026-09-07 18:30:25 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 166733.0
+2026-09-07 18:30:26 [INFO] [216/381] syncing Pulp Fiction (1994).eng.srt against Pulp Fiction (1994).mkv
+2026-09-07 18:30:26 [INFO] [211/381] IN_SYNC  Pirates of the Caribbean The Curse of the Black Pearl (2003).eng.srt in 764.6s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 18:42:18 [INFO] ffsubsync measured: offset +23.050s, framerate x1.000, score -132307.0
+2026-09-07 18:42:21 [INFO] fetched replacement subtitle id=8904109 (Oppenheimer.2023.NORDiC.1080p.BluRay.x264-EGEN.en); retrying ffsubsync
+2026-09-07 18:48:01 [INFO] ffsubsync measured: offset +1.540s, framerate x1.043, score 41714.3
+2026-09-07 18:48:01 [INFO] [217/381] syncing Ratatouille (2007).eng.srt against Ratatouille (2007).mkv
+2026-09-07 18:48:01 [INFO] [215/381] SYNCED   Project X (2012).eng.srt in 1056.9s (offset +1.540s, framerate x1.043)
+2026-09-07 18:56:01 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 76359.0
+2026-09-07 18:56:01 [INFO] [218/381] syncing Ready Player One (2018).eng.srt against Ready Player One (2018).mkv
+2026-09-07 18:56:01 [INFO] [216/381] IN_SYNC  Pulp Fiction (1994).eng.srt in 1534.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 18:56:12 [INFO] ffsubsync measured: offset +0.090s, framerate x1.000, score -103845.0
+2026-09-07 18:56:15 [INFO] fetched replacement subtitle id=8384209 (Oppenheimer.2023.1080p.BluRay.x264.AAC5.1-[YTS); retrying ffsubsync
+2026-09-07 18:58:17 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 120034.0
+2026-09-07 18:58:17 [INFO] [219/381] syncing Real Steel (2011).eng.srt against Real Steel (2011).mkv
+2026-09-07 18:58:17 [INFO] [217/381] IN_SYNC  Ratatouille (2007).eng.srt in 616.4s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 18:59:43 [INFO] [220/381] syncing Remember the Titans (2000).eng.srt against Remember the Titans (2000).mkv
+2026-09-07 18:59:43 [INFO] [214/381] FAILED   Project Hail Mary (2026).eng.srt in 1800.0s (ffsubsync timed out after 1800s)
+2026-09-07 19:07:43 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score -124737.0
+2026-09-07 19:07:45 [INFO] fetched replacement subtitle id=9361924 (Oppenheimer.2023.1080p.UHD.BluRay.DDP.5.1.HDR10.x265-c0kE); retrying ffsubsync
+2026-09-07 19:12:11 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 132253.0
+2026-09-07 19:12:11 [INFO] [221/381] syncing Requiem for a Dream (2000).eng.srt against Requiem for a Dream (2000).mkv
+2026-09-07 19:12:11 [INFO] [218/381] IN_SYNC  Ready Player One (2018).eng.srt in 970.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 19:17:06 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 103836.0
+2026-09-07 19:17:06 [INFO] [222/381] syncing Rise of the Planet of the Apes (2011).eng.srt against Rise of the Planet of the Apes (2011).mkv
+2026-09-07 19:17:06 [INFO] [219/381] IN_SYNC  Real Steel (2011).eng.srt in 1128.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 19:19:40 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score 20030.0
+2026-09-07 19:19:40 [INFO] [223/381] syncing Robots (2005).eng.srt against Robots (2005).mkv
+2026-09-07 19:19:40 [INFO] [220/381] IN_SYNC  Remember the Titans (2000).eng.srt in 1196.4s (already aligned (offset -0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 19:21:09 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score -41242.0
+2026-09-07 19:21:12 [INFO] fetched replacement subtitle id=11432950 (Oppenheimer.2023.1080p.BluRay.x265-YAWNTiC_eng); retrying ffsubsync
+2026-09-07 19:28:20 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 110101.0
+2026-09-07 19:28:20 [INFO] [224/381] syncing Rocky (1976).eng.srt against Rocky (1976).mkv
+2026-09-07 19:28:20 [INFO] [223/381] IN_SYNC  Robots (2005).eng.srt in 520.3s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 19:28:40 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 201333.0
+2026-09-07 19:28:40 [INFO] [225/381] syncing Room (2015).eng.srt against Room (2015).mkv
+2026-09-07 19:28:40 [INFO] [221/381] IN_SYNC  Requiem for a Dream (2000).eng.srt in 989.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 19:31:27 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -37457.0
+2026-09-07 19:31:30 [INFO] fetched replacement subtitle id=8371859 (Oppenheimer.2023.1080p.MA.WEB-DL.DDP5.1.Atmos.H.264 (SDH)); retrying ffsubsync
+2026-09-07 19:35:12 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 156756.0
+2026-09-07 19:35:12 [INFO] [226/381] syncing Sausage Party (2016).eng.srt against Sausage Party (2016).mkv
+2026-09-07 19:35:12 [INFO] [222/381] IN_SYNC  Rise of the Planet of the Apes (2011).eng.srt in 1086.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 19:38:45 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 138701.0
+2026-09-07 19:38:45 [INFO] [227/381] syncing Saving Private Ryan (1998).eng.srt against Saving Private Ryan (1998).mkv
+2026-09-07 19:38:45 [INFO] [224/381] IN_SYNC  Rocky (1976).eng.srt in 625.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 19:39:00 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 188050.0
+2026-09-07 19:39:00 [INFO] [228/381] syncing Saw (2004).eng.srt against Saw (2004).mkv
+2026-09-07 19:39:00 [INFO] [225/381] IN_SYNC  Room (2015).eng.srt in 620.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 19:42:34 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 1761.0
+2026-09-07 19:42:34 [INFO] [229/381] syncing Scarface (1983).eng.srt against Scarface (1983).mkv
+2026-09-07 19:42:34 [INFO] [226/381] IN_SYNC  Sausage Party (2016).eng.srt in 441.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 19:42:55 [INFO] ffsubsync measured: offset -0.670s, framerate x1.000, score -124392.0
+2026-09-07 19:42:55 [INFO] [230/381] syncing Schindler's List (1993).eng.srt against Schindler's List (1993).mkv
+2026-09-07 19:42:55 [INFO] [203/381] REVIEW   Oppenheimer (2023).eng.srt in 8235.3s (ffsubsync's quality gate rejected the alignment; original kept for review)
+2026-09-07 20:00:44 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 222988.0
+2026-09-07 20:00:45 [INFO] [231/381] syncing Scream (1996).eng.srt against Scream (1996).mkv
+2026-09-07 20:00:45 [INFO] [228/381] IN_SYNC  Saw (2004).eng.srt in 1304.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 20:01:30 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 216132.0
+2026-09-07 20:01:30 [INFO] [232/381] syncing Se7en (1995).eng.srt against Se7en (1995).mkv
+2026-09-07 20:01:30 [INFO] [229/381] IN_SYNC  Scarface (1983).eng.srt in 1136.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 20:04:50 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 234251.0
+2026-09-07 20:04:51 [INFO] [233/381] syncing Shark Tale (2004).eng.sdh.srt against Shark Tale (2004).mkv
+2026-09-07 20:04:51 [INFO] [227/381] IN_SYNC  Saving Private Ryan (1998).eng.srt in 1565.1s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 20:12:47 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 425943.0
+2026-09-07 20:12:47 [INFO] [234/381] syncing Shazam! (2019).eng.srt against Shazam! (2019).mkv
+2026-09-07 20:12:47 [INFO] [230/381] IN_SYNC  Schindler's List (1993).eng.srt in 1792.2s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 20:15:13 [INFO] ffsubsync measured: offset +0.050s, framerate x1.000, score 34951.0
+2026-09-07 20:15:13 [INFO] [235/381] syncing Shrek (2001).eng.srt against Shrek (2001).mkv
+2026-09-07 20:15:13 [INFO] [233/381] IN_SYNC  Shark Tale (2004).eng.sdh.srt in 622.0s (already aligned (offset +0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 20:21:52 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score 39116.0
+2026-09-07 20:21:52 [INFO] [236/381] syncing Shrek 2 (2004).eng.srt against Shrek 2 (2004).mkv
+2026-09-07 20:21:52 [INFO] [231/381] IN_SYNC  Scream (1996).eng.srt in 1267.6s (already aligned (offset -0.050s, below the 0.1s threshold); original untouched)
+2026-09-07 20:25:56 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 60693.0
+2026-09-07 20:25:56 [INFO] [237/381] syncing Shrek Forever After (2010).eng.srt against Shrek Forever After (2010).mkv
+2026-09-07 20:25:56 [INFO] [235/381] IN_SYNC  Shrek (2001).eng.srt in 643.6s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 20:31:31 [INFO] [238/381] syncing Shutter Island (2010).eng.srt against Shutter Island (2010).mkv
+2026-09-07 20:31:31 [INFO] [232/381] FAILED   Se7en (1995).eng.srt in 1800.2s (ffsubsync timed out after 1800s)
+2026-09-07 20:31:59 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 121273.0
+2026-09-07 20:31:59 [INFO] [239/381] syncing Sicario (2015).eng.srt against Sicario (2015).mkv
+2026-09-07 20:31:59 [INFO] [237/381] IN_SYNC  Shrek Forever After (2010).eng.srt in 363.0s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 20:33:01 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 219298.0
+2026-09-07 20:33:01 [INFO] [240/381] syncing Signs (2002).eng.srt against Signs (2002).mkv
+2026-09-07 20:33:01 [INFO] [234/381] IN_SYNC  Shazam! (2019).eng.srt in 1214.1s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 20:35:45 [INFO] ffsubsync measured: offset -0.030s, framerate x1.000, score 115474.0
+2026-09-07 20:35:45 [INFO] [241/381] syncing Sinister (2012).eng.srt against Sinister (2012).mkv
+2026-09-07 20:35:45 [INFO] [236/381] IN_SYNC  Shrek 2 (2004).eng.srt in 832.7s (already aligned (offset -0.030s, below the 0.1s threshold); original untouched)
+2026-09-07 20:42:04 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 312878.0
+2026-09-07 20:42:04 [INFO] [242/381] syncing Sinners (2025).eng.srt against Sinners (2025).mkv
+2026-09-07 20:42:04 [INFO] [239/381] IN_SYNC  Sicario (2015).eng.srt in 604.9s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 20:42:05 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 189497.0
+2026-09-07 20:42:05 [INFO] [243/381] syncing Skyfall (2012).eng.srt against Skyfall (2012).mkv
+2026-09-07 20:42:05 [INFO] [238/381] IN_SYNC  Shutter Island (2010).eng.srt in 634.0s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 20:48:12 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 286515.0
+2026-09-07 20:48:12 [INFO] [244/381] syncing Slumdog Millionaire (2008).eng.srt against Slumdog Millionaire (2008).mkv
+2026-09-07 20:48:12 [INFO] [241/381] IN_SYNC  Sinister (2012).eng.srt in 747.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 20:50:43 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 185407.0
+2026-09-07 20:50:43 [INFO] [245/381] syncing Snatch (2000).eng.srt against Snatch (2000).mkv
+2026-09-07 20:50:43 [INFO] [240/381] IN_SYNC  Signs (2002).eng.srt in 1061.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 20:59:52 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 424571.0
+2026-09-07 20:59:52 [INFO] [246/381] syncing Snowden (2016).eng.srt against Snowden (2016).mkv
+2026-09-07 20:59:52 [INFO] [243/381] IN_SYNC  Skyfall (2012).eng.srt in 1067.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:05:50 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 155964.0
+2026-09-07 21:05:50 [INFO] [247/381] syncing Source Code (2011).eng.srt against Source Code (2011).mkv
+2026-09-07 21:05:50 [INFO] [245/381] IN_SYNC  Snatch (2000).eng.srt in 906.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:06:07 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 185588.0
+2026-09-07 21:06:07 [INFO] [248/381] syncing Spaceballs (1987).eng.srt against Spaceballs (1987).mkv
+2026-09-07 21:06:07 [INFO] [244/381] IN_SYNC  Slumdog Millionaire (2008).eng.srt in 1075.2s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 21:07:46 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 301531.0
+2026-09-07 21:07:46 [INFO] [249/381] syncing Spider-Man (2002).eng.srt against Spider-Man (2002).mkv
+2026-09-07 21:07:46 [INFO] [242/381] IN_SYNC  Sinners (2025).eng.srt in 1542.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:13:07 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 65972.0
+2026-09-07 21:13:07 [INFO] [250/381] syncing Spider-Man - Across the Spider-Verse (2023).eng.srt against Spider-Man - Across the Spider-Verse (2023).mkv
+2026-09-07 21:13:07 [INFO] [246/381] IN_SYNC  Snowden (2016).eng.srt in 795.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:18:01 [INFO] ffsubsync measured: offset -0.090s, framerate x1.000, score 125673.0
+2026-09-07 21:18:01 [INFO] [251/381] syncing Spider-Man - Homecoming (2017).eng.srt against Spider-Man - Homecoming (2017).mkv
+2026-09-07 21:18:01 [INFO] [248/381] IN_SYNC  Spaceballs (1987).eng.srt in 713.8s (already aligned (offset -0.090s, below the 0.1s threshold); original untouched)
+2026-09-07 21:20:32 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 119579.0
+2026-09-07 21:20:32 [INFO] [252/381] syncing Spider-Man - Into the Spider-Verse (2018).eng.srt against Spider-Man - Into the Spider-Verse (2018).mkv
+2026-09-07 21:20:32 [INFO] [247/381] IN_SYNC  Source Code (2011).eng.srt in 882.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:27:19 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 175898.0
+2026-09-07 21:27:19 [INFO] [253/381] syncing Spider-Man 2 (2004).eng.srt against Spider-Man 2 (2004).mkv
+2026-09-07 21:27:19 [INFO] [249/381] IN_SYNC  Spider-Man (2002).eng.srt in 1173.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:34:22 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 181093.0
+2026-09-07 21:34:22 [INFO] [254/381] syncing Spider-Man No Way Home (2021).eng.srt against Spider-Man No Way Home (2021).mkv
+2026-09-07 21:34:22 [INFO] [251/381] IN_SYNC  Spider-Man - Homecoming (2017).eng.srt in 980.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:35:11 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 53706.0
+2026-09-07 21:35:11 [INFO] [255/381] syncing Spirited Away (2001).eng.srt against Spirited Away (2001).mkv
+2026-09-07 21:35:11 [INFO] [252/381] IN_SYNC  Spider-Man - Into the Spider-Verse (2018).eng.srt in 878.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:35:12 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 65790.0
+2026-09-07 21:35:12 [INFO] [256/381] syncing Split (2016).eng.srt against Split (2016).mkv
+2026-09-07 21:35:12 [INFO] [250/381] IN_SYNC  Spider-Man - Across the Spider-Verse (2023).eng.srt in 1325.1s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 21:42:32 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 265995.0
+2026-09-07 21:42:32 [INFO] [257/381] syncing Stalker (1979).eng.srt against Stalker (1979).mkv
+2026-09-07 21:42:32 [INFO] [256/381] IN_SYNC  Split (2016).eng.srt in 439.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:47:24 [INFO] ffsubsync measured: offset -0.090s, framerate x1.000, score 208231.0
+2026-09-07 21:47:24 [INFO] [258/381] syncing Stand by Me (1986).eng.srt against Stand by Me (1986).mkv
+2026-09-07 21:47:24 [INFO] [254/381] IN_SYNC  Spider-Man No Way Home (2021).eng.srt in 781.8s (already aligned (offset -0.090s, below the 0.1s threshold); original untouched)
+2026-09-07 21:49:08 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 325954.0
+2026-09-07 21:49:08 [INFO] [259/381] syncing Star Trek (2009).eng.srt against Star Trek (2009).mkv
+2026-09-07 21:49:08 [INFO] [253/381] IN_SYNC  Spider-Man 2 (2004).eng.srt in 1308.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 21:54:18 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 275898.0
+2026-09-07 21:54:18 [INFO] [260/381] syncing Star Trek - Into Darkness (2013).eng.srt against Star Trek - Into Darkness (2013).mkv
+2026-09-07 21:54:18 [INFO] [255/381] IN_SYNC  Spirited Away (2001).eng.srt in 1147.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 22:00:00 [INFO] ffsubsync measured: offset -0.030s, framerate x1.000, score 148084.0
+2026-09-07 22:00:00 [INFO] [261/381] syncing Star Wars - Episode I - The Phantom Menace (1999).eng.srt against Star Wars - Episode I - The Phantom Menace (1999).mkv
+2026-09-07 22:00:00 [INFO] [258/381] IN_SYNC  Stand by Me (1986).eng.srt in 756.6s (already aligned (offset -0.030s, below the 0.1s threshold); original untouched)
+2026-09-07 22:04:46 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 145140.0
+2026-09-07 22:04:46 [INFO] [262/381] syncing Star Wars - Episode II - Attack of the Clones (2002).eng.srt against Star Wars - Episode II - Attack of the Clones (2002).mkv
+2026-09-07 22:04:46 [INFO] [259/381] IN_SYNC  Star Trek (2009).eng.srt in 937.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 22:05:54 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 517905.0
+2026-09-07 22:05:54 [INFO] [263/381] syncing Star Wars - Episode III - Revenge of the Sith (2005).eng.srt against Star Wars - Episode III - Revenge of the Sith (2005).mkv
+2026-09-07 22:05:54 [INFO] [257/381] IN_SYNC  Stalker (1979).eng.srt in 1402.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 22:13:15 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 174557.0
+2026-09-07 22:13:15 [INFO] [264/381] syncing Star Wars - Episode IV - A New Hope (1977).eng.srt against Star Wars - Episode IV - A New Hope (1977).mkv
+2026-09-07 22:13:15 [INFO] [260/381] IN_SYNC  Star Trek - Into Darkness (2013).eng.srt in 1137.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 22:19:19 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 205152.0
+2026-09-07 22:19:20 [INFO] [265/381] syncing Star Wars - Episode V - The Empire Strikes Back (1980).eng.srt against Star Wars - Episode V - The Empire Strikes Back (1980).mkv
+2026-09-07 22:19:20 [INFO] [262/381] IN_SYNC  Star Wars - Episode II - Attack of the Clones (2002).eng.srt in 873.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 22:22:13 [INFO] ffsubsync measured: offset -28.250s, framerate x1.042, score 68022.2
+2026-09-07 22:22:13 [INFO] [266/381] syncing Star Wars - Episode VI - Return of the Jedi (1983).eng.srt against Star Wars - Episode VI - Return of the Jedi (1983).mkv
+2026-09-07 22:22:13 [INFO] [261/381] SYNCED   Star Wars - Episode I - The Phantom Menace (1999).eng.srt in 1333.1s (offset -28.250s, framerate x1.042)
+2026-09-07 22:25:09 [INFO] ffsubsync measured: offset -39.030s, framerate x1.042, score 201860.9
+2026-09-07 22:25:12 [INFO] fetched replacement subtitle id=4627609 (Star.Wars.Episode.III.Revenge.Of.The.Sith.2005.1080p.HDTV.x264-hV.Eng); retrying ffsubsync
+2026-09-07 22:29:35 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 131458.0
+2026-09-07 22:29:35 [INFO] [267/381] syncing Straight Outta Compton (2015).eng.srt against Straight Outta Compton (2015).mkv
+2026-09-07 22:29:35 [INFO] [264/381] IN_SYNC  Star Wars - Episode IV - A New Hope (1977).eng.srt in 979.7s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 22:34:51 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 208711.0
+2026-09-07 22:34:51 [INFO] [268/381] syncing Super 8 (2011).eng.srt against Super 8 (2011).mkv
+2026-09-07 22:34:51 [INFO] [265/381] IN_SYNC  Star Wars - Episode V - The Empire Strikes Back (1980).eng.srt in 931.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 22:43:31 [INFO] ffsubsync measured: offset -0.120s, framerate x1.043, score 246805.9
+2026-09-07 22:43:32 [INFO] [269/381] syncing Superbad (2007).eng.srt against Superbad (2007).mkv
+2026-09-07 22:43:32 [INFO] [266/381] SYNCED   Star Wars - Episode VI - Return of the Jedi (1983).eng.srt in 1278.1s (offset -0.120s, framerate x1.043)
+2026-09-07 22:45:34 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 67927.0
+2026-09-07 22:45:34 [INFO] [270/381] syncing Surf's Up (2007).eng.srt against Surf's Up (2007).mkv
+2026-09-07 22:45:34 [INFO] [267/381] IN_SYNC  Straight Outta Compton (2015).eng.srt in 959.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 22:47:28 [INFO] ffsubsync measured: offset +3.180s, framerate x1.043, score 217236.1
+2026-09-07 22:47:28 [INFO] [271/381] syncing Taken (2008).eng.srt against Taken (2008).mkv
+2026-09-07 22:47:28 [INFO] [263/381] SYNCED   Star Wars - Episode III - Revenge of the Sith (2005).eng.srt in 2493.5s (offset +3.180s, framerate x1.043)
+2026-09-07 22:50:02 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 108328.0
+2026-09-07 22:50:02 [INFO] [272/381] syncing Tangled (2010).eng.srt against Tangled (2010).mkv
+2026-09-07 22:50:02 [INFO] [268/381] IN_SYNC  Super 8 (2011).eng.srt in 910.3s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 22:50:15 [INFO] ffsubsync measured: offset -0.040s, framerate x1.001, score 3488.7
+2026-09-07 22:50:16 [INFO] [273/381] syncing Taxi Driver (1976).eng.srt against Taxi Driver (1976).mkv
+2026-09-07 22:50:16 [INFO] [269/381] IN_SYNC  Superbad (2007).eng.srt in 404.0s (already aligned (offset -0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 22:56:28 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 82367.0
+2026-09-07 22:56:29 [INFO] [274/381] syncing Ted (2012).eng.srt against Ted (2012).mkv
+2026-09-07 22:56:29 [INFO] [270/381] IN_SYNC  Surf's Up (2007).eng.srt in 654.7s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 23:00:28 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 79341.0
+2026-09-07 23:00:28 [INFO] [275/381] syncing Tenet (2020).eng.srt against Tenet (2020).mkv
+2026-09-07 23:00:28 [INFO] [272/381] IN_SYNC  Tangled (2010).eng.srt in 626.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 23:02:14 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 171488.0
+2026-09-07 23:02:14 [INFO] [276/381] syncing Terminator 2 - Judgment Day (1991).eng.srt against Terminator 2 - Judgment Day (1991).mkv
+2026-09-07 23:02:14 [INFO] [271/381] IN_SYNC  Taken (2008).eng.srt in 885.9s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 23:04:32 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 44635.0
+2026-09-07 23:04:32 [INFO] [277/381] syncing Tetris (2023).eng.srt against Tetris (2023).mkv
+2026-09-07 23:04:32 [INFO] [274/381] IN_SYNC  Ted (2012).eng.srt in 483.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 23:09:53 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 169361.0
+2026-09-07 23:09:54 [INFO] [278/381] syncing The Accountant (2016).eng.srt against The Accountant (2016).mkv
+2026-09-07 23:09:54 [INFO] [273/381] IN_SYNC  Taxi Driver (1976).eng.srt in 1178.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 23:13:04 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 185803.0
+2026-09-07 23:13:05 [INFO] [279/381] syncing The Amazing Spider-Man (2012).eng.srt against The Amazing Spider-Man (2012).mkv
+2026-09-07 23:13:05 [INFO] [277/381] IN_SYNC  Tetris (2023).eng.srt in 512.2s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-07 23:14:28 [INFO] ffsubsync measured: offset +33.540s, framerate x0.960, score 297333.0
+2026-09-07 23:14:31 [INFO] fetched replacement subtitle id=262218 (Terminator.2.Judgment.Day.1991.DC.1080p.BluRay.x264.DTS-FGT); retrying ffsubsync
+2026-09-07 23:19:38 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 78500.0
+2026-09-07 23:19:39 [INFO] [280/381] syncing The Avengers (2012).eng.srt against The Avengers (2012).mkv
+2026-09-07 23:19:39 [INFO] [275/381] IN_SYNC  Tenet (2020).eng.srt in 1150.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 23:24:16 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 315123.0
+2026-09-07 23:24:17 [INFO] [281/381] syncing The Batman (2022).eng.srt against The Batman (2022).mkv
+2026-09-07 23:24:17 [INFO] [279/381] IN_SYNC  The Amazing Spider-Man (2012).eng.srt in 671.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 23:28:18 [INFO] ffsubsync measured: offset +0.070s, framerate x1.000, score 159866.0
+2026-09-07 23:28:18 [INFO] [282/381] syncing The Big Lebowski (1998).eng.srt against The Big Lebowski (1998).mkv
+2026-09-07 23:28:18 [INFO] [278/381] IN_SYNC  The Accountant (2016).eng.srt in 1104.5s (already aligned (offset +0.070s, below the 0.1s threshold); original untouched)
+2026-09-07 23:28:45 [INFO] ffsubsync measured: offset -34.960s, framerate x0.959, score 298317.0
+2026-09-07 23:28:47 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 204933.0
+2026-09-07 23:28:47 [INFO] [283/381] syncing The Big Short (2015).eng.srt against The Big Short (2015).mkv
+2026-09-07 23:28:47 [INFO] [280/381] IN_SYNC  The Avengers (2012).eng.srt in 548.1s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-07 23:28:48 [INFO] fetched replacement subtitle id=253306 (Terminator.2.Judgment.Day.Skynet.Edition.1991.1080p.BluRay.DTS.x264-HDC); retrying ffsubsync
+2026-09-07 23:39:13 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 81935.0
+2026-09-07 23:39:14 [INFO] [284/381] syncing The Book of Eli (2010).eng.srt against The Book of Eli (2010).mkv
+2026-09-07 23:39:14 [INFO] [282/381] IN_SYNC  The Big Lebowski (1998).eng.srt in 655.5s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-07 23:41:43 [INFO] ffsubsync measured: offset +24.540s, framerate x0.960, score 300949.0
+2026-09-07 23:41:43 [INFO] [285/381] syncing The Bourne Identity (2002).eng.srt against The Bourne Identity (2002).mkv
+2026-09-07 23:41:43 [INFO] [276/381] SYNCED   Terminator 2 - Judgment Day (1991).eng.srt in 2369.1s (offset +24.540s, framerate x0.960)
+2026-09-07 23:50:53 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score -22187.0
+2026-09-07 23:50:57 [INFO] fetched replacement subtitle id=3947244 (The.Big.Short.2015.1080p.WEB-DL.DD5.1); retrying ffsubsync
+2026-09-07 23:51:41 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 293815.0
+2026-09-07 23:51:41 [INFO] [286/381] syncing The Bourne Supremacy (2004).eng.srt against The Bourne Supremacy (2004).mkv
+2026-09-07 23:51:41 [INFO] [281/381] IN_SYNC  The Batman (2022).eng.srt in 1644.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 23:53:21 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 231672.0
+2026-09-07 23:53:21 [INFO] [287/381] syncing The Bourne Ultimatum (2007).eng.srt against The Bourne Ultimatum (2007).mkv
+2026-09-07 23:53:21 [INFO] [284/381] IN_SYNC  The Book of Eli (2010).eng.srt in 847.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-07 23:53:26 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 265613.0
+2026-09-07 23:53:26 [INFO] [288/381] syncing The Boy in the Striped Pyjamas (2008).eng.srt against The Boy in the Striped Pyjamas (2008).mkv
+2026-09-07 23:53:26 [INFO] [285/381] IN_SYNC  The Bourne Identity (2002).eng.srt in 703.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 00:06:20 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 244321.0
+2026-09-08 00:06:20 [INFO] [289/381] syncing The Breakfast Club (1985).eng.srt against The Breakfast Club (1985).mkv
+2026-09-08 00:06:20 [INFO] [288/381] IN_SYNC  The Boy in the Striped Pyjamas (2008).eng.srt in 773.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 00:07:58 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 275150.0
+2026-09-08 00:07:58 [INFO] [290/381] syncing The Curious Case of Benjamin Button (2008).eng.srt against The Curious Case of Benjamin Button (2008).mkv
+2026-09-08 00:07:58 [INFO] [286/381] IN_SYNC  The Bourne Supremacy (2004).eng.srt in 977.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 00:08:45 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 237099.0
+2026-09-08 00:08:45 [INFO] [291/381] syncing The Dark Knight (2008).eng.srt against The Dark Knight (2008).mkv
+2026-09-08 00:08:45 [INFO] [287/381] IN_SYNC  The Bourne Ultimatum (2007).eng.srt in 923.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 00:13:39 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score -61050.0
+2026-09-08 00:13:42 [INFO] fetched replacement subtitle id=3947205 (The.Big.Short.2015.1080p.WEB-DL.DD5.1); retrying ffsubsync
+2026-09-08 00:18:08 [INFO] ffsubsync measured: offset -0.070s, framerate x1.000, score 150163.0
+2026-09-08 00:18:08 [INFO] [292/381] syncing The Dark Knight Rises (2012).eng.srt against The Dark Knight Rises (2012).mkv
+2026-09-08 00:18:08 [INFO] [289/381] IN_SYNC  The Breakfast Club (1985).eng.srt in 708.3s (already aligned (offset -0.070s, below the 0.1s threshold); original untouched)
+2026-09-08 00:25:55 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 121063.0
+2026-09-08 00:25:55 [INFO] [293/381] syncing The Day After (1983).eng.srt against The Day After (1983).mkv
+2026-09-08 00:25:55 [INFO] [290/381] IN_SYNC  The Curious Case of Benjamin Button (2008).eng.srt in 1077.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 00:33:14 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 353644.0
+2026-09-08 00:33:15 [INFO] [294/381] syncing The Departed (2006).eng.srt against The Departed (2006).mkv
+2026-09-08 00:33:15 [INFO] [293/381] IN_SYNC  The Day After (1983).eng.srt in 439.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 00:35:51 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 56880.0
+2026-09-08 00:35:51 [INFO] [295/381] syncing The Edge of Seventeen (2016).eng.srt against The Edge of Seventeen (2016).mkv
+2026-09-08 00:35:51 [INFO] [291/381] IN_SYNC  The Dark Knight (2008).eng.srt in 1626.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 00:36:41 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score 115344.0
+2026-09-08 00:36:41 [INFO] [296/381] syncing The Emperor's New Groove (2000).eng.srt against The Emperor's New Groove (2000).mkv
+2026-09-08 00:36:41 [INFO] [292/381] IN_SYNC  The Dark Knight Rises (2012).eng.srt in 1112.8s (already aligned (offset -0.080s, below the 0.1s threshold); original untouched)
+2026-09-08 00:37:34 [INFO] ffsubsync measured: offset +0.080s, framerate x1.000, score -65482.0
+2026-09-08 00:37:37 [INFO] fetched replacement subtitle id=3949963 (The.Big.Short.2015.720p.BluRay.x264-Replica); retrying ffsubsync
+2026-09-08 00:42:36 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score 79466.0
+2026-09-08 00:42:36 [INFO] [297/381] syncing The Fast and the Furious (2001).eng.srt against The Fast and the Furious (2001).mkv
+2026-09-08 00:42:36 [INFO] [296/381] IN_SYNC  The Emperor's New Groove (2000).eng.srt in 355.4s (already aligned (offset +0.030s, below the 0.1s threshold); original untouched)
+2026-09-08 00:55:05 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 207809.0
+2026-09-08 00:55:05 [INFO] [298/381] syncing The Founder (2016).eng.srt against The Founder (2016).mkv
+2026-09-08 00:55:05 [INFO] [295/381] IN_SYNC  The Edge of Seventeen (2016).eng.srt in 1154.1s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-08 00:59:22 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score -19117.0
+2026-09-08 00:59:25 [INFO] fetched replacement subtitle id=11486810 (The.Big.Short.2015.720p.BluRay.x264-[YTS.AG]bubulac); retrying ffsubsync
+2026-09-08 01:00:10 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 171627.0
+2026-09-08 01:00:10 [INFO] [299/381] syncing The Godfather (1972).eng.srt against The Godfather (1972).mkv
+2026-09-08 01:00:10 [INFO] [294/381] IN_SYNC  The Departed (2006).eng.srt in 1615.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 01:09:10 [INFO] ffsubsync measured: offset +0.070s, framerate x1.000, score 187454.0
+2026-09-08 01:09:10 [INFO] [300/381] syncing The Godfather - Part II (1974).eng.srt against The Godfather - Part II (1974).mkv
+2026-09-08 01:09:10 [INFO] [297/381] IN_SYNC  The Fast and the Furious (2001).eng.srt in 1593.8s (already aligned (offset +0.070s, below the 0.1s threshold); original untouched)
+2026-09-08 01:09:27 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 101904.0
+2026-09-08 01:09:27 [INFO] [301/381] syncing The Goonies (1985).eng.srt against The Goonies (1985).mkv
+2026-09-08 01:09:27 [INFO] [298/381] IN_SYNC  The Founder (2016).eng.srt in 861.7s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-08 01:25:22 [INFO] ffsubsync measured: offset -0.660s, framerate x1.000, score -141731.0
+2026-09-08 01:25:25 [INFO] fetched replacement subtitle id=3949824 (The-Big-Short-2015-BDRip-x264-DiAMOND); retrying ffsubsync
+2026-09-08 01:30:11 [INFO] [302/381] syncing The Green Mile (1999).eng.srt against The Green Mile (1999).mkv
+2026-09-08 01:30:11 [INFO] [299/381] FAILED   The Godfather (1972).eng.srt in 1800.2s (ffsubsync timed out after 1800s)
+2026-09-08 01:30:32 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 85936.0
+2026-09-08 01:30:32 [INFO] [303/381] syncing The Hangover (2009).eng.srt against The Hangover (2009).mkv
+2026-09-08 01:30:32 [INFO] [301/381] IN_SYNC  The Goonies (1985).eng.srt in 1265.1s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-08 01:39:11 [INFO] [304/381] syncing The Help (2011).eng.srt against The Help (2011).mkv
+2026-09-08 01:39:11 [INFO] [300/381] FAILED   The Godfather - Part II (1974).eng.srt in 1800.3s (ffsubsync timed out after 1800s)
+2026-09-08 01:50:49 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 29453.0
+2026-09-08 01:50:49 [INFO] [305/381] syncing The Hunger Games (2012).eng.srt against The Hunger Games (2012).mkv
+2026-09-08 01:50:49 [INFO] [303/381] IN_SYNC  The Hangover (2009).eng.srt in 1217.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 01:53:02 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score -22187.0
+2026-09-08 01:53:06 [INFO] fetched replacement subtitle id=3949795 (The-Big-Short-2015-BDRip-x264-DiAMOND); retrying ffsubsync
+2026-09-08 01:55:34 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 254341.0
+2026-09-08 01:55:35 [INFO] [306/381] syncing The Hunger Games - Mockingjay - Part 1 (2014).eng.srt against The Hunger Games - Mockingjay - Part 1 (2014).mkv
+2026-09-08 01:55:35 [INFO] [304/381] IN_SYNC  The Help (2011).eng.srt in 983.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 02:00:11 [INFO] [307/381] syncing The Hunger Games - Mockingjay - Part 2 (2015).eng.srt against The Hunger Games - Mockingjay - Part 2 (2015).mkv
+2026-09-08 02:00:11 [INFO] [302/381] FAILED   The Green Mile (1999).eng.srt in 1800.3s (ffsubsync timed out after 1800s)
+2026-09-08 02:07:54 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 356098.0
+2026-09-08 02:07:55 [INFO] [308/381] syncing The Hunger Games Catching Fire (2013).eng.srt against The Hunger Games Catching Fire (2013).mkv
+2026-09-08 02:07:55 [INFO] [305/381] IN_SYNC  The Hunger Games (2012).eng.srt in 1025.1s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 02:09:10 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 172720.0
+2026-09-08 02:09:10 [INFO] [309/381] syncing The Hurt Locker (2008).eng.srt against The Hurt Locker (2008).mkv
+2026-09-08 02:09:10 [INFO] [306/381] IN_SYNC  The Hunger Games - Mockingjay - Part 1 (2014).eng.srt in 815.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 02:13:28 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score 279214.0
+2026-09-08 02:13:28 [INFO] [310/381] syncing The Imitation Game (2014).eng.srt against The Imitation Game (2014).mkv
+2026-09-08 02:13:28 [INFO] [307/381] IN_SYNC  The Hunger Games - Mockingjay - Part 2 (2015).eng.srt in 796.2s (already aligned (offset -0.080s, below the 0.1s threshold); original untouched)
+2026-09-08 02:19:38 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score -11572.0
+2026-09-08 02:19:41 [INFO] fetched replacement subtitle id=3949857 (The.Big.Short.2015.720p.BluRay.x264-Replica.HI); retrying ffsubsync
+2026-09-08 02:27:25 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 222615.0
+2026-09-08 02:27:26 [INFO] [311/381] syncing The Incredibles (2004).eng.srt against The Incredibles (2004).mkv
+2026-09-08 02:27:26 [INFO] [310/381] IN_SYNC  The Imitation Game (2014).eng.srt in 837.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 02:30:24 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 304844.0
+2026-09-08 02:30:24 [INFO] [312/381] syncing The Interview (2014).eng.srt against The Interview (2014).mkv
+2026-09-08 02:30:24 [INFO] [308/381] IN_SYNC  The Hunger Games Catching Fire (2013).eng.srt in 1349.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 02:32:11 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 376336.0
+2026-09-08 02:32:11 [INFO] [313/381] syncing The Invisible Man (2020).eng.srt against The Invisible Man (2020).mkv
+2026-09-08 02:32:11 [INFO] [309/381] IN_SYNC  The Hurt Locker (2008).eng.srt in 1381.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 02:41:13 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 35596.0
+2026-09-08 02:41:14 [INFO] [314/381] syncing The Karate Kid (1984).eng.srt against The Karate Kid (1984).mkv
+2026-09-08 02:41:14 [INFO] [312/381] IN_SYNC  The Interview (2014).eng.srt in 649.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 02:42:42 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 293338.0
+2026-09-08 02:42:42 [INFO] [315/381] syncing The Longest Yard (2005).eng.srt against The Longest Yard (2005).mkv
+2026-09-08 02:42:42 [INFO] [313/381] IN_SYNC  The Invisible Man (2020).eng.srt in 630.9s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-08 02:45:25 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score -11272.0
+2026-09-08 02:45:27 [INFO] fetched replacement subtitle id=3950166 (The.Big.Short.2015.720p.BluRay.x264-Replica-HI); retrying ffsubsync
+2026-09-08 02:48:37 [INFO] ffsubsync measured: offset -0.020s, framerate x1.000, score 135722.0
+2026-09-08 02:48:37 [INFO] [316/381] syncing The Lord of the Rings The Fellowship of the Ring (2001).eng.srt against The Lord of the Rings The Fellowship of the Ring (2001).mkv
+2026-09-08 02:48:37 [INFO] [311/381] IN_SYNC  The Incredibles (2004).eng.srt in 1270.8s (already aligned (offset -0.020s, below the 0.1s threshold); original untouched)
+2026-09-08 02:56:46 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 61652.0
+2026-09-08 02:56:46 [INFO] [317/381] syncing The Lord of the Rings The Return of the King (2003).eng.srt against The Lord of the Rings The Return of the King (2003).mkv
+2026-09-08 02:56:46 [INFO] [315/381] IN_SYNC  The Longest Yard (2005).eng.srt in 843.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 03:03:00 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 201509.0
+2026-09-08 03:03:00 [INFO] [318/381] syncing The Lord of the Rings The Two Towers (2002).eng.srt against The Lord of the Rings The Two Towers (2002).mkv
+2026-09-08 03:03:00 [INFO] [314/381] IN_SYNC  The Karate Kid (1984).eng.srt in 1305.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 03:08:00 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score 276806.0
+2026-09-08 03:08:00 [INFO] [319/381] syncing The Martian (2015).eng.srt against The Martian (2015).mkv
+2026-09-08 03:08:00 [INFO] [316/381] IN_SYNC  The Lord of the Rings The Fellowship of the Ring (2001).eng.srt in 1162.9s (already aligned (offset -0.050s, below the 0.1s threshold); original untouched)
+2026-09-08 03:08:31 [INFO] ffsubsync measured: offset -0.050s, framerate x1.000, score -7032.0
+2026-09-08 03:08:34 [INFO] [320/381] syncing The Matrix (1999).eng.srt against The Matrix (1999).mkv
+2026-09-08 03:08:34 [INFO] [283/381] REVIEW   The Big Short (2015).eng.srt in 13184.5s (ffsubsync's quality gate rejected the alignment; original kept for review; replacement fetch stopped: no unused qualifying English SRT for a replacement fetch)
+2026-09-08 03:19:11 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 92405.0
+2026-09-08 03:19:11 [INFO] [321/381] syncing The Maze Runner (2014).eng.srt against The Maze Runner (2014).mkv
+2026-09-08 03:19:11 [INFO] [319/381] IN_SYNC  The Martian (2015).eng.srt in 671.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 03:24:37 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 286887.0
+2026-09-08 03:24:37 [INFO] [322/381] syncing The Nightmare Before Christmas (1993).eng.srt against The Nightmare Before Christmas (1993).mkv
+2026-09-08 03:24:37 [INFO] [318/381] IN_SYNC  The Lord of the Rings The Two Towers (2002).eng.srt in 1297.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 03:26:32 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 279774.0
+2026-09-08 03:26:32 [INFO] [323/381] syncing The Polar Express (2004).eng.srt against The Polar Express (2004).mkv
+2026-09-08 03:26:32 [INFO] [320/381] IN_SYNC  The Matrix (1999).eng.srt in 1077.6s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 03:26:46 [INFO] [324/381] syncing The Prestige (2006).eng.srt against The Prestige (2006).mkv
+2026-09-08 03:26:46 [INFO] [317/381] FAILED   The Lord of the Rings The Return of the King (2003).eng.srt in 1800.1s (ffsubsync timed out after 1800s)
+2026-09-08 03:31:03 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 211054.0
+2026-09-08 03:31:03 [INFO] [325/381] syncing The Princess and the Frog (2009).eng.srt against The Princess and the Frog (2009).mkv
+2026-09-08 03:31:03 [INFO] [321/381] IN_SYNC  The Maze Runner (2014).eng.srt in 711.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 03:32:52 [INFO] ffsubsync measured: offset +0.130s, framerate x1.000, score -61975.0
+2026-09-08 03:32:54 [INFO] fetched replacement subtitle id=229725 (The.Nightmare.Before.Christmas.1993.1080p.BluRay.DTS-ES.x264-ESiR.ENG); retrying ffsubsync
+2026-09-08 03:36:41 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 148474.0
+2026-09-08 03:36:42 [INFO] [326/381] syncing The Proposal (2009).eng.srt against The Proposal (2009).mkv
+2026-09-08 03:36:42 [INFO] [323/381] IN_SYNC  The Polar Express (2004).eng.srt in 609.4s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-08 03:36:48 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 3290.0
+2026-09-08 03:36:49 [INFO] [327/381] syncing The Revenant (2015).eng.srt against The Revenant (2015).mkv
+2026-09-08 03:36:49 [INFO] [324/381] IN_SYNC  The Prestige (2006).eng.srt in 602.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 03:41:50 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score -125910.0
+2026-09-08 03:41:53 [INFO] fetched replacement subtitle id=12634402 (The.Princess.and.the.Frog.2009.1080p.BluRay.x264-nikt0.en); retrying ffsubsync
+2026-09-08 03:44:16 [INFO] ffsubsync measured: offset -0.040s, framerate x1.000, score -67441.0
+2026-09-08 03:44:19 [INFO] fetched replacement subtitle id=228179 (The.Nightmare.Before.Christmas.1993.1080p.BluRay.x264-CiNEFiLE.Eng); retrying ffsubsync
+2026-09-08 03:50:37 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 45846.0
+2026-09-08 03:50:37 [INFO] [328/381] syncing The Sandlot (1993).eng.srt against The Sandlot (1993).mkv
+2026-09-08 03:50:37 [INFO] [326/381] IN_SYNC  The Proposal (2009).eng.srt in 835.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 03:52:18 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score -7098.0
+2026-09-08 03:52:20 [INFO] fetched replacement subtitle id=20667 (The.Princess.and.the.Frog.2009.1080p.BluRay.Hebrew.Dubbed.Also.English.DTS.x264-Extinct); retrying ffsubsync
+2026-09-08 03:54:29 [INFO] ffsubsync measured: offset +0.290s, framerate x1.000, score -80981.0
+2026-09-08 03:54:32 [INFO] fetched replacement subtitle id=235893 (The.Nightmare.Before.Christmas.1993.1080p.BluRay.H264.AAC-RARBG); retrying ffsubsync
+2026-09-08 03:55:04 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 484068.0
+2026-09-08 03:55:04 [INFO] [329/381] syncing The Shawshank Redemption (1994).eng.srt against The Shawshank Redemption (1994).mkv
+2026-09-08 03:55:04 [INFO] [327/381] IN_SYNC  The Revenant (2015).eng.srt in 1095.1s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-08 04:02:24 [INFO] ffsubsync measured: offset -0.370s, framerate x1.000, score -20741.0
+2026-09-08 04:02:26 [INFO] fetched replacement subtitle id=12634401 (The.Princess.and.the.Frog.2009.1080p.BluRay.x264-nikt0.SDH.en); retrying ffsubsync
+2026-09-08 04:02:49 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 83689.0
+2026-09-08 04:02:49 [INFO] [330/381] syncing The Silence of the Lambs (1991).eng.srt against The Silence of the Lambs (1991).mkv
+2026-09-08 04:02:49 [INFO] [328/381] IN_SYNC  The Sandlot (1993).eng.srt in 732.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 04:06:19 [INFO] ffsubsync measured: offset -0.110s, framerate x1.000, score -59191.0
+2026-09-08 04:06:22 [INFO] fetched replacement subtitle id=7939205 (The.Nightmare.Before.Christmas.1993.1080p.BluRay.x265-RARBG.en); retrying ffsubsync
+2026-09-08 04:11:37 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score -7962.0
+2026-09-08 04:11:40 [INFO] fetched replacement subtitle id=16789 (The.Princess.And.The.Frog.2009.480p.BRRip.XviD.AC3-Rx); retrying ffsubsync
+2026-09-08 04:15:35 [INFO] ffsubsync measured: offset -0.140s, framerate x1.000, score -36757.0
+2026-09-08 04:15:38 [INFO] fetched replacement subtitle id=6801502 (The.Nightmare.Before.Christmas.1993.1080p.BluRay.H264.AAC-RARBG); retrying ffsubsync
+2026-09-08 04:16:15 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 284827.0
+2026-09-08 04:16:15 [INFO] [331/381] syncing The Sixth Sense (1999).eng.srt against The Sixth Sense (1999).mkv
+2026-09-08 04:16:15 [INFO] [329/381] IN_SYNC  The Shawshank Redemption (1994).eng.srt in 1271.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 04:20:44 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 183553.0
+2026-09-08 04:20:44 [INFO] [332/381] syncing The Social Network (2010).eng.srt against The Social Network (2010).mkv
+2026-09-08 04:20:44 [INFO] [330/381] IN_SYNC  The Silence of the Lambs (1991).eng.srt in 1074.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 04:20:53 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score -125910.0
+2026-09-08 04:20:55 [INFO] [333/381] syncing The Substance (2024).eng.srt against The Substance (2024).mkv
+2026-09-08 04:20:55 [INFO] [325/381] REVIEW   The Princess and the Frog (2009).eng.srt in 2989.7s (ffsubsync's quality gate rejected the alignment; original kept for review; replacement fetch stopped: no unused qualifying English SRT for a replacement fetch)
+2026-09-08 04:25:44 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 250973.0
+2026-09-08 04:25:44 [INFO] [334/381] syncing The Terminator (1984).eng.srt against The Terminator (1984).mkv
+2026-09-08 04:25:44 [INFO] [331/381] IN_SYNC  The Sixth Sense (1999).eng.srt in 568.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 04:25:50 [INFO] ffsubsync measured: offset +0.130s, framerate x1.000, score -61975.0
+2026-09-08 04:25:53 [INFO] fetched replacement subtitle id=235695 (The.Nightmare.Before.Christmas.1993.720p.BluRay.H264.AAC-RARBG-eng); retrying ffsubsync
+2026-09-08 04:27:20 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 26017.0
+2026-09-08 04:27:20 [INFO] [335/381] syncing The Theory of Everything (2014).eng.srt against The Theory of Everything (2014).mkv
+2026-09-08 04:27:20 [INFO] [332/381] IN_SYNC  The Social Network (2010).eng.srt in 395.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 04:36:26 [INFO] ffsubsync measured: offset +0.360s, framerate x1.000, score -36793.0
+2026-09-08 04:36:28 [INFO] fetched replacement subtitle id=232916 (The.Nightmare.Before.Christmas.1993.BluRay.720p.x264.DTS-WiKi.eng); retrying ffsubsync
+2026-09-08 04:38:31 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 534094.0
+2026-09-08 04:38:31 [INFO] [336/381] syncing The Thing (1982).eng.srt against The Thing (1982).mkv
+2026-09-08 04:38:31 [INFO] [333/381] IN_SYNC  The Substance (2024).eng.srt in 1055.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 04:39:56 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 287652.0
+2026-09-08 04:39:56 [INFO] [337/381] syncing The Truman Show (1998).eng.srt against The Truman Show (1998).mkv
+2026-09-08 04:39:56 [INFO] [334/381] IN_SYNC  The Terminator (1984).eng.srt in 851.8s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 04:43:04 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 271853.0
+2026-09-08 04:43:04 [INFO] [338/381] syncing The Usual Suspects (1995).eng.srt against The Usual Suspects (1995).mkv
+2026-09-08 04:43:04 [INFO] [335/381] IN_SYNC  The Theory of Everything (2014).eng.srt in 944.6s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-08 04:47:31 [INFO] ffsubsync measured: offset -0.040s, framerate x1.000, score -67441.0
+2026-09-08 04:47:34 [INFO] fetched replacement subtitle id=231085 (The.Nightmare.Before.Christmas.1993.720p.BluRay.DTS.x264-CtrlHD); retrying ffsubsync
+2026-09-08 04:51:17 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 328832.0
+2026-09-08 04:51:17 [INFO] [339/381] syncing The Wild Robot (2024).eng.srt against The Wild Robot (2024).mkv
+2026-09-08 04:51:17 [INFO] [336/381] IN_SYNC  The Thing (1982).eng.srt in 766.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 04:56:46 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 137046.0
+2026-09-08 04:56:46 [INFO] [340/381] syncing The Wolf of Wall Street (2013).eng.srt against The Wolf of Wall Street (2013).mkv
+2026-09-08 04:56:46 [INFO] [337/381] IN_SYNC  The Truman Show (1998).eng.srt in 1010.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 04:58:31 [INFO] ffsubsync measured: offset +0.120s, framerate x1.000, score -49654.0
+2026-09-08 04:58:33 [INFO] fetched replacement subtitle id=4881473 (The.Nightmare.Before.Christmas.1993.Bluray.english); retrying ffsubsync
+2026-09-08 05:03:46 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 204415.0
+2026-09-08 05:03:46 [INFO] [341/381] syncing There Will Be Blood (2007).eng.srt against There Will Be Blood (2007).mkv
+2026-09-08 05:03:46 [INFO] [338/381] IN_SYNC  The Usual Suspects (1995).eng.srt in 1241.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 05:05:24 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 148928.0
+2026-09-08 05:05:24 [INFO] [342/381] syncing This Christmas (2007).eng.srt against This Christmas (2007).mkv
+2026-09-08 05:05:24 [INFO] [339/381] IN_SYNC  The Wild Robot (2024).eng.srt in 846.8s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-08 05:09:24 [INFO] ffsubsync measured: offset +0.370s, framerate x1.000, score -54465.0
+2026-09-08 05:09:26 [INFO] fetched replacement subtitle id=4881501 (The.Nightmare.Before.Christmas.1993.Bluray.commentary); retrying ffsubsync
+2026-09-08 05:17:58 [INFO] ffsubsync measured: offset +56.040s, framerate x1.043, score -297659.7
+2026-09-08 05:17:58 [INFO] [343/381] syncing This Is the End (2013).eng.srt against This Is the End (2013).mkv
+2026-09-08 05:17:58 [INFO] [322/381] REVIEW   The Nightmare Before Christmas (1993).eng.srt in 6800.8s (anti-correlated alignment score -297660; original kept for review)
+2026-09-08 05:17:58 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 109513.0
+2026-09-08 05:17:58 [INFO] [344/381] syncing Thor - Ragnarok (2017).eng.srt against Thor - Ragnarok (2017).mkv
+2026-09-08 05:17:58 [INFO] [342/381] IN_SYNC  This Christmas (2007).eng.srt in 754.6s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-08 05:24:45 [INFO] ffsubsync measured: offset -0.130s, framerate x1.000, score -136139.0
+2026-09-08 05:24:48 [INFO] fetched replacement subtitle id=5045328 (The Wolf of Wall Street 2013 (1080p x265 10bit Tigole).eng); retrying ffsubsync
+2026-09-08 05:26:30 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 328534.0
+2026-09-08 05:26:30 [INFO] [345/381] syncing Threads (1984).eng.srt against Threads (1984).mkv
+2026-09-08 05:26:30 [INFO] [341/381] IN_SYNC  There Will Be Blood (2007).eng.srt in 1364.1s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-08 05:31:24 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score -55034.0
+2026-09-08 05:31:27 [INFO] fetched replacement subtitle id=991152 (This.Is.the.End.2013.1080p.BluRay.x264.YIFY); retrying ffsubsync
+2026-09-08 05:34:37 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 199956.0
+2026-09-08 05:34:37 [INFO] [346/381] syncing Titanic (1997).eng.srt against Titanic (1997).mkv
+2026-09-08 05:34:37 [INFO] [344/381] IN_SYNC  Thor - Ragnarok (2017).eng.srt in 998.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 05:41:52 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 218161.0
+2026-09-08 05:41:53 [INFO] [347/381] syncing Top Gun (1986).eng.srt against Top Gun (1986).mkv
+2026-09-08 05:41:53 [INFO] [345/381] IN_SYNC  Threads (1984).eng.srt in 922.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 05:45:56 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -58247.0
+2026-09-08 05:45:59 [INFO] fetched replacement subtitle id=11496838 (This.Is.the.End.2013.1080p.BluRay.x264.YIFY.en); retrying ffsubsync
+2026-09-08 05:48:50 [INFO] ffsubsync measured: offset -1.030s, framerate x1.000, score -152650.0
+2026-09-08 05:48:53 [INFO] fetched replacement subtitle id=1027576 (The.Wolf.of.Wall.Street.2013.BluRay.1080p.DTS.x264-CHD.eng); retrying ffsubsync
+2026-09-08 05:58:50 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 143341.0
+2026-09-08 05:58:50 [INFO] [348/381] syncing Top Gun - Maverick (2022).eng.srt against Top Gun - Maverick (2022).mkv
+2026-09-08 05:58:50 [INFO] [347/381] IN_SYNC  Top Gun (1986).eng.srt in 1016.9s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-08 05:59:56 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -58326.0
+2026-09-08 05:59:59 [INFO] fetched replacement subtitle id=985544 (This.is.the.End.2013.720p.BluRay.x264-SPARKS); retrying ffsubsync
+2026-09-08 06:04:37 [INFO] [349/381] syncing Toy Story (1995).eng.srt against Toy Story (1995).mkv
+2026-09-08 06:04:37 [INFO] [346/381] FAILED   Titanic (1997).eng.srt in 1800.1s (ffsubsync timed out after 1800s)
+2026-09-08 06:11:40 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -58247.0
+2026-09-08 06:11:43 [INFO] fetched replacement subtitle id=985418 (This.Is.the.End.2013.720p.BluRay.x264.YIFY); retrying ffsubsync
+2026-09-08 06:13:44 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 60486.0
+2026-09-08 06:13:45 [INFO] [350/381] syncing Toy Story 2 (1999).eng.srt against Toy Story 2 (1999).mkv
+2026-09-08 06:13:45 [INFO] [349/381] IN_SYNC  Toy Story (1995).eng.srt in 547.7s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-08 06:16:37 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 178466.0
+2026-09-08 06:16:37 [INFO] [351/381] syncing Toy Story 3 (2010).eng.srt against Toy Story 3 (2010).mkv
+2026-09-08 06:16:37 [INFO] [348/381] IN_SYNC  Top Gun - Maverick (2022).eng.srt in 1067.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 06:18:53 [INFO] [352/381] syncing Toy Story 4 (2019).eng.srt against Toy Story 4 (2019).mkv
+2026-09-08 06:18:53 [INFO] [340/381] FAILED   The Wolf of Wall Street (2013).eng.srt in 4927.2s (ffsubsync timed out after 1800s)
+2026-09-08 06:23:46 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score -55034.0
+2026-09-08 06:23:50 [INFO] fetched replacement subtitle id=984800 (This.is.the.End.2013.720p.BluRay.x264-SPARKS); retrying ffsubsync
+2026-09-08 06:25:37 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 29145.0
+2026-09-08 06:25:37 [INFO] [353/381] syncing Toy Story 5 (2026).eng.srt against Toy Story 5 (2026).mkv
+2026-09-08 06:25:37 [INFO] [350/381] IN_SYNC  Toy Story 2 (1999).eng.srt in 712.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 06:28:20 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score 96132.0
+2026-09-08 06:28:20 [INFO] [354/381] syncing Training Day (2001).eng.srt against Training Day (2001).mkv
+2026-09-08 06:28:20 [INFO] [351/381] IN_SYNC  Toy Story 3 (2010).eng.srt in 702.7s (already aligned (offset +0.030s, below the 0.1s threshold); original untouched)
+2026-09-08 06:31:07 [INFO] ffsubsync measured: offset +0.060s, framerate x1.000, score 90374.0
+2026-09-08 06:31:07 [INFO] [355/381] syncing Transformers (2007).eng.srt against Transformers (2007).mkv
+2026-09-08 06:31:07 [INFO] [352/381] IN_SYNC  Toy Story 4 (2019).eng.srt in 733.6s (already aligned (offset +0.060s, below the 0.1s threshold); original untouched)
+2026-09-08 06:35:31 [INFO] ffsubsync measured: offset -0.080s, framerate x1.000, score -55034.0
+2026-09-08 06:35:34 [INFO] fetched replacement subtitle id=989534 (This.Is.the.End.2013.720p.BluRay.x264.YIFY); retrying ffsubsync
+2026-09-08 06:43:37 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 135289.0
+2026-09-08 06:43:38 [INFO] [356/381] syncing Transformers Dark Of The Moon (2011).eng.srt against Transformers Dark Of The Moon (2011).mkv
+2026-09-08 06:43:38 [INFO] [354/381] IN_SYNC  Training Day (2001).eng.srt in 917.9s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 06:44:53 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 158579.0
+2026-09-08 06:44:53 [INFO] [357/381] syncing Transformers Revenge of the Fallen (2009).eng.srt against Transformers Revenge of the Fallen (2009).mkv
+2026-09-08 06:44:53 [INFO] [353/381] IN_SYNC  Toy Story 5 (2026).eng.srt in 1155.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 06:48:06 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 126466.0
+2026-09-08 06:48:06 [INFO] [358/381] syncing Treasure Planet (2002).eng.srt against Treasure Planet (2002).mkv
+2026-09-08 06:48:06 [INFO] [355/381] IN_SYNC  Transformers (2007).eng.srt in 1019.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 06:48:08 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -57897.0
+2026-09-08 06:48:10 [INFO] fetched replacement subtitle id=987869 (This.is.the.End.2013.720p.BluRay.x264-SPARKS); retrying ffsubsync
+2026-09-08 06:57:48 [INFO] ffsubsync measured: offset +0.020s, framerate x1.000, score 53728.0
+2026-09-08 06:57:48 [INFO] [359/381] syncing TRON - Legacy (2010).eng.srt against TRON - Legacy (2010).mkv
+2026-09-08 06:57:48 [INFO] [358/381] IN_SYNC  Treasure Planet (2002).eng.srt in 581.8s (already aligned (offset +0.020s, below the 0.1s threshold); original untouched)
+2026-09-08 06:59:47 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -48873.0
+2026-09-08 06:59:49 [INFO] fetched replacement subtitle id=987360 (This Is The End 2013 720p BRRip x264 AC3-JYK); retrying ffsubsync
+2026-09-08 07:03:18 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 149877.0
+2026-09-08 07:03:18 [INFO] [360/381] syncing Turtles Forever (2009).eng.srt against Turtles Forever (2009).mkv
+2026-09-08 07:03:18 [INFO] [356/381] IN_SYNC  Transformers Dark Of The Moon (2011).eng.srt in 1180.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 07:09:02 [INFO] ffsubsync measured: offset +0.050s, framerate x1.000, score 40212.0
+2026-09-08 07:09:02 [INFO] [361/381] syncing Twelve Monkeys (1995).eng.srt against Twelve Monkeys (1995).mkv
+2026-09-08 07:09:02 [INFO] [357/381] IN_SYNC  Transformers Revenge of the Fallen (2009).eng.srt in 1449.2s (already aligned (offset +0.050s, below the 0.1s threshold); original untouched)
+2026-09-08 07:10:24 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 7785.0
+2026-09-08 07:10:24 [INFO] [362/381] syncing Uncut Gems (2019).eng.srt against Uncut Gems (2019).mkv
+2026-09-08 07:10:24 [INFO] [360/381] IN_SYNC  Turtles Forever (2009).eng.srt in 425.1s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-08 07:13:01 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -58247.0
+2026-09-08 07:13:04 [INFO] fetched replacement subtitle id=985363 (This.is.the.End.2013.720p.BluRay.x264-SPARKS); retrying ffsubsync
+2026-09-08 07:20:34 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score 209949.0
+2026-09-08 07:20:34 [INFO] [363/381] syncing United 93 (2006).eng.srt against United 93 (2006).mkv
+2026-09-08 07:20:34 [INFO] [359/381] IN_SYNC  TRON - Legacy (2010).eng.srt in 1366.0s (already aligned (offset +0.030s, below the 0.1s threshold); original untouched)
+2026-09-08 07:24:55 [INFO] ffsubsync measured: offset +39.110s, framerate x0.959, score -253958.0
+2026-09-08 07:24:58 [INFO] fetched replacement subtitle id=991178 (This.Is.the.End.2013.720p.BluRay.x264.YIFY.english); retrying ffsubsync
+2026-09-08 07:30:21 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score 27974.0
+2026-09-08 07:30:21 [INFO] [364/381] syncing Us (2019).eng.srt against Us (2019).mkv
+2026-09-08 07:30:21 [INFO] [362/381] IN_SYNC  Uncut Gems (2019).eng.srt in 1197.8s (already aligned (offset +0.030s, below the 0.1s threshold); original untouched)
+2026-09-08 07:31:50 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 26688.0
+2026-09-08 07:31:50 [INFO] [365/381] syncing V for Vendetta (2005).eng.srt against V for Vendetta (2005).mkv
+2026-09-08 07:31:50 [INFO] [361/381] IN_SYNC  Twelve Monkeys (1995).eng.srt in 1368.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 07:37:11 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score -28068.0
+2026-09-08 07:37:11 [INFO] [366/381] syncing WALL-E (2008).eng.srt against WALL-E (2008).mkv
+2026-09-08 07:37:11 [INFO] [343/381] REVIEW   This Is the End (2013).eng.srt in 8352.7s (ffsubsync's quality gate rejected the alignment; original kept for review)
+2026-09-08 07:38:14 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 188947.0
+2026-09-08 07:38:14 [INFO] [367/381] syncing Wallace & Gromit - The Curse of the Were-Rabbit (2005).eng.srt against Wallace & Gromit - The Curse of the Were-Rabbit (2005).mkv
+2026-09-08 07:38:14 [INFO] [364/381] IN_SYNC  Us (2019).eng.srt in 472.6s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-08 07:39:03 [INFO] ffsubsync measured: offset +0.160s, framerate x1.000, score -28974.0
+2026-09-08 07:39:05 [INFO] fetched replacement subtitle id=12657008 (United.93.2006.1080p.BluRay.x265-RARBG.en); retrying ffsubsync
+2026-09-08 07:45:44 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 254811.0
+2026-09-08 07:45:44 [INFO] [368/381] syncing War Dogs (2016).eng.srt against War Dogs (2016).mkv
+2026-09-08 07:45:44 [INFO] [366/381] IN_SYNC  WALL-E (2008).eng.srt in 513.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 07:48:29 [INFO] ffsubsync measured: offset -0.070s, framerate x1.000, score 54502.0
+2026-09-08 07:48:29 [INFO] [369/381] syncing War for the Planet of the Apes (2017).eng.srt against War for the Planet of the Apes (2017).mkv
+2026-09-08 07:48:29 [INFO] [365/381] IN_SYNC  V for Vendetta (2005).eng.srt in 998.8s (already aligned (offset -0.070s, below the 0.1s threshold); original untouched)
+2026-09-08 07:48:53 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 187250.0
+2026-09-08 07:48:53 [INFO] [370/381] syncing WarGames (1983).eng.srt against WarGames (1983).mkv
+2026-09-08 07:48:53 [INFO] [367/381] IN_SYNC  Wallace & Gromit - The Curse of the Were-Rabbit (2005).eng.srt in 639.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 07:58:44 [INFO] ffsubsync measured: offset +0.050s, framerate x1.000, score 164968.0
+2026-09-08 07:58:45 [INFO] [371/381] syncing Warrior (2011).eng.srt against Warrior (2011).mkv
+2026-09-08 07:58:45 [INFO] [368/381] IN_SYNC  War Dogs (2016).eng.srt in 780.7s (already aligned (offset +0.050s, below the 0.1s threshold); original untouched)
+2026-09-08 08:03:25 [INFO] ffsubsync measured: offset +0.160s, framerate x1.000, score -28974.0
+2026-09-08 08:03:27 [INFO] fetched replacement subtitle id=3232410 (United.93.2006.720p.BluRay.X264-AMIABLE); retrying ffsubsync
+2026-09-08 08:04:49 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 475650.0
+2026-09-08 08:04:49 [INFO] [372/381] syncing We're the Millers (2013).eng.srt against We're the Millers (2013).mkv
+2026-09-08 08:04:49 [INFO] [369/381] IN_SYNC  War for the Planet of the Apes (2017).eng.srt in 980.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 08:10:05 [INFO] ffsubsync measured: offset -0.010s, framerate x1.000, score 229252.0
+2026-09-08 08:10:06 [INFO] [373/381] syncing Weapons (2025).eng.srt against Weapons (2025).mkv
+2026-09-08 08:10:06 [INFO] [370/381] IN_SYNC  WarGames (1983).eng.srt in 1272.1s (already aligned (offset -0.010s, below the 0.1s threshold); original untouched)
+2026-09-08 08:19:38 [INFO] ffsubsync measured: offset +0.010s, framerate x1.000, score 50256.0
+2026-09-08 08:19:39 [INFO] [374/381] syncing Whiplash (2014).eng.srt against Whiplash (2014).mkv
+2026-09-08 08:19:39 [INFO] [372/381] IN_SYNC  We're the Millers (2013).eng.srt in 889.1s (already aligned (offset +0.010s, below the 0.1s threshold); original untouched)
+2026-09-08 08:22:29 [INFO] ffsubsync measured: offset +0.160s, framerate x1.000, score -26148.0
+2026-09-08 08:22:32 [INFO] fetched replacement subtitle id=3233165 (United.93.2006.720p.BrRip.x264); retrying ffsubsync
+2026-09-08 08:24:44 [INFO] ffsubsync measured: offset -0.130s, framerate x1.000, score -19577.0
+2026-09-08 08:24:48 [INFO] fetched replacement subtitle id=4375459 (Warrior.2011.720p.1080p.Some.Bluray.Version); retrying ffsubsync
+2026-09-08 08:24:54 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 214468.0
+2026-09-08 08:24:54 [INFO] [375/381] syncing Willy Wonka & the Chocolate Factory (1971).eng.srt against Willy Wonka & the Chocolate Factory (1971).mkv
+2026-09-08 08:24:54 [INFO] [374/381] IN_SYNC  Whiplash (2014).eng.srt in 315.3s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 08:25:55 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 329994.0
+2026-09-08 08:25:55 [INFO] [376/381] syncing World War Z (2013).eng.srt against World War Z (2013).mkv
+2026-09-08 08:25:55 [INFO] [373/381] IN_SYNC  Weapons (2025).eng.srt in 949.4s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 08:37:45 [INFO] ffsubsync measured: offset +0.160s, framerate x1.000, score -25976.0
+2026-09-08 08:37:48 [INFO] fetched replacement subtitle id=9170558 (United.93.2006.720p.BDRiP.XViD.AC3-FLAWL3SS); retrying ffsubsync
+2026-09-08 08:41:22 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 61572.0
+2026-09-08 08:41:22 [INFO] [377/381] syncing Wreck-It Ralph (2012).eng.srt against Wreck-It Ralph (2012).mkv
+2026-09-08 08:41:22 [INFO] [375/381] IN_SYNC  Willy Wonka & the Chocolate Factory (1971).eng.srt in 987.7s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 08:45:19 [INFO] ffsubsync measured: offset -0.130s, framerate x1.000, score -19577.0
+2026-09-08 08:45:21 [INFO] fetched replacement subtitle id=4383521 (Warrior.2011.1080p.BluRay.AC3.x264-tomcat12[ETRG]); retrying ffsubsync
+2026-09-08 08:48:48 [INFO] ffsubsync measured: offset +0.040s, framerate x1.000, score 241678.0
+2026-09-08 08:48:48 [INFO] [378/381] syncing Zathura - A Space Adventure (2005).eng.srt against Zathura - A Space Adventure (2005).mkv
+2026-09-08 08:48:48 [INFO] [376/381] IN_SYNC  World War Z (2013).eng.srt in 1372.9s (already aligned (offset +0.040s, below the 0.1s threshold); original untouched)
+2026-09-08 08:49:47 [INFO] ffsubsync measured: offset -0.090s, framerate x1.000, score 61662.0
+2026-09-08 08:49:47 [INFO] [379/381] syncing Zero Dark Thirty (2012).eng.srt against Zero Dark Thirty (2012).mkv
+2026-09-08 08:49:47 [INFO] [377/381] IN_SYNC  Wreck-It Ralph (2012).eng.srt in 505.7s (already aligned (offset -0.090s, below the 0.1s threshold); original untouched)
+2026-09-08 08:55:44 [INFO] ffsubsync measured: offset -0.520s, framerate x1.000, score -27223.0
+2026-09-08 08:55:47 [INFO] fetched replacement subtitle id=3232235 (United.93.2006.BluRay.720p.x264.DTS.MySilu); retrying ffsubsync
+2026-09-08 09:02:18 [INFO] ffsubsync measured: offset +0.030s, framerate x1.000, score 241786.0
+2026-09-08 09:02:18 [INFO] [380/381] syncing Zootopia (2016).eng.srt against Zootopia (2016).mkv
+2026-09-08 09:02:18 [INFO] [378/381] IN_SYNC  Zathura - A Space Adventure (2005).eng.srt in 810.0s (already aligned (offset +0.030s, below the 0.1s threshold); original untouched)
+2026-09-08 09:06:40 [INFO] ffsubsync measured: offset +0.680s, framerate x1.000, score -31838.0
+2026-09-08 09:06:43 [INFO] fetched replacement subtitle id=4383524 (Warrior.2011.1080p.BluRay.x264.anoXmous_eng); retrying ffsubsync
+2026-09-08 09:07:02 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 321868.0
+2026-09-08 09:07:02 [INFO] [381/381] syncing Zootopia 2 (2025).eng.sdh.srt against Zootopia 2 (2025).mkv
+2026-09-08 09:07:02 [INFO] [379/381] IN_SYNC  Zero Dark Thirty (2012).eng.srt in 1034.5s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 09:14:12 [INFO] ffsubsync measured: offset +0.160s, framerate x1.000, score -26148.0
+2026-09-08 09:14:16 [INFO] [363/381] REVIEW   United 93 (2006).eng.srt in 6818.8s (ffsubsync's quality gate rejected the alignment; original kept for review; replacement fetch stopped: no unused qualifying English SRT for a replacement fetch)
+2026-09-08 09:14:44 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 30390.0
+2026-09-08 09:14:44 [INFO] [380/381] IN_SYNC  Zootopia (2016).eng.srt in 746.2s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 09:16:42 [INFO] ffsubsync measured: offset +0.000s, framerate x1.000, score 60316.0
+2026-09-08 09:16:42 [INFO] [381/381] IN_SYNC  Zootopia 2 (2025).eng.sdh.srt in 580.0s (already aligned (offset +0.000s, below the 0.1s threshold); original untouched)
+2026-09-08 09:17:00 [INFO] ffsubsync measured: offset -24.520s, framerate x1.043, score -116834.2
+2026-09-08 09:17:02 [INFO] fetched replacement subtitle id=7114822 (Warrior.2011.Open.Matte.Bluray.1080p.x265.AAC(5.1).GREENOTEA); retrying ffsubsync
+2026-09-08 09:17:59 [INFO] ffsubsync measured: offset +0.760s, framerate x1.001, score -33346.4
+2026-09-08 09:18:01 [INFO] fetched replacement subtitle id=11158769 (Warrior.2011.1080p.BluRay.x265-YAWNTiC_eng); retrying ffsubsync
+2026-09-08 09:18:22 [INFO] ffsubsync measured: offset +0.670s, framerate x1.000, score -33637.0
+2026-09-08 09:18:24 [INFO] fetched replacement subtitle id=12658968 (Warrior (2011) {imdb-tt1291584} [Bluray-1080p][AAC 2.0][x264]-ETRG.en); retrying ffsubsync
+2026-09-08 09:18:45 [INFO] ffsubsync measured: offset -31.090s, framerate x1.043, score -37649.1
+2026-09-08 09:18:47 [INFO] fetched replacement subtitle id=6963512 (Warrior.2011.Repack.BluRay.1080p.TrueHD.Atmos.7.1.AVC.HYBRID.REMUX-FraMeSToR_SDH); retrying ffsubsync
+2026-09-08 09:19:57 [INFO] ffsubsync measured: offset +0.650s, framerate x1.000, score -85374.0
+2026-09-08 09:19:59 [INFO] fetched replacement subtitle id=11158770 (Warrior.2011.1080p.BluRay.x265-YAWNTiC_eng SDH); retrying ffsubsync
+2026-09-08 09:20:56 [INFO] ffsubsync measured: offset -6.880s, framerate x1.043, score -86447.2
+2026-09-08 09:20:58 [INFO] fetched replacement subtitle id=4383138 (Warrior.(2011).BDRip.AC3.XviD-D-Z0N3); retrying ffsubsync
+2026-09-08 09:21:21 [INFO] ffsubsync measured: offset -0.120s, framerate x1.000, score -31758.0
+2026-09-08 09:21:23 [INFO] fetched replacement subtitle id=4383506 (Warrior.2011.720p.BluRay.x264); retrying ffsubsync
+2026-09-08 09:21:45 [INFO] ffsubsync measured: offset -31.090s, framerate x1.043, score -37653.0
+2026-09-08 09:21:46 [INFO] [371/381] REVIEW   Warrior (2011).eng.srt in 4980.5s (anti-correlated alignment score -37653; original kept for review)
+2026-09-08 09:21:46 [INFO] Report written: E:\torrents\tools\ReportsAndLogs\sync_subtitles\sync_subtitles_report.txt
+2026-09-08 09:21:48 [INFO] 
+2026-09-08 09:21:48 [INFO] SYNC COMPLETE
+2026-09-08 09:21:48 [INFO]   Synced (replaced)   : 9
+2026-09-08 09:21:48 [INFO]   Already in sync     : 348
+2026-09-08 09:21:48 [INFO]   Remembered (skipped): 0
+2026-09-08 09:21:48 [INFO]   Extracted (skipped) : 0
+2026-09-08 09:21:48 [INFO]   Held for review     : 13
+2026-09-08 09:21:48 [INFO]   Failed              : 11
+2026-09-08 09:21:48 [INFO]   Skipped             : 0
+2026-09-08 09:21:48 [INFO] Report: E:\torrents\tools\ReportsAndLogs\sync_subtitles\sync_subtitles_report.txt
+2026-09-08 09:21:48 [ERROR] 11 failure(s); see the report for ffsubsync's error lines.

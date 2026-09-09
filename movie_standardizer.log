@@ -1,0 +1,14 @@
+2026-09-06 21:23:54 [INFO] --- Automated run: E:\torrents\final\Joyful Noise (2012) [BluRay] [1080p] [YTS.AM] ---
+2026-09-06 21:23:54 [WARNING] No placeable movie in: E:\torrents\final\Joyful Noise (2012) [BluRay] [1080p] [YTS.AM] (not an MKV (1926 MB); this tool never transcodes)
+2026-09-06 21:23:55 [INFO] Report written to E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt
+2026-09-06 21:23:55 [INFO] --- Run summary: attempted=0 completed=0 skipped=1 reported=0 quarantined=0 deleted=0 failed=0 ---
+2026-09-06 21:34:24 [INFO] --- Batch scan: E:\torrents\final ---
+2026-09-06 21:34:24 [WARNING] No placeable movie in: E:\torrents\final\Joyful Noise (2012) [BluRay] [1080p] [YTS.AM] (not an MKV (1926 MB); this tool never transcodes)
+2026-09-06 21:34:24 [INFO] --- Batch scan finished (1 items) ---
+2026-09-06 21:34:24 [INFO] Report written to E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt
+2026-09-06 21:34:24 [INFO] --- Run summary: attempted=0 completed=0 skipped=1 reported=0 quarantined=0 deleted=0 failed=0 ---
+2026-09-07 01:23:02 [INFO] --- Automated run: E:\torrents\final\Joyful Noise (2012) [BluRay] [1080p] [YTS.AM] ---
+2026-09-07 01:23:02 [INFO] Movie 'Joyful.Noise.2012.1080p.BluRay.x264-[YTS.AM].mp4' -> 'Joyful Noise (2012)'
+2026-09-07 01:23:02 [INFO] HARDLINK: 'E:\torrents\final\Joyful Noise (2012) [BluRay] [1080p] [YTS.AM]\Joyful.Noise.2012.1080p.BluRay.x264-[YTS.AM].mp4' -> 'E:\torrents\final_organized\Joyful Noise (2012)\Joyful Noise (2012).mp4' (verified hardlink)
+2026-09-07 01:23:02 [INFO] Report written to E:\torrents\tools\ReportsAndLogs\movie_standardizer\movie_standardizer_report.txt
+2026-09-07 01:23:02 [INFO] --- Run summary: attempted=1 completed=1 skipped=0 reported=0 quarantined=0 deleted=0 failed=0 ---

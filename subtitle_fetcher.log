@@ -1,0 +1,768 @@
+2026-09-07 01:14:27 [INFO] Found 381 eligible movies. UTC local reservations: OpenSubtitles downloads 0/100 · SubDL downloads 0/50; searches 0/2000 · Subf2m.co searches 0/20 · Podnapisi.NET searches 0/20 · Addic7ed.com searches 0/20 · SubSource.net searches 0/20 · Subsunacs.net searches 0/20 · YIFY Subtitles searches 0/20 · Subs.sab.bz searches 0/20.
+2026-09-07 01:14:27 [INFO] Inspecting existing sidecars with 6 workers (--workers 1 for the serial run); every provider request stays serial.
+2026-09-07 01:14:27 [INFO] [001/381] HAVE     10 Cloverfield Lane (2016)\10 Cloverfield Lane (2016).mkv — validated covering sidecar 10 Cloverfield Lane (2016).eng.srt
+2026-09-07 01:14:27 [INFO] [002/381] HAVE     10 Things I Hate About You (1999)\10 Things I Hate About You (1999).mkv — validated covering sidecar 10 Things I Hate About You (1999).eng.srt
+2026-09-07 01:14:27 [INFO] [003/381] HAVE     12 Years a Slave (2013)\12 Years a Slave (2013).mkv — validated covering sidecar 12 Years a Slave (2013).eng.srt
+2026-09-07 01:14:27 [INFO] [004/381] HAVE     13 Hours - The Secret Soldiers of Benghazi (2016)\13 Hours - The Secret Soldiers of Benghazi (2016).mkv — validated covering sidecar 13 Hours - The Secret Soldiers of Benghazi (2016).eng.srt
+2026-09-07 01:14:27 [INFO] [005/381] HAVE     1917 (2019)\1917 (2019).mkv — validated covering sidecar 1917 (2019).eng.srt
+2026-09-07 01:14:27 [INFO] [006/381] HAVE     2001 - A Space Odyssey (1968)\2001 - A Space Odyssey (1968).mkv — validated covering sidecar 2001 - A Space Odyssey (1968).eng.srt
+2026-09-07 01:14:27 [INFO] [007/381] HAVE     21 Jump Street (2012)\21 Jump Street (2012).mkv — validated covering sidecar 21 Jump Street (2012).eng.srt
+2026-09-07 01:14:27 [INFO] [008/381] HAVE     22 Jump Street (2014)\22 Jump Street (2014).mkv — validated covering sidecar 22 Jump Street (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [009/381] HAVE     300 (2006)\300 (2006).mkv — validated covering sidecar 300 (2006).eng.srt
+2026-09-07 01:14:27 [INFO] [010/381] HAVE     42 (2013)\42 (2013).mkv — validated covering sidecar 42 (2013).eng.sdh.srt
+2026-09-07 01:14:27 [INFO] [011/381] HAVE     50 First Dates (2004)\50 First Dates (2004).mkv — validated covering sidecar 50 First Dates (2004).eng.srt
+2026-09-07 01:14:27 [INFO] [012/381] HAVE     500 Days of Summer (2009)\500 Days of Summer (2009).mkv — validated covering sidecar 500 Days of Summer (2009).eng.srt
+2026-09-07 01:14:27 [INFO] [013/381] HAVE     8 Mile (2002)\8 Mile (2002).mkv — validated covering sidecar 8 Mile (2002).eng.srt
+2026-09-07 01:14:27 [INFO] [014/381] HAVE     9 (2009)\9 (2009).mkv — validated covering sidecar 9 (2009).eng.srt
+2026-09-07 01:14:27 [INFO] [015/381] HAVE     A Beautiful Mind (2001)\A Beautiful Mind (2001).mkv — validated covering sidecar A Beautiful Mind (2001).eng.srt
+2026-09-07 01:14:27 [INFO] [016/381] HAVE     A Christmas Story (1983)\A Christmas Story (1983).mkv — validated covering sidecar A Christmas Story (1983).eng.srt
+2026-09-07 01:14:27 [INFO] [017/381] HAVE     A I Artificial Intelligence (2001)\A I Artificial Intelligence (2001).mkv — validated covering sidecar A I Artificial Intelligence (2001).eng.srt
+2026-09-07 01:14:27 [INFO] [018/381] HAVE     A Quiet Place (2018)\A Quiet Place (2018).mkv — validated covering sidecar A Quiet Place (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [019/381] HAVE     A Quiet Place Part II (2021)\A Quiet Place Part II (2021).mkv — validated covering sidecar A Quiet Place Part II (2021).eng.srt
+2026-09-07 01:14:27 [INFO] [020/381] HAVE     About Time (2013)\About Time (2013).mkv — validated covering sidecar About Time (2013).eng.srt
+2026-09-07 01:14:27 [INFO] [021/381] HAVE     Accepted (2006)\Accepted (2006).mkv — validated covering sidecar Accepted (2006).eng.srt
+2026-09-07 01:14:27 [INFO] [022/381] HAVE     Air (2023)\Air (2023).mkv — validated covering sidecar Air (2023).eng.sdh.srt
+2026-09-07 01:14:27 [INFO] [023/381] HAVE     Aladdin (1992)\Aladdin (1992).mkv — validated covering sidecar Aladdin (1992).eng.srt
+2026-09-07 01:14:27 [INFO] [024/381] HAVE     Alien (1979)\Alien (1979).mkv — validated covering sidecar Alien (1979).eng.sdh.srt
+2026-09-07 01:14:27 [INFO] [025/381] HAVE     Aliens (1986)\Aliens (1986).mkv — validated covering sidecar Aliens (1986).eng.srt
+2026-09-07 01:14:27 [INFO] [026/381] HAVE     All Quiet on the Western Front (2022)\All Quiet on the Western Front (2022).mkv — validated covering sidecar All Quiet on the Western Front (2022).eng.sdh.srt
+2026-09-07 01:14:27 [INFO] [027/381] HAVE     American History X (1998)\American History X (1998).mkv — validated covering sidecar American History X (1998).eng.srt
+2026-09-07 01:14:27 [INFO] [028/381] HAVE     American Pie (1999)\American Pie (1999).mkv — validated covering sidecar American Pie (1999).eng.srt
+2026-09-07 01:14:27 [INFO] [029/381] HAVE     American Psycho (2000)\American Psycho (2000).mkv — validated covering sidecar American Psycho (2000).eng.srt
+2026-09-07 01:14:27 [INFO] [030/381] HAVE     American Sniper (2014)\American Sniper (2014).mkv — validated covering sidecar American Sniper (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [031/381] HAVE     Annihilation (2018)\Annihilation (2018).mkv — validated covering sidecar Annihilation (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [032/381] HAVE     Apollo 13 (1995)\Apollo 13 (1995).mkv — validated covering sidecar Apollo 13 (1995).eng.sdh.srt
+2026-09-07 01:14:27 [INFO] [033/381] HAVE     Arrival (2016)\Arrival (2016).mkv — validated covering sidecar Arrival (2016).eng.srt
+2026-09-07 01:14:27 [INFO] [034/381] HAVE     Avatar (2009)\Avatar (2009).mkv — validated covering sidecar Avatar (2009).eng.srt
+2026-09-07 01:14:27 [INFO] [035/381] HAVE     Avengers Age of Ultron (2015)\Avengers Age of Ultron (2015).mkv — validated covering sidecar Avengers Age of Ultron (2015).eng.srt
+2026-09-07 01:14:27 [INFO] [036/381] HAVE     Avengers Endgame (2019)\Avengers Endgame (2019).mkv — validated covering sidecar Avengers Endgame (2019).eng.srt
+2026-09-07 01:14:27 [INFO] [037/381] HAVE     Avengers Infinity War (2018)\Avengers Infinity War (2018).mkv — validated covering sidecar Avengers Infinity War (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [038/381] HAVE     Back to the Future (1985)\Back to the Future (1985).mkv — validated covering sidecar Back to the Future (1985).eng.srt
+2026-09-07 01:14:27 [INFO] [039/381] HAVE     Back to the Future Part II (1989)\Back to the Future Part II (1989).mkv — validated covering sidecar Back to the Future Part II (1989).eng.srt
+2026-09-07 01:14:27 [INFO] [040/381] HAVE     Back to the Future Part III (1990)\Back to the Future Part III (1990).mkv — validated covering sidecar Back to the Future Part III (1990).eng.srt
+2026-09-07 01:14:27 [INFO] [041/381] HAVE     Backrooms (2026)\Backrooms (2026).mkv — validated covering sidecar Backrooms (2026).eng.sdh.srt
+2026-09-07 01:14:27 [INFO] [042/381] HAVE     Barbie (2023)\Barbie (2023).mkv — validated covering sidecar Barbie (2023).eng.srt
+2026-09-07 01:14:27 [INFO] [043/381] HAVE     Batman Begins (2005)\Batman Begins (2005).mkv — validated covering sidecar Batman Begins (2005).eng.srt
+2026-09-07 01:14:27 [INFO] [044/381] HAVE     Bee Movie (2007)\Bee Movie (2007).mkv — validated covering sidecar Bee Movie (2007).eng.srt
+2026-09-07 01:14:27 [INFO] [045/381] HAVE     Black Hawk Down (2001)\Black Hawk Down (2001).mkv — validated covering sidecar Black Hawk Down (2001).eng.srt
+2026-09-07 01:14:27 [INFO] [046/381] HAVE     Black Panther (2018)\Black Panther (2018).mkv — validated covering sidecar Black Panther (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [047/381] HAVE     Blade Runner (1982)\Blade Runner (1982).mkv — validated covering sidecar Blade Runner (1982).eng.srt
+2026-09-07 01:14:27 [INFO] [048/381] HAVE     Blade Runner 2049 (2017)\Blade Runner 2049 (2017).mkv — validated covering sidecar Blade Runner 2049 (2017).eng.srt
+2026-09-07 01:14:27 [INFO] [049/381] HAVE     Blended (2014)\Blended (2014).mkv — validated covering sidecar Blended (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [050/381] HAVE     Bohemian Rhapsody (2018)\Bohemian Rhapsody (2018).mkv — validated covering sidecar Bohemian Rhapsody (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [051/381] HAVE     Borat (2006)\Borat (2006).mkv — validated covering sidecar Borat (2006).eng.srt
+2026-09-07 01:14:27 [INFO] [052/381] HAVE     Boyhood (2014)\Boyhood (2014).mkv — validated covering sidecar Boyhood (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [053/381] HAVE     Boyz N the Hood (1991)\Boyz N the Hood (1991).mkv — validated covering sidecar Boyz N the Hood (1991).eng.srt
+2026-09-07 01:14:27 [INFO] [054/381] HAVE     Braveheart (1995)\Braveheart (1995).mkv — validated covering sidecar Braveheart (1995).eng.srt
+2026-09-07 01:14:27 [INFO] [055/381] HAVE     Bugonia (2025)\Bugonia (2025).mkv — validated covering sidecar Bugonia (2025).eng.srt
+2026-09-07 01:14:27 [INFO] [056/381] HAVE     Captain America Civil War (2016)\Captain America Civil War (2016).mkv — validated covering sidecar Captain America Civil War (2016).eng.srt
+2026-09-07 01:14:27 [INFO] [057/381] HAVE     Captain America The First Avenger (2011)\Captain America The First Avenger (2011).mkv — validated covering sidecar Captain America The First Avenger (2011).eng.srt
+2026-09-07 01:14:27 [INFO] [058/381] HAVE     Captain America The Winter Soldier (2014)\Captain America The Winter Soldier (2014).mkv — validated covering sidecar Captain America The Winter Soldier (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [059/381] HAVE     Cars (2006)\Cars (2006).mkv — validated covering sidecar Cars (2006).eng.srt
+2026-09-07 01:14:27 [INFO] [060/381] HAVE     Casino Royale (2006)\Casino Royale (2006).mkv — validated covering sidecar Casino Royale (2006).eng.srt
+2026-09-07 01:14:27 [INFO] [061/381] HAVE     Cast Away (2000)\Cast Away (2000).mkv — validated covering sidecar Cast Away (2000).eng.srt
+2026-09-07 01:14:27 [INFO] [062/381] HAVE     Catch Me If You Can (2002)\Catch Me If You Can (2002).mkv — validated covering sidecar Catch Me If You Can (2002).eng.srt
+2026-09-07 01:14:27 [INFO] [063/381] HAVE     Charlie and the Chocolate Factory (2005)\Charlie and the Chocolate Factory (2005).mkv — validated covering sidecar Charlie and the Chocolate Factory (2005).eng.srt
+2026-09-07 01:14:27 [INFO] [064/381] HAVE     Chicken Little (2005)\Chicken Little (2005).mkv — validated covering sidecar Chicken Little (2005).eng.srt
+2026-09-07 01:14:27 [INFO] [065/381] HAVE     Children of Men (2006)\Children of Men (2006).mkv — validated covering sidecar Children of Men (2006).eng.srt
+2026-09-07 01:14:27 [INFO] [066/381] HAVE     Chronicle (2012)\Chronicle (2012).mkv — validated covering sidecar Chronicle (2012).eng.srt
+2026-09-07 01:14:27 [INFO] [067/381] HAVE     Civil War (2024)\Civil War (2024).mkv — validated covering sidecar Civil War (2024).eng.srt
+2026-09-07 01:14:27 [INFO] [068/381] HAVE     Cloudy with a Chance of Meatballs (2009)\Cloudy with a Chance of Meatballs (2009).mkv — validated covering sidecar Cloudy with a Chance of Meatballs (2009).eng.srt
+2026-09-07 01:14:27 [INFO] [069/381] HAVE     Cloverfield (2008)\Cloverfield (2008).mkv — validated covering sidecar Cloverfield (2008).eng.srt
+2026-09-07 01:14:27 [INFO] [070/381] HAVE     Coach Carter (2005)\Coach Carter (2005).mkv — validated covering sidecar Coach Carter (2005).eng.srt
+2026-09-07 01:14:27 [INFO] [071/381] HAVE     Coco (2017)\Coco (2017).mkv — validated covering sidecar Coco (2017).eng.srt
+2026-09-07 01:14:27 [INFO] [072/381] HAVE     Contact (1997)\Contact (1997).mkv — validated covering sidecar Contact (1997).eng.srt
+2026-09-07 01:14:27 [INFO] [073/381] HAVE     Contagion (2011)\Contagion (2011).mkv — validated covering sidecar Contagion (2011).eng.srt
+2026-09-07 01:14:27 [INFO] [074/381] HAVE     Coraline (2009)\Coraline (2009).mkv — validated covering sidecar Coraline (2009).eng.srt
+2026-09-07 01:14:27 [INFO] [075/381] HAVE     Crazy Rich Asians (2018)\Crazy Rich Asians (2018).mkv — validated covering sidecar Crazy Rich Asians (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [076/381] HAVE     Creed (2015)\Creed (2015).mkv — validated covering sidecar Creed (2015).eng.srt
+2026-09-07 01:14:27 [INFO] [077/381] HAVE     Dawn of the Planet of the Apes (2014)\Dawn of the Planet of the Apes (2014).mkv — validated covering sidecar Dawn of the Planet of the Apes (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [078/381] HAVE     Dead Poets Society (1989)\Dead Poets Society (1989).mkv — validated covering sidecar Dead Poets Society (1989).eng.srt
+2026-09-07 01:14:27 [INFO] [079/381] HAVE     Deadpool (2016)\Deadpool (2016).mkv — validated covering sidecar Deadpool (2016).eng.srt
+2026-09-07 01:14:27 [INFO] [080/381] HAVE     Deadpool 2 (2018)\Deadpool 2 (2018).mkv — validated covering sidecar Deadpool 2 (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [081/381] HAVE     Despicable Me (2010)\Despicable Me (2010).mkv — validated covering sidecar Despicable Me (2010).eng.srt
+2026-09-07 01:14:27 [INFO] [082/381] HAVE     Die Hard (1988)\Die Hard (1988).mkv — validated covering sidecar Die Hard (1988).eng.srt
+2026-09-07 01:14:27 [INFO] [083/381] HAVE     District 9 (2009)\District 9 (2009).mkv — validated covering sidecar District 9 (2009).eng.srt
+2026-09-07 01:14:27 [INFO] [084/381] HAVE     Django Unchained (2012)\Django Unchained (2012).mkv — validated covering sidecar Django Unchained (2012).eng.srt
+2026-09-07 01:14:27 [INFO] [085/381] HAVE     Donnie Darko (2001)\Donnie Darko (2001).mkv — validated covering sidecar Donnie Darko (2001).eng.srt
+2026-09-07 01:14:27 [INFO] [086/381] HAVE     Dune (2021)\Dune (2021).mkv — validated covering sidecar Dune (2021).eng.srt
+2026-09-07 01:14:27 [INFO] [087/381] HAVE     Dune - Part Two (2024)\Dune - Part Two (2024).mkv — validated covering sidecar Dune - Part Two (2024).eng.srt
+2026-09-07 01:14:27 [INFO] [088/381] HAVE     Dunkirk (2017)\Dunkirk (2017).mkv — validated covering sidecar Dunkirk (2017).eng.srt
+2026-09-07 01:14:27 [INFO] [089/381] HAVE     E T the Extra-Terrestrial (1982)\E T the Extra-Terrestrial (1982).mkv — validated covering sidecar E T the Extra-Terrestrial (1982).eng.srt
+2026-09-07 01:14:27 [INFO] [090/381] HAVE     Easy A (2010)\Easy A (2010).mkv — validated covering sidecar Easy A (2010).eng.srt
+2026-09-07 01:14:27 [INFO] [091/381] HAVE     Edge of Tomorrow (2014)\Edge of Tomorrow (2014).mkv — validated covering sidecar Edge of Tomorrow (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [092/381] HAVE     Edward Scissorhands (1990)\Edward Scissorhands (1990).mkv — validated covering sidecar Edward Scissorhands (1990).eng.srt
+2026-09-07 01:14:27 [INFO] [093/381] HAVE     Elemental (2023)\Elemental (2023).mkv — validated covering sidecar Elemental (2023).eng.srt
+2026-09-07 01:14:27 [INFO] [094/381] HAVE     Elysium (2013)\Elysium (2013).mkv — validated covering sidecar Elysium (2013).eng.srt
+2026-09-07 01:14:27 [INFO] [095/381] HAVE     Enchanted (2007)\Enchanted (2007).mkv — validated covering sidecar Enchanted (2007).eng.srt
+2026-09-07 01:14:27 [INFO] [096/381] HAVE     Enemy (2013)\Enemy (2013).mkv — validated covering sidecar Enemy (2013).eng.srt
+2026-09-07 01:14:27 [INFO] [097/381] HAVE     Eternal Sunshine of the Spotless Mind (2004)\Eternal Sunshine of the Spotless Mind (2004).mkv — validated covering sidecar Eternal Sunshine of the Spotless Mind (2004).eng.srt
+2026-09-07 01:14:27 [INFO] [098/381] HAVE     Ex Machina (2015)\Ex Machina (2015).mkv — validated covering sidecar Ex Machina (2015).eng.srt
+2026-09-07 01:14:27 [INFO] [099/381] HAVE     Fargo (1996)\Fargo (1996).mkv — validated covering sidecar Fargo (1996).eng.srt
+2026-09-07 01:14:27 [INFO] [100/381] HAVE     Fast Five (2011)\Fast Five (2011).mkv — validated covering sidecar Fast Five (2011).eng.srt
+2026-09-07 01:14:27 [INFO] [101/381] HAVE     Ferris Bueller's Day Off (1986)\Ferris Bueller's Day Off (1986).mkv — validated covering sidecar Ferris Bueller's Day Off (1986).eng.srt
+2026-09-07 01:14:27 [INFO] [102/381] HAVE     Fight Club (1999)\Fight Club (1999).mkv — validated covering sidecar Fight Club (1999).eng.srt
+2026-09-07 01:14:27 [INFO] [103/381] HAVE     Finding Nemo (2003)\Finding Nemo (2003).mkv — validated covering sidecar Finding Nemo (2003).eng.srt
+2026-09-07 01:14:27 [INFO] [104/381] HAVE     First Man (2018)\First Man (2018).mkv — validated covering sidecar First Man (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [105/381] HAVE     Ford v Ferrari (2019)\Ford v Ferrari (2019).mkv — validated covering sidecar Ford v Ferrari (2019).eng.srt
+2026-09-07 01:14:27 [INFO] [106/381] HAVE     Forrest Gump (1994)\Forrest Gump (1994).mkv — validated covering sidecar Forrest Gump (1994).eng.srt
+2026-09-07 01:14:27 [INFO] [107/381] HAVE     Fractured (2019)\Fractured (2019).mkv — validated covering sidecar Fractured (2019).eng.srt
+2026-09-07 01:14:27 [INFO] [108/381] HAVE     Fury (2014)\Fury (2014).mkv — validated covering sidecar Fury (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [109/381] HAVE     Get Out (2017)\Get Out (2017).mkv — validated covering sidecar Get Out (2017).eng.srt
+2026-09-07 01:14:27 [INFO] [110/381] HAVE     Ghostbusters (1984)\Ghostbusters (1984).mkv — validated covering sidecar Ghostbusters (1984).eng.srt
+2026-09-07 01:14:27 [INFO] [111/381] HAVE     Gladiator (2000)\Gladiator (2000).mkv — validated covering sidecar Gladiator (2000).eng.srt
+2026-09-07 01:14:27 [INFO] [112/381] HAVE     Gone Girl (2014)\Gone Girl (2014).mkv — validated covering sidecar Gone Girl (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [113/381] HAVE     Good Will Hunting (1997)\Good Will Hunting (1997).mkv — validated covering sidecar Good Will Hunting (1997).eng.srt
+2026-09-07 01:14:27 [INFO] [114/381] HAVE     Goodfellas (1990)\Goodfellas (1990).mkv — validated covering sidecar Goodfellas (1990).eng.srt
+2026-09-07 01:14:27 [INFO] [115/381] HAVE     Gravity (2013)\Gravity (2013).mkv — validated covering sidecar Gravity (2013).eng.srt
+2026-09-07 01:14:27 [INFO] [116/381] HAVE     Green Book (2018)\Green Book (2018).mkv — validated covering sidecar Green Book (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [117/381] HAVE     Greenland (2020)\Greenland (2020).mkv — validated covering sidecar Greenland (2020).eng.srt
+2026-09-07 01:14:27 [INFO] [118/381] HAVE     Groundhog Day (1993)\Groundhog Day (1993).mkv — validated covering sidecar Groundhog Day (1993).eng.srt
+2026-09-07 01:14:27 [INFO] [119/381] HAVE     Grown Ups (2010)\Grown Ups (2010).mkv — validated covering sidecar Grown Ups (2010).eng.srt
+2026-09-07 01:14:27 [INFO] [120/381] HAVE     Guardians of the Galaxy (2014)\Guardians of the Galaxy (2014).mkv — validated covering sidecar Guardians of the Galaxy (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [121/381] HAVE     Hacksaw Ridge (2016)\Hacksaw Ridge (2016).mkv — validated covering sidecar Hacksaw Ridge (2016).eng.srt
+2026-09-07 01:14:27 [INFO] [122/381] HAVE     Happy Feet (2006)\Happy Feet (2006).mkv — validated covering sidecar Happy Feet (2006).eng.srt
+2026-09-07 01:14:27 [INFO] [123/381] HAVE     Happy Gilmore (1996)\Happy Gilmore (1996).mkv — validated covering sidecar Happy Gilmore (1996).eng.srt
+2026-09-07 01:14:27 [INFO] [124/381] HAVE     Harry Potter and the Chamber of Secrets (2002)\Harry Potter and the Chamber of Secrets (2002).mkv — validated covering sidecar Harry Potter and the Chamber of Secrets (2002).eng.srt
+2026-09-07 01:14:27 [INFO] [125/381] HAVE     Harry Potter and the Deathly Hallows - Part 1 (2010)\Harry Potter and the Deathly Hallows - Part 1 (2010).mkv — validated covering sidecar Harry Potter and the Deathly Hallows - Part 1 (2010).eng.srt
+2026-09-07 01:14:27 [INFO] [126/381] HAVE     Harry Potter and the Deathly Hallows - Part 2 (2011)\Harry Potter and the Deathly Hallows - Part 2 (2011).mkv — validated covering sidecar Harry Potter and the Deathly Hallows - Part 2 (2011).eng.srt
+2026-09-07 01:14:27 [INFO] [127/381] HAVE     Harry Potter and the Goblet of Fire (2005)\Harry Potter and the Goblet of Fire (2005).mkv — validated covering sidecar Harry Potter and the Goblet of Fire (2005).eng.srt
+2026-09-07 01:14:27 [INFO] [128/381] HAVE     Harry Potter and the Half-Blood Prince (2009)\Harry Potter and the Half-Blood Prince (2009).mkv — validated covering sidecar Harry Potter and the Half-Blood Prince (2009).eng.srt
+2026-09-07 01:14:27 [INFO] [129/381] HAVE     Harry Potter and the Order of the Phoenix (2007)\Harry Potter and the Order of the Phoenix (2007).mkv — validated covering sidecar Harry Potter and the Order of the Phoenix (2007).eng.srt
+2026-09-07 01:14:27 [INFO] [130/381] HAVE     Harry Potter and the Prisoner of Azkaban (2004)\Harry Potter and the Prisoner of Azkaban (2004).mkv — validated covering sidecar Harry Potter and the Prisoner of Azkaban (2004).eng.srt
+2026-09-07 01:14:27 [INFO] [131/381] HAVE     Harry Potter and the Sorcerer's Stone (2001)\Harry Potter and the Sorcerer's Stone (2001).mkv — validated covering sidecar Harry Potter and the Sorcerer's Stone (2001).eng.srt
+2026-09-07 01:14:27 [INFO] [132/381] HAVE     Heat (1995)\Heat (1995).mkv — validated covering sidecar Heat (1995).eng.srt
+2026-09-07 01:14:27 [INFO] [133/381] HAVE     Her (2013)\Her (2013).mkv — validated covering sidecar Her (2013).eng.srt
+2026-09-07 01:14:27 [INFO] [134/381] HAVE     Hercules (1997)\Hercules (1997).mkv — validated covering sidecar Hercules (1997).eng.srt
+2026-09-07 01:14:27 [INFO] [135/381] HAVE     Hereditary (2018)\Hereditary (2018).mkv — validated covering sidecar Hereditary (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [136/381] HAVE     Hidden Figures (2016)\Hidden Figures (2016).mkv — validated covering sidecar Hidden Figures (2016).eng.srt
+2026-09-07 01:14:27 [INFO] [137/381] HAVE     Holes (2003)\Holes (2003).mkv — validated covering sidecar Holes (2003).eng.srt
+2026-09-07 01:14:27 [INFO] [138/381] HAVE     Home Alone (1990)\Home Alone (1990).mkv — validated covering sidecar Home Alone (1990).eng.srt
+2026-09-07 01:14:27 [INFO] [139/381] HAVE     Home Alone 2 - Lost in New York (1992)\Home Alone 2 - Lost in New York (1992).mkv — validated covering sidecar Home Alone 2 - Lost in New York (1992).eng.srt
+2026-09-07 01:14:27 [INFO] [140/381] HAVE     How to Train Your Dragon (2010)\How to Train Your Dragon (2010).mkv — validated covering sidecar How to Train Your Dragon (2010).eng.srt
+2026-09-07 01:14:27 [INFO] [141/381] HAVE     I Am Legend (2007)\I Am Legend (2007).mkv — validated covering sidecar I Am Legend (2007).eng.srt
+2026-09-07 01:14:27 [INFO] [142/381] HAVE     I, Robot (2004)\I, Robot (2004).mkv — validated covering sidecar I, Robot (2004).eng.srt
+2026-09-07 01:14:27 [INFO] [143/381] HAVE     I, Tonya (2017)\I, Tonya (2017).mkv — validated covering sidecar I, Tonya (2017).eng.srt
+2026-09-07 01:14:27 [INFO] [144/381] HAVE     Ice Age (2002)\Ice Age (2002).mkv — validated covering sidecar Ice Age (2002).eng.srt
+2026-09-07 01:14:27 [INFO] [145/381] HAVE     Idiocracy (2006)\Idiocracy (2006).mkv — validated covering sidecar Idiocracy (2006).eng.srt
+2026-09-07 01:14:27 [INFO] [146/381] HAVE     Inception (2010)\Inception (2010).mkv — validated covering sidecar Inception (2010).eng.srt
+2026-09-07 01:14:27 [INFO] [147/381] HAVE     Incredibles 2 (2018)\Incredibles 2 (2018).mkv — validated covering sidecar Incredibles 2 (2018).eng.srt
+2026-09-07 01:14:27 [INFO] [148/381] HAVE     Independence Day (1996)\Independence Day (1996).mkv — validated covering sidecar Independence Day (1996).eng.srt
+2026-09-07 01:14:27 [INFO] [149/381] HAVE     Indiana Jones and the Last Crusade (1989)\Indiana Jones and the Last Crusade (1989).mkv — validated covering sidecar Indiana Jones and the Last Crusade (1989).eng.srt
+2026-09-07 01:14:27 [INFO] [150/381] HAVE     Indiana Jones and the Raiders of the Lost Ark (1981)\Indiana Jones and the Raiders of the Lost Ark (1981).mkv — validated covering sidecar Indiana Jones and the Raiders of the Lost Ark (1981).eng.srt
+2026-09-07 01:14:27 [INFO] [151/381] HAVE     Indiana Jones and the Temple of Doom (1984)\Indiana Jones and the Temple of Doom (1984).mkv — validated covering sidecar Indiana Jones and the Temple of Doom (1984).eng.srt
+2026-09-07 01:14:27 [INFO] [152/381] HAVE     Inglourious Basterds (2009)\Inglourious Basterds (2009).mkv — validated covering sidecar Inglourious Basterds (2009).eng.srt
+2026-09-07 01:14:27 [INFO] [153/381] HAVE     Insomnia (2002)\Insomnia (2002).mkv — validated covering sidecar Insomnia (2002).eng.srt
+2026-09-07 01:14:27 [INFO] [154/381] HAVE     Interstellar (2014)\Interstellar (2014).mkv — validated covering sidecar Interstellar (2014).eng.srt
+2026-09-07 01:14:27 [INFO] [155/381] HAVE     Into the Wild (2007)\Into the Wild (2007).mkv — validated covering sidecar Into the Wild (2007).eng.srt
+2026-09-07 01:14:27 [INFO] [156/381] HAVE     Iron Man (2008)\Iron Man (2008).mkv — validated covering sidecar Iron Man (2008).eng.srt
+2026-09-07 01:14:27 [INFO] [157/381] HAVE     Iron Man 2 (2010)\Iron Man 2 (2010).mkv — validated covering sidecar Iron Man 2 (2010).eng.srt
+2026-09-07 01:14:27 [INFO] [158/381] HAVE     IT (2017)\IT (2017).mkv — validated covering sidecar IT (2017).eng.srt
+2026-09-07 01:14:27 [INFO] [159/381] HAVE     James and the Giant Peach (1996)\James and the Giant Peach (1996).mkv — validated covering sidecar James and the Giant Peach (1996).eng.srt
+2026-09-07 01:14:27 [INFO] [160/381] HAVE     Jaws (1975)\Jaws (1975).mkv — validated covering sidecar Jaws (1975).eng.srt
+2026-09-07 01:14:28 [INFO] [161/381] HAVE     Jimmy Neutron Boy Genius (2001)\Jimmy Neutron Boy Genius (2001).mkv — validated covering sidecar Jimmy Neutron Boy Genius (2001).eng.srt
+2026-09-07 01:14:28 [INFO] [162/381] HAVE     John Q (2002)\John Q (2002).mkv — validated covering sidecar John Q (2002).eng.srt
+2026-09-07 01:14:28 [INFO] [163/381] HAVE     Joker (2019)\Joker (2019).mkv — validated covering sidecar Joker (2019).eng.srt
+2026-09-07 01:14:28 [INFO] [164/381] HAVE     Jumanji (1995)\Jumanji (1995).mkv — validated covering sidecar Jumanji (1995).eng.srt
+2026-09-07 01:14:28 [INFO] [165/381] HAVE     Juno (2007)\Juno (2007).mkv — validated covering sidecar Juno (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [166/381] HAVE     Jurassic Park (1993)\Jurassic Park (1993).mkv — validated covering sidecar Jurassic Park (1993).eng.srt
+2026-09-07 01:14:28 [INFO] [167/381] HAVE     Jurassic World (2015)\Jurassic World (2015).mkv — validated covering sidecar Jurassic World (2015).eng.srt
+2026-09-07 01:14:28 [INFO] [168/381] HAVE     Kick-Ass (2010)\Kick-Ass (2010).mkv — validated covering sidecar Kick-Ass (2010).eng.srt
+2026-09-07 01:14:28 [INFO] [169/381] HAVE     King Richard (2021)\King Richard (2021).mkv — validated covering sidecar King Richard (2021).eng.srt
+2026-09-07 01:14:28 [INFO] [170/381] HAVE     Knives Out (2019)\Knives Out (2019).mkv — validated covering sidecar Knives Out (2019).eng.srt
+2026-09-07 01:14:28 [INFO] [171/381] HAVE     Knowing (2009)\Knowing (2009).mkv — validated covering sidecar Knowing (2009).eng.srt
+2026-09-07 01:14:28 [INFO] [172/381] HAVE     Kung Fu Panda (2008)\Kung Fu Panda (2008).mkv — validated covering sidecar Kung Fu Panda (2008).eng.srt
+2026-09-07 01:14:28 [INFO] [173/381] HAVE     Legally Blonde (2001)\Legally Blonde (2001).mkv — validated covering sidecar Legally Blonde (2001).eng.srt
+2026-09-07 01:14:28 [INFO] [174/381] HAVE     Logan (2017)\Logan (2017).mkv — validated covering sidecar Logan (2017).eng.srt
+2026-09-07 01:14:28 [INFO] [175/381] HAVE     Lone Survivor (2013)\Lone Survivor (2013).mkv — validated covering sidecar Lone Survivor (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [176/381] HAVE     Madagascar (2005)\Madagascar (2005).mkv — validated covering sidecar Madagascar (2005).eng.srt
+2026-09-07 01:14:28 [INFO] [177/381] HAVE     Magnolia (1999)\Magnolia (1999).mkv — validated covering sidecar Magnolia (1999).eng.srt
+2026-09-07 01:14:28 [INFO] [178/381] HAVE     Marty Supreme (2025)\Marty Supreme (2025).mkv — validated covering sidecar Marty Supreme (2025).eng.srt
+2026-09-07 01:14:28 [INFO] [179/381] HAVE     Mean Girls (2004)\Mean Girls (2004).mkv — validated covering sidecar Mean Girls (2004).eng.srt
+2026-09-07 01:14:28 [INFO] [180/381] HAVE     Meet the Robinsons (2007)\Meet the Robinsons (2007).mkv — validated covering sidecar Meet the Robinsons (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [181/381] HAVE     Megamind (2010)\Megamind (2010).mkv — validated covering sidecar Megamind (2010).eng.srt
+2026-09-07 01:14:28 [INFO] [182/381] HAVE     Memento (2000)\Memento (2000).mkv — validated covering sidecar Memento (2000).eng.srt
+2026-09-07 01:14:28 [INFO] [183/381] HAVE     Minority Report (2002)\Minority Report (2002).mkv — validated covering sidecar Minority Report (2002).eng.srt
+2026-09-07 01:14:28 [INFO] [184/381] HAVE     Mission - Impossible - Fallout (2018)\Mission - Impossible - Fallout (2018).mkv — validated covering sidecar Mission - Impossible - Fallout (2018).eng.srt
+2026-09-07 01:14:28 [INFO] [185/381] HAVE     Monsters University (2013)\Monsters University (2013).mkv — validated covering sidecar Monsters University (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [186/381] HAVE     Monsters, Inc (2001)\Monsters, Inc (2001).mkv — validated covering sidecar Monsters, Inc (2001).eng.srt
+2026-09-07 01:14:28 [INFO] [187/381] HAVE     Moon (2009)\Moon (2009).mkv — validated covering sidecar Moon (2009).eng.srt
+2026-09-07 01:14:28 [INFO] [188/381] HAVE     Mulan (1998)\Mulan (1998).mkv — validated covering sidecar Mulan (1998).eng.srt
+2026-09-07 01:14:28 [INFO] [189/381] HAVE     Napoleon Dynamite (2004)\Napoleon Dynamite (2004).mkv — validated covering sidecar Napoleon Dynamite (2004).eng.srt
+2026-09-07 01:14:28 [INFO] [190/381] HAVE     National Lampoon's Christmas Vacation (1989)\National Lampoon's Christmas Vacation (1989).mkv — validated covering sidecar National Lampoon's Christmas Vacation (1989).eng.srt
+2026-09-07 01:14:28 [INFO] [191/381] HAVE     National Treasure (2004)\National Treasure (2004).mkv — validated covering sidecar National Treasure (2004).eng.srt
+2026-09-07 01:14:28 [INFO] [192/381] HAVE     National Treasure Book of Secrets (2007)\National Treasure Book of Secrets (2007).mkv — validated covering sidecar National Treasure Book of Secrets (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [193/381] HAVE     Night at the Museum (2006)\Night at the Museum (2006).mkv — validated covering sidecar Night at the Museum (2006).eng.srt
+2026-09-07 01:14:28 [INFO] [194/381] HAVE     Nightcrawler (2014)\Nightcrawler (2014).mkv — validated covering sidecar Nightcrawler (2014).eng.srt
+2026-09-07 01:14:28 [INFO] [195/381] HAVE     No Country for Old Men (2007)\No Country for Old Men (2007).mkv — validated covering sidecar No Country for Old Men (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [196/381] HAVE     Now You See Me (2013)\Now You See Me (2013).mkv — validated covering sidecar Now You See Me (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [197/381] HAVE     Oblivion (2013)\Oblivion (2013).mkv — validated covering sidecar Oblivion (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [198/381] HAVE     Obsession (2026)\Obsession (2026).mkv — validated covering sidecar Obsession (2026).eng.srt
+2026-09-07 01:14:28 [INFO] [199/381] HAVE     October Sky (1999)\October Sky (1999).mkv — validated covering sidecar October Sky (1999).eng.srt
+2026-09-07 01:14:28 [INFO] [200/381] HAVE     Office Space (1999)\Office Space (1999).mkv — validated covering sidecar Office Space (1999).eng.srt
+2026-09-07 01:14:28 [INFO] [201/381] HAVE     One Flew Over the Cuckoo's Nest (1975)\One Flew Over the Cuckoo's Nest (1975).mkv — validated covering sidecar One Flew Over the Cuckoo's Nest (1975).eng.srt
+2026-09-07 01:14:28 [INFO] [202/381] HAVE     Open Season (2006)\Open Season (2006).mkv — validated covering sidecar Open Season (2006).eng.srt
+2026-09-07 01:14:28 [INFO] [203/381] HAVE     Oppenheimer (2023)\Oppenheimer (2023).mkv — validated covering sidecar Oppenheimer (2023).eng.srt
+2026-09-07 01:14:28 [INFO] [204/381] HAVE     Osmosis Jones (2001)\Osmosis Jones (2001).mkv — validated covering sidecar Osmosis Jones (2001).eng.sdh.srt
+2026-09-07 01:14:28 [INFO] [205/381] HAVE     Over the Hedge (2006)\Over the Hedge (2006).mkv — validated covering sidecar Over the Hedge (2006).eng.srt
+2026-09-07 01:14:28 [INFO] [206/381] HAVE     Parasite (2019)\Parasite (2019).mkv — validated covering sidecar Parasite (2019).eng.srt
+2026-09-07 01:14:28 [INFO] [207/381] HAVE     Pearl (2022)\Pearl (2022).mkv — validated covering sidecar Pearl (2022).eng.srt
+2026-09-07 01:14:28 [INFO] [208/381] HAVE     Pineapple Express (2008)\Pineapple Express (2008).mkv — validated covering sidecar Pineapple Express (2008).eng.srt
+2026-09-07 01:14:28 [INFO] [209/381] HAVE     Pirates of the Caribbean At World's End (2007)\Pirates of the Caribbean At World's End (2007).mkv — validated covering sidecar Pirates of the Caribbean At World's End (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [210/381] HAVE     Pirates of the Caribbean Dead Man's Chest (2006)\Pirates of the Caribbean Dead Man's Chest (2006).mkv — validated covering sidecar Pirates of the Caribbean Dead Man's Chest (2006).eng.srt
+2026-09-07 01:14:28 [INFO] [211/381] HAVE     Pirates of the Caribbean The Curse of the Black Pearl (2003)\Pirates of the Caribbean The Curse of the Black Pearl (2003).mkv — validated covering sidecar Pirates of the Caribbean The Curse of the Black Pearl (2003).eng.srt
+2026-09-07 01:14:28 [INFO] [212/381] HAVE     Pitch Perfect (2012)\Pitch Perfect (2012).mkv — validated covering sidecar Pitch Perfect (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [213/381] HAVE     Prisoners (2013)\Prisoners (2013).mkv — validated covering sidecar Prisoners (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [214/381] HAVE     Project Hail Mary (2026)\Project Hail Mary (2026).mkv — validated covering sidecar Project Hail Mary (2026).eng.srt
+2026-09-07 01:14:28 [INFO] [215/381] HAVE     Project X (2012)\Project X (2012).mkv — validated covering sidecar Project X (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [216/381] HAVE     Pulp Fiction (1994)\Pulp Fiction (1994).mkv — validated covering sidecar Pulp Fiction (1994).eng.srt
+2026-09-07 01:14:28 [INFO] [217/381] HAVE     Ratatouille (2007)\Ratatouille (2007).mkv — validated covering sidecar Ratatouille (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [218/381] HAVE     Ready Player One (2018)\Ready Player One (2018).mkv — validated covering sidecar Ready Player One (2018).eng.srt
+2026-09-07 01:14:28 [INFO] [219/381] HAVE     Real Steel (2011)\Real Steel (2011).mkv — validated covering sidecar Real Steel (2011).eng.srt
+2026-09-07 01:14:28 [INFO] [220/381] HAVE     Remember the Titans (2000)\Remember the Titans (2000).mkv — validated covering sidecar Remember the Titans (2000).eng.srt
+2026-09-07 01:14:28 [INFO] [221/381] HAVE     Requiem for a Dream (2000)\Requiem for a Dream (2000).mkv — validated covering sidecar Requiem for a Dream (2000).eng.srt
+2026-09-07 01:14:28 [INFO] [222/381] HAVE     Rise of the Planet of the Apes (2011)\Rise of the Planet of the Apes (2011).mkv — validated covering sidecar Rise of the Planet of the Apes (2011).eng.srt
+2026-09-07 01:14:28 [INFO] [223/381] HAVE     Robots (2005)\Robots (2005).mkv — validated covering sidecar Robots (2005).eng.srt
+2026-09-07 01:14:28 [INFO] [224/381] HAVE     Rocky (1976)\Rocky (1976).mkv — validated covering sidecar Rocky (1976).eng.srt
+2026-09-07 01:14:28 [INFO] [225/381] HAVE     Room (2015)\Room (2015).mkv — validated covering sidecar Room (2015).eng.srt
+2026-09-07 01:14:28 [INFO] [226/381] HAVE     Sausage Party (2016)\Sausage Party (2016).mkv — validated covering sidecar Sausage Party (2016).eng.srt
+2026-09-07 01:14:28 [INFO] [227/381] HAVE     Saving Private Ryan (1998)\Saving Private Ryan (1998).mkv — validated covering sidecar Saving Private Ryan (1998).eng.srt
+2026-09-07 01:14:28 [INFO] [228/381] HAVE     Saw (2004)\Saw (2004).mkv — validated covering sidecar Saw (2004).eng.srt
+2026-09-07 01:14:28 [INFO] [229/381] HAVE     Scarface (1983)\Scarface (1983).mkv — validated covering sidecar Scarface (1983).eng.srt
+2026-09-07 01:14:28 [INFO] [230/381] HAVE     Schindler's List (1993)\Schindler's List (1993).mkv — validated covering sidecar Schindler's List (1993).eng.srt
+2026-09-07 01:14:28 [INFO] [231/381] HAVE     Scream (1996)\Scream (1996).mkv — validated covering sidecar Scream (1996).eng.srt
+2026-09-07 01:14:28 [INFO] [232/381] HAVE     Se7en (1995)\Se7en (1995).mkv — validated covering sidecar Se7en (1995).eng.srt
+2026-09-07 01:14:28 [INFO] [233/381] HAVE     Shark Tale (2004)\Shark Tale (2004).mkv — validated covering sidecar Shark Tale (2004).eng.sdh.srt
+2026-09-07 01:14:28 [INFO] [234/381] HAVE     Shazam! (2019)\Shazam! (2019).mkv — validated covering sidecar Shazam! (2019).eng.srt
+2026-09-07 01:14:28 [INFO] [235/381] HAVE     Shrek (2001)\Shrek (2001).mkv — validated covering sidecar Shrek (2001).eng.srt
+2026-09-07 01:14:28 [INFO] [236/381] HAVE     Shrek 2 (2004)\Shrek 2 (2004).mkv — validated covering sidecar Shrek 2 (2004).eng.srt
+2026-09-07 01:14:28 [INFO] [237/381] HAVE     Shrek Forever After (2010)\Shrek Forever After (2010).mkv — validated covering sidecar Shrek Forever After (2010).eng.srt
+2026-09-07 01:14:28 [INFO] [238/381] HAVE     Shutter Island (2010)\Shutter Island (2010).mkv — validated covering sidecar Shutter Island (2010).eng.srt
+2026-09-07 01:14:28 [INFO] [239/381] HAVE     Sicario (2015)\Sicario (2015).mkv — validated covering sidecar Sicario (2015).eng.srt
+2026-09-07 01:14:28 [INFO] [240/381] HAVE     Signs (2002)\Signs (2002).mkv — validated covering sidecar Signs (2002).eng.srt
+2026-09-07 01:14:28 [INFO] [241/381] HAVE     Sinister (2012)\Sinister (2012).mkv — validated covering sidecar Sinister (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [242/381] HAVE     Sinners (2025)\Sinners (2025).mkv — validated covering sidecar Sinners (2025).eng.srt
+2026-09-07 01:14:28 [INFO] [243/381] HAVE     Skyfall (2012)\Skyfall (2012).mkv — validated covering sidecar Skyfall (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [244/381] HAVE     Slumdog Millionaire (2008)\Slumdog Millionaire (2008).mkv — validated covering sidecar Slumdog Millionaire (2008).eng.srt
+2026-09-07 01:14:28 [INFO] [245/381] HAVE     Snatch (2000)\Snatch (2000).mkv — validated covering sidecar Snatch (2000).eng.srt
+2026-09-07 01:14:28 [INFO] [246/381] HAVE     Snowden (2016)\Snowden (2016).mkv — validated covering sidecar Snowden (2016).eng.srt
+2026-09-07 01:14:28 [INFO] [247/381] HAVE     Source Code (2011)\Source Code (2011).mkv — validated covering sidecar Source Code (2011).eng.srt
+2026-09-07 01:14:28 [INFO] [248/381] HAVE     Spaceballs (1987)\Spaceballs (1987).mkv — validated covering sidecar Spaceballs (1987).eng.srt
+2026-09-07 01:14:28 [INFO] [249/381] HAVE     Spider-Man (2002)\Spider-Man (2002).mkv — validated covering sidecar Spider-Man (2002).eng.srt
+2026-09-07 01:14:28 [INFO] [250/381] HAVE     Spider-Man - Across the Spider-Verse (2023)\Spider-Man - Across the Spider-Verse (2023).mkv — validated covering sidecar Spider-Man - Across the Spider-Verse (2023).eng.srt
+2026-09-07 01:14:28 [INFO] [251/381] HAVE     Spider-Man - Homecoming (2017)\Spider-Man - Homecoming (2017).mkv — validated covering sidecar Spider-Man - Homecoming (2017).eng.srt
+2026-09-07 01:14:28 [INFO] [252/381] HAVE     Spider-Man - Into the Spider-Verse (2018)\Spider-Man - Into the Spider-Verse (2018).mkv — validated covering sidecar Spider-Man - Into the Spider-Verse (2018).eng.srt
+2026-09-07 01:14:28 [INFO] [253/381] HAVE     Spider-Man 2 (2004)\Spider-Man 2 (2004).mkv — validated covering sidecar Spider-Man 2 (2004).eng.srt
+2026-09-07 01:14:28 [INFO] [254/381] HAVE     Spider-Man No Way Home (2021)\Spider-Man No Way Home (2021).mkv — validated covering sidecar Spider-Man No Way Home (2021).eng.srt
+2026-09-07 01:14:28 [INFO] [255/381] HAVE     Spirited Away (2001)\Spirited Away (2001).mkv — validated covering sidecar Spirited Away (2001).eng.srt
+2026-09-07 01:14:28 [INFO] [256/381] HAVE     Split (2016)\Split (2016).mkv — validated covering sidecar Split (2016).eng.srt
+2026-09-07 01:14:28 [INFO] [257/381] HAVE     Stalker (1979)\Stalker (1979).mkv — validated covering sidecar Stalker (1979).eng.srt
+2026-09-07 01:14:28 [INFO] [258/381] HAVE     Stand by Me (1986)\Stand by Me (1986).mkv — validated covering sidecar Stand by Me (1986).eng.srt
+2026-09-07 01:14:28 [INFO] [259/381] HAVE     Star Trek (2009)\Star Trek (2009).mkv — validated covering sidecar Star Trek (2009).eng.srt
+2026-09-07 01:14:28 [INFO] [260/381] HAVE     Star Trek - Into Darkness (2013)\Star Trek - Into Darkness (2013).mkv — validated covering sidecar Star Trek - Into Darkness (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [261/381] HAVE     Star Wars - Episode I - The Phantom Menace (1999)\Star Wars - Episode I - The Phantom Menace (1999).mkv — validated covering sidecar Star Wars - Episode I - The Phantom Menace (1999).eng.srt
+2026-09-07 01:14:28 [INFO] [262/381] HAVE     Star Wars - Episode II - Attack of the Clones (2002)\Star Wars - Episode II - Attack of the Clones (2002).mkv — validated covering sidecar Star Wars - Episode II - Attack of the Clones (2002).eng.srt
+2026-09-07 01:14:28 [INFO] [263/381] HAVE     Star Wars - Episode III - Revenge of the Sith (2005)\Star Wars - Episode III - Revenge of the Sith (2005).mkv — validated covering sidecar Star Wars - Episode III - Revenge of the Sith (2005).eng.srt
+2026-09-07 01:14:28 [INFO] [264/381] HAVE     Star Wars - Episode IV - A New Hope (1977)\Star Wars - Episode IV - A New Hope (1977).mkv — validated covering sidecar Star Wars - Episode IV - A New Hope (1977).eng.srt
+2026-09-07 01:14:28 [INFO] [265/381] HAVE     Star Wars - Episode V - The Empire Strikes Back (1980)\Star Wars - Episode V - The Empire Strikes Back (1980).mkv — validated covering sidecar Star Wars - Episode V - The Empire Strikes Back (1980).eng.srt
+2026-09-07 01:14:28 [INFO] [266/381] HAVE     Star Wars - Episode VI - Return of the Jedi (1983)\Star Wars - Episode VI - Return of the Jedi (1983).mkv — validated covering sidecar Star Wars - Episode VI - Return of the Jedi (1983).eng.srt
+2026-09-07 01:14:28 [INFO] [267/381] HAVE     Straight Outta Compton (2015)\Straight Outta Compton (2015).mkv — validated covering sidecar Straight Outta Compton (2015).eng.srt
+2026-09-07 01:14:28 [INFO] [268/381] HAVE     Super 8 (2011)\Super 8 (2011).mkv — validated covering sidecar Super 8 (2011).eng.srt
+2026-09-07 01:14:28 [INFO] [269/381] HAVE     Superbad (2007)\Superbad (2007).mkv — validated covering sidecar Superbad (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [270/381] HAVE     Surf's Up (2007)\Surf's Up (2007).mkv — validated covering sidecar Surf's Up (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [271/381] HAVE     Taken (2008)\Taken (2008).mkv — validated covering sidecar Taken (2008).eng.srt
+2026-09-07 01:14:28 [INFO] [272/381] HAVE     Tangled (2010)\Tangled (2010).mkv — validated covering sidecar Tangled (2010).eng.srt
+2026-09-07 01:14:28 [INFO] [273/381] HAVE     Taxi Driver (1976)\Taxi Driver (1976).mkv — validated covering sidecar Taxi Driver (1976).eng.srt
+2026-09-07 01:14:28 [INFO] [274/381] HAVE     Ted (2012)\Ted (2012).mkv — validated covering sidecar Ted (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [275/381] HAVE     Tenet (2020)\Tenet (2020).mkv — validated covering sidecar Tenet (2020).eng.srt
+2026-09-07 01:14:28 [INFO] [276/381] HAVE     Terminator 2 - Judgment Day (1991)\Terminator 2 - Judgment Day (1991).mkv — validated covering sidecar Terminator 2 - Judgment Day (1991).eng.srt
+2026-09-07 01:14:28 [INFO] [277/381] HAVE     Tetris (2023)\Tetris (2023).mkv — validated covering sidecar Tetris (2023).eng.srt
+2026-09-07 01:14:28 [INFO] [278/381] HAVE     The Accountant (2016)\The Accountant (2016).mkv — validated covering sidecar The Accountant (2016).eng.srt
+2026-09-07 01:14:28 [INFO] [279/381] HAVE     The Amazing Spider-Man (2012)\The Amazing Spider-Man (2012).mkv — validated covering sidecar The Amazing Spider-Man (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [280/381] HAVE     The Avengers (2012)\The Avengers (2012).mkv — validated covering sidecar The Avengers (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [281/381] HAVE     The Batman (2022)\The Batman (2022).mkv — validated covering sidecar The Batman (2022).eng.srt
+2026-09-07 01:14:28 [INFO] [282/381] HAVE     The Big Lebowski (1998)\The Big Lebowski (1998).mkv — validated covering sidecar The Big Lebowski (1998).eng.srt
+2026-09-07 01:14:28 [INFO] [283/381] HAVE     The Big Short (2015)\The Big Short (2015).mkv — validated covering sidecar The Big Short (2015).eng.srt
+2026-09-07 01:14:28 [INFO] [284/381] HAVE     The Book of Eli (2010)\The Book of Eli (2010).mkv — validated covering sidecar The Book of Eli (2010).eng.srt
+2026-09-07 01:14:28 [INFO] [285/381] HAVE     The Bourne Identity (2002)\The Bourne Identity (2002).mkv — validated covering sidecar The Bourne Identity (2002).eng.srt
+2026-09-07 01:14:28 [INFO] [286/381] HAVE     The Bourne Supremacy (2004)\The Bourne Supremacy (2004).mkv — validated covering sidecar The Bourne Supremacy (2004).eng.srt
+2026-09-07 01:14:28 [INFO] [287/381] HAVE     The Bourne Ultimatum (2007)\The Bourne Ultimatum (2007).mkv — validated covering sidecar The Bourne Ultimatum (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [288/381] HAVE     The Boy in the Striped Pyjamas (2008)\The Boy in the Striped Pyjamas (2008).mkv — validated covering sidecar The Boy in the Striped Pyjamas (2008).eng.srt
+2026-09-07 01:14:28 [INFO] [289/381] HAVE     The Breakfast Club (1985)\The Breakfast Club (1985).mkv — validated covering sidecar The Breakfast Club (1985).eng.srt
+2026-09-07 01:14:28 [INFO] [290/381] HAVE     The Curious Case of Benjamin Button (2008)\The Curious Case of Benjamin Button (2008).mkv — validated covering sidecar The Curious Case of Benjamin Button (2008).eng.srt
+2026-09-07 01:14:28 [INFO] [291/381] HAVE     The Dark Knight (2008)\The Dark Knight (2008).mkv — validated covering sidecar The Dark Knight (2008).eng.srt
+2026-09-07 01:14:28 [INFO] [292/381] HAVE     The Dark Knight Rises (2012)\The Dark Knight Rises (2012).mkv — validated covering sidecar The Dark Knight Rises (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [293/381] HAVE     The Day After (1983)\The Day After (1983).mkv — validated covering sidecar The Day After (1983).eng.srt
+2026-09-07 01:14:28 [INFO] [294/381] HAVE     The Departed (2006)\The Departed (2006).mkv — validated covering sidecar The Departed (2006).eng.srt
+2026-09-07 01:14:28 [INFO] [295/381] HAVE     The Edge of Seventeen (2016)\The Edge of Seventeen (2016).mkv — validated covering sidecar The Edge of Seventeen (2016).eng.srt
+2026-09-07 01:14:28 [INFO] [296/381] HAVE     The Emperor's New Groove (2000)\The Emperor's New Groove (2000).mkv — validated covering sidecar The Emperor's New Groove (2000).eng.srt
+2026-09-07 01:14:28 [INFO] [297/381] HAVE     The Fast and the Furious (2001)\The Fast and the Furious (2001).mkv — validated covering sidecar The Fast and the Furious (2001).eng.srt
+2026-09-07 01:14:28 [INFO] [298/381] HAVE     The Founder (2016)\The Founder (2016).mkv — validated covering sidecar The Founder (2016).eng.srt
+2026-09-07 01:14:28 [INFO] [299/381] HAVE     The Godfather (1972)\The Godfather (1972).mkv — validated covering sidecar The Godfather (1972).eng.srt
+2026-09-07 01:14:28 [INFO] [300/381] HAVE     The Godfather - Part II (1974)\The Godfather - Part II (1974).mkv — validated covering sidecar The Godfather - Part II (1974).eng.srt
+2026-09-07 01:14:28 [INFO] [301/381] HAVE     The Goonies (1985)\The Goonies (1985).mkv — validated covering sidecar The Goonies (1985).eng.srt
+2026-09-07 01:14:28 [INFO] [302/381] HAVE     The Green Mile (1999)\The Green Mile (1999).mkv — validated covering sidecar The Green Mile (1999).eng.srt
+2026-09-07 01:14:28 [INFO] [303/381] HAVE     The Hangover (2009)\The Hangover (2009).mkv — validated covering sidecar The Hangover (2009).eng.srt
+2026-09-07 01:14:28 [INFO] [304/381] HAVE     The Help (2011)\The Help (2011).mkv — validated covering sidecar The Help (2011).eng.srt
+2026-09-07 01:14:28 [INFO] [305/381] HAVE     The Hunger Games (2012)\The Hunger Games (2012).mkv — validated covering sidecar The Hunger Games (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [306/381] HAVE     The Hunger Games - Mockingjay - Part 1 (2014)\The Hunger Games - Mockingjay - Part 1 (2014).mkv — validated covering sidecar The Hunger Games - Mockingjay - Part 1 (2014).eng.srt
+2026-09-07 01:14:28 [INFO] [307/381] HAVE     The Hunger Games - Mockingjay - Part 2 (2015)\The Hunger Games - Mockingjay - Part 2 (2015).mkv — validated covering sidecar The Hunger Games - Mockingjay - Part 2 (2015).eng.srt
+2026-09-07 01:14:28 [INFO] [308/381] HAVE     The Hunger Games Catching Fire (2013)\The Hunger Games Catching Fire (2013).mkv — validated covering sidecar The Hunger Games Catching Fire (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [309/381] HAVE     The Hurt Locker (2008)\The Hurt Locker (2008).mkv — validated covering sidecar The Hurt Locker (2008).eng.srt
+2026-09-07 01:14:28 [INFO] [310/381] HAVE     The Imitation Game (2014)\The Imitation Game (2014).mkv — validated covering sidecar The Imitation Game (2014).eng.srt
+2026-09-07 01:14:28 [INFO] [311/381] HAVE     The Incredibles (2004)\The Incredibles (2004).mkv — validated covering sidecar The Incredibles (2004).eng.srt
+2026-09-07 01:14:28 [INFO] [312/381] HAVE     The Interview (2014)\The Interview (2014).mkv — validated covering sidecar The Interview (2014).eng.srt
+2026-09-07 01:14:28 [INFO] [313/381] HAVE     The Invisible Man (2020)\The Invisible Man (2020).mkv — validated covering sidecar The Invisible Man (2020).eng.srt
+2026-09-07 01:14:28 [INFO] [314/381] HAVE     The Karate Kid (1984)\The Karate Kid (1984).mkv — validated covering sidecar The Karate Kid (1984).eng.srt
+2026-09-07 01:14:28 [INFO] [315/381] HAVE     The Longest Yard (2005)\The Longest Yard (2005).mkv — validated covering sidecar The Longest Yard (2005).eng.srt
+2026-09-07 01:14:28 [INFO] [316/381] HAVE     The Lord of the Rings The Fellowship of the Ring (2001)\The Lord of the Rings The Fellowship of the Ring (2001).mkv — validated covering sidecar The Lord of the Rings The Fellowship of the Ring (2001).eng.srt
+2026-09-07 01:14:28 [INFO] [317/381] HAVE     The Lord of the Rings The Return of the King (2003)\The Lord of the Rings The Return of the King (2003).mkv — validated covering sidecar The Lord of the Rings The Return of the King (2003).eng.srt
+2026-09-07 01:14:28 [INFO] [318/381] HAVE     The Lord of the Rings The Two Towers (2002)\The Lord of the Rings The Two Towers (2002).mkv — validated covering sidecar The Lord of the Rings The Two Towers (2002).eng.srt
+2026-09-07 01:14:28 [INFO] [319/381] HAVE     The Martian (2015)\The Martian (2015).mkv — validated covering sidecar The Martian (2015).eng.srt
+2026-09-07 01:14:28 [INFO] [320/381] HAVE     The Matrix (1999)\The Matrix (1999).mkv — validated covering sidecar The Matrix (1999).eng.srt
+2026-09-07 01:14:28 [INFO] [321/381] HAVE     The Maze Runner (2014)\The Maze Runner (2014).mkv — validated covering sidecar The Maze Runner (2014).eng.srt
+2026-09-07 01:14:28 [INFO] [322/381] HAVE     The Nightmare Before Christmas (1993)\The Nightmare Before Christmas (1993).mkv — validated covering sidecar The Nightmare Before Christmas (1993).eng.srt
+2026-09-07 01:14:28 [INFO] [323/381] HAVE     The Polar Express (2004)\The Polar Express (2004).mkv — validated covering sidecar The Polar Express (2004).eng.srt
+2026-09-07 01:14:28 [INFO] [324/381] HAVE     The Prestige (2006)\The Prestige (2006).mkv — validated covering sidecar The Prestige (2006).eng.srt
+2026-09-07 01:14:28 [INFO] [325/381] HAVE     The Princess and the Frog (2009)\The Princess and the Frog (2009).mkv — validated covering sidecar The Princess and the Frog (2009).eng.srt
+2026-09-07 01:14:28 [INFO] [326/381] HAVE     The Proposal (2009)\The Proposal (2009).mkv — validated covering sidecar The Proposal (2009).eng.srt
+2026-09-07 01:14:28 [INFO] [327/381] HAVE     The Revenant (2015)\The Revenant (2015).mkv — validated covering sidecar The Revenant (2015).eng.srt
+2026-09-07 01:14:28 [INFO] [328/381] HAVE     The Sandlot (1993)\The Sandlot (1993).mkv — validated covering sidecar The Sandlot (1993).eng.srt
+2026-09-07 01:14:28 [INFO] [329/381] HAVE     The Shawshank Redemption (1994)\The Shawshank Redemption (1994).mkv — validated covering sidecar The Shawshank Redemption (1994).eng.srt
+2026-09-07 01:14:28 [INFO] [330/381] HAVE     The Silence of the Lambs (1991)\The Silence of the Lambs (1991).mkv — validated covering sidecar The Silence of the Lambs (1991).eng.srt
+2026-09-07 01:14:28 [INFO] [331/381] HAVE     The Sixth Sense (1999)\The Sixth Sense (1999).mkv — validated covering sidecar The Sixth Sense (1999).eng.srt
+2026-09-07 01:14:28 [INFO] [332/381] HAVE     The Social Network (2010)\The Social Network (2010).mkv — validated covering sidecar The Social Network (2010).eng.srt
+2026-09-07 01:14:28 [INFO] [333/381] HAVE     The Substance (2024)\The Substance (2024).mkv — validated covering sidecar The Substance (2024).eng.srt
+2026-09-07 01:14:28 [INFO] [334/381] HAVE     The Terminator (1984)\The Terminator (1984).mkv — validated covering sidecar The Terminator (1984).eng.srt
+2026-09-07 01:14:28 [INFO] [335/381] HAVE     The Theory of Everything (2014)\The Theory of Everything (2014).mkv — validated covering sidecar The Theory of Everything (2014).eng.srt
+2026-09-07 01:14:28 [INFO] [336/381] HAVE     The Thing (1982)\The Thing (1982).mkv — validated covering sidecar The Thing (1982).eng.srt
+2026-09-07 01:14:28 [INFO] [337/381] HAVE     The Truman Show (1998)\The Truman Show (1998).mkv — validated covering sidecar The Truman Show (1998).eng.srt
+2026-09-07 01:14:28 [INFO] [338/381] HAVE     The Usual Suspects (1995)\The Usual Suspects (1995).mkv — validated covering sidecar The Usual Suspects (1995).eng.srt
+2026-09-07 01:14:28 [INFO] [339/381] HAVE     The Wild Robot (2024)\The Wild Robot (2024).mkv — validated covering sidecar The Wild Robot (2024).eng.srt
+2026-09-07 01:14:28 [INFO] [340/381] HAVE     The Wolf of Wall Street (2013)\The Wolf of Wall Street (2013).mkv — validated covering sidecar The Wolf of Wall Street (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [341/381] HAVE     There Will Be Blood (2007)\There Will Be Blood (2007).mkv — validated covering sidecar There Will Be Blood (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [342/381] HAVE     This Christmas (2007)\This Christmas (2007).mkv — validated covering sidecar This Christmas (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [343/381] HAVE     This Is the End (2013)\This Is the End (2013).mkv — validated covering sidecar This Is the End (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [344/381] HAVE     Thor - Ragnarok (2017)\Thor - Ragnarok (2017).mkv — validated covering sidecar Thor - Ragnarok (2017).eng.srt
+2026-09-07 01:14:28 [INFO] [345/381] HAVE     Threads (1984)\Threads (1984).mkv — validated covering sidecar Threads (1984).eng.srt
+2026-09-07 01:14:28 [INFO] [346/381] HAVE     Titanic (1997)\Titanic (1997).mkv — validated covering sidecar Titanic (1997).eng.srt
+2026-09-07 01:14:28 [INFO] [347/381] HAVE     Top Gun (1986)\Top Gun (1986).mkv — validated covering sidecar Top Gun (1986).eng.srt
+2026-09-07 01:14:28 [INFO] [348/381] HAVE     Top Gun - Maverick (2022)\Top Gun - Maverick (2022).mkv — validated covering sidecar Top Gun - Maverick (2022).eng.srt
+2026-09-07 01:14:28 [INFO] [349/381] HAVE     Toy Story (1995)\Toy Story (1995).mkv — validated covering sidecar Toy Story (1995).eng.srt
+2026-09-07 01:14:28 [INFO] [350/381] HAVE     Toy Story 2 (1999)\Toy Story 2 (1999).mkv — validated covering sidecar Toy Story 2 (1999).eng.srt
+2026-09-07 01:14:28 [INFO] [351/381] HAVE     Toy Story 3 (2010)\Toy Story 3 (2010).mkv — validated covering sidecar Toy Story 3 (2010).eng.srt
+2026-09-07 01:14:28 [INFO] [352/381] HAVE     Toy Story 4 (2019)\Toy Story 4 (2019).mkv — validated covering sidecar Toy Story 4 (2019).eng.srt
+2026-09-07 01:14:28 [INFO] [353/381] HAVE     Toy Story 5 (2026)\Toy Story 5 (2026).mkv — validated covering sidecar Toy Story 5 (2026).eng.srt
+2026-09-07 01:14:28 [INFO] [354/381] HAVE     Training Day (2001)\Training Day (2001).mkv — validated covering sidecar Training Day (2001).eng.srt
+2026-09-07 01:14:28 [INFO] [355/381] HAVE     Transformers (2007)\Transformers (2007).mkv — validated covering sidecar Transformers (2007).eng.srt
+2026-09-07 01:14:28 [INFO] [356/381] HAVE     Transformers Dark Of The Moon (2011)\Transformers Dark Of The Moon (2011).mkv — validated covering sidecar Transformers Dark Of The Moon (2011).eng.srt
+2026-09-07 01:14:28 [INFO] [357/381] HAVE     Transformers Revenge of the Fallen (2009)\Transformers Revenge of the Fallen (2009).mkv — validated covering sidecar Transformers Revenge of the Fallen (2009).eng.srt
+2026-09-07 01:14:28 [INFO] [358/381] HAVE     Treasure Planet (2002)\Treasure Planet (2002).mkv — validated covering sidecar Treasure Planet (2002).eng.srt
+2026-09-07 01:14:28 [INFO] [359/381] HAVE     TRON - Legacy (2010)\TRON - Legacy (2010).mkv — validated covering sidecar TRON - Legacy (2010).eng.srt
+2026-09-07 01:14:28 [INFO] [360/381] HAVE     Turtles Forever (2009)\Turtles Forever (2009).mkv — validated covering sidecar Turtles Forever (2009).eng.srt
+2026-09-07 01:14:28 [INFO] [361/381] HAVE     Twelve Monkeys (1995)\Twelve Monkeys (1995).mkv — validated covering sidecar Twelve Monkeys (1995).eng.srt
+2026-09-07 01:14:28 [INFO] [362/381] HAVE     Uncut Gems (2019)\Uncut Gems (2019).mkv — validated covering sidecar Uncut Gems (2019).eng.srt
+2026-09-07 01:14:28 [INFO] [363/381] HAVE     United 93 (2006)\United 93 (2006).mkv — validated covering sidecar United 93 (2006).eng.srt
+2026-09-07 01:14:28 [INFO] [364/381] HAVE     Us (2019)\Us (2019).mkv — validated covering sidecar Us (2019).eng.srt
+2026-09-07 01:14:28 [INFO] [365/381] HAVE     V for Vendetta (2005)\V for Vendetta (2005).mkv — validated covering sidecar V for Vendetta (2005).eng.srt
+2026-09-07 01:14:28 [INFO] [366/381] HAVE     WALL-E (2008)\WALL-E (2008).mkv — validated covering sidecar WALL-E (2008).eng.srt
+2026-09-07 01:14:28 [INFO] [367/381] HAVE     Wallace & Gromit - The Curse of the Were-Rabbit (2005)\Wallace & Gromit - The Curse of the Were-Rabbit (2005).mkv — validated covering sidecar Wallace & Gromit - The Curse of the Were-Rabbit (2005).eng.srt
+2026-09-07 01:14:28 [INFO] [368/381] HAVE     War Dogs (2016)\War Dogs (2016).mkv — validated covering sidecar War Dogs (2016).eng.srt
+2026-09-07 01:14:28 [INFO] [369/381] HAVE     War for the Planet of the Apes (2017)\War for the Planet of the Apes (2017).mkv — validated covering sidecar War for the Planet of the Apes (2017).eng.srt
+2026-09-07 01:14:28 [INFO] [370/381] HAVE     WarGames (1983)\WarGames (1983).mkv — validated covering sidecar WarGames (1983).eng.srt
+2026-09-07 01:14:28 [INFO] [371/381] HAVE     Warrior (2011)\Warrior (2011).mkv — validated covering sidecar Warrior (2011).eng.srt
+2026-09-07 01:14:28 [INFO] [372/381] HAVE     We're the Millers (2013)\We're the Millers (2013).mkv — validated covering sidecar We're the Millers (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [373/381] HAVE     Weapons (2025)\Weapons (2025).mkv — validated covering sidecar Weapons (2025).eng.srt
+2026-09-07 01:14:28 [INFO] [374/381] HAVE     Whiplash (2014)\Whiplash (2014).mkv — validated covering sidecar Whiplash (2014).eng.srt
+2026-09-07 01:14:28 [INFO] [375/381] HAVE     Willy Wonka & the Chocolate Factory (1971)\Willy Wonka & the Chocolate Factory (1971).mkv — validated covering sidecar Willy Wonka & the Chocolate Factory (1971).eng.srt
+2026-09-07 01:14:28 [INFO] [376/381] HAVE     World War Z (2013)\World War Z (2013).mkv — validated covering sidecar World War Z (2013).eng.srt
+2026-09-07 01:14:28 [INFO] [377/381] HAVE     Wreck-It Ralph (2012)\Wreck-It Ralph (2012).mkv — validated covering sidecar Wreck-It Ralph (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [378/381] HAVE     Zathura - A Space Adventure (2005)\Zathura - A Space Adventure (2005).mkv — validated covering sidecar Zathura - A Space Adventure (2005).eng.srt
+2026-09-07 01:14:28 [INFO] [379/381] HAVE     Zero Dark Thirty (2012)\Zero Dark Thirty (2012).mkv — validated covering sidecar Zero Dark Thirty (2012).eng.srt
+2026-09-07 01:14:28 [INFO] [380/381] HAVE     Zootopia (2016)\Zootopia (2016).mkv — validated covering sidecar Zootopia (2016).eng.srt
+2026-09-07 01:14:28 [INFO] [381/381] HAVE     Zootopia 2 (2025)\Zootopia 2 (2025).mkv — validated covering sidecar Zootopia 2 (2025).eng.sdh.srt
+2026-09-07 01:14:28 [INFO] Report written: E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher_report.txt
+2026-09-07 01:31:51 [INFO] Found 381 eligible movies. UTC local reservations: OpenSubtitles downloads 0/100 · SubDL downloads 0/50; searches 0/2000 · Subf2m.co searches 0/20 · Podnapisi.NET searches 0/20 · Addic7ed.com searches 0/20 · SubSource.net searches 0/20 · Subsunacs.net searches 0/20 · YIFY Subtitles searches 0/20 · Subs.sab.bz searches 0/20.
+2026-09-07 01:31:52 [INFO] Inspecting existing sidecars with 6 workers (--workers 1 for the serial run); every provider request stays serial.
+2026-09-07 01:31:52 [INFO] [001/381] HAVE     10 Cloverfield Lane (2016)\10 Cloverfield Lane (2016).mkv — validated covering sidecar 10 Cloverfield Lane (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [002/381] HAVE     10 Things I Hate About You (1999)\10 Things I Hate About You (1999).mkv — validated covering sidecar 10 Things I Hate About You (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [003/381] HAVE     12 Years a Slave (2013)\12 Years a Slave (2013).mkv — validated covering sidecar 12 Years a Slave (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [004/381] HAVE     13 Hours - The Secret Soldiers of Benghazi (2016)\13 Hours - The Secret Soldiers of Benghazi (2016).mkv — validated covering sidecar 13 Hours - The Secret Soldiers of Benghazi (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [005/381] HAVE     1917 (2019)\1917 (2019).mkv — validated covering sidecar 1917 (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [006/381] HAVE     2001 - A Space Odyssey (1968)\2001 - A Space Odyssey (1968).mkv — validated covering sidecar 2001 - A Space Odyssey (1968).eng.srt
+2026-09-07 01:31:52 [INFO] [007/381] HAVE     21 Jump Street (2012)\21 Jump Street (2012).mkv — validated covering sidecar 21 Jump Street (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [008/381] HAVE     22 Jump Street (2014)\22 Jump Street (2014).mkv — validated covering sidecar 22 Jump Street (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [009/381] HAVE     300 (2006)\300 (2006).mkv — validated covering sidecar 300 (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [010/381] HAVE     42 (2013)\42 (2013).mkv — validated covering sidecar 42 (2013).eng.sdh.srt
+2026-09-07 01:31:52 [INFO] [011/381] HAVE     50 First Dates (2004)\50 First Dates (2004).mkv — validated covering sidecar 50 First Dates (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [012/381] HAVE     500 Days of Summer (2009)\500 Days of Summer (2009).mkv — validated covering sidecar 500 Days of Summer (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [013/381] HAVE     8 Mile (2002)\8 Mile (2002).mkv — validated covering sidecar 8 Mile (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [014/381] HAVE     9 (2009)\9 (2009).mkv — validated covering sidecar 9 (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [015/381] HAVE     A Beautiful Mind (2001)\A Beautiful Mind (2001).mkv — validated covering sidecar A Beautiful Mind (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [016/381] HAVE     A Christmas Story (1983)\A Christmas Story (1983).mkv — validated covering sidecar A Christmas Story (1983).eng.srt
+2026-09-07 01:31:52 [INFO] [017/381] HAVE     A I Artificial Intelligence (2001)\A I Artificial Intelligence (2001).mkv — validated covering sidecar A I Artificial Intelligence (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [018/381] HAVE     A Quiet Place (2018)\A Quiet Place (2018).mkv — validated covering sidecar A Quiet Place (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [019/381] HAVE     A Quiet Place Part II (2021)\A Quiet Place Part II (2021).mkv — validated covering sidecar A Quiet Place Part II (2021).eng.srt
+2026-09-07 01:31:52 [INFO] [020/381] HAVE     About Time (2013)\About Time (2013).mkv — validated covering sidecar About Time (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [021/381] HAVE     Accepted (2006)\Accepted (2006).mkv — validated covering sidecar Accepted (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [022/381] HAVE     Air (2023)\Air (2023).mkv — validated covering sidecar Air (2023).eng.sdh.srt
+2026-09-07 01:31:52 [INFO] [023/381] HAVE     Aladdin (1992)\Aladdin (1992).mkv — validated covering sidecar Aladdin (1992).eng.srt
+2026-09-07 01:31:52 [INFO] [024/381] HAVE     Alien (1979)\Alien (1979).mkv — validated covering sidecar Alien (1979).eng.sdh.srt
+2026-09-07 01:31:52 [INFO] [025/381] HAVE     Aliens (1986)\Aliens (1986).mkv — validated covering sidecar Aliens (1986).eng.srt
+2026-09-07 01:31:52 [INFO] [026/381] HAVE     All Quiet on the Western Front (2022)\All Quiet on the Western Front (2022).mkv — validated covering sidecar All Quiet on the Western Front (2022).eng.sdh.srt
+2026-09-07 01:31:52 [INFO] [027/381] HAVE     American History X (1998)\American History X (1998).mkv — validated covering sidecar American History X (1998).eng.srt
+2026-09-07 01:31:52 [INFO] [028/381] HAVE     American Pie (1999)\American Pie (1999).mkv — validated covering sidecar American Pie (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [029/381] HAVE     American Psycho (2000)\American Psycho (2000).mkv — validated covering sidecar American Psycho (2000).eng.srt
+2026-09-07 01:31:52 [INFO] [030/381] HAVE     American Sniper (2014)\American Sniper (2014).mkv — validated covering sidecar American Sniper (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [031/381] HAVE     Annihilation (2018)\Annihilation (2018).mkv — validated covering sidecar Annihilation (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [032/381] HAVE     Apollo 13 (1995)\Apollo 13 (1995).mkv — validated covering sidecar Apollo 13 (1995).eng.sdh.srt
+2026-09-07 01:31:52 [INFO] [033/381] HAVE     Arrival (2016)\Arrival (2016).mkv — validated covering sidecar Arrival (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [034/381] HAVE     Avatar (2009)\Avatar (2009).mkv — validated covering sidecar Avatar (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [035/381] HAVE     Avengers Age of Ultron (2015)\Avengers Age of Ultron (2015).mkv — validated covering sidecar Avengers Age of Ultron (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [036/381] HAVE     Avengers Endgame (2019)\Avengers Endgame (2019).mkv — validated covering sidecar Avengers Endgame (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [037/381] HAVE     Avengers Infinity War (2018)\Avengers Infinity War (2018).mkv — validated covering sidecar Avengers Infinity War (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [038/381] HAVE     Back to the Future (1985)\Back to the Future (1985).mkv — validated covering sidecar Back to the Future (1985).eng.srt
+2026-09-07 01:31:52 [INFO] [039/381] HAVE     Back to the Future Part II (1989)\Back to the Future Part II (1989).mkv — validated covering sidecar Back to the Future Part II (1989).eng.srt
+2026-09-07 01:31:52 [INFO] [040/381] HAVE     Back to the Future Part III (1990)\Back to the Future Part III (1990).mkv — validated covering sidecar Back to the Future Part III (1990).eng.srt
+2026-09-07 01:31:52 [INFO] [041/381] HAVE     Backrooms (2026)\Backrooms (2026).mkv — validated covering sidecar Backrooms (2026).eng.sdh.srt
+2026-09-07 01:31:52 [INFO] [042/381] HAVE     Barbie (2023)\Barbie (2023).mkv — validated covering sidecar Barbie (2023).eng.srt
+2026-09-07 01:31:52 [INFO] [043/381] HAVE     Batman Begins (2005)\Batman Begins (2005).mkv — validated covering sidecar Batman Begins (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [044/381] HAVE     Bee Movie (2007)\Bee Movie (2007).mkv — validated covering sidecar Bee Movie (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [045/381] HAVE     Black Hawk Down (2001)\Black Hawk Down (2001).mkv — validated covering sidecar Black Hawk Down (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [046/381] HAVE     Black Panther (2018)\Black Panther (2018).mkv — validated covering sidecar Black Panther (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [047/381] HAVE     Blade Runner (1982)\Blade Runner (1982).mkv — validated covering sidecar Blade Runner (1982).eng.srt
+2026-09-07 01:31:52 [INFO] [048/381] HAVE     Blade Runner 2049 (2017)\Blade Runner 2049 (2017).mkv — validated covering sidecar Blade Runner 2049 (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [049/381] HAVE     Blended (2014)\Blended (2014).mkv — validated covering sidecar Blended (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [050/381] HAVE     Bohemian Rhapsody (2018)\Bohemian Rhapsody (2018).mkv — validated covering sidecar Bohemian Rhapsody (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [051/381] HAVE     Borat (2006)\Borat (2006).mkv — validated covering sidecar Borat (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [052/381] HAVE     Boyhood (2014)\Boyhood (2014).mkv — validated covering sidecar Boyhood (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [053/381] HAVE     Boyz N the Hood (1991)\Boyz N the Hood (1991).mkv — validated covering sidecar Boyz N the Hood (1991).eng.srt
+2026-09-07 01:31:52 [INFO] [054/381] HAVE     Braveheart (1995)\Braveheart (1995).mkv — validated covering sidecar Braveheart (1995).eng.srt
+2026-09-07 01:31:52 [INFO] [055/381] HAVE     Bugonia (2025)\Bugonia (2025).mkv — validated covering sidecar Bugonia (2025).eng.srt
+2026-09-07 01:31:52 [INFO] [056/381] HAVE     Captain America Civil War (2016)\Captain America Civil War (2016).mkv — validated covering sidecar Captain America Civil War (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [057/381] HAVE     Captain America The First Avenger (2011)\Captain America The First Avenger (2011).mkv — validated covering sidecar Captain America The First Avenger (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [058/381] HAVE     Captain America The Winter Soldier (2014)\Captain America The Winter Soldier (2014).mkv — validated covering sidecar Captain America The Winter Soldier (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [059/381] HAVE     Cars (2006)\Cars (2006).mkv — validated covering sidecar Cars (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [060/381] HAVE     Casino Royale (2006)\Casino Royale (2006).mkv — validated covering sidecar Casino Royale (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [061/381] HAVE     Cast Away (2000)\Cast Away (2000).mkv — validated covering sidecar Cast Away (2000).eng.srt
+2026-09-07 01:31:52 [INFO] [062/381] HAVE     Catch Me If You Can (2002)\Catch Me If You Can (2002).mkv — validated covering sidecar Catch Me If You Can (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [063/381] HAVE     Charlie and the Chocolate Factory (2005)\Charlie and the Chocolate Factory (2005).mkv — validated covering sidecar Charlie and the Chocolate Factory (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [064/381] HAVE     Chicken Little (2005)\Chicken Little (2005).mkv — validated covering sidecar Chicken Little (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [065/381] HAVE     Children of Men (2006)\Children of Men (2006).mkv — validated covering sidecar Children of Men (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [066/381] HAVE     Chronicle (2012)\Chronicle (2012).mkv — validated covering sidecar Chronicle (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [067/381] HAVE     Civil War (2024)\Civil War (2024).mkv — validated covering sidecar Civil War (2024).eng.srt
+2026-09-07 01:31:52 [INFO] [068/381] HAVE     Cloudy with a Chance of Meatballs (2009)\Cloudy with a Chance of Meatballs (2009).mkv — validated covering sidecar Cloudy with a Chance of Meatballs (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [069/381] HAVE     Cloverfield (2008)\Cloverfield (2008).mkv — validated covering sidecar Cloverfield (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [070/381] HAVE     Coach Carter (2005)\Coach Carter (2005).mkv — validated covering sidecar Coach Carter (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [071/381] HAVE     Coco (2017)\Coco (2017).mkv — validated covering sidecar Coco (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [072/381] HAVE     Contact (1997)\Contact (1997).mkv — validated covering sidecar Contact (1997).eng.srt
+2026-09-07 01:31:52 [INFO] [073/381] HAVE     Contagion (2011)\Contagion (2011).mkv — validated covering sidecar Contagion (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [074/381] HAVE     Coraline (2009)\Coraline (2009).mkv — validated covering sidecar Coraline (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [075/381] HAVE     Crazy Rich Asians (2018)\Crazy Rich Asians (2018).mkv — validated covering sidecar Crazy Rich Asians (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [076/381] HAVE     Creed (2015)\Creed (2015).mkv — validated covering sidecar Creed (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [077/381] HAVE     Dawn of the Planet of the Apes (2014)\Dawn of the Planet of the Apes (2014).mkv — validated covering sidecar Dawn of the Planet of the Apes (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [078/381] HAVE     Dead Poets Society (1989)\Dead Poets Society (1989).mkv — validated covering sidecar Dead Poets Society (1989).eng.srt
+2026-09-07 01:31:52 [INFO] [079/381] HAVE     Deadpool (2016)\Deadpool (2016).mkv — validated covering sidecar Deadpool (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [080/381] HAVE     Deadpool 2 (2018)\Deadpool 2 (2018).mkv — validated covering sidecar Deadpool 2 (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [081/381] HAVE     Despicable Me (2010)\Despicable Me (2010).mkv — validated covering sidecar Despicable Me (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [082/381] HAVE     Die Hard (1988)\Die Hard (1988).mkv — validated covering sidecar Die Hard (1988).eng.srt
+2026-09-07 01:31:52 [INFO] [083/381] HAVE     District 9 (2009)\District 9 (2009).mkv — validated covering sidecar District 9 (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [084/381] HAVE     Django Unchained (2012)\Django Unchained (2012).mkv — validated covering sidecar Django Unchained (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [085/381] HAVE     Donnie Darko (2001)\Donnie Darko (2001).mkv — validated covering sidecar Donnie Darko (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [086/381] HAVE     Dune (2021)\Dune (2021).mkv — validated covering sidecar Dune (2021).eng.srt
+2026-09-07 01:31:52 [INFO] [087/381] HAVE     Dune - Part Two (2024)\Dune - Part Two (2024).mkv — validated covering sidecar Dune - Part Two (2024).eng.srt
+2026-09-07 01:31:52 [INFO] [088/381] HAVE     Dunkirk (2017)\Dunkirk (2017).mkv — validated covering sidecar Dunkirk (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [089/381] HAVE     E T the Extra-Terrestrial (1982)\E T the Extra-Terrestrial (1982).mkv — validated covering sidecar E T the Extra-Terrestrial (1982).eng.srt
+2026-09-07 01:31:52 [INFO] [090/381] HAVE     Easy A (2010)\Easy A (2010).mkv — validated covering sidecar Easy A (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [091/381] HAVE     Edge of Tomorrow (2014)\Edge of Tomorrow (2014).mkv — validated covering sidecar Edge of Tomorrow (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [092/381] HAVE     Edward Scissorhands (1990)\Edward Scissorhands (1990).mkv — validated covering sidecar Edward Scissorhands (1990).eng.srt
+2026-09-07 01:31:52 [INFO] [093/381] HAVE     Elemental (2023)\Elemental (2023).mkv — validated covering sidecar Elemental (2023).eng.srt
+2026-09-07 01:31:52 [INFO] [094/381] HAVE     Elysium (2013)\Elysium (2013).mkv — validated covering sidecar Elysium (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [095/381] HAVE     Enchanted (2007)\Enchanted (2007).mkv — validated covering sidecar Enchanted (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [096/381] HAVE     Enemy (2013)\Enemy (2013).mkv — validated covering sidecar Enemy (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [097/381] HAVE     Eternal Sunshine of the Spotless Mind (2004)\Eternal Sunshine of the Spotless Mind (2004).mkv — validated covering sidecar Eternal Sunshine of the Spotless Mind (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [098/381] HAVE     Ex Machina (2015)\Ex Machina (2015).mkv — validated covering sidecar Ex Machina (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [099/381] HAVE     Fargo (1996)\Fargo (1996).mkv — validated covering sidecar Fargo (1996).eng.srt
+2026-09-07 01:31:52 [INFO] [100/381] HAVE     Fast Five (2011)\Fast Five (2011).mkv — validated covering sidecar Fast Five (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [101/381] HAVE     Ferris Bueller's Day Off (1986)\Ferris Bueller's Day Off (1986).mkv — validated covering sidecar Ferris Bueller's Day Off (1986).eng.srt
+2026-09-07 01:31:52 [INFO] [102/381] HAVE     Fight Club (1999)\Fight Club (1999).mkv — validated covering sidecar Fight Club (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [103/381] HAVE     Finding Nemo (2003)\Finding Nemo (2003).mkv — validated covering sidecar Finding Nemo (2003).eng.srt
+2026-09-07 01:31:52 [INFO] [104/381] HAVE     First Man (2018)\First Man (2018).mkv — validated covering sidecar First Man (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [105/381] HAVE     Ford v Ferrari (2019)\Ford v Ferrari (2019).mkv — validated covering sidecar Ford v Ferrari (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [106/381] HAVE     Forrest Gump (1994)\Forrest Gump (1994).mkv — validated covering sidecar Forrest Gump (1994).eng.srt
+2026-09-07 01:31:52 [INFO] [107/381] HAVE     Fractured (2019)\Fractured (2019).mkv — validated covering sidecar Fractured (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [108/381] HAVE     Fury (2014)\Fury (2014).mkv — validated covering sidecar Fury (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [109/381] HAVE     Get Out (2017)\Get Out (2017).mkv — validated covering sidecar Get Out (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [110/381] HAVE     Ghostbusters (1984)\Ghostbusters (1984).mkv — validated covering sidecar Ghostbusters (1984).eng.srt
+2026-09-07 01:31:52 [INFO] [111/381] HAVE     Gladiator (2000)\Gladiator (2000).mkv — validated covering sidecar Gladiator (2000).eng.srt
+2026-09-07 01:31:52 [INFO] [112/381] HAVE     Gone Girl (2014)\Gone Girl (2014).mkv — validated covering sidecar Gone Girl (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [113/381] HAVE     Good Will Hunting (1997)\Good Will Hunting (1997).mkv — validated covering sidecar Good Will Hunting (1997).eng.srt
+2026-09-07 01:31:52 [INFO] [114/381] HAVE     Goodfellas (1990)\Goodfellas (1990).mkv — validated covering sidecar Goodfellas (1990).eng.srt
+2026-09-07 01:31:52 [INFO] [115/381] HAVE     Gravity (2013)\Gravity (2013).mkv — validated covering sidecar Gravity (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [116/381] HAVE     Green Book (2018)\Green Book (2018).mkv — validated covering sidecar Green Book (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [117/381] HAVE     Greenland (2020)\Greenland (2020).mkv — validated covering sidecar Greenland (2020).eng.srt
+2026-09-07 01:31:52 [INFO] [118/381] HAVE     Groundhog Day (1993)\Groundhog Day (1993).mkv — validated covering sidecar Groundhog Day (1993).eng.srt
+2026-09-07 01:31:52 [INFO] [119/381] HAVE     Grown Ups (2010)\Grown Ups (2010).mkv — validated covering sidecar Grown Ups (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [120/381] HAVE     Guardians of the Galaxy (2014)\Guardians of the Galaxy (2014).mkv — validated covering sidecar Guardians of the Galaxy (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [121/381] HAVE     Hacksaw Ridge (2016)\Hacksaw Ridge (2016).mkv — validated covering sidecar Hacksaw Ridge (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [122/381] HAVE     Happy Feet (2006)\Happy Feet (2006).mkv — validated covering sidecar Happy Feet (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [123/381] HAVE     Happy Gilmore (1996)\Happy Gilmore (1996).mkv — validated covering sidecar Happy Gilmore (1996).eng.srt
+2026-09-07 01:31:52 [INFO] [124/381] HAVE     Harry Potter and the Chamber of Secrets (2002)\Harry Potter and the Chamber of Secrets (2002).mkv — validated covering sidecar Harry Potter and the Chamber of Secrets (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [125/381] HAVE     Harry Potter and the Deathly Hallows - Part 1 (2010)\Harry Potter and the Deathly Hallows - Part 1 (2010).mkv — validated covering sidecar Harry Potter and the Deathly Hallows - Part 1 (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [126/381] HAVE     Harry Potter and the Deathly Hallows - Part 2 (2011)\Harry Potter and the Deathly Hallows - Part 2 (2011).mkv — validated covering sidecar Harry Potter and the Deathly Hallows - Part 2 (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [127/381] HAVE     Harry Potter and the Goblet of Fire (2005)\Harry Potter and the Goblet of Fire (2005).mkv — validated covering sidecar Harry Potter and the Goblet of Fire (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [128/381] HAVE     Harry Potter and the Half-Blood Prince (2009)\Harry Potter and the Half-Blood Prince (2009).mkv — validated covering sidecar Harry Potter and the Half-Blood Prince (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [129/381] HAVE     Harry Potter and the Order of the Phoenix (2007)\Harry Potter and the Order of the Phoenix (2007).mkv — validated covering sidecar Harry Potter and the Order of the Phoenix (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [130/381] HAVE     Harry Potter and the Prisoner of Azkaban (2004)\Harry Potter and the Prisoner of Azkaban (2004).mkv — validated covering sidecar Harry Potter and the Prisoner of Azkaban (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [131/381] HAVE     Harry Potter and the Sorcerer's Stone (2001)\Harry Potter and the Sorcerer's Stone (2001).mkv — validated covering sidecar Harry Potter and the Sorcerer's Stone (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [132/381] HAVE     Heat (1995)\Heat (1995).mkv — validated covering sidecar Heat (1995).eng.srt
+2026-09-07 01:31:52 [INFO] [133/381] HAVE     Her (2013)\Her (2013).mkv — validated covering sidecar Her (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [134/381] HAVE     Hercules (1997)\Hercules (1997).mkv — validated covering sidecar Hercules (1997).eng.srt
+2026-09-07 01:31:52 [INFO] [135/381] HAVE     Hereditary (2018)\Hereditary (2018).mkv — validated covering sidecar Hereditary (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [136/381] HAVE     Hidden Figures (2016)\Hidden Figures (2016).mkv — validated covering sidecar Hidden Figures (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [137/381] HAVE     Holes (2003)\Holes (2003).mkv — validated covering sidecar Holes (2003).eng.srt
+2026-09-07 01:31:52 [INFO] [138/381] HAVE     Home Alone (1990)\Home Alone (1990).mkv — validated covering sidecar Home Alone (1990).eng.srt
+2026-09-07 01:31:52 [INFO] [139/381] HAVE     Home Alone 2 - Lost in New York (1992)\Home Alone 2 - Lost in New York (1992).mkv — validated covering sidecar Home Alone 2 - Lost in New York (1992).eng.srt
+2026-09-07 01:31:52 [INFO] [140/381] HAVE     How to Train Your Dragon (2010)\How to Train Your Dragon (2010).mkv — validated covering sidecar How to Train Your Dragon (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [141/381] HAVE     I Am Legend (2007)\I Am Legend (2007).mkv — validated covering sidecar I Am Legend (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [142/381] HAVE     I, Robot (2004)\I, Robot (2004).mkv — validated covering sidecar I, Robot (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [143/381] HAVE     I, Tonya (2017)\I, Tonya (2017).mkv — validated covering sidecar I, Tonya (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [144/381] HAVE     Ice Age (2002)\Ice Age (2002).mkv — validated covering sidecar Ice Age (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [145/381] HAVE     Idiocracy (2006)\Idiocracy (2006).mkv — validated covering sidecar Idiocracy (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [146/381] HAVE     Inception (2010)\Inception (2010).mkv — validated covering sidecar Inception (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [147/381] HAVE     Incredibles 2 (2018)\Incredibles 2 (2018).mkv — validated covering sidecar Incredibles 2 (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [148/381] HAVE     Independence Day (1996)\Independence Day (1996).mkv — validated covering sidecar Independence Day (1996).eng.srt
+2026-09-07 01:31:52 [INFO] [149/381] HAVE     Indiana Jones and the Last Crusade (1989)\Indiana Jones and the Last Crusade (1989).mkv — validated covering sidecar Indiana Jones and the Last Crusade (1989).eng.srt
+2026-09-07 01:31:52 [INFO] [150/381] HAVE     Indiana Jones and the Raiders of the Lost Ark (1981)\Indiana Jones and the Raiders of the Lost Ark (1981).mkv — validated covering sidecar Indiana Jones and the Raiders of the Lost Ark (1981).eng.srt
+2026-09-07 01:31:52 [INFO] [151/381] HAVE     Indiana Jones and the Temple of Doom (1984)\Indiana Jones and the Temple of Doom (1984).mkv — validated covering sidecar Indiana Jones and the Temple of Doom (1984).eng.srt
+2026-09-07 01:31:52 [INFO] [152/381] HAVE     Inglourious Basterds (2009)\Inglourious Basterds (2009).mkv — validated covering sidecar Inglourious Basterds (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [153/381] HAVE     Insomnia (2002)\Insomnia (2002).mkv — validated covering sidecar Insomnia (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [154/381] HAVE     Interstellar (2014)\Interstellar (2014).mkv — validated covering sidecar Interstellar (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [155/381] HAVE     Into the Wild (2007)\Into the Wild (2007).mkv — validated covering sidecar Into the Wild (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [156/381] HAVE     Iron Man (2008)\Iron Man (2008).mkv — validated covering sidecar Iron Man (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [157/381] HAVE     Iron Man 2 (2010)\Iron Man 2 (2010).mkv — validated covering sidecar Iron Man 2 (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [158/381] HAVE     IT (2017)\IT (2017).mkv — validated covering sidecar IT (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [159/381] HAVE     James and the Giant Peach (1996)\James and the Giant Peach (1996).mkv — validated covering sidecar James and the Giant Peach (1996).eng.srt
+2026-09-07 01:31:52 [INFO] [160/381] HAVE     Jaws (1975)\Jaws (1975).mkv — validated covering sidecar Jaws (1975).eng.srt
+2026-09-07 01:31:52 [INFO] [161/381] HAVE     Jimmy Neutron Boy Genius (2001)\Jimmy Neutron Boy Genius (2001).mkv — validated covering sidecar Jimmy Neutron Boy Genius (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [162/381] HAVE     John Q (2002)\John Q (2002).mkv — validated covering sidecar John Q (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [163/381] HAVE     Joker (2019)\Joker (2019).mkv — validated covering sidecar Joker (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [164/381] HAVE     Jumanji (1995)\Jumanji (1995).mkv — validated covering sidecar Jumanji (1995).eng.srt
+2026-09-07 01:31:52 [INFO] [165/381] HAVE     Juno (2007)\Juno (2007).mkv — validated covering sidecar Juno (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [166/381] HAVE     Jurassic Park (1993)\Jurassic Park (1993).mkv — validated covering sidecar Jurassic Park (1993).eng.srt
+2026-09-07 01:31:52 [INFO] [167/381] HAVE     Jurassic World (2015)\Jurassic World (2015).mkv — validated covering sidecar Jurassic World (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [168/381] HAVE     Kick-Ass (2010)\Kick-Ass (2010).mkv — validated covering sidecar Kick-Ass (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [169/381] HAVE     King Richard (2021)\King Richard (2021).mkv — validated covering sidecar King Richard (2021).eng.srt
+2026-09-07 01:31:52 [INFO] [170/381] HAVE     Knives Out (2019)\Knives Out (2019).mkv — validated covering sidecar Knives Out (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [171/381] HAVE     Knowing (2009)\Knowing (2009).mkv — validated covering sidecar Knowing (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [172/381] HAVE     Kung Fu Panda (2008)\Kung Fu Panda (2008).mkv — validated covering sidecar Kung Fu Panda (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [173/381] HAVE     Legally Blonde (2001)\Legally Blonde (2001).mkv — validated covering sidecar Legally Blonde (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [174/381] HAVE     Logan (2017)\Logan (2017).mkv — validated covering sidecar Logan (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [175/381] HAVE     Lone Survivor (2013)\Lone Survivor (2013).mkv — validated covering sidecar Lone Survivor (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [176/381] HAVE     Madagascar (2005)\Madagascar (2005).mkv — validated covering sidecar Madagascar (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [177/381] HAVE     Magnolia (1999)\Magnolia (1999).mkv — validated covering sidecar Magnolia (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [178/381] HAVE     Marty Supreme (2025)\Marty Supreme (2025).mkv — validated covering sidecar Marty Supreme (2025).eng.srt
+2026-09-07 01:31:52 [INFO] [179/381] HAVE     Mean Girls (2004)\Mean Girls (2004).mkv — validated covering sidecar Mean Girls (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [180/381] HAVE     Meet the Robinsons (2007)\Meet the Robinsons (2007).mkv — validated covering sidecar Meet the Robinsons (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [181/381] HAVE     Megamind (2010)\Megamind (2010).mkv — validated covering sidecar Megamind (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [182/381] HAVE     Memento (2000)\Memento (2000).mkv — validated covering sidecar Memento (2000).eng.srt
+2026-09-07 01:31:52 [INFO] [183/381] HAVE     Minority Report (2002)\Minority Report (2002).mkv — validated covering sidecar Minority Report (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [184/381] HAVE     Mission - Impossible - Fallout (2018)\Mission - Impossible - Fallout (2018).mkv — validated covering sidecar Mission - Impossible - Fallout (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [185/381] HAVE     Monsters University (2013)\Monsters University (2013).mkv — validated covering sidecar Monsters University (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [186/381] HAVE     Monsters, Inc (2001)\Monsters, Inc (2001).mkv — validated covering sidecar Monsters, Inc (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [187/381] HAVE     Moon (2009)\Moon (2009).mkv — validated covering sidecar Moon (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [188/381] HAVE     Mulan (1998)\Mulan (1998).mkv — validated covering sidecar Mulan (1998).eng.srt
+2026-09-07 01:31:52 [INFO] [189/381] HAVE     Napoleon Dynamite (2004)\Napoleon Dynamite (2004).mkv — validated covering sidecar Napoleon Dynamite (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [190/381] HAVE     National Lampoon's Christmas Vacation (1989)\National Lampoon's Christmas Vacation (1989).mkv — validated covering sidecar National Lampoon's Christmas Vacation (1989).eng.srt
+2026-09-07 01:31:52 [INFO] [191/381] HAVE     National Treasure (2004)\National Treasure (2004).mkv — validated covering sidecar National Treasure (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [192/381] HAVE     National Treasure Book of Secrets (2007)\National Treasure Book of Secrets (2007).mkv — validated covering sidecar National Treasure Book of Secrets (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [193/381] HAVE     Night at the Museum (2006)\Night at the Museum (2006).mkv — validated covering sidecar Night at the Museum (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [194/381] HAVE     Nightcrawler (2014)\Nightcrawler (2014).mkv — validated covering sidecar Nightcrawler (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [195/381] HAVE     No Country for Old Men (2007)\No Country for Old Men (2007).mkv — validated covering sidecar No Country for Old Men (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [196/381] HAVE     Now You See Me (2013)\Now You See Me (2013).mkv — validated covering sidecar Now You See Me (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [197/381] HAVE     Oblivion (2013)\Oblivion (2013).mkv — validated covering sidecar Oblivion (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [198/381] HAVE     Obsession (2026)\Obsession (2026).mkv — validated covering sidecar Obsession (2026).eng.srt
+2026-09-07 01:31:52 [INFO] [199/381] HAVE     October Sky (1999)\October Sky (1999).mkv — validated covering sidecar October Sky (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [200/381] HAVE     Office Space (1999)\Office Space (1999).mkv — validated covering sidecar Office Space (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [201/381] HAVE     One Flew Over the Cuckoo's Nest (1975)\One Flew Over the Cuckoo's Nest (1975).mkv — validated covering sidecar One Flew Over the Cuckoo's Nest (1975).eng.srt
+2026-09-07 01:31:52 [INFO] [202/381] HAVE     Open Season (2006)\Open Season (2006).mkv — validated covering sidecar Open Season (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [203/381] HAVE     Oppenheimer (2023)\Oppenheimer (2023).mkv — validated covering sidecar Oppenheimer (2023).eng.srt
+2026-09-07 01:31:52 [INFO] [204/381] HAVE     Osmosis Jones (2001)\Osmosis Jones (2001).mkv — validated covering sidecar Osmosis Jones (2001).eng.sdh.srt
+2026-09-07 01:31:52 [INFO] [205/381] HAVE     Over the Hedge (2006)\Over the Hedge (2006).mkv — validated covering sidecar Over the Hedge (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [206/381] HAVE     Parasite (2019)\Parasite (2019).mkv — validated covering sidecar Parasite (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [207/381] HAVE     Pearl (2022)\Pearl (2022).mkv — validated covering sidecar Pearl (2022).eng.srt
+2026-09-07 01:31:52 [INFO] [208/381] HAVE     Pineapple Express (2008)\Pineapple Express (2008).mkv — validated covering sidecar Pineapple Express (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [209/381] HAVE     Pirates of the Caribbean At World's End (2007)\Pirates of the Caribbean At World's End (2007).mkv — validated covering sidecar Pirates of the Caribbean At World's End (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [210/381] HAVE     Pirates of the Caribbean Dead Man's Chest (2006)\Pirates of the Caribbean Dead Man's Chest (2006).mkv — validated covering sidecar Pirates of the Caribbean Dead Man's Chest (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [211/381] HAVE     Pirates of the Caribbean The Curse of the Black Pearl (2003)\Pirates of the Caribbean The Curse of the Black Pearl (2003).mkv — validated covering sidecar Pirates of the Caribbean The Curse of the Black Pearl (2003).eng.srt
+2026-09-07 01:31:52 [INFO] [212/381] HAVE     Pitch Perfect (2012)\Pitch Perfect (2012).mkv — validated covering sidecar Pitch Perfect (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [213/381] HAVE     Prisoners (2013)\Prisoners (2013).mkv — validated covering sidecar Prisoners (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [214/381] HAVE     Project Hail Mary (2026)\Project Hail Mary (2026).mkv — validated covering sidecar Project Hail Mary (2026).eng.srt
+2026-09-07 01:31:52 [INFO] [215/381] HAVE     Project X (2012)\Project X (2012).mkv — validated covering sidecar Project X (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [216/381] HAVE     Pulp Fiction (1994)\Pulp Fiction (1994).mkv — validated covering sidecar Pulp Fiction (1994).eng.srt
+2026-09-07 01:31:52 [INFO] [217/381] HAVE     Ratatouille (2007)\Ratatouille (2007).mkv — validated covering sidecar Ratatouille (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [218/381] HAVE     Ready Player One (2018)\Ready Player One (2018).mkv — validated covering sidecar Ready Player One (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [219/381] HAVE     Real Steel (2011)\Real Steel (2011).mkv — validated covering sidecar Real Steel (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [220/381] HAVE     Remember the Titans (2000)\Remember the Titans (2000).mkv — validated covering sidecar Remember the Titans (2000).eng.srt
+2026-09-07 01:31:52 [INFO] [221/381] HAVE     Requiem for a Dream (2000)\Requiem for a Dream (2000).mkv — validated covering sidecar Requiem for a Dream (2000).eng.srt
+2026-09-07 01:31:52 [INFO] [222/381] HAVE     Rise of the Planet of the Apes (2011)\Rise of the Planet of the Apes (2011).mkv — validated covering sidecar Rise of the Planet of the Apes (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [223/381] HAVE     Robots (2005)\Robots (2005).mkv — validated covering sidecar Robots (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [224/381] HAVE     Rocky (1976)\Rocky (1976).mkv — validated covering sidecar Rocky (1976).eng.srt
+2026-09-07 01:31:52 [INFO] [225/381] HAVE     Room (2015)\Room (2015).mkv — validated covering sidecar Room (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [226/381] HAVE     Sausage Party (2016)\Sausage Party (2016).mkv — validated covering sidecar Sausage Party (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [227/381] HAVE     Saving Private Ryan (1998)\Saving Private Ryan (1998).mkv — validated covering sidecar Saving Private Ryan (1998).eng.srt
+2026-09-07 01:31:52 [INFO] [228/381] HAVE     Saw (2004)\Saw (2004).mkv — validated covering sidecar Saw (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [229/381] HAVE     Scarface (1983)\Scarface (1983).mkv — validated covering sidecar Scarface (1983).eng.srt
+2026-09-07 01:31:52 [INFO] [230/381] HAVE     Schindler's List (1993)\Schindler's List (1993).mkv — validated covering sidecar Schindler's List (1993).eng.srt
+2026-09-07 01:31:52 [INFO] [231/381] HAVE     Scream (1996)\Scream (1996).mkv — validated covering sidecar Scream (1996).eng.srt
+2026-09-07 01:31:52 [INFO] [232/381] HAVE     Se7en (1995)\Se7en (1995).mkv — validated covering sidecar Se7en (1995).eng.srt
+2026-09-07 01:31:52 [INFO] [233/381] HAVE     Shark Tale (2004)\Shark Tale (2004).mkv — validated covering sidecar Shark Tale (2004).eng.sdh.srt
+2026-09-07 01:31:52 [INFO] [234/381] HAVE     Shazam! (2019)\Shazam! (2019).mkv — validated covering sidecar Shazam! (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [235/381] HAVE     Shrek (2001)\Shrek (2001).mkv — validated covering sidecar Shrek (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [236/381] HAVE     Shrek 2 (2004)\Shrek 2 (2004).mkv — validated covering sidecar Shrek 2 (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [237/381] HAVE     Shrek Forever After (2010)\Shrek Forever After (2010).mkv — validated covering sidecar Shrek Forever After (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [238/381] HAVE     Shutter Island (2010)\Shutter Island (2010).mkv — validated covering sidecar Shutter Island (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [239/381] HAVE     Sicario (2015)\Sicario (2015).mkv — validated covering sidecar Sicario (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [240/381] HAVE     Signs (2002)\Signs (2002).mkv — validated covering sidecar Signs (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [241/381] HAVE     Sinister (2012)\Sinister (2012).mkv — validated covering sidecar Sinister (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [242/381] HAVE     Sinners (2025)\Sinners (2025).mkv — validated covering sidecar Sinners (2025).eng.srt
+2026-09-07 01:31:52 [INFO] [243/381] HAVE     Skyfall (2012)\Skyfall (2012).mkv — validated covering sidecar Skyfall (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [244/381] HAVE     Slumdog Millionaire (2008)\Slumdog Millionaire (2008).mkv — validated covering sidecar Slumdog Millionaire (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [245/381] HAVE     Snatch (2000)\Snatch (2000).mkv — validated covering sidecar Snatch (2000).eng.srt
+2026-09-07 01:31:52 [INFO] [246/381] HAVE     Snowden (2016)\Snowden (2016).mkv — validated covering sidecar Snowden (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [247/381] HAVE     Source Code (2011)\Source Code (2011).mkv — validated covering sidecar Source Code (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [248/381] HAVE     Spaceballs (1987)\Spaceballs (1987).mkv — validated covering sidecar Spaceballs (1987).eng.srt
+2026-09-07 01:31:52 [INFO] [249/381] HAVE     Spider-Man (2002)\Spider-Man (2002).mkv — validated covering sidecar Spider-Man (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [250/381] HAVE     Spider-Man - Across the Spider-Verse (2023)\Spider-Man - Across the Spider-Verse (2023).mkv — validated covering sidecar Spider-Man - Across the Spider-Verse (2023).eng.srt
+2026-09-07 01:31:52 [INFO] [251/381] HAVE     Spider-Man - Homecoming (2017)\Spider-Man - Homecoming (2017).mkv — validated covering sidecar Spider-Man - Homecoming (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [252/381] HAVE     Spider-Man - Into the Spider-Verse (2018)\Spider-Man - Into the Spider-Verse (2018).mkv — validated covering sidecar Spider-Man - Into the Spider-Verse (2018).eng.srt
+2026-09-07 01:31:52 [INFO] [253/381] HAVE     Spider-Man 2 (2004)\Spider-Man 2 (2004).mkv — validated covering sidecar Spider-Man 2 (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [254/381] HAVE     Spider-Man No Way Home (2021)\Spider-Man No Way Home (2021).mkv — validated covering sidecar Spider-Man No Way Home (2021).eng.srt
+2026-09-07 01:31:52 [INFO] [255/381] HAVE     Spirited Away (2001)\Spirited Away (2001).mkv — validated covering sidecar Spirited Away (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [256/381] HAVE     Split (2016)\Split (2016).mkv — validated covering sidecar Split (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [257/381] HAVE     Stalker (1979)\Stalker (1979).mkv — validated covering sidecar Stalker (1979).eng.srt
+2026-09-07 01:31:52 [INFO] [258/381] HAVE     Stand by Me (1986)\Stand by Me (1986).mkv — validated covering sidecar Stand by Me (1986).eng.srt
+2026-09-07 01:31:52 [INFO] [259/381] HAVE     Star Trek (2009)\Star Trek (2009).mkv — validated covering sidecar Star Trek (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [260/381] HAVE     Star Trek - Into Darkness (2013)\Star Trek - Into Darkness (2013).mkv — validated covering sidecar Star Trek - Into Darkness (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [261/381] HAVE     Star Wars - Episode I - The Phantom Menace (1999)\Star Wars - Episode I - The Phantom Menace (1999).mkv — validated covering sidecar Star Wars - Episode I - The Phantom Menace (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [262/381] HAVE     Star Wars - Episode II - Attack of the Clones (2002)\Star Wars - Episode II - Attack of the Clones (2002).mkv — validated covering sidecar Star Wars - Episode II - Attack of the Clones (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [263/381] HAVE     Star Wars - Episode III - Revenge of the Sith (2005)\Star Wars - Episode III - Revenge of the Sith (2005).mkv — validated covering sidecar Star Wars - Episode III - Revenge of the Sith (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [264/381] HAVE     Star Wars - Episode IV - A New Hope (1977)\Star Wars - Episode IV - A New Hope (1977).mkv — validated covering sidecar Star Wars - Episode IV - A New Hope (1977).eng.srt
+2026-09-07 01:31:52 [INFO] [265/381] HAVE     Star Wars - Episode V - The Empire Strikes Back (1980)\Star Wars - Episode V - The Empire Strikes Back (1980).mkv — validated covering sidecar Star Wars - Episode V - The Empire Strikes Back (1980).eng.srt
+2026-09-07 01:31:52 [INFO] [266/381] HAVE     Star Wars - Episode VI - Return of the Jedi (1983)\Star Wars - Episode VI - Return of the Jedi (1983).mkv — validated covering sidecar Star Wars - Episode VI - Return of the Jedi (1983).eng.srt
+2026-09-07 01:31:52 [INFO] [267/381] HAVE     Straight Outta Compton (2015)\Straight Outta Compton (2015).mkv — validated covering sidecar Straight Outta Compton (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [268/381] HAVE     Super 8 (2011)\Super 8 (2011).mkv — validated covering sidecar Super 8 (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [269/381] HAVE     Superbad (2007)\Superbad (2007).mkv — validated covering sidecar Superbad (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [270/381] HAVE     Surf's Up (2007)\Surf's Up (2007).mkv — validated covering sidecar Surf's Up (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [271/381] HAVE     Taken (2008)\Taken (2008).mkv — validated covering sidecar Taken (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [272/381] HAVE     Tangled (2010)\Tangled (2010).mkv — validated covering sidecar Tangled (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [273/381] HAVE     Taxi Driver (1976)\Taxi Driver (1976).mkv — validated covering sidecar Taxi Driver (1976).eng.srt
+2026-09-07 01:31:52 [INFO] [274/381] HAVE     Ted (2012)\Ted (2012).mkv — validated covering sidecar Ted (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [275/381] HAVE     Tenet (2020)\Tenet (2020).mkv — validated covering sidecar Tenet (2020).eng.srt
+2026-09-07 01:31:52 [INFO] [276/381] HAVE     Terminator 2 - Judgment Day (1991)\Terminator 2 - Judgment Day (1991).mkv — validated covering sidecar Terminator 2 - Judgment Day (1991).eng.srt
+2026-09-07 01:31:52 [INFO] [277/381] HAVE     Tetris (2023)\Tetris (2023).mkv — validated covering sidecar Tetris (2023).eng.srt
+2026-09-07 01:31:52 [INFO] [278/381] HAVE     The Accountant (2016)\The Accountant (2016).mkv — validated covering sidecar The Accountant (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [279/381] HAVE     The Amazing Spider-Man (2012)\The Amazing Spider-Man (2012).mkv — validated covering sidecar The Amazing Spider-Man (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [280/381] HAVE     The Avengers (2012)\The Avengers (2012).mkv — validated covering sidecar The Avengers (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [281/381] HAVE     The Batman (2022)\The Batman (2022).mkv — validated covering sidecar The Batman (2022).eng.srt
+2026-09-07 01:31:52 [INFO] [282/381] HAVE     The Big Lebowski (1998)\The Big Lebowski (1998).mkv — validated covering sidecar The Big Lebowski (1998).eng.srt
+2026-09-07 01:31:52 [INFO] [283/381] HAVE     The Big Short (2015)\The Big Short (2015).mkv — validated covering sidecar The Big Short (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [284/381] HAVE     The Book of Eli (2010)\The Book of Eli (2010).mkv — validated covering sidecar The Book of Eli (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [285/381] HAVE     The Bourne Identity (2002)\The Bourne Identity (2002).mkv — validated covering sidecar The Bourne Identity (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [286/381] HAVE     The Bourne Supremacy (2004)\The Bourne Supremacy (2004).mkv — validated covering sidecar The Bourne Supremacy (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [287/381] HAVE     The Bourne Ultimatum (2007)\The Bourne Ultimatum (2007).mkv — validated covering sidecar The Bourne Ultimatum (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [288/381] HAVE     The Boy in the Striped Pyjamas (2008)\The Boy in the Striped Pyjamas (2008).mkv — validated covering sidecar The Boy in the Striped Pyjamas (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [289/381] HAVE     The Breakfast Club (1985)\The Breakfast Club (1985).mkv — validated covering sidecar The Breakfast Club (1985).eng.srt
+2026-09-07 01:31:52 [INFO] [290/381] HAVE     The Curious Case of Benjamin Button (2008)\The Curious Case of Benjamin Button (2008).mkv — validated covering sidecar The Curious Case of Benjamin Button (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [291/381] HAVE     The Dark Knight (2008)\The Dark Knight (2008).mkv — validated covering sidecar The Dark Knight (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [292/381] HAVE     The Dark Knight Rises (2012)\The Dark Knight Rises (2012).mkv — validated covering sidecar The Dark Knight Rises (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [293/381] HAVE     The Day After (1983)\The Day After (1983).mkv — validated covering sidecar The Day After (1983).eng.srt
+2026-09-07 01:31:52 [INFO] [294/381] HAVE     The Departed (2006)\The Departed (2006).mkv — validated covering sidecar The Departed (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [295/381] HAVE     The Edge of Seventeen (2016)\The Edge of Seventeen (2016).mkv — validated covering sidecar The Edge of Seventeen (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [296/381] HAVE     The Emperor's New Groove (2000)\The Emperor's New Groove (2000).mkv — validated covering sidecar The Emperor's New Groove (2000).eng.srt
+2026-09-07 01:31:52 [INFO] [297/381] HAVE     The Fast and the Furious (2001)\The Fast and the Furious (2001).mkv — validated covering sidecar The Fast and the Furious (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [298/381] HAVE     The Founder (2016)\The Founder (2016).mkv — validated covering sidecar The Founder (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [299/381] HAVE     The Godfather (1972)\The Godfather (1972).mkv — validated covering sidecar The Godfather (1972).eng.srt
+2026-09-07 01:31:52 [INFO] [300/381] HAVE     The Godfather - Part II (1974)\The Godfather - Part II (1974).mkv — validated covering sidecar The Godfather - Part II (1974).eng.srt
+2026-09-07 01:31:52 [INFO] [301/381] HAVE     The Goonies (1985)\The Goonies (1985).mkv — validated covering sidecar The Goonies (1985).eng.srt
+2026-09-07 01:31:52 [INFO] [302/381] HAVE     The Green Mile (1999)\The Green Mile (1999).mkv — validated covering sidecar The Green Mile (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [303/381] HAVE     The Hangover (2009)\The Hangover (2009).mkv — validated covering sidecar The Hangover (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [304/381] HAVE     The Help (2011)\The Help (2011).mkv — validated covering sidecar The Help (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [305/381] HAVE     The Hunger Games (2012)\The Hunger Games (2012).mkv — validated covering sidecar The Hunger Games (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [306/381] HAVE     The Hunger Games - Mockingjay - Part 1 (2014)\The Hunger Games - Mockingjay - Part 1 (2014).mkv — validated covering sidecar The Hunger Games - Mockingjay - Part 1 (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [307/381] HAVE     The Hunger Games - Mockingjay - Part 2 (2015)\The Hunger Games - Mockingjay - Part 2 (2015).mkv — validated covering sidecar The Hunger Games - Mockingjay - Part 2 (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [308/381] HAVE     The Hunger Games Catching Fire (2013)\The Hunger Games Catching Fire (2013).mkv — validated covering sidecar The Hunger Games Catching Fire (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [309/381] HAVE     The Hurt Locker (2008)\The Hurt Locker (2008).mkv — validated covering sidecar The Hurt Locker (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [310/381] HAVE     The Imitation Game (2014)\The Imitation Game (2014).mkv — validated covering sidecar The Imitation Game (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [311/381] HAVE     The Incredibles (2004)\The Incredibles (2004).mkv — validated covering sidecar The Incredibles (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [312/381] HAVE     The Interview (2014)\The Interview (2014).mkv — validated covering sidecar The Interview (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [313/381] HAVE     The Invisible Man (2020)\The Invisible Man (2020).mkv — validated covering sidecar The Invisible Man (2020).eng.srt
+2026-09-07 01:31:52 [INFO] [314/381] HAVE     The Karate Kid (1984)\The Karate Kid (1984).mkv — validated covering sidecar The Karate Kid (1984).eng.srt
+2026-09-07 01:31:52 [INFO] [315/381] HAVE     The Longest Yard (2005)\The Longest Yard (2005).mkv — validated covering sidecar The Longest Yard (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [316/381] HAVE     The Lord of the Rings The Fellowship of the Ring (2001)\The Lord of the Rings The Fellowship of the Ring (2001).mkv — validated covering sidecar The Lord of the Rings The Fellowship of the Ring (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [317/381] HAVE     The Lord of the Rings The Return of the King (2003)\The Lord of the Rings The Return of the King (2003).mkv — validated covering sidecar The Lord of the Rings The Return of the King (2003).eng.srt
+2026-09-07 01:31:52 [INFO] [318/381] HAVE     The Lord of the Rings The Two Towers (2002)\The Lord of the Rings The Two Towers (2002).mkv — validated covering sidecar The Lord of the Rings The Two Towers (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [319/381] HAVE     The Martian (2015)\The Martian (2015).mkv — validated covering sidecar The Martian (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [320/381] HAVE     The Matrix (1999)\The Matrix (1999).mkv — validated covering sidecar The Matrix (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [321/381] HAVE     The Maze Runner (2014)\The Maze Runner (2014).mkv — validated covering sidecar The Maze Runner (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [322/381] HAVE     The Nightmare Before Christmas (1993)\The Nightmare Before Christmas (1993).mkv — validated covering sidecar The Nightmare Before Christmas (1993).eng.srt
+2026-09-07 01:31:52 [INFO] [323/381] HAVE     The Polar Express (2004)\The Polar Express (2004).mkv — validated covering sidecar The Polar Express (2004).eng.srt
+2026-09-07 01:31:52 [INFO] [324/381] HAVE     The Prestige (2006)\The Prestige (2006).mkv — validated covering sidecar The Prestige (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [325/381] HAVE     The Princess and the Frog (2009)\The Princess and the Frog (2009).mkv — validated covering sidecar The Princess and the Frog (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [326/381] HAVE     The Proposal (2009)\The Proposal (2009).mkv — validated covering sidecar The Proposal (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [327/381] HAVE     The Revenant (2015)\The Revenant (2015).mkv — validated covering sidecar The Revenant (2015).eng.srt
+2026-09-07 01:31:52 [INFO] [328/381] HAVE     The Sandlot (1993)\The Sandlot (1993).mkv — validated covering sidecar The Sandlot (1993).eng.srt
+2026-09-07 01:31:52 [INFO] [329/381] HAVE     The Shawshank Redemption (1994)\The Shawshank Redemption (1994).mkv — validated covering sidecar The Shawshank Redemption (1994).eng.srt
+2026-09-07 01:31:52 [INFO] [330/381] HAVE     The Silence of the Lambs (1991)\The Silence of the Lambs (1991).mkv — validated covering sidecar The Silence of the Lambs (1991).eng.srt
+2026-09-07 01:31:52 [INFO] [331/381] HAVE     The Sixth Sense (1999)\The Sixth Sense (1999).mkv — validated covering sidecar The Sixth Sense (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [332/381] HAVE     The Social Network (2010)\The Social Network (2010).mkv — validated covering sidecar The Social Network (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [333/381] HAVE     The Substance (2024)\The Substance (2024).mkv — validated covering sidecar The Substance (2024).eng.srt
+2026-09-07 01:31:52 [INFO] [334/381] HAVE     The Terminator (1984)\The Terminator (1984).mkv — validated covering sidecar The Terminator (1984).eng.srt
+2026-09-07 01:31:52 [INFO] [335/381] HAVE     The Theory of Everything (2014)\The Theory of Everything (2014).mkv — validated covering sidecar The Theory of Everything (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [336/381] HAVE     The Thing (1982)\The Thing (1982).mkv — validated covering sidecar The Thing (1982).eng.srt
+2026-09-07 01:31:52 [INFO] [337/381] HAVE     The Truman Show (1998)\The Truman Show (1998).mkv — validated covering sidecar The Truman Show (1998).eng.srt
+2026-09-07 01:31:52 [INFO] [338/381] HAVE     The Usual Suspects (1995)\The Usual Suspects (1995).mkv — validated covering sidecar The Usual Suspects (1995).eng.srt
+2026-09-07 01:31:52 [INFO] [339/381] HAVE     The Wild Robot (2024)\The Wild Robot (2024).mkv — validated covering sidecar The Wild Robot (2024).eng.srt
+2026-09-07 01:31:52 [INFO] [340/381] HAVE     The Wolf of Wall Street (2013)\The Wolf of Wall Street (2013).mkv — validated covering sidecar The Wolf of Wall Street (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [341/381] HAVE     There Will Be Blood (2007)\There Will Be Blood (2007).mkv — validated covering sidecar There Will Be Blood (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [342/381] HAVE     This Christmas (2007)\This Christmas (2007).mkv — validated covering sidecar This Christmas (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [343/381] HAVE     This Is the End (2013)\This Is the End (2013).mkv — validated covering sidecar This Is the End (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [344/381] HAVE     Thor - Ragnarok (2017)\Thor - Ragnarok (2017).mkv — validated covering sidecar Thor - Ragnarok (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [345/381] HAVE     Threads (1984)\Threads (1984).mkv — validated covering sidecar Threads (1984).eng.srt
+2026-09-07 01:31:52 [INFO] [346/381] HAVE     Titanic (1997)\Titanic (1997).mkv — validated covering sidecar Titanic (1997).eng.srt
+2026-09-07 01:31:52 [INFO] [347/381] HAVE     Top Gun (1986)\Top Gun (1986).mkv — validated covering sidecar Top Gun (1986).eng.srt
+2026-09-07 01:31:52 [INFO] [348/381] HAVE     Top Gun - Maverick (2022)\Top Gun - Maverick (2022).mkv — validated covering sidecar Top Gun - Maverick (2022).eng.srt
+2026-09-07 01:31:52 [INFO] [349/381] HAVE     Toy Story (1995)\Toy Story (1995).mkv — validated covering sidecar Toy Story (1995).eng.srt
+2026-09-07 01:31:52 [INFO] [350/381] HAVE     Toy Story 2 (1999)\Toy Story 2 (1999).mkv — validated covering sidecar Toy Story 2 (1999).eng.srt
+2026-09-07 01:31:52 [INFO] [351/381] HAVE     Toy Story 3 (2010)\Toy Story 3 (2010).mkv — validated covering sidecar Toy Story 3 (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [352/381] HAVE     Toy Story 4 (2019)\Toy Story 4 (2019).mkv — validated covering sidecar Toy Story 4 (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [353/381] HAVE     Toy Story 5 (2026)\Toy Story 5 (2026).mkv — validated covering sidecar Toy Story 5 (2026).eng.srt
+2026-09-07 01:31:52 [INFO] [354/381] HAVE     Training Day (2001)\Training Day (2001).mkv — validated covering sidecar Training Day (2001).eng.srt
+2026-09-07 01:31:52 [INFO] [355/381] HAVE     Transformers (2007)\Transformers (2007).mkv — validated covering sidecar Transformers (2007).eng.srt
+2026-09-07 01:31:52 [INFO] [356/381] HAVE     Transformers Dark Of The Moon (2011)\Transformers Dark Of The Moon (2011).mkv — validated covering sidecar Transformers Dark Of The Moon (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [357/381] HAVE     Transformers Revenge of the Fallen (2009)\Transformers Revenge of the Fallen (2009).mkv — validated covering sidecar Transformers Revenge of the Fallen (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [358/381] HAVE     Treasure Planet (2002)\Treasure Planet (2002).mkv — validated covering sidecar Treasure Planet (2002).eng.srt
+2026-09-07 01:31:52 [INFO] [359/381] HAVE     TRON - Legacy (2010)\TRON - Legacy (2010).mkv — validated covering sidecar TRON - Legacy (2010).eng.srt
+2026-09-07 01:31:52 [INFO] [360/381] HAVE     Turtles Forever (2009)\Turtles Forever (2009).mkv — validated covering sidecar Turtles Forever (2009).eng.srt
+2026-09-07 01:31:52 [INFO] [361/381] HAVE     Twelve Monkeys (1995)\Twelve Monkeys (1995).mkv — validated covering sidecar Twelve Monkeys (1995).eng.srt
+2026-09-07 01:31:52 [INFO] [362/381] HAVE     Uncut Gems (2019)\Uncut Gems (2019).mkv — validated covering sidecar Uncut Gems (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [363/381] HAVE     United 93 (2006)\United 93 (2006).mkv — validated covering sidecar United 93 (2006).eng.srt
+2026-09-07 01:31:52 [INFO] [364/381] HAVE     Us (2019)\Us (2019).mkv — validated covering sidecar Us (2019).eng.srt
+2026-09-07 01:31:52 [INFO] [365/381] HAVE     V for Vendetta (2005)\V for Vendetta (2005).mkv — validated covering sidecar V for Vendetta (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [366/381] HAVE     WALL-E (2008)\WALL-E (2008).mkv — validated covering sidecar WALL-E (2008).eng.srt
+2026-09-07 01:31:52 [INFO] [367/381] HAVE     Wallace & Gromit - The Curse of the Were-Rabbit (2005)\Wallace & Gromit - The Curse of the Were-Rabbit (2005).mkv — validated covering sidecar Wallace & Gromit - The Curse of the Were-Rabbit (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [368/381] HAVE     War Dogs (2016)\War Dogs (2016).mkv — validated covering sidecar War Dogs (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [369/381] HAVE     War for the Planet of the Apes (2017)\War for the Planet of the Apes (2017).mkv — validated covering sidecar War for the Planet of the Apes (2017).eng.srt
+2026-09-07 01:31:52 [INFO] [370/381] HAVE     WarGames (1983)\WarGames (1983).mkv — validated covering sidecar WarGames (1983).eng.srt
+2026-09-07 01:31:52 [INFO] [371/381] HAVE     Warrior (2011)\Warrior (2011).mkv — validated covering sidecar Warrior (2011).eng.srt
+2026-09-07 01:31:52 [INFO] [372/381] HAVE     We're the Millers (2013)\We're the Millers (2013).mkv — validated covering sidecar We're the Millers (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [373/381] HAVE     Weapons (2025)\Weapons (2025).mkv — validated covering sidecar Weapons (2025).eng.srt
+2026-09-07 01:31:52 [INFO] [374/381] HAVE     Whiplash (2014)\Whiplash (2014).mkv — validated covering sidecar Whiplash (2014).eng.srt
+2026-09-07 01:31:52 [INFO] [375/381] HAVE     Willy Wonka & the Chocolate Factory (1971)\Willy Wonka & the Chocolate Factory (1971).mkv — validated covering sidecar Willy Wonka & the Chocolate Factory (1971).eng.srt
+2026-09-07 01:31:52 [INFO] [376/381] HAVE     World War Z (2013)\World War Z (2013).mkv — validated covering sidecar World War Z (2013).eng.srt
+2026-09-07 01:31:52 [INFO] [377/381] HAVE     Wreck-It Ralph (2012)\Wreck-It Ralph (2012).mkv — validated covering sidecar Wreck-It Ralph (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [378/381] HAVE     Zathura - A Space Adventure (2005)\Zathura - A Space Adventure (2005).mkv — validated covering sidecar Zathura - A Space Adventure (2005).eng.srt
+2026-09-07 01:31:52 [INFO] [379/381] HAVE     Zero Dark Thirty (2012)\Zero Dark Thirty (2012).mkv — validated covering sidecar Zero Dark Thirty (2012).eng.srt
+2026-09-07 01:31:52 [INFO] [380/381] HAVE     Zootopia (2016)\Zootopia (2016).mkv — validated covering sidecar Zootopia (2016).eng.srt
+2026-09-07 01:31:52 [INFO] [381/381] HAVE     Zootopia 2 (2025)\Zootopia 2 (2025).mkv — validated covering sidecar Zootopia 2 (2025).eng.sdh.srt
+2026-09-07 01:31:53 [INFO] Report written: E:\torrents\tools\ReportsAndLogs\subtitle_fetcher\subtitle_fetcher_report.txt
