@@ -39,6 +39,8 @@ ReportsAndLogs/
 state.db
 state.db-wal
 state.db-shm
+# ffsubsync remembered-verdict ledger (also rebuildable; lives beside the logs)
+sync_state.json
 
 # Accidental desktop / OS dumps
 Screenshot*.png
