@@ -1,10 +1,10 @@
 """The field smoke test every tool exposes as ``--self-test``.
 
 A tool used to carry its *entire* offline test suite inside the shipped file —
-2,229 lines across the toolkit, 1,047 of them in ``subtitle_fetcher.py``, on
-top of the 1,811-line ``tests/test_subtitle_fetcher.py`` that covers the same
-code. Those assertions now live in ``tests/selftests/`` where they run as part
-of the unit suite (and count towards coverage).
+2,229 lines across the toolkit, most of them in the subtitle tool, on top of
+the 1,811-line test file that covers the same code. Those assertions now
+live in ``tests/selftests/`` where they run as part of the unit suite (and
+count towards coverage).
 
 What remains in the tools is what ``--self-test`` is actually *for*: answering
 "is this copy of the tool working on this machine?" without the repository, a

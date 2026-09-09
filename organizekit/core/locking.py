@@ -82,8 +82,8 @@ class CoordinationLock:
     """Advisory, cross-platform, fail-closed lock shared across the tools.
 
     This is the single implementation of the lock protocol used by
-    ``movie_standardizer.py``, ``mkv_track_cleaner.py`` and
-    ``subtitle_fetcher.py``.  Because all three hash the *same normalized
+    ``movie_standardizer.py``, ``mkv_track_cleaner.py``,
+    ``subtitle_extractor.py`` and friends.  Because every tool hashes the *same normalized
     target path* with the *same lock file name* in the system temp directory,
     they all contend on the identical file — which is exactly what prevents a
     qBittorrent completion hook from placing or replacing canonical hardlinks
