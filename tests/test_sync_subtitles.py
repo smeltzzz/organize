@@ -19,6 +19,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import subtitle_extractor as sx
 import sync_subtitles as ss
 from organizekit import core
 
@@ -26,6 +27,21 @@ from organizekit import core
 GOOD_SRT = "1\n00:00:01,000 --> 00:00:02,000\nHello.\n\n2\n00:00:04,000 --> 00:00:05,000\nWorld.\n"
 # The "corrected" version the fake ffsubsync writes (all cues shifted).
 SHIFTED_SRT = "1\n00:00:05,000 --> 00:00:06,000\nHello.\n\n2\n00:00:08,000 --> 00:00:09,000\nWorld.\n"
+
+
+def _record_extraction(video: Path, sidecar: Path, ledger: Path) -> None:
+    """Pretend subtitle_extractor.py just extracted ``sidecar`` from ``video``.
+
+    Sync only ever touches a sidecar the extractor recorded, so every test
+    library starts with provenance for the sidecars that should be measured.
+    """
+    track = sx.EmbeddedSubtitleTrack(
+        track_id=2, codec_id="S_TEXT/UTF8", language="eng", name="English",
+        kind="text", extension=".srt")
+    sx.record_extracted_sidecar(
+        video, sidecar, track=track, method="text", cue_count=2,
+        sha256=sx.sha256_text(sidecar.read_text(encoding="utf-8")),
+        path=ledger)
 
 
 # The tool publishes its verdicts to the shared state cache, whose default
@@ -382,6 +398,8 @@ class EndToEndTests(unittest.TestCase):
         self.srt.write_text(GOOD_SRT, encoding="utf-8")
         self.log = self.tmp / "out" / "sync_subtitles.log"
         self.report = self.tmp / "out" / "sync_subtitles_report.txt"
+        self.ledger = self.tmp / "out" / "subtitle_extractor_extracted.json"
+        _record_extraction(self.mkv, self.srt, self.ledger)
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -402,6 +420,7 @@ class EndToEndTests(unittest.TestCase):
                 mock.patch.object(ss, "ffsubsync_version", lambda binary: "ffsubsync 9.9.9"), \
                 mock.patch.object(ss, "detect_ffsubsync_features",
                                   lambda binary: ss.FfsubsyncFeatures(True, True, True)), \
+                mock.patch.dict(os.environ, {"SUBTITLE_EXTRACTED_LEDGER": str(self.ledger)}), \
                 mock.patch("shutil.which", side_effect=which):
             return ss.main([
                 "--source", str(self.lib),
@@ -481,83 +500,6 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(self.srt.read_bytes(), before)
         self.assertIn("SUBTITLES HELD FOR REVIEW", self.report.read_text(encoding="utf-8"))
 
-    def test_rejected_refetch_restores_entry_time_original(self) -> None:
-        before = self.srt.read_bytes()
-        candidate = GOOD_SRT.replace("Hello.", "Replacement candidate.")
-        fake = FakeFfsubsync(offset=45.0)
-
-        def refetch(_video: Path, dest: Path, _excluded: list[str], _log: Path | None):
-            dest.write_text(candidate, encoding="utf-8")
-            return True, "123", "candidate release"
-
-        with mock.patch.object(ss, "run_ffsubsync", fake), \
-                mock.patch.object(ss, "_refetch_sidecar", side_effect=refetch), \
-                mock.patch.object(ss, "MAX_SYNC_REFETCHES", 1):
-            result = ss.sync_one(
-                ss.Job(self.srt, self.mkv), _cfg(self.tmp), "fake-ffsubsync",
-                ss.FfsubsyncFeatures(True, True, True),
-            )
-
-        self.assertEqual(result.status, ss.STATUS_REVIEW)
-        self.assertEqual(self.srt.read_bytes(), before)
-        self.assertEqual(len(fake.calls), 2)
-
-    def test_failed_refetch_restores_original_even_if_fetcher_removed_it(self) -> None:
-        before = self.srt.read_bytes()
-        fake = FakeFfsubsync(offset=45.0)
-
-        def destructive_failure(_video: Path, dest: Path, _excluded: list[str], _log: Path | None):
-            dest.unlink()
-            return False, "456", "HTTP 406 quota exceeded"
-
-        with mock.patch.object(ss, "run_ffsubsync", fake), \
-                mock.patch.object(ss, "_refetch_sidecar", side_effect=destructive_failure):
-            result = ss.sync_one(
-                ss.Job(self.srt, self.mkv), _cfg(self.tmp), "fake-ffsubsync",
-                ss.FfsubsyncFeatures(True, True, True),
-            )
-
-        self.assertEqual(result.status, ss.STATUS_REVIEW)
-        self.assertEqual(self.srt.read_bytes(), before)
-        self.assertIn("HTTP 406", result.detail)
-
-    def test_tenth_replacement_download_can_be_the_one_that_syncs(self) -> None:
-        """The per-movie retry budget is inclusive: candidate ten is tested."""
-        before = self.srt.read_bytes()
-        rejected = FakeFfsubsync(offset=45.0)
-        accepted = FakeFfsubsync(offset=-4.0)
-        sync_calls = 0
-        download_ids: list[str] = []
-
-        def run(cfg: ss.Config, command: list[str]):
-            nonlocal sync_calls
-            sync_calls += 1
-            # The entry-time sidecar and the first nine downloads are bad;
-            # the tenth replacement is accepted and atomically activated.
-            fake = accepted if sync_calls == 11 else rejected
-            return fake(cfg, command)
-
-        def refetch(_video: Path, dest: Path, excluded: list[str], _log: Path | None):
-            candidate_id = str(len(download_ids) + 1)
-            self.assertEqual(excluded, download_ids)
-            download_ids.append(candidate_id)
-            dest.write_text(GOOD_SRT.replace("Hello.", f"Candidate {candidate_id}."), encoding="utf-8")
-            return True, candidate_id, f"candidate release {candidate_id}"
-
-        with mock.patch.object(ss, "run_ffsubsync", side_effect=run), \
-                mock.patch.object(ss, "_refetch_sidecar", side_effect=refetch):
-            result = ss.sync_one(
-                ss.Job(self.srt, self.mkv), _cfg(self.tmp), "fake-ffsubsync",
-                ss.FfsubsyncFeatures(True, True, True),
-            )
-
-        self.assertEqual(ss.MAX_SYNC_REFETCHES, 10)
-        self.assertEqual(download_ids, [str(number) for number in range(1, 11)])
-        self.assertEqual(sync_calls, 11)
-        self.assertEqual(result.status, ss.STATUS_SYNCED)
-        self.assertNotEqual(self.srt.read_bytes(), before)
-        self.assertEqual(self.srt.read_text(encoding="utf-8"), SHIFTED_SRT)
-
     def test_dry_run_never_launches_ffsubsync(self) -> None:
         before = self.srt.read_bytes()
         fake = FakeFfsubsync(offset=-4.0)
@@ -607,7 +549,8 @@ class EndToEndTests(unittest.TestCase):
         self.assertFalse(self.report.is_file(), "no report without a live run")
 
     def test_dry_run_without_ffsubsync_still_works(self) -> None:
-        with mock.patch.object(ss, "find_ffsubsync", lambda explicit=None: None):
+        with mock.patch.object(ss, "find_ffsubsync", lambda explicit=None: None), \
+                mock.patch.dict(os.environ, {"SUBTITLE_EXTRACTED_LEDGER": str(self.ledger)}):
             code = ss.main([
                 "--source", str(self.lib),
                 "--log", str(self.log),
@@ -615,7 +558,9 @@ class EndToEndTests(unittest.TestCase):
                 "--dry-run",
             ])
         self.assertEqual(code, 0)
-        self.assertIn("DRY-RUN PREVIEW", self.report.read_text(encoding="utf-8"))
+        text = self.report.read_text(encoding="utf-8")
+        self.assertIn("DRY-RUN (nothing will be written)", text)
+        self.assertIn("DRY-RUN PREVIEW (WOULD RUN FFSUBSYNC)", text)
 
     def test_explicit_missing_ffsubsync_path_is_exit_2(self) -> None:
         with mock.patch.object(ss, "find_ffsubsync", lambda explicit=None: None):
@@ -673,7 +618,8 @@ class _SyncedLibraryFixture(unittest.TestCase):
         self.srt.write_text(GOOD_SRT, encoding="utf-8")
         self.log = self.tmp / "out" / "sync_subtitles.log"
         self.report = self.tmp / "out" / "sync_subtitles_report.txt"
-        self.ledger = self.tmp / "out" / "sync_state.json"
+        self.ledger = self.tmp / "out" / "subtitle_extractor_extracted.json"
+        _record_extraction(self.mkv, self.srt, self.ledger)
 
     def _run(self, fake: FakeFfsubsync, *extra: str) -> int:
         real_which = shutil.which
@@ -688,37 +634,33 @@ class _SyncedLibraryFixture(unittest.TestCase):
                 mock.patch.object(ss, "ffsubsync_version", lambda binary: "ffsubsync 9.9.9"), \
                 mock.patch.object(ss, "detect_ffsubsync_features",
                                   lambda binary: ss.FfsubsyncFeatures(True, True, True)), \
+                mock.patch.dict(os.environ, {"SUBTITLE_EXTRACTED_LEDGER": str(self.ledger)}), \
                 mock.patch("shutil.which", side_effect=which):
             return ss.main([
                 "--source", str(self.lib),
                 "--log", str(self.log),
                 "--report", str(self.report),
-                "--sync-ledger", str(self.ledger),
                 *extra,
             ])
 
-    def _second_run_calls(self, first: FakeFfsubsync, *extra: str) -> int:
-        self.assertEqual(self._run(first), 0)
-        second = FakeFfsubsync(offset=-4.0)
-        self.assertEqual(self._run(second, *extra), 0)
-        return len(second.calls)
-
 
 class SyncStateTests(_SyncedLibraryFixture):
-    """Remembered verdicts: a library that has already been synced must not
-    pay for another ffsubsync run, and any change to either file must send
-    the sidecar back through ffsubsync."""
+    """The closed sync rule: only a sidecar the extractor just recorded is
+    measured, and only until it is marked done. Everything else - a
+    pre-existing sidecar, a hand-edited one, a movie replaced underneath -
+    is skipped, never "corrected"."""
 
     def test_second_run_does_not_remeasure(self) -> None:
-        """The whole point: an unchanged, already-synced library costs nothing."""
+        """The whole point: a synced sidecar costs nothing on the next run."""
         fake = FakeFfsubsync(offset=0.01)  # below --min-offset: "in sync"
-        calls = self._second_run_calls(fake)
-        self.assertEqual(calls, 0, "a remembered verdict must not respawn ffsubsync")
+        self.assertEqual(self._run(fake), 0)
+        second = FakeFfsubsync(offset=-4.0)
+        self.assertEqual(self._run(second), 0)
+        self.assertEqual(len(second.calls), 0, "a marked sidecar must not respawn ffsubsync")
         report = self.report.read_text(encoding="utf-8")
-        self.assertIn("REMEMBERED IN SYNC (NOT RE-MEASURED)", report)
-        self.assertIn("Remembered in sync", report)
+        self.assertIn("already synced on", report)
 
-    def test_a_corrected_sidecar_is_remembered_by_its_new_bytes(self) -> None:
+    def test_a_corrected_sidecar_is_marked_by_its_new_bytes(self) -> None:
         fake = FakeFfsubsync(offset=-4.0)  # trusted drift: sidecar is replaced
         self.assertEqual(self._run(fake), 0)
         self.assertEqual(self.srt.read_text(encoding="utf-8"), SHIFTED_SRT)
@@ -728,70 +670,68 @@ class SyncStateTests(_SyncedLibraryFixture):
         self.assertEqual(len(second.calls), 0)
         self.assertEqual(self.srt.read_text(encoding="utf-8"), SHIFTED_SRT)
 
-    def test_edited_subtitle_is_measured_again(self) -> None:
-        """A hand-edited or re-downloaded sidecar has new bytes: re-measure."""
-        self.assertEqual(self._run(FakeFfsubsync(offset=0.01)), 0)
+    def test_an_edited_sidecar_is_no_longer_ours(self) -> None:
+        """A hand-edited sidecar has new bytes: it is not the extracted copy
+        any more, so it is skipped - never re-measured, never overwritten."""
+        fake = FakeFfsubsync(offset=-4.0)
+        self.assertEqual(self._run(fake), 0)
         self.srt.write_text(GOOD_SRT + "3\n00:00:09,000 --> 00:00:10,000\nExtra line.\n",
                             encoding="utf-8")
-        second = FakeFfsubsync(offset=0.01)
+        second = FakeFfsubsync(offset=-4.0)
         self.assertEqual(self._run(second), 0)
-        self.assertEqual(len(second.calls), 1)
+        self.assertEqual(len(second.calls), 0, "an edited sidecar is authoritative, not ours")
 
-    def test_replaced_movie_is_measured_again(self) -> None:
-        """A remux changes the movie's size and/or mtime: re-measure."""
+    def test_a_replaced_movie_does_not_reopen_a_done_sidecar(self) -> None:
+        """A remux changes the movie's bytes; a sidecar already synced stays
+        done - the extractor's ledger, not the movie, decides provenance."""
         self.assertEqual(self._run(FakeFfsubsync(offset=0.01)), 0)
         self.mkv.write_bytes(b"a completely different movie file, remuxed")
         second = FakeFfsubsync(offset=0.01)
         self.assertEqual(self._run(second), 0)
-        self.assertEqual(len(second.calls), 1)
+        self.assertEqual(len(second.calls), 0)
 
-    def test_a_held_sidecar_is_never_remembered(self) -> None:
+    def test_a_held_sidecar_is_never_marked(self) -> None:
         """Review and failure still need another attempt, so nothing is recorded."""
         self.assertEqual(self._run(FakeFfsubsync(offset=45.0)), 0)
         second = FakeFfsubsync(offset=45.0)
         self.assertEqual(self._run(second), 0)
         self.assertEqual(len(second.calls), 1, "an untrusted sync is re-measured next run")
 
-    def test_dry_run_reads_but_never_writes_the_memory(self) -> None:
+    def test_dry_run_never_marks_anything(self) -> None:
         self.assertEqual(self._run(FakeFfsubsync(offset=0.01)), 0)
-        self.assertTrue(self.ledger.is_file())
         before = self.ledger.read_text(encoding="utf-8")
 
         fake = FakeFfsubsync(offset=-4.0)
         self.assertEqual(self._run(fake, "--dry-run"), 0)
         self.assertEqual(fake.calls, [], "a dry run never launches ffsubsync")
         self.assertEqual(self.ledger.read_text(encoding="utf-8"), before,
-                         "a dry run measured nothing, so it must not write")
+                         "a dry run measured nothing, so it must not mark")
 
     def test_dry_run_shows_what_a_live_run_would_skip(self) -> None:
         self.assertEqual(self._run(FakeFfsubsync(offset=0.01)), 0)
         self.assertEqual(self._run(FakeFfsubsync(offset=-4.0), "--dry-run"), 0)
-        self.assertIn("REMEMBERED IN SYNC (NOT RE-MEASURED)",
-                      self.report.read_text(encoding="utf-8"))
+        self.assertIn("already synced on", self.report.read_text(encoding="utf-8"))
 
-    def test_corrupt_memory_is_simply_forgotten(self) -> None:
-        self.assertEqual(self._run(FakeFfsubsync(offset=0.01)), 0)
+    def test_a_corrupt_ledger_skips_instead_of_crashing(self) -> None:
+        # The extractor's loader fails closed: unreadable JSON reads as "no
+        # record", which means no provenance, which means no sync.
         self.ledger.write_text("{not json at all", encoding="utf-8")
-        second = FakeFfsubsync(offset=0.01)
-        self.assertEqual(self._run(second), 0)
-        self.assertEqual(len(second.calls), 1, "an unreadable ledger must fail open, not crash")
-
-    def test_ledger_outside_the_library_is_required(self) -> None:
-        cfg = _cfg(self.tmp, sync_ledger=self.lib / "sync_state.json")
-        self.assertIn("--sync-ledger must be outside the Jellyfin media library",
-                      ss.validate_config(cfg))
-
-    def test_a_sidecar_that_no_longer_exists_is_forgotten(self) -> None:
-        self.assertEqual(self._run(FakeFfsubsync(offset=0.01)), 0)
-        self.srt.unlink()
-        second_srt = self.movie_dir / "Film (2000).en.srt"
-        second_srt.write_text(GOOD_SRT, encoding="utf-8")
-
         fake = FakeFfsubsync(offset=0.01)
         self.assertEqual(self._run(fake), 0)
-        self.assertEqual(len(fake.calls), 1, "a new sidecar is measured")
-        saved = json.loads(self.ledger.read_text(encoding="utf-8"))
-        self.assertNotIn(ss.sync_state_key(self.srt), saved["entries"])
+        self.assertEqual(len(fake.calls), 0, "an unreadable ledger can prove nothing, so nothing syncs")
+        self.assertIn("SKIPPED", self.report.read_text(encoding="utf-8"))
+
+    def test_a_sidecar_the_extractor_never_recorded_is_skipped(self) -> None:
+        """The rule that replaced the old refetch loop: a sidecar that exists
+        without an extraction record - downloaded by hand, shipped with the
+        release, whatever - is authoritative and never touched."""
+        self.ledger.unlink()
+        fake = FakeFfsubsync(offset=-4.0)
+        self.assertEqual(self._run(fake), 0)
+        self.assertEqual(fake.calls, [], "no provenance means no sync, ever")
+        self.assertIn("not extracted from this movie's own tracks",
+                      self.report.read_text(encoding="utf-8"))
+        self.assertEqual(self.srt.read_text(encoding="utf-8"), GOOD_SRT)
 
 
 class StateCacheTests(_SyncedLibraryFixture):
@@ -895,7 +835,6 @@ class VendoredContractTests(unittest.TestCase):
         expected = ss.default_tool_dir("sync_subtitles")
         self.assertEqual(Path(ss.LOG_FILE).parent, expected)
         self.assertEqual(Path(ss.REPORT_FILE).parent, expected)
-        self.assertEqual(Path(ss.SYNC_STATE_FILE).parent, expected)
 
 
 class ReportShapeTests(unittest.TestCase):
@@ -949,15 +888,15 @@ class ReportShapeTests(unittest.TestCase):
                                features=ss.FfsubsyncFeatures(),
                                elapsed_sec=0.1, truncated=False)
         self.assertIn("NOTHING FOUND", text)
-        self.assertIn("subtitle_fetcher.py", text)
+        self.assertIn("subtitle_extractor.py", text)
 
 
 class ParallelMeasurementTests(unittest.TestCase):
     """ffsubsync is the slowest thing the toolchain does, and each sidecar is
     an independent measurement, so they run in parallel. Two things must
-    survive that: every sidecar is still measured exactly once, and the shared
-    remembered-verdict ledger does not lose an entry to a lost update.
-    """
+    survive that: every extracted sidecar is still measured exactly once, and
+    the shared extraction ledger keeps every sync mark despite twelve workers
+    writing it concurrently."""
 
     MOVIES = 12
 
@@ -974,7 +913,16 @@ class ParallelMeasurementTests(unittest.TestCase):
             (folder / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8")
         self.log = self.tmp / "out" / "sync.log"
         self.report = self.tmp / "out" / "sync_report.txt"
-        self.ledger = self.tmp / "out" / "sync_state.json"
+        self.ledger = self.tmp / "out" / "subtitle_extractor_extracted.json"
+        self._record_all()
+
+    def _record_all(self) -> None:
+        """Give every sidecar fresh extraction provenance."""
+        self.ledger.unlink(missing_ok=True)
+        for index in range(self.MOVIES):
+            name = f"Film {index:02d} (2000)"
+            _record_extraction(self.lib / name / f"{name}.mkv",
+                               self.lib / name / f"{name}.eng.srt", self.ledger)
 
     def _reset_library(self) -> None:
         """Put the library back exactly as setUp left it, in place.
@@ -985,7 +933,7 @@ class ParallelMeasurementTests(unittest.TestCase):
         for index in range(self.MOVIES):
             name = f"Film {index:02d} (2000)"
             (self.lib / name / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8")
-        self.ledger.unlink(missing_ok=True)
+        self._record_all()
 
     def _run(self, workers: int) -> int:
         real_which = shutil.which
@@ -999,12 +947,12 @@ class ParallelMeasurementTests(unittest.TestCase):
                 mock.patch.object(ss, "ffsubsync_version", lambda binary: "ffsubsync 9.9.9"), \
                 mock.patch.object(ss, "detect_ffsubsync_features",
                                   lambda binary: ss.FfsubsyncFeatures(True, True, True)), \
+                mock.patch.dict(os.environ, {"SUBTITLE_EXTRACTED_LEDGER": str(self.ledger)}), \
                 mock.patch("shutil.which", side_effect=which):
             code = ss.main([
                 "--source", str(self.lib),
                 "--log", str(self.log),
                 "--report", str(self.report),
-                "--sync-ledger", str(self.ledger),
                 "--workers", str(workers),
             ])
         self.calls = fake.calls
@@ -1021,12 +969,14 @@ class ParallelMeasurementTests(unittest.TestCase):
                 (self.lib / name / f"{name}.eng.srt").read_text(encoding="utf-8"),
             )
 
-    def test_the_shared_ledger_keeps_every_verdict(self) -> None:
-        """The lost-update case: twelve workers writing one dict."""
+    def test_the_shared_ledger_keeps_every_sync_mark(self) -> None:
+        """The lost-update case: twelve workers marking one ledger."""
         self._run(workers=4)
-        entries = json.loads(self.ledger.read_text(encoding="utf-8"))["entries"]
-        self.assertEqual(self.MOVIES, len(entries))
-        self.assertTrue(all(entry["status"] == ss.STATUS_SYNCED for entry in entries.values()))
+        payload = json.loads(self.ledger.read_text(encoding="utf-8"))
+        records = payload["sidecars"]
+        self.assertEqual(self.MOVIES, len(records))
+        self.assertTrue(all(str(r.get("synced_utc") or "") for r in records.values()),
+                        "every synced sidecar must carry its sync mark")
 
     def test_the_report_is_the_same_whatever_the_worker_count(self) -> None:
         """Results are sorted before rendering, so scheduling cannot show up."""

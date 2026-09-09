@@ -102,8 +102,8 @@ TRACK_CLEANER_TEMP_PREFIX = "temp_clean_"
 
 # Folder states that mean the layout itself is wrong. MISSING_SIDECAR is
 # deliberately absent: a freshly standardized movie has no sidecar until
-# subtitle_fetcher.py runs, so counting it as a defect would make the exit-code
-# gate fail on every healthy new library.
+# subtitle_extractor.py runs, so counting it as a defect would make the
+# exit-code gate fail on every healthy new library.
 DEFECT_STATES = frozenset({
     "SINGLE_OTHER_CONTAINER",
     "MULTIPLE_DIRECT_MOVIE_FILES",
@@ -237,19 +237,20 @@ def classify_folder(folder: Path) -> FolderAudit:
         # its own state instead of being folded into CANONICAL_MKV.
         return FolderAudit(
             folder, "MISSING_SIDECAR", files,
-            f"no English {EXTERNAL_SRT_SUFFIX} sidecar; subtitle_fetcher.py can still fetch one",
+            f"no English {EXTERNAL_SRT_SUFFIX} sidecar; subtitle_extractor.py can still "
+            "build one from the embedded track",
         )
     # The name is right, so check the contents. A sidecar that is empty, an
     # error page, or a truncated download looks perfectly healthy to a
     # filename-only audit, but it silently blocks every downstream tool: the
-    # fetcher will not replace a file it thinks is already there and the
+    # extractor will not replace a file it thinks is already there and the
     # cleaner will not trust it. That dead end has to be visible here.
     last_reason = ""
     for name in covering_present:
         usable, reason = validate_srt_sidecar(folder / name)
         if usable:
             return FolderAudit(folder, "CANONICAL_MKV", files)
-        last_reason = f"{name} is unusable ({reason}); delete it and re-run subtitle_fetcher.py"
+        last_reason = f"{name} is unusable ({reason}); delete it and re-run subtitle_extractor.py"
     return FolderAudit(folder, "INVALID_SIDECAR", files, last_reason)
 
 def audit_library(cfg: Config) -> Audit:
@@ -289,7 +290,7 @@ def audit_library(cfg: Config) -> Audit:
         if result.state == "MISSING_SIDECAR":
             # Advisory, not a defect: the layout is correct, only the subtitle
             # is absent. Logged at INFO so a library that simply has not been
-            # fetched yet does not drown the console in warnings.
+            # extracted yet does not drown the console in warnings.
             log(f"[{index}/{len(folders)}] {result.state}: {folder.name}", level="INFO")
         elif result.state != "CANONICAL_MKV":
             log(f"[{index}/{len(folders)}] {result.state}: {folder.name}", level="WARNING")
@@ -371,14 +372,15 @@ class StateGuide:
     fix: str
 
 # Reading order is the order of the report: the two sidecar states share one
-# actionable group (that is the group subtitle_fetcher.py exists to clear), and
+# actionable group (that is the group subtitle_extractor.py exists to clear), and
 # the remaining layout defects follow, cheapest fix first.
 STATE_GUIDES: tuple[StateGuide, ...] = (
     StateGuide(
-        "MISSING_SIDECAR", "Missing Eng SRT", "run subtitle_fetcher.py",
+        "MISSING_SIDECAR", "Missing Eng SRT", "run subtitle_extractor.py",
         "MOVIES WITH NO USABLE EXTERNAL ENGLISH SRT (ACTIONABLE)",
-        "Run subtitle_fetcher.py before mkv_track_cleaner.py: fetching first keeps the "
-        "pristine release moviehash, which is what makes an exact subtitle match possible.",
+        "Run subtitle_extractor.py before mkv_track_cleaner.py: extraction must happen "
+        "while the embedded track is still in the file, because the cleaner strips every "
+        "embedded subtitle once a sidecar exists.",
     ),
     StateGuide(
         "INVALID_SIDECAR", "Invalid Eng SRT", "delete the broken sidecar",
@@ -399,10 +401,11 @@ STATE_GUIDES: tuple[StateGuide, ...] = (
         "\"Title (Year)/Title (Year).mkv\".",
     ),
     StateGuide(
-        "SINGLE_OTHER_CONTAINER", "Single other container", "remux to MKV or accept it",
+        "SINGLE_OTHER_CONTAINER", "Single other container", "run mkv_track_cleaner.py to convert it",
         "MOVIE IS NOT AN MKV",
-        "MKV is the only container this toolkit cleans and the only one guaranteed to "
-        "carry an external SRT plus every track type Jellyfin direct plays.",
+        "MKV is the only container this toolkit maintains. mkv_track_cleaner.py converts an "
+        "MP4 to the canonical MKV in the same lossless remux that cleans its tracks - after "
+        "subtitle_extractor.py has built the sidecar from its embedded track.",
     ),
     StateGuide(
         "MULTIPLE_DIRECT_MOVIE_FILES", "Multiple movie files", "keep one feature per folder",

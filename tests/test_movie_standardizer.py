@@ -759,7 +759,7 @@ class CoordinationLockTests(unittest.TestCase):
 
     def test_path_is_deterministic(self) -> None:
         # The lock path must be identical for identical normalized targets so the
-        # standardizer, cleaner and subtitle fetcher contend on the same file.
+        # standardizer, cleaner and subtitle extractor contend on the same file.
         # normpath collapses "." and ".."; on Windows normcase also lower-cases,
         # which is exactly what makes the tools agree on a shared key.
         lock_a = CoordinationLock(Path("/Data/./Library"))

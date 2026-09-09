@@ -48,7 +48,7 @@ def run_self_tests() -> int:
 ╔═ JELLYFIN MOVIE LIBRARY AUDIT ═╗
   ────────────────────────────────
      7   Canonical MKV            one MKV + a validated .eng.srt
-     0   Missing Eng SRT          run subtitle_fetcher.py
+     0   Missing Eng SRT          run subtitle_extractor.py
      7   Folders checked          every top-level folder in the library
   ────────────────────────────────
   AUDIT SUMMARY: canonical=7; total=7; pct=100.0%
@@ -75,7 +75,7 @@ def run_self_tests() -> int:
         covered, total = parse_auditor_coverage(test_runtime_log, report2)
         check(covered == 42 and total == 42, f"Canonical MKV parsing: got {covered}/{total}")
 
-        # Test 4: Parse fetcher-style coverage line
+        # Test 4: Parse extractor-style coverage line
         report3 = tmp_path / "report3.txt"
         report3.write_text("Coverage this run: 5 of 9 movie(s) (55.6%) end with a validated external English SRT.")
         covered, total = parse_auditor_coverage(test_runtime_log, report3)
@@ -106,7 +106,7 @@ def run_self_tests() -> int:
 
         # Test 9: Missing tool script detection
         check(
-            "subtitle_fetcher.py" in missing_tool_scripts(tmp_path),
+            "subtitle_extractor.py" in missing_tool_scripts(tmp_path),
             "missing tool script detected",
         )
 
@@ -117,10 +117,6 @@ def run_self_tests() -> int:
         lines = transcript.read_text(encoding="utf-8").splitlines()
         check(len(lines) == 15, f"transcript bounded to {max(0, 15)} lines, got {len(lines)}")
         check(lines[-1] == "line 4-9", "transcript keeps the newest lines")
-
-        # Test 11: UTC midnight wait (just check it doesn't crash)
-        # We don't actually wait in tests
-        check(callable(wait_for_utc_midnight), "UTC wait function exists and is callable")
 
         # Test 12: Library root resolution — flag > MOVIE_STD_TARGET > default,
         # the same ladder every sibling tool walks.

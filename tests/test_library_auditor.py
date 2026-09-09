@@ -75,7 +75,7 @@ class FolderClassificationTests(unittest.TestCase):
         folder = self._movie("No Subs (2005)")
         result = la.classify_folder(folder)
         self.assertEqual(result.state, "MISSING_SIDECAR")
-        self.assertIn("subtitle_fetcher", result.detail)
+        self.assertIn("subtitle_extractor", result.detail)
 
     def test_missing_sidecar_is_not_canonical(self) -> None:
         without = la.classify_folder(self._movie("Bare (2006)"))
@@ -89,7 +89,7 @@ class InvalidSidecarTests(unittest.TestCase):
     """A correctly-named sidecar whose contents are unusable must be reported.
 
     A filename-only audit calls this CANONICAL_MKV, which silently blocks the
-    whole pipeline: subtitle_fetcher.py refuses to replace a sidecar it thinks
+    whole pipeline: subtitle_extractor.py refuses to replace a sidecar it thinks
     is present, and mkv_track_cleaner.py will not trust it either. The movie can
     never acquire a working external subtitle and nothing says why.
     """
@@ -138,7 +138,7 @@ class InvalidSidecarTests(unittest.TestCase):
         result = la.classify_folder(self._movie_with_sidecar("Detail (2017)", ""))
         self.assertEqual(result.state, "INVALID_SIDECAR")
         self.assertIn("delete", result.detail.lower())
-        self.assertIn("subtitle_fetcher", result.detail)
+        self.assertIn("subtitle_extractor", result.detail)
 
 
 class UnusableSidecarReportTests(unittest.TestCase):
@@ -235,7 +235,7 @@ class ExitCodeGateTests(unittest.TestCase):
         self.assertEqual(la.exit_code_for(counts, la.Config(fail_on_defects=True)), 1)
 
     def test_missing_sidecar_is_not_a_defect(self) -> None:
-        # A freshly standardized movie has no sidecar until the fetcher runs,
+        # A freshly standardized movie has no sidecar until the extractor runs,
         # so counting it would make the gate fail on every healthy new library.
         counts = Counter({"CANONICAL_MKV": 3, "MISSING_SIDECAR": 2})
         self.assertEqual(la.exit_code_for(counts, la.Config(fail_on_defects=True)), 0)

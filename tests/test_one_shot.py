@@ -190,7 +190,7 @@ EMPTY_REPORT = "  AUDIT SUMMARY: canonical=0; total=0; pct=100.0%\n"
 class FakeToolRunner:
     """Deterministic stand-in for run_tool.
 
-    The subtitle fetcher succeeds; the auditor writes the configured
+    The subtitle extractor succeeds; the auditor writes the configured
     report to the --report path and honours the auditor's exit-code
     contract (0 healthy / 0 with findings unless --fail-on-findings,
     1 with findings and --fail-on-findings, configurable override).
@@ -200,12 +200,12 @@ class FakeToolRunner:
         self,
         report: str = PARTIAL_REPORT,
         auditor_rc: int | None = None,
-        fetcher_rc: int = 0,
+        extractor_rc: int = 0,
         write_report: bool = True,
     ) -> None:
         self.report = report
         self.auditor_rc = auditor_rc
-        self.fetcher_rc = fetcher_rc
+        self.extractor_rc = extractor_rc
         self.write_report = write_report
         self.calls: list[tuple[str, list[str]]] = []
         self.streaming: list[bool] = []
@@ -229,8 +229,8 @@ class FakeToolRunner:
         self.tags.append(str(kwargs.get("console_tag", "")))
         if transcript is not None:
             self.transcripts.append(Path(str(transcript)))
-        if script_path.name == "subtitle_fetcher.py":
-            return self.fetcher_rc, "fetcher ok\n", ""
+        if script_path.name == "subtitle_extractor.py":
+            return self.extractor_rc, "extractor ok\n", ""
         if script_path.name == "library_auditor.py":
             if self.write_report:
                 report_arg = args[args.index("--report") + 1]
@@ -354,7 +354,8 @@ class RunOneShotTests(unittest.TestCase):
         self.library.mkdir()
         self.log_dir = self.tmp / "logs"
         self.runtime_log = self.log_dir / "one_shot_test.log"
-        self.tools = {"mkvmerge": False, "ffprobe": False, "ffsubsync": False, "ffmpeg": False}
+        self.tools = {"mkvmerge": True, "mkvextract": True, "ffprobe": True,
+                      "ffsubsync": True, "ffmpeg": True}
 
     def tearDown(self) -> None:
         self._td.cleanup()
@@ -362,8 +363,7 @@ class RunOneShotTests(unittest.TestCase):
     def _run(self, fake: FakeToolRunner, **kwargs: object) -> int:
         tools = kwargs.pop("tools", self.tools)
         with mock.patch.object(js, "run_tool", fake), \
-                mock.patch.object(js.time, "sleep", lambda _s: None), \
-                mock.patch.object(js, "wait_for_utc_midnight", lambda _log: None):
+                mock.patch.object(js.time, "sleep", lambda _s: None):
             return js.run_one_shot(
                 library=self.library,
                 script_dir=Path(js.__file__).parent,
@@ -391,20 +391,24 @@ class RunOneShotTests(unittest.TestCase):
         fake = FakeToolRunner(report=COMPLETE_REPORT)
         code = self._run(fake, dry_run=False, force_pass=True)
         self.assertEqual(code, 0)
-        self.assertEqual(self._steps_called(fake), ["subtitle_fetcher.py", "library_auditor.py"])
+        self.assertEqual(self._steps_called(fake), [
+            "subtitle_extractor.py", "mkv_track_cleaner.py", "bitdepth.py",
+            "sync_subtitles.py", "library_auditor.py"])
 
     def test_preflight_does_not_shorten_a_dry_run(self) -> None:
         # A dry run previews exactly one pass; skipping it would preview nothing.
         fake = FakeToolRunner(report=COMPLETE_REPORT)
         code = self._run(fake, dry_run=True, force_pass=False)
         self.assertEqual(code, 0)
-        self.assertEqual(self._steps_called(fake), ["subtitle_fetcher.py", "library_auditor.py"])
+        self.assertEqual(self._steps_called(fake), [
+            "subtitle_extractor.py", "mkv_track_cleaner.py", "bitdepth.py",
+            "sync_subtitles.py", "library_auditor.py"])
 
     def test_partial_library_still_runs_a_full_pass(self) -> None:
         fake = FakeToolRunner(report=PARTIAL_REPORT)
         code = self._run(fake, dry_run=False, max_passes=1)
         self.assertEqual(code, 1)
-        fetch_calls = [n for n, _a in fake.calls if n == "subtitle_fetcher.py"]
+        fetch_calls = [n for n, _a in fake.calls if n == "subtitle_extractor.py"]
         self.assertEqual(len(fetch_calls), 1, "an incomplete library is never left alone")
         text = self.runtime_log.read_text(encoding="utf-8")
         self.assertIn("Pre-flight coverage: 1/2", text)
@@ -421,14 +425,14 @@ class RunOneShotTests(unittest.TestCase):
         fake = FakeToolRunner(report="", auditor_rc=2, write_report=False)
         code = self._run(fake, dry_run=False, max_passes=1)
         self.assertEqual(code, 1)
-        fetch_calls = [n for n, _a in fake.calls if n == "subtitle_fetcher.py"]
+        fetch_calls = [n for n, _a in fake.calls if n == "subtitle_extractor.py"]
         self.assertEqual(len(fetch_calls), 1, "no verdict means the sweep still runs")
 
     def test_dry_run_is_exactly_one_pass_and_exits_0(self) -> None:
         fake = FakeToolRunner(report=PARTIAL_REPORT)
         code = self._run(fake, dry_run=True, max_passes=0)
         self.assertEqual(code, 0, "a dry-run preview is a success even when incomplete")
-        fetch_calls = [args for name, args in fake.calls if name == "subtitle_fetcher.py"]
+        fetch_calls = [args for name, args in fake.calls if name == "subtitle_extractor.py"]
         audit_calls = [args for name, args in fake.calls if name == "library_auditor.py"]
         self.assertEqual(len(fetch_calls), 1, "dry run must not loop passes")
         self.assertEqual(len(audit_calls), 1)
@@ -436,18 +440,19 @@ class RunOneShotTests(unittest.TestCase):
         # The auditor is read-only; it takes no --dry-run flag.
         self.assertNotIn("--dry-run", audit_calls[0])
 
-    def test_sync_step_pins_its_ledger_under_the_log_dir(self) -> None:
-        # Every artifact of a run lives under --log-dir, so the remembered
-        # sync verdicts do too.
+    def test_sync_step_takes_no_ledger_flag(self) -> None:
+        # Remembered sync verdicts are gone: sync runs only for freshly
+        # extracted sidecars, so it needs no state file of its own.
         fake = FakeToolRunner(report=PARTIAL_REPORT)
         self._run(fake, dry_run=True, tools={"ffsubsync": True, "ffmpeg": True})
         _name, args = next((n, a) for n, a in fake.calls if n == "sync_subtitles.py")
-        self.assertIn(str(self.log_dir / "sync_state.json"),
-                      args[args.index("--sync-ledger") + 1:])
+        self.assertNotIn("--sync-ledger", args)
+        self.assertEqual(args[args.index("--log") + 1], str(self.runtime_log))
 
     def test_dry_run_pins_staged_reports_and_the_shared_log(self) -> None:
         fake = FakeToolRunner(report=PARTIAL_REPORT)
-        self._run(fake, dry_run=True, tools={"mkvmerge": True, "ffprobe": True,
+        self._run(fake, dry_run=True, tools={"mkvmerge": True, "mkvextract": True,
+                                             "ffprobe": True,
                                              "ffsubsync": True, "ffmpeg": True})
         # Every tool's report is staged so it can be folded into the one
         # report file, and every tool writes into the one log file.
@@ -455,16 +460,7 @@ class RunOneShotTests(unittest.TestCase):
             report = args[args.index("--report") + 1]
             self.assertTrue(report.startswith(str(self.log_dir / ".one_shot_stage")),
                             f"{name} must stage its report, got {report}")
-            if name == "subtitle_fetcher.py":
-                # Its --log is its durable quota ledger, not a run log.
-                self.assertEqual(args[args.index("--log") + 1],
-                                 str(self.log_dir / "subtitle_fetcher_ledger.log"))
-            else:
-                self.assertEqual(args[args.index("--log") + 1], str(self.runtime_log))
-
-        _name, fetch_args = next((n, a) for n, a in fake.calls if n == "subtitle_fetcher.py")
-        self.assertIn("--allow-missing", fetch_args)
-        self.assertIn("--scrape-daily-cap", fetch_args)
+            self.assertEqual(args[args.index("--log") + 1], str(self.runtime_log))
 
     def test_a_run_leaves_one_report_and_one_log(self) -> None:
         """The point of the staging folder: nothing per-tool survives."""
@@ -486,7 +482,7 @@ class RunOneShotTests(unittest.TestCase):
         text = (self.log_dir / "jellyfin_one_shot_report.txt").read_text(encoding="utf-8")
         self.assertIn("AUDIT SUMMARY: canonical=1; total=2", text)
         for script in js.TOOL_SCRIPTS:
-            if script == "subtitle_fetcher.py":
+            if script == "subtitle_extractor.py":
                 continue  # its report is the staged one the fake wrote
             self.assertIn(script, text)
         self.assertIn("PASS HISTORY", text)
@@ -494,9 +490,10 @@ class RunOneShotTests(unittest.TestCase):
     def test_console_tags_identify_the_running_step(self) -> None:
         fake = FakeToolRunner(report=PARTIAL_REPORT)
         self._run(fake, dry_run=False, max_passes=1,
-                  tools={"mkvmerge": True, "ffprobe": True, "ffsubsync": True, "ffmpeg": True})
+                  tools={"mkvmerge": True, "mkvextract": True, "ffprobe": True,
+                         "ffsubsync": True, "ffmpeg": True})
         # Pre-flight audit first, then the pass, then the final fail-gated audit.
-        self.assertEqual(fake.tags, ["audit", "fetch", "clean", "10bit", "sync",
+        self.assertEqual(fake.tags, ["audit", "extract", "clean", "10bit", "sync",
                                      "audit", "final audit"])
 
     def test_quiet_stops_streaming_but_not_the_run(self) -> None:
@@ -514,7 +511,7 @@ class RunOneShotTests(unittest.TestCase):
         fake = FakeToolRunner(report=PARTIAL_REPORT)
         self._run(fake, dry_run=False, max_passes=1)
         text = self.runtime_log.read_text(encoding="utf-8")
-        for title in ("FETCH SUBTITLES", "CLEAN TRACKS", "INSPECT 10-BIT / HDR",
+        for title in ("EXTRACT SUBTITLES", "CLEAN TRACKS", "INSPECT 10-BIT / HDR",
                       "SYNC SUBTITLE TIMING", "AUDIT THE LIBRARY"):
             self.assertIn(title, text)
         self.assertIn("What it does", text)
@@ -537,7 +534,7 @@ class RunOneShotTests(unittest.TestCase):
         code = self._run(fake, dry_run=False, max_passes=5, force_pass=True)
         self.assertEqual(code, 2)
         # The empty verdict comes from the first pass; no further passes.
-        self.assertEqual(len([n for n, _a in fake.calls if n == "subtitle_fetcher.py"]), 1)
+        self.assertEqual(len([n for n, _a in fake.calls if n == "subtitle_extractor.py"]), 1)
 
     def test_persistently_failing_auditor_exits_1(self) -> None:
         # rc 2, no report written: the worst audit case. Three bad passes
@@ -570,8 +567,7 @@ class RunOneShotTests(unittest.TestCase):
             return 0, "", ""
 
         with mock.patch.object(js, "run_tool", flaky), \
-                mock.patch.object(js.time, "sleep", lambda _s: None), \
-                mock.patch.object(js, "wait_for_utc_midnight", lambda _log: None):
+                mock.patch.object(js.time, "sleep", lambda _s: None):
             code = js.run_one_shot(
                 library=self.library,
                 script_dir=Path(js.__file__).parent,
@@ -583,22 +579,28 @@ class RunOneShotTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(audit_attempts["n"], js.AUDIT_ATTEMPTS_PER_PASS + 1)
 
-    def test_stagnation_waits_for_utc_rollover(self) -> None:
+    def test_stagnation_stops_the_run(self) -> None:
+        # There is no quota left to wait for in this toolchain: two passes
+        # with no improvement must stop the loop, not schedule a third.
         fake = FakeToolRunner(report=PARTIAL_REPORT)
         with mock.patch.object(js, "run_tool", fake), \
-                mock.patch.object(js.time, "sleep", lambda _s: None), \
-                mock.patch.object(js, "wait_for_utc_midnight", return_value=None) as w:
-            js.run_one_shot(
+                mock.patch.object(js.time, "sleep", lambda _s: None):
+            code = js.run_one_shot(
                 library=self.library,
                 script_dir=Path(js.__file__).parent,
                 runtime_log=self.runtime_log,
                 log_dir=self.log_dir,
                 tools=self.tools,
-                max_passes=js.STAGNATION_PASSES_BEFORE_ROLLOVER + 1,
+                max_passes=js.STAGNATION_PASSES_BEFORE_STOP + 1,
             )
-        # Pass 1 sets the baseline; passes 2 and 3 show no improvement, so
-        # the rollover wait fires once before pass 3.
-        self.assertEqual(w.call_count, 1)
+        self.assertEqual(code, 1, "a stalled library is a PARTIAL verdict, not a loop")
+        text = self.runtime_log.read_text(encoding="utf-8")
+        self.assertIn("No improvement for 2 passes", text)
+        report = (self.log_dir / "jellyfin_one_shot_report.txt").read_text(encoding="utf-8")
+        self.assertIn("STALLED", report)
+        # Pass 1 sets the baseline; passes 2 and 3 show no improvement, and the
+        # loop stops instead of spending pass 4 (max_passes allowed it).
+        self.assertEqual(len([n for n, _a in fake.calls if n == "subtitle_extractor.py"]), 3)
 
     def test_progress_resets_the_stagnation_counter(self) -> None:
         reports = iter([PARTIAL_REPORT, COMPLETE_REPORT, PARTIAL_REPORT])
@@ -610,8 +612,7 @@ class RunOneShotTests(unittest.TestCase):
             return fake(runtime_log, script_path, args, tool_name, **kw)
 
         with mock.patch.object(js, "run_tool", runner), \
-                mock.patch.object(js.time, "sleep", lambda _s: None), \
-                mock.patch.object(js, "wait_for_utc_midnight", return_value=None) as w:
+                mock.patch.object(js.time, "sleep", lambda _s: None):
             code = js.run_one_shot(
                 library=self.library,
                 script_dir=Path(js.__file__).parent,
@@ -621,7 +622,6 @@ class RunOneShotTests(unittest.TestCase):
                 max_passes=5,
             )
         self.assertEqual(code, 0, "the complete report on pass 2 must end the run")
-        self.assertEqual(w.call_count, 0, "improved coverage must not wait for midnight")
 
 
 # ---------------------------------------------------------------------------

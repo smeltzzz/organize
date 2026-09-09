@@ -26,8 +26,8 @@ To maintain its bulletproof stability, all contributions must respect the projec
 4. **Hardlink-Only Ingest (Zero Extra Disk Usage)**
    Ingestion into the organized library uses `os.link()`. It never silently degrades to a copy or move. Completed torrents remain fully seedable on their original filesystem without taking twice the space.
 
-5. **Strict Order: Subtitles BEFORE Remux**
-   `subtitle_fetcher.py` queries OpenSubtitles using release OSHash (`moviehash_match=only`). Remuxing rewrites the MKV headers, permanently invalidating the OSHash. Subtitles must always be fetched before track cleaning. The order is `organizekit.core.toolchain.STEP_ORDER`, stated once and asserted by `tests/test_shared_core.py`.
+5. **Strict Order: Extraction BEFORE Remux**
+   `mkv_track_cleaner.py` strips every embedded subtitle track once a validated external `.eng.srt` exists, so `subtitle_extractor.py` must run while the track is still inside the container — after the remux it is gone for good. The order is `organizekit.core.toolchain.STEP_ORDER`, stated once and asserted by `tests/test_shared_core.py`.
 
 6. **Fail-Closed Concurrency Locks**
    All tools coordinate across processes and schedulers via advisory locks (`organizekit.core.CoordinationLock`). A tool refuses to touch a file rather than risk racing another process.

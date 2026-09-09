@@ -11,8 +11,6 @@ Everything is overridable per run with CLI flags (see each tool's
 
 | Variable | Used by | Purpose |
 | :--- | :--- | :--- |
-| `OPENSUBTITLES_API_KEY` | subtitle_fetcher | Subtitle source (exact-moviehash matching) |
-| `SUBDL_API_KEY` | subtitle_fetcher | Equal subtitle source (release match scored ≥ 0.80) |
 | `ORGANIZE_LIBRARY` | **every tool** | The movie-library root. Set this one variable and no tool needs a path flag. |
 | `MOVIE_STD_SOURCE` | movie_standardizer / `doctor` | Completed-download root to ingest from (platform default: `E:\torrents\final` on Windows, `~/torrents/final` elsewhere) |
 | `MOVIE_STD_TARGET` | every tool (legacy) | Older name for `ORGANIZE_LIBRARY`; still honoured, lower precedence |
@@ -20,7 +18,8 @@ Everything is overridable per run with CLI flags (see each tool's
 | `MOVIE_STD_MAINTENANCE_MODE` | movie_standardizer | `REPORT` (default) / `QUARANTINE` / `DELETE` for duplicates |
 | `ORGANIZE_STATE_DB` | auditor / cleaner / 10-bit / sync / `status` | Where the shared state cache lives (default: beside the logs and reports, never inside the library) |
 | `ORGANIZE_NO_STATE` | the same tools | Set to `1` to turn the cache off everywhere at once (equivalent to passing `--no-state`) |
-| `ORGANIZE_NO_KEEPALIVE` | subtitle_fetcher | Set to `1` to stop reusing HTTP connections between provider requests (one socket per request, as before) |
+| `SUBTITLE_EXTRACTED_LEDGER` | subtitle_extractor / sync | Where the extraction provenance ledger lives (default: `ReportsAndLogs/subtitle_extractor_extracted.json`, outside the library). `sync_subtitles.py` reads it to know which sidecars it may measure |
+| `PGSTOSRT_DLL` | subtitle_extractor | Path to the PgsToSrt `.dll` (it runs as `dotnet <dll>`), when that OCR backend is wanted |
 
 A `.env` file next to the scripts is read automatically at startup by every
 tool; anything already exported in the environment wins over the file.

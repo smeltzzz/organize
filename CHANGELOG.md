@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Subtitle fetching is gone: the movie's own tracks are the only subtitle
+source.** Downloading subtitles was the one part of this toolkit that could
+not be made reliable — an answer from a stranger's website is a guess about
+someone else's release — so it was removed outright, not disabled.
+
+### Removed
+- **All subtitle downloading**: OpenSubtitles, SubDL and the seven scraping
+  fallbacks, their API keys, quotas, ledgers, rate limits and connection
+  pooling (`nethttp.py`, `ratelimit.py`), and every `--source`/`--skip-source`
+  flag. No network access exists anywhere in the toolkit now.
+- `OPENSUBTITLES_API_KEY`, `SUBDL_API_KEY` and `ORGANIZE_NO_KEEPALIVE` from
+  the environment surface; `organize doctor` no longer checks provider keys.
+
+### Changed
+- **`subtitle_fetcher.py` is now `subtitle_extractor.py`** (pipeline step
+  `extractor`, CLI verb `organize.py extract`). It extracts the movie's own
+  embedded English track into a validated `<movie>.eng.srt` — text tracks
+  via `mkvextract`, image tracks via an OCR backend, and MP4s through a
+  temporary MKV bridge, because `mkvextract` cannot read `mov_text` directly.
+  A movie with no usable embedded track is reported for a human decision;
+  there is no download to fall back to and the report says so.
+- **The sync rule is inverted.** `sync_subtitles.py` used to skip extracted
+  sidecars as "already frame-accurate" and sync downloaded ones; now it is
+  exactly the other way around. A sidecar the extractor just wrote is
+  measured against the movie's audio **once** (and corrected if the drift is
+  real and trustworthy); every other sidecar — placed by hand, carried over,
+  or already synced — is authoritative and never touched. An existing
+  `.eng.srt` beside a movie is never re-checked, by either tool.
+- **`mkv_track_cleaner.py` converts MP4s to MKVs.** The container swap is a
+  lossless remux with everything the MKV path already had (transactional
+  replace, free-space check, seeding deferral), and it runs after the
+  extractor has lifted any embedded subtitles out through the bridge. A
+  movie remuxed without a validated sidecar keeps its embedded English
+  subtitle tracks so the extractor can still build one later.
+- After extraction and sync, the cleaner strips **every** embedded subtitle
+  track from the MKV, leaving the external `.eng.srt` as the sole subtitle
+  option. This behaviour is unchanged; it is now the whole subtitle story.
+
 ## [3.6.0] - 2026-09-07
 
 **MP4 placement, the four deferred items, and a suite that runs on every

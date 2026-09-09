@@ -34,6 +34,7 @@ from unittest import mock
 
 import library_auditor
 import mkv_track_cleaner as tc
+import subtitle_extractor as sx
 import sync_subtitles as ss
 from organizekit import core
 
@@ -461,15 +462,20 @@ class DurableWriteTests(unittest.TestCase):
 class SidecarCrashTests(unittest.TestCase):
     """The sidecar half of the promise: a subtitle is never lost to a crash.
 
-    ``sync_subtitles`` rewrites a working subtitle in place when ffsubsync
-    finds a trustworthy correction. These tests kill it mid-rewrite and check
-    that the subtitle the user already had is still there and still plays.
+    ``sync_subtitles`` rewrites a freshly-extracted sidecar in place when
+    ffsubsync finds a trustworthy correction. These tests kill it mid-rewrite
+    and check that the subtitle the user already had is still there and still
+    plays. The fixture sidecar carries an extraction record, because that is
+    the only file this tool is ever allowed to rewrite.
     """
 
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory(prefix="crash_srt_")
         self.root = Path(self._td.name)
         self.addCleanup(self._td.cleanup)
+        self._saved_ledger = os.environ.get(sx.EXTRACTED_LEDGER_ENV)
+        os.environ[sx.EXTRACTED_LEDGER_ENV] = str(self.root / "extracted.json")
+        self.addCleanup(self._restore_ledger_env)
         self.folder = self.root / "Film (2000)"
         self.folder.mkdir()
         self.movie = self.folder / "Film (2000).mkv"
@@ -477,10 +483,20 @@ class SidecarCrashTests(unittest.TestCase):
         self.srt = self.folder / "Film (2000).eng.srt"
         self.srt.write_text(SRT, encoding="utf-8")
         self.cfg = ss.Config(library=self.root, log_file=self.root / "s.log",
-                             report_file=self.root / "s.txt",
-                             sync_ledger=self.root / "ledger.json",
-                             use_state=False)
+                             report_file=self.root / "s.txt", use_state=False)
         self.features = ss.FfsubsyncFeatures(True, True, True)
+        # The provenance record is what authorises the rewrite at all: only a
+        # sidecar the extractor just wrote may be measured and replaced.
+        self.assertTrue(sx.record_extracted_sidecar(
+            self.movie, self.srt,
+            track=sx.EmbeddedSubtitleTrack(2, "S_TEXT/UTF8", "eng", "English", "text", ".srt"),
+            method="text", cue_count=1, sha256=sx.sha256_text(SRT)))
+
+    def _restore_ledger_env(self) -> None:
+        if self._saved_ledger is None:
+            os.environ.pop(sx.EXTRACTED_LEDGER_ENV, None)
+        else:
+            os.environ[sx.EXTRACTED_LEDGER_ENV] = self._saved_ledger
 
     def _ffsubsync(self, *, crash_after_write: bool = False):
         """A stand-in ffsubsync that measures a large, trustworthy correction."""
@@ -525,6 +541,8 @@ class SidecarCrashTests(unittest.TestCase):
         self.assertEqual(result.status, ss.STATUS_SYNCED)
         self.assertEqual(self.srt.read_text(encoding="utf-8"), SHIFTED_SRT)
         self.assertEqual(self._staging(), [], "staging is consumed by the swap")
+        # And the rewritten sidecar is marked done: never measured again.
+        self.assertFalse(sx.extracted_sidecar_needs_sync(self.srt, sx.sha256_text(SHIFTED_SRT)))
 
     def test_a_crash_while_ffsubsync_runs_leaves_the_subtitle_alone(self) -> None:
         self._sync(self._ffsubsync(crash_after_write=True))
@@ -542,7 +560,7 @@ class SidecarCrashTests(unittest.TestCase):
         self.assertEqual(len(stranded), 1, "the crash did strand a staging file")
 
         # Nothing may mistake it for the movie's subtitle: not this tool's own
-        # discovery, and not the auditor that decides what still needs fetching.
+        # discovery, and not the auditor that decides what needs attention.
         jobs, skipped, _videos = ss.discover_jobs(self.root)
         self.assertEqual([job.srt for job in jobs], [self.srt])
         self.assertEqual(skipped, [])
@@ -559,11 +577,12 @@ class SidecarCrashTests(unittest.TestCase):
             Path(command[command.index("-o") + 1]).write_text("garbage", encoding="utf-8")
             return 1, "", "ERROR: ffsubsync failed to sync the input"
 
-        with mock.patch.object(ss, "_refetch_sidecar",
-                               lambda *a, **k: (False, "", "no candidates")):
-            result = self._sync(hopeless, expect_crash=False)
+        result = self._sync(hopeless, expect_crash=False)
         self.assertIn(result.status, {ss.STATUS_FAILED, ss.STATUS_REVIEW})
         self._assert_subtitle_survived()
+        # A failed measurement leaves the record unmarked, so the next run
+        # retries the sidecar rather than declaring it permanently done.
+        self.assertTrue(sx.extracted_sidecar_needs_sync(self.srt, sx.sha256_text(SRT)))
 
 
 if __name__ == "__main__":

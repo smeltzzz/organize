@@ -30,7 +30,7 @@ from tests.selftests import (
     mkv_track_cleaner_selftests,
     movie_standardizer_selftests,
     pipeline_selftests,
-    subtitle_fetcher_selftests,
+    subtitle_extractor_selftests,
     sync_subtitles_selftests,
 )
 
@@ -41,9 +41,7 @@ SUITES = (
     ("mkv_track_cleaner", mkv_track_cleaner_selftests.run_self_tests),
     ("movie_standardizer", movie_standardizer_selftests.run_canonical_self_tests),
     ("pipeline", pipeline_selftests.run_self_tests),
-    # run_self_tests drives the scraping and extraction sub-suites itself,
-    # collecting into the same error list, so it is the only entry point.
-    ("subtitle_fetcher", subtitle_fetcher_selftests.run_self_tests),
+    ("subtitle_extractor", subtitle_extractor_selftests.run_self_tests),
     ("sync_subtitles", sync_subtitles_selftests.run_self_tests),
 )
 
@@ -57,7 +55,7 @@ SHIPPED_SMOKE_TESTS = (
     ("library_auditor", "run_self_tests"),
     ("mkv_track_cleaner", "run_self_tests"),
     ("movie_standardizer", "run_canonical_self_tests"),
-    ("subtitle_fetcher", "run_self_tests"),
+    ("subtitle_extractor", "run_self_tests"),
     ("sync_subtitles", "run_self_tests"),
 )
 

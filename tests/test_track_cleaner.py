@@ -267,7 +267,7 @@ class ForeignFilmWithExternalSrtTests(unittest.TestCase):
 
 
 class RemuxWithoutSrtReportTests(unittest.TestCase):
-    """Remuxing with no external SRT invalidates the moviehash; say so in the report."""
+    """Remuxing with no external SRT keeps the embedded subs; say so in the report."""
 
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory(prefix="cleaner_report_test_")
@@ -286,15 +286,15 @@ class RemuxWithoutSrtReportTests(unittest.TestCase):
         stats = _empty_stats()
         stats["remux_without_srt"] = ["Film (2000).mkv"]
         text = self._render(stats)
-        self.assertIn("REMUXED WITH NO EXTERNAL SRT", text)
-        self.assertIn("moviehash", text)
+        self.assertIn("REMUXED WITHOUT AN EXTERNAL SRT", text)
+        self.assertIn("subtitle_extractor.py", text)
         self.assertIn("Film (2000).mkv", text)
-        self.assertEqual(scorecard(text)["Remuxed without SRT"], 1)
+        self.assertEqual(scorecard(text)["Cleaned without SRT"], 1)
 
     def test_section_is_absent_when_every_movie_had_an_srt(self) -> None:
         text = self._render(_empty_stats())
-        self.assertNotIn("REMUXED WITH NO EXTERNAL SRT", text)
-        self.assertEqual(scorecard(text)["Remuxed without SRT"], 0)
+        self.assertNotIn("REMUXED WITHOUT AN EXTERNAL SRT", text)
+        self.assertEqual(scorecard(text)["Cleaned without SRT"], 0)
 
 
 class MetadataCacheWiringTests(unittest.TestCase):
@@ -1232,7 +1232,11 @@ class RemuxVerdictTests(unittest.TestCase):
             for line in source.splitlines()
             if 'stats["' in line and "].append(" in line
         }
-        known = {bucket for bucket, _ in tc.VERDICT_BUCKETS} | {"remux_without_srt"}
+        # `remux_without_srt` and `converted_mp4` are notes, not outcomes: a
+        # movie in either is always counted in `cleaned` too, so it already has
+        # a verdict and these two just annotate the report.
+        known = ({bucket for bucket, _ in tc.VERDICT_BUCKETS}
+                 | {"remux_without_srt", "converted_mp4"})
         self.assertEqual(appended - known, set())
 
 

@@ -14,10 +14,12 @@ than a screen lives here.
 
 Also in this folder:
 
-- [`ci-workflow.patch`](ci-workflow.patch) — changes to
-  `.github/workflows/ci.yml` that are held as a patch rather than a commit,
-  because the bot that pushes this branch has no `workflows` permission.
-  Apply with `git apply docs/ci-workflow.patch`.
+- [`ci-workflow.patch`](ci-workflow.patch) — a change to
+  `.github/workflows/ci.yml` that is held as a patch rather than a commit,
+  because the bot that pushes this branch has no `workflows` permission:
+  the syntax gate's byte-compile list still names `subtitle_fetcher.py`,
+  which is now `subtitle_extractor.py`. Apply with
+  `git apply docs/ci-workflow.patch`.
 - [`release-workflow.patch`](release-workflow.patch) — a new
   `.github/workflows/release.yml`, held back for the same reason. It publishes
   to PyPI from a pushed tag with Trusted Publishing (no API token anywhere),

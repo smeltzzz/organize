@@ -33,14 +33,14 @@ def run_self_tests() -> int:
             errors.append(msg)
 
     # The ordering is the whole point of this script.
-    check(STEP_ORDER == ("fetcher", "cleaner", "10bit", "sync", "auditor"), "canonical step order")
-    check(STEP_ORDER.index("fetcher") < STEP_ORDER.index("cleaner"),
-          "subtitles must be fetched before the remux invalidates the moviehash")
+    check(STEP_ORDER == ("extractor", "cleaner", "10bit", "sync", "auditor"), "canonical step order")
+    check(STEP_ORDER.index("extractor") < STEP_ORDER.index("cleaner"),
+          "subtitles must be extracted before the remux strips the embedded tracks")
     check(STEP_ORDER.index("sync") < STEP_ORDER.index("auditor"),
           "subtitle sync must finish before the audit sees the sidecars")
 
     # Order is preserved no matter how the user types the flag.
-    for requested in (["auditor", "fetcher"], ["10bit", "cleaner", "fetcher"],
+    for requested in (["auditor", "extractor"], ["10bit", "cleaner", "extractor"],
                       ["auditor"], ["cleaner", "10bit"]):
         resolved = resolve_steps(requested)
         check(resolved == tuple(k for k in STEP_ORDER if k in set(requested)),
@@ -75,18 +75,18 @@ def run_self_tests() -> int:
 
     # Each tool's library-root flag differs; getting these wrong silently
     # points a tool at the default path instead of the requested library.
-    check(STEPS["fetcher"].root_flag == "--source", "fetcher uses --source")
+    check(STEPS["extractor"].root_flag == "--source", "extractor uses --source")
     check(STEPS["cleaner"].root_flag == "--dir", "cleaner uses --dir")
     check(STEPS["10bit"].root_flag == "--source", "10bit uses --source")
     check(STEPS["sync"].root_flag == "--source", "sync uses --source")
     check(STEPS["auditor"].root_flag == "--source", "auditor uses --source")
 
     library = Path("/media/movies")
-    base = [sys.executable, str(HERE / "subtitle_fetcher.py"), "--source", str(library)]
-    check(build_command(STEPS["fetcher"], Config(library=library)) == base, "plain fetcher argv")
-    check(build_command(STEPS["fetcher"], Config(library=library, dry_run=True))
+    base = [sys.executable, str(HERE / "subtitle_extractor.py"), "--source", str(library)]
+    check(build_command(STEPS["extractor"], Config(library=library)) == base, "plain extractor argv")
+    check(build_command(STEPS["extractor"], Config(library=library, dry_run=True))
           == base + ["--dry-run"], "dry-run flag")
-    check(build_command(STEPS["fetcher"], Config(library=library, limit=5))
+    check(build_command(STEPS["extractor"], Config(library=library, limit=5))
           == base + ["--limit", "5"], "limit flag")
     check(build_command(STEPS["cleaner"], Config(library=library, nice=True))
           == [sys.executable, str(HERE / "mkv_track_cleaner.py"), "--dir", str(library),
@@ -105,7 +105,7 @@ def run_self_tests() -> int:
     # The summary names what happened.
     summary = build_summary(
         Run(results=[
-            StepResult("fetcher", "Fetch", "ran", returncode=0, seconds=1.5),
+            StepResult("extractor", "Extract", "ran", returncode=0, seconds=1.5),
             StepResult("cleaner", "Clean", "skipped", detail="mkvmerge not found"),
         ], elapsed=2.0),
         Config(library=library),
@@ -113,10 +113,10 @@ def run_self_tests() -> int:
     check("SKIP" in summary and "mkvmerge not found" in summary, "summary reports a skip")
     check("RAN" in summary and "ok" in summary, "summary reports a successful run")
     failed_summary = build_summary(
-        Run(results=[StepResult("fetcher", "Fetch", "ran", returncode=1, seconds=0.1)]),
+        Run(results=[StepResult("extractor", "Extract", "ran", returncode=1, seconds=0.1)]),
         Config(library=library),
     )
-    check("Failed steps : fetcher" in failed_summary, "summary reports failures")
+    check("Failed steps : extractor" in failed_summary, "summary reports failures")
 
     if errors:
         print("SELF-TEST FAILED:")

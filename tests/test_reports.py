@@ -23,7 +23,7 @@ import library_auditor as la
 import mkv_track_cleaner as tc
 import movie_standardizer as ms
 import pipeline as pl
-import subtitle_fetcher as sf
+import subtitle_extractor as sx
 from organizekit import core
 
 HEAVY = "\u2550"
@@ -43,17 +43,16 @@ class _SampleReports(unittest.TestCase):
         video = library / "Dune (2021)" / "Dune (2021).mkv"
         sidecar = library / "Dune (2021)" / "Dune (2021).eng.srt"
         results = [
-            sf.JobResult(video, "have", "validated exact .eng.srt", sidecar, reason=sf.REASON_COVERED),
-            sf.JobResult(library / "Heat (1995)" / "Heat (1995).mkv", "skip",
-                         "no usable English moviehash-matched human SRT", reason=sf.REASON_NO_MATCH),
+            sx.JobResult(video, "have", "validated exact .eng.srt", sidecar, reason=sx.REASON_COVERED),
+            sx.JobResult(library / "Heat (1995)" / "Heat (1995).mkv", "skip",
+                         "no embedded English subtitle track", reason=sx.REASON_NO_TRACK),
         ]
-        cfg = sf.QueueConfig(library=library, log_file=self.tmp / "fetch.log",
-                             report_file=self.tmp / "fetch_report.txt")
-        summary = {"utc_day": "2026-08-29", "daily_cap": 200, "download_requests_reserved": 0,
-                   "successful_downloads": 0, "quota_reached": False, "deferred_remaining": 0,
-                   "ledger_log": str(self.tmp / "fetch.log"), "movies_discovered": 2,
-                   "deferred_videos": []}
-        return sf.build_report(results, cfg, summary)
+        cfg = sx.ExtractorConfig(library=library, log_file=self.tmp / "extract.log",
+                                 report_file=self.tmp / "extract_report.txt")
+        summary = {"movies_discovered": 2, "coverage_covered": 1, "coverage_total": 2,
+                   "extracted_from_embedded": 0, "ocr_jobs": 0,
+                   "ledger_log": str(self.tmp / "extract.log")}
+        return sx.build_report(results, cfg, summary)
 
     def auditor_report(self) -> str:
         folders = [
@@ -109,13 +108,13 @@ class _SampleReports(unittest.TestCase):
             ms.CFG, ms.RUN_SUMMARY, ms.RUN_EVENTS = saved
 
     def pipeline_report(self) -> str:
-        run = pl.Run(results=[pl.StepResult("fetcher", "Fetch subtitles", "ran", returncode=0, seconds=1.0)])
+        run = pl.Run(results=[pl.StepResult("extractor", "Extract subtitles", "ran", returncode=0, seconds=1.0)])
         run.elapsed = 1.0
         return pl.build_summary(run, pl.Config(library=self.tmp / "lib"))
 
     def all_reports(self) -> dict[str, str]:
         return {
-            "subtitle_fetcher": self.subtitle_report(),
+            "subtitle_extractor": self.subtitle_report(),
             "library_auditor": self.auditor_report(),
             "10bit": self.inspector_report(),
             "mkv_track_cleaner": self.cleaner_report(),
@@ -156,7 +155,7 @@ class SubtitleReportContentTests(_SampleReports):
 
     def test_covered_and_needing_movies_are_in_separate_sections(self) -> None:
         text = self.subtitle_report()
-        needs = section(text, "MOVIES THAT NEED A SUBTITLE")
+        needs = section(text, "MOVIES THAT NEED ATTENTION")
         covered = section(text, "MOVIES THAT ALREADY HAVE AN EXTERNAL .eng.srt")
 
         self.assertIn("Heat (1995)", needs)
@@ -164,7 +163,7 @@ class SubtitleReportContentTests(_SampleReports):
         self.assertIn("Dune (2021).eng.srt", covered)
         self.assertNotIn("Heat (1995)", covered)
         self.assertEqual(scorecard(text)["Already have .eng.srt"], 1)
-        self.assertEqual(scorecard(text)["NEED A SUBTITLE"], 1)
+        self.assertEqual(scorecard(text)["NEED ATTENTION"], 1)
 
 
 class InspectorReportOrderTests(_SampleReports):
@@ -222,7 +221,7 @@ class HostileConsoleEncodingTests(unittest.TestCase):
     not.
     """
 
-    def test_fetcher_survives_an_ascii_console_and_keeps_the_file_utf8(self) -> None:
+    def test_extractor_survives_an_ascii_console_and_keeps_the_file_utf8(self) -> None:
         import os
         import subprocess
         import sys
@@ -235,11 +234,10 @@ class HostileConsoleEncodingTests(unittest.TestCase):
             (movie / "Covered Movie (2020).eng.srt").write_text(
                 "1\n00:00:00,000 --> 00:00:04,000\nHi.\n", encoding="utf-8")
             report = root / "report.txt"
-            env = dict(os.environ, OPENSUBTITLES_API_KEY="test-key-not-used",
-                       PYTHONIOENCODING="ascii")
+            env = dict(os.environ, PYTHONIOENCODING="ascii")
             proc = subprocess.run(
-                [sys.executable, "subtitle_fetcher.py", "--source", str(root / "lib"),
-                 "--log", str(root / "fetch.log"), "--report", str(report), "--min-size", "0"],
+                [sys.executable, "subtitle_extractor.py", "--source", str(root / "lib"),
+                 "--log", str(root / "extract.log"), "--report", str(report), "--min-size", "0"],
                 capture_output=True, encoding="utf-8", errors="replace", env=env,
                 timeout=120, cwd=Path(__file__).resolve().parent.parent,
             )

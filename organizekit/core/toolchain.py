@@ -42,14 +42,10 @@ TOOLS_DIR = Path(__file__).resolve().parents[2]
 # and a crash in one cannot take the run down with it.
 RUN_TOOL_VERB = "run-tool"
 
-# The fetcher's per-source scrape budget for a long unattended run. It matches
-# subtitle_fetcher.py's own default; it is stated here because the completer
-# passes it explicitly rather than relying on the tool's default staying put.
-SCRAPING_DAILY_CAP = 20
-
 # The canonical order. Index order is the execution order; do not reorder
-# without re-reading the moviehash note in the module docstring.
-STEP_ORDER = ("fetcher", "cleaner", "10bit", "sync", "auditor")
+# without re-reading the pipeline notes in the module docstring and each
+# step's ``why_here``.
+STEP_ORDER = ("extractor", "cleaner", "10bit", "sync", "auditor")
 
 @dataclass(frozen=True)
 class Step:
@@ -102,24 +98,18 @@ class Step:
         return self.banner_title or self.title
 
 STEPS: dict[str, Step] = {
-    "fetcher": Step(
-        key="fetcher", script="subtitle_fetcher.py", title="Fetch English SRT subtitles",
+    "extractor": Step(
+        key="extractor", script="subtitle_extractor.py", title="Extract embedded English SRT subtitles",
         root_flag="--source",
-        banner_title="Fetch subtitles",
-        # Not the shared run log: this file is the fetcher's durable quota
-        # ledger, which it parses back to meter the daily caps. Another tool's
-        # lines in it would be read as quota reservations.
-        log_name="subtitle_fetcher_ledger.log",
+        banner_title="Extract subtitles",
         timeout_seconds=3600.0,
-        console_tag="fetch",
-        tool_name="subtitle_fetcher",
-        agent_name="Subtitle fetch",
-        activity="subtitle fetching",
-        extra_args=("--scrape-daily-cap", str(SCRAPING_DAILY_CAP),
-                    "--allow-missing"),  # one movie without a match must not fail the run
-        purpose="Put a validated English <movie>.eng.srt beside every movie that does not have one.",
-        why_here="First, on purpose: it searches by the release's exact OpenSubtitles moviehash, and any remux would destroy that hash forever.",
-        idle="Movies that already have a validated sidecar are counted and skipped without spending a provider request.",
+        console_tag="extract",
+        tool_name="subtitle_extractor",
+        agent_name="Subtitle extraction",
+        activity="subtitle extraction",
+        purpose="Put a validated English <movie>.eng.srt beside every movie that does not have one, built from the movie's own embedded track.",
+        why_here="First, on purpose: the cleaner that follows strips every embedded subtitle, so extraction must happen while the tracks still exist.",
+        idle="Movies that already have a sidecar are counted and skipped; an existing .eng.srt is authoritative.",
     ),
     "cleaner": Step(
         key="cleaner", script="mkv_track_cleaner.py", title="Clean MKV tracks (remux)",
@@ -131,8 +121,8 @@ STEPS: dict[str, Step] = {
         tool_name="mkv_track_cleaner",
         agent_name="Track cleaner",
         activity="track cleaning",
-        purpose="Rebuild MKVs that still carry extra audio tracks or embedded subtitles: one best English audio, no embedded subs.",
-        why_here="After fetching, because a remux rewrites the bytes the subtitle moviehash is computed from.",
+        purpose="Rebuild movies that still carry extra audio tracks or embedded subtitles - and convert MP4s to MKV: one best English audio, no embedded subs.",
+        why_here="After extraction: the sidecar must exist before the embedded tracks it was extracted from are stripped.",
         idle="Already-clean movies are answered from the metadata cache and skipped without re-reading the file.",
     ),
     "10bit": Step(
@@ -153,18 +143,14 @@ STEPS: dict[str, Step] = {
         key="sync", script="sync_subtitles.py", title="Sync subtitle timing (ffsubsync)",
         root_flag="--source",
         banner_title="Sync subtitle timing (ffsubsync)",
-        # Remembered verdicts live with the rest of the run's state, so a
-        # one-shot run is self-contained under --log-dir.
-        cache_name="sync_state.json",
-        cache_flag="--sync-ledger",
         timeout_seconds=7200.0,
         console_tag="sync",
         tool_name="sync_subtitles",
         agent_name="Subtitle sync",
         activity="subtitle sync",
-        purpose="Measure every sidecar against the movie's real audio and correct the timing when the drift is real and trustworthy.",
+        purpose="Measure every freshly extracted sidecar against the movie's real audio and correct the timing when the drift is real and trustworthy.",
         why_here="Last of the content steps: it rewrites subtitle bytes only, so the audit that follows validates finished sidecars.",
-        idle="Sidecars measured in sync on an earlier run are skipped while the subtitle and the movie are unchanged.",
+        idle="A sidecar is synced exactly once, when it was just extracted; everything else is left untouched.",
     ),
     "auditor": Step(
         key="auditor", script="library_auditor.py", title="Audit library layout",
@@ -192,21 +178,15 @@ TOOL_SCRIPTS: tuple[str, ...] = tuple(STEPS[key].script for key in STEP_ORDER)
 # two callers can disagree about whether a machine is provisioned.
 # ---------------------------------------------------------------------------
 
-def api_key_present() -> bool:
-    """A subtitle provider key from either source, env or config file."""
+def mkvtoolnix_installed() -> bool:
+    """mkvmerge AND mkvextract: the extractor drives both, the cleaner one."""
     try:
-        import subtitle_fetcher as sf
+        import subtitle_extractor as sx
+        return bool(sx.find_mkvtoolnix_binary("mkvmerge")
+                    and sx.find_mkvtoolnix_binary("mkvextract"))
     except Exception:  # noqa: BLE001 - a sibling tool that will not import
         # must degrade to the plain PATH lookup, not take the caller down.
-        return bool(str(os.environ.get("OPENSUBTITLES_API_KEY") or "").strip()
-                    or str(os.environ.get("SUBDL_API_KEY") or "").strip())
-    keys = (
-        os.environ.get("OPENSUBTITLES_API_KEY"),
-        sf.OPENSUBTITLES_API_KEY,
-        os.environ.get("SUBDL_API_KEY"),
-        sf.SUBDL_API_KEY,
-    )
-    return any(str(key or "").strip() for key in keys)
+        return shutil.which("mkvmerge") is not None and shutil.which("mkvextract") is not None
 
 
 def mkvmerge_installed() -> bool:
@@ -218,6 +198,16 @@ def mkvmerge_installed() -> bool:
     except Exception:  # noqa: BLE001 - a sibling tool that will not import
         # must degrade to the plain PATH lookup, not take the caller down.
         return shutil.which("mkvmerge") is not None
+
+
+def mkvextract_installed() -> bool:
+    """Delegate to the extractor's resolver: PATH plus known install dirs."""
+    try:
+        import subtitle_extractor as sx
+        return sx.find_mkvtoolnix_binary("mkvextract") is not None
+    except Exception:  # noqa: BLE001 - a sibling tool that will not import
+        # must degrade to the plain PATH lookup, not take the caller down.
+        return shutil.which("mkvextract") is not None
 
 
 def ffprobe_installed() -> bool:
@@ -254,9 +244,10 @@ def ffsubsync_ready() -> bool:
 
 
 PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
-    "fetcher": (
-        api_key_present,
-        "no subtitle-provider key; set OPENSUBTITLES_API_KEY and/or SUBDL_API_KEY to enable fetching",
+    "extractor": (
+        mkvtoolnix_installed,
+        "MKVToolNix (mkvmerge and mkvextract) not found on PATH or in the standard "
+        "install locations; the extractor needs both",
     ),
     "cleaner": (
         mkvmerge_installed,
@@ -293,9 +284,12 @@ def detect_tools() -> dict[str, bool]:
 
     ffmpeg is reported separately from ffsubsync even though syncing needs
     both, because the operator has to be told which one to install.
+    mkvextract is reported separately from mkvmerge even though they ship
+    together, because the extractor drives both and the cleaner only one.
     """
     return {
         "mkvmerge": mkvmerge_installed(),
+        "mkvextract": mkvextract_installed(),
         "ffprobe": ffprobe_installed(),
         "ffsubsync": ffsubsync_installed(),
         "ffmpeg": ffmpeg_installed(),
@@ -304,6 +298,7 @@ def detect_tools() -> dict[str, bool]:
 
 # Which entries of a ``detect_tools()`` map each step needs before it can run.
 STEP_BINARIES: dict[str, tuple[str, ...]] = {
+    "extractor": ("mkvmerge", "mkvextract"),
     "cleaner": ("mkvmerge",),
     "10bit": ("ffprobe",),
     "sync": ("ffsubsync", "ffmpeg"),

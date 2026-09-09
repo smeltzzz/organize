@@ -199,10 +199,10 @@ class ToolAdoptionTests(unittest.TestCase):
         import bitdepth
         import jellyfin_one_shot
         import library_auditor
-        import subtitle_fetcher
+        import subtitle_extractor
         import sync_subtitles
 
-        for module in (bitdepth, library_auditor, sync_subtitles, subtitle_fetcher):
+        for module in (bitdepth, library_auditor, sync_subtitles, subtitle_extractor):
             with self.subTest(module=module.__name__):
                 self.assertIsInstance(module.log, RunLog)
         self.assertIsInstance(jellyfin_one_shot._RUN_LOG, RunLog)
@@ -222,13 +222,13 @@ class ToolAdoptionTests(unittest.TestCase):
         self.assertIn("[INFO] starting", buffer.getvalue())
         self.assertNotIn("detail", buffer.getvalue())
 
-    def test_the_fetcher_writes_nowhere_unless_told_to(self) -> None:
-        # Unlike its siblings the fetcher passes cfg.log_file at every call
+    def test_the_extractor_writes_nowhere_unless_told_to(self) -> None:
+        # Like its siblings the extractor passes cfg.log_file at every call
         # site and never sets a default; adopting one would start writing to a
         # file its callers did not ask for.
-        import subtitle_fetcher
+        import subtitle_extractor
 
-        self.assertIsNone(subtitle_fetcher.log.file)
+        self.assertIsNone(subtitle_extractor.log.file)
 
 
 if __name__ == "__main__":

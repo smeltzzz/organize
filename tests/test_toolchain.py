@@ -68,24 +68,14 @@ class BuildStepArgs(unittest.TestCase):
         # The cleaner is the odd one out: --dir, not --source.
         self.assertEqual(str(self.library), self._value(self._args("cleaner"), "--dir"))
         self.assertNotIn("--source", self._args("cleaner"))
-        for key in ("fetcher", "10bit", "sync", "auditor"):
+        for key in ("extractor", "10bit", "sync", "auditor"):
             with self.subTest(step=key):
                 self.assertEqual(str(self.library), self._value(self._args(key), "--source"))
 
-    def test_every_step_but_the_fetcher_writes_the_shared_run_log(self) -> None:
-        for key in ("cleaner", "10bit", "sync", "auditor"):
+    def test_every_step_writes_the_shared_run_log(self) -> None:
+        for key in ("extractor", "cleaner", "10bit", "sync", "auditor"):
             with self.subTest(step=key):
                 self.assertEqual(str(self.run_log), self._value(self._args(key), "--log"))
-
-    def test_the_fetcher_keeps_its_own_ledger(self) -> None:
-        """Its log *is* its quota ledger: it parses the file back.
-
-        Another tool's lines in that file are read as quota reservations, so
-        the fetcher can never share the run log.
-        """
-        log = self._value(self._args("fetcher"), "--log")
-        self.assertNotEqual(str(self.run_log), log)
-        self.assertEqual(str(self.logs / "subtitle_fetcher_ledger.log"), log)
 
     def test_caches_live_under_the_log_dir_so_a_run_is_self_contained(self) -> None:
         """Both probe caches are one file now, and it is the run's own."""
@@ -93,10 +83,6 @@ class BuildStepArgs(unittest.TestCase):
                          self._value(self._args("cleaner"), "--cache"))
         self.assertEqual(str(self.logs / "state.db"),
                          self._value(self._args("10bit"), "--cache"))
-        # The sync tool spells the same idea differently.
-        self.assertEqual(str(self.logs / "sync_state.json"),
-                         self._value(self._args("sync"), "--sync-ledger"))
-        self.assertNotIn("--cache", self._args("sync"))
 
     def test_the_auditor_takes_no_cache_and_no_dry_run(self) -> None:
         """It is read-only, and it has no flag for either."""
@@ -106,21 +92,16 @@ class BuildStepArgs(unittest.TestCase):
         self.assertNotIn("--nice", args)
 
     def test_dry_run_reaches_every_tool_that_understands_it(self) -> None:
-        for key in ("fetcher", "cleaner", "10bit", "sync"):
+        for key in ("extractor", "cleaner", "10bit", "sync"):
             with self.subTest(step=key):
                 self.assertIn("--dry-run", self._args(key, dry_run=True))
                 self.assertNotIn("--dry-run", self._args(key))
 
     def test_nice_is_only_offered_to_the_tool_that_has_it(self) -> None:
         self.assertIn("--nice", self._args("cleaner", nice=True))
-        for key in ("fetcher", "10bit", "sync", "auditor"):
+        for key in ("extractor", "10bit", "sync", "auditor"):
             with self.subTest(step=key):
                 self.assertNotIn("--nice", self._args(key, nice=True))
-
-    def test_the_fetcher_is_capped_and_tolerates_a_missing_match(self) -> None:
-        args = self._args("fetcher")
-        self.assertIn("--allow-missing", args)
-        self.assertEqual(str(tc.SCRAPING_DAILY_CAP), self._value(args, "--scrape-daily-cap"))
 
     def test_extra_flags_are_appended_verbatim(self) -> None:
         args = self._args("auditor", extra=("--fail-on-findings",))
@@ -134,7 +115,8 @@ class BuildStepArgs(unittest.TestCase):
 
 
 class SkipReasons(unittest.TestCase):
-    ALL_PRESENT = {"mkvmerge": True, "ffprobe": True, "ffsubsync": True, "ffmpeg": True}
+    ALL_PRESENT = {"mkvmerge": True, "mkvextract": True, "ffprobe": True,
+                   "ffsubsync": True, "ffmpeg": True}
 
     def test_a_provisioned_machine_skips_nothing(self) -> None:
         for key in tc.STEP_ORDER:
@@ -146,6 +128,8 @@ class SkipReasons(unittest.TestCase):
                          tc.step_skip_reason("cleaner", {**self.ALL_PRESENT, "mkvmerge": False}))
         self.assertEqual("ffprobe is not installed",
                          tc.step_skip_reason("10bit", {**self.ALL_PRESENT, "ffprobe": False}))
+        self.assertEqual("mkvextract is not installed",
+                         tc.step_skip_reason("extractor", {**self.ALL_PRESENT, "mkvextract": False}))
 
     def test_sync_needs_both_and_says_so(self) -> None:
         self.assertEqual("ffmpeg is not installed",
@@ -155,9 +139,8 @@ class SkipReasons(unittest.TestCase):
             tc.step_skip_reason("sync", {**self.ALL_PRESENT, "ffsubsync": False, "ffmpeg": False}),
         )
 
-    def test_the_steps_with_no_binary_are_never_skipped_for_one(self) -> None:
-        """Fetching and auditing depend on nothing this machine can lack."""
-        self.assertIsNone(tc.step_skip_reason("fetcher", {}))
+    def test_the_step_with_no_binary_is_never_skipped_for_one(self) -> None:
+        """Auditing depends on nothing this machine can lack."""
         self.assertIsNone(tc.step_skip_reason("auditor", {}))
 
     def test_a_missing_script_is_a_skip_not_a_crash(self) -> None:

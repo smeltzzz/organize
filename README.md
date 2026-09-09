@@ -4,13 +4,14 @@
 
 **A rock-solid, dependency-free set of Python tools that turns finished
 torrents into a perfectly organized, 100% Direct Play Jellyfin &amp; Plex
-movie library — with zero duplicate disk usage, exact-match subtitles, and
+movie library — with zero duplicate disk usage, subtitles extracted from each
+movie's own tracks, and
 lossless track cleanup.**
 
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-1800%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-1295%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -33,19 +34,20 @@ library for Jellyfin / Plex:
 ```
 Title (Year)/
 ├── Title (Year).mkv        ← one losslessly-cleaned MKV per movie
-└── Title (Year).eng.srt     ← one validated English subtitle (hash-matched when available)
+└── Title (Year).eng.srt     ← one validated English subtitle (from the movie's own tracks)
 ```
 
 Every tool is **100% standard-library Python**: no pip installs, no venv, no
-containers, no daemons. The only things some tools need are the usual media
-binaries (`mkvmerge`, `ffprobe`, `ffsubsync`) and, for subtitle fetching, a
-free API key.
+containers, no daemons, and no network — subtitles come from the movie's own
+embedded tracks, never from a download site. The only things some tools need
+are the usual media binaries (`mkvmerge` + `mkvextract`, `ffprobe`,
+`ffsubsync`, and an OCR backend for image-based subtitle tracks).
 
 | | |
 | :--- | :--- |
 | 🫧 **Zero pip installs** | A tool is a single file. Copy it, run it, done. |
 | 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
-| 💬 **Exact-match subtitles** | OpenSubtitles and SubDL are equal sources: both providers' release-identifying routes are consulted (SubDL's release match needs score ≥ 0.80) and the qualifying release with the most downloads wins, with a strict title/year fallback. |
+| 💬 **Subtitles from the movie itself** | Each movie's own embedded English track is extracted to a validated `.eng.srt` — text tracks via `mkvextract`, image tracks via OCR, MP4s through a temporary MKV bridge — and then measured once with ffsubsync. Nothing is ever downloaded, and an existing sidecar is never re-extracted or re-synced. |
 | ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track (or best non-commentary audio on foreign films with a validated `.eng.srt`) and drops commentary, dubs, and embedded bitmap subtitles — video untouched. |
 | 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
@@ -56,11 +58,14 @@ free API key.
 That stack is excellent and, for many people, the right answer. Choose this if
 you want any of the following, which the usual containers do not give you:
 
-- **Subtitles are fetched *before* the remux, on purpose.** OpenSubtitles
-  matches on a hash of the file's bytes. A remux rewrites those bytes, so a
-  library that transcodes first is permanently downgraded to fuzzy title/year
-  matching. This ordering constraint is the reason `pipeline.py` exists, and
-  it is enforced by a test, not just documented.
+- **Subtitles are extracted *before* the remux, on purpose.** Once a validated
+  sidecar exists, the cleaner strips every embedded subtitle track — so
+  extraction must happen while the track is still inside the container. The
+  pipeline enforces this order, and a test enforces the pipeline. (Subtitle
+  downloading used to live here too; it was removed outright because it was
+  the one step that could not be made reliable. A movie with no usable
+  embedded track is reported for a human decision instead of guessed at by a
+  scraper.)
 - **Seeding torrents are never touched.** A movie still hardlinked to its
   qBittorrent source is always deferred, with no override flag.
 - **HDR is protected fail-closed.** Anything uncertain is never queued for
@@ -84,7 +89,7 @@ One file, one purpose. Nothing else.
 | File | What it is |
 | :--- | :--- |
 | `organize.py` | **The front door.** Unified CLI, system doctor, progress summary, and test runner: `organize.py doctor`, `organize.py status`, `organize.py run`, `organize.py test`, plus one subcommand per tool. |
-| `subtitle_fetcher.py` | Tool 1 — one validated English `.eng.srt` per movie: extract the movie's own embedded track first, else OpenSubtitles + SubDL + 7 scraping fallbacks. |
+| `subtitle_extractor.py` | Tool 1 — one validated English `.eng.srt` per movie, extracted from the movie's own embedded track (text via `mkvextract`, image via OCR, MP4 through a temporary MKV bridge). An existing sidecar is authoritative. |
 | `mkv_track_cleaner.py` | Tool 2 — lossless remux: keep one best audio, strip commentary/dubs/embedded subs. |
 | `bitdepth.py` | Tool 3 — ffprobe sweep: queue 8-bit SDR for HandBrake, protect HDR. |
 | `library_auditor.py` | Tool 4 — read-only health check of layout, naming, and subtitles. |
@@ -92,8 +97,8 @@ One file, one purpose. Nothing else.
 | `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. Sidecars extracted from the movie itself are skipped (they are already frame-accurate). |
 | `pipeline.py` | Runs the maintenance tools in the one correct order. |
 | `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
-| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided, and `ratelimit.py`, the per-host token buckets that keep every provider inside its published rate. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock — and `live.py` is the overwritable status line every sweep draws on a terminal and never anywhere else. |
-| `tests/` | Fully offline unit tests (2,123), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus `fake_mkvmerge.py`, `fake_ffprobe.py` and `fake_provider.py`, stand-ins real enough to drive an end-to-end remux, library inspection and subtitle fetch. |
+| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock — and `live.py` is the overwritable status line every sweep draws on a terminal and never anywhere else. |
+| `tests/` | Fully offline unit tests (1,295), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus `fake_mkvmerge.py`, `fake_ffprobe.py` and `fakebin.py`, stand-ins real enough to drive an end-to-end remux, an extraction, a sync and a library inspection. |
 | `docs/` | The long-form documentation this page links to: the [tool reference](docs/tools.md), [the pipeline](docs/pipeline.md), [configuration](docs/configuration.md), [testing & development](docs/development.md) and, for maintainers, [merging & releasing](docs/merge-and-release.md). |
 | `benchmarks/` | The scripts behind every speed claim in this repo — stdlib-only, offline, re-runnable. |
 | `.env.example` | Every supported environment variable, annotated. |
@@ -141,10 +146,11 @@ cd organize
 python3 organize.py doctor
 ```
 
-`doctor` verifies Python, `mkvmerge` (MKVToolNix), `ffprobe` (FFmpeg), your
-OpenSubtitles and/or SubDL key, and — crucially — that your download folder
-and library sit on the **same filesystem** so hardlinks work. Missing pieces
-are reported with the exact fix, never a crash. It exits `1` only if something
+`doctor` verifies Python, the MKVToolNix pair (`mkvmerge` + `mkvextract`),
+`ffprobe`/`ffmpeg` (FFmpeg), `ffsubsync`, an OCR backend for image subtitles,
+and — crucially — that your download folder and library sit on the **same
+filesystem** so hardlinks work. Missing pieces are reported with the exact
+fix, never a crash. It exits `1` only if something
 is actually broken; a missing optional tool is a warning, because that step
 simply skips.
 
@@ -162,15 +168,14 @@ python3 organize.py run --nice        # low priority: Jellyfin streaming is neve
 
 ### 3 · Let the one-shot completer get the library to 100%
 
-The one-shot completer runs the entire toolchain pass after pass — fetch
+The one-shot completer runs the entire toolchain pass after pass — extract
 subtitles, clean tracks, inspect bit depth, sync timing, audit — until the
-auditor reports **100% canonical**. It handles API quota exhaustion (waits
-for the UTC day rollover), retries transient failures every pass, and paces
-itself: two passes with no progress means it sleeps until the daily caps
-reset instead of hot-looping. It fails fast with the exact fix when
-misconfigured (empty library, log dir inside the library) instead of
-looping, and every step is idempotent, so an interrupted run resumes where
-it left off.
+auditor reports **100% canonical**. It retries transient failures every
+pass, and it knows when to stop: two passes with no coverage improvement
+means it reports the exact number it is stuck at and exits with a clear
+verdict instead of hot-looping. It fails fast with the exact fix when
+misconfigured (empty library, log dir inside the library), and every step
+is idempotent, so an interrupted run resumes where it left off.
 
 ```bash
 python3 jellyfin_one_shot.py                                     # default library
@@ -221,9 +226,10 @@ pipeline on a schedule), see [The pipeline](docs/pipeline.md) — the
 qBittorrent hook, the step order, and how to read the reports.
 
 > [!TIP]
-> Set `OPENSUBTITLES_API_KEY` (free, <https://www.opensubtitles.com/en/consumers>)
-> and optionally `SUBDL_API_KEY` (<https://subdl.com/panel/api>) in your
-> environment or a `.env` file. See `.env.example` for every variable.
+> Subtitle extraction needs MKVToolNix (`mkvmerge` + `mkvextract`); image
+> tracks (PGS/VobSub) additionally need an OCR backend —
+> `pip install pgsrip` is the usual choice. No API keys, no accounts, no
+> network, ever. See `.env.example` for every supported variable.
 
 ---
 
@@ -234,8 +240,8 @@ standalone file with zero imports from this repository:
 
 ```bash
 # All you need subtitles:
-cp subtitle_fetcher.py /path/to/your/media-tools/
-python3 /path/to/media-tools/subtitle_fetcher.py --source /path/to/movies
+cp subtitle_extractor.py /path/to/your/media-tools/
+python3 /path/to/media-tools/subtitle_extractor.py --source /path/to/movies
 
 # All you need is a library health check:
 python3 library_auditor.py --source /path/to/movies
@@ -243,15 +249,15 @@ python3 library_auditor.py --source /path/to/movies
 
 Prerequisites per tool:
 
-| Tool | External binary | API key |
+| Tool | External binary | Notes |
 | :--- | :--- | :--- |
-| `subtitle_fetcher.py` | — | optional — the scraping sources work with no keys at all |
+| `subtitle_extractor.py` | `mkvmerge` + `mkvextract` (MKVToolNix) | image tracks (PGS/VobSub) additionally need an OCR backend |
 | `mkv_track_cleaner.py` | `mkvmerge` (MKVToolNix) | — |
 | `bitdepth.py` | `ffprobe` (FFmpeg) | — |
 | `library_auditor.py` | — | — |
 | `movie_standardizer.py` | `ffprobe` (optional, for duplicate upgrades) | — |
 | `sync_subtitles.py` | `ffsubsync` (`pip install ffsubsync`) + `ffmpeg` (FFmpeg) | — |
-| `jellyfin_one_shot.py` | whatever the tools it runs need (missing binaries are skipped, not fatal) | optional |
+| `jellyfin_one_shot.py` | whatever the tools it runs need (missing binaries are skipped, not fatal) | — |
 
 Shared behaviour belongs in `organizekit/core/` and is imported, not copied.
 The test suite fails the build if a tool defines a helper the core already
@@ -270,14 +276,14 @@ one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
 
 | Tool | What it does | Needs |
 | :--- | :--- | :--- |
-| [`subtitle_fetcher.py`](docs/tools.md#1--subtitle_fetcherpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: the movie's **own embedded track** first (exact, free, already in sync), then OpenSubtitles + SubDL + seven scraping fallbacks. Parallel local triage, strictly serial spending. | nothing; API keys optional |
+| [`subtitle_extractor.py`](docs/tools.md#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie, extracted from the movie's **own embedded track** — text via `mkvextract`, image via OCR, MP4s through a temporary MKV bridge. An existing sidecar is authoritative and never touched. | `mkvmerge` + `mkvextract` |
 | [`mkv_track_cleaner.py`](docs/tools.md#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best audio track, strip commentary, dubs and embedded subtitles. Video untouched; seeding movies deferred. | `mkvmerge` |
 | [`bitdepth.py`](docs/tools.md#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect native HDR10 / HDR10+ / Dolby Vision fail-closed, flag anything ambiguous for review. | `ffprobe` |
 | [`library_auditor.py`](docs/tools.md#4--library_auditorpy--read-only-health-check) | Strictly read-only health check of layout, naming and subtitles, with gating exit codes for cron. | nothing |
 | [`movie_standardizer.py`](docs/tools.md#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names and hardlink one movie file per `Title (Year)/` — MKV canonical, MP4 placed as-is. Zero extra bytes. | `ffprobe` (optional) |
-| [`sync_subtitles.py`](docs/tools.md#6--sync_subtitlespy--subtitle-timing-sync-ffsubsync) | Measure every sidecar against the actual audio and apply only trustworthy drift; anything doubtful is held for review, never applied. | `ffsubsync` + `ffmpeg` |
+| [`sync_subtitles.py`](docs/tools.md#6--sync_subtitlespy--subtitle-timing-sync-ffsubsync) | Measure a freshly extracted sidecar against the actual audio — exactly once — and apply only trustworthy drift; anything doubtful is held for review, never applied. Pre-existing sidecars are never touched. | `ffsubsync` + `ffmpeg` |
 | [`pipeline.py`](docs/pipeline.md) | The five maintenance steps in the one safe order. | — |
-| [`jellyfin_one_shot.py`](docs/tools.md#7--jellyfin_one_shotpy--the-never-stop-completer) | Loops the whole toolchain, pass after pass, until the auditor reports 100% canonical — quota-aware, resumable, safe to leave running for days. | whatever its steps need |
+| [`jellyfin_one_shot.py`](docs/tools.md#7--jellyfin_one_shotpy--the-never-stop-completer) | Loops the whole toolchain, pass after pass, until the auditor reports 100% canonical — resumable, and honest about the point where more passes will not help. | whatever its steps need |
 
 ---
 
@@ -308,9 +314,11 @@ Non-negotiable rules every tool obeys:
 1. **Hardlink-only ingestion** — `movie_standardizer.py` calls `os.link()`
    exclusively. No copy, no move, no symlink, no cross-device fallback. Your
    seeds keep seeding on the same bytes.
-2. **Subtitles before remuxing** — a remux permanently rewrites the
-   OpenSubtitles moviehash. The pipeline enforces the order; the cleaner
-   warns per-file when it must remux without a sidecar.
+2. **Extraction before remuxing** — once a validated sidecar exists the
+   cleaner strips every embedded subtitle track, so extraction must happen
+   while the track is still in the container. The pipeline enforces the
+   order; the cleaner keeps the embedded English subs when it must remux
+   without a sidecar, so nothing is lost either way.
 3. **Seeding movies are inviolable** — link count > 1 means *deferred,
    unconditionally*. No override flag exists.
 4. **Fail-closed concurrency** — all tools coordinate through advisory locks

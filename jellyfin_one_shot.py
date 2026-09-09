@@ -10,15 +10,15 @@ subtitles, and passes 10-bit inspection.
 
 This is the "never stop, never skip, get to the end result no matter
 what" runner. It handles:
-  - API quota exhaustion (waits for UTC day rollover, then retries)
-  - Movies held for manual review (retries on every pass; scraping
-    tier re-offers daily)
-  - Transient failures (retries each pass)
+  - Movies held for manual review (retried on every pass)
+  - Transient failures (retried each pass)
   - Partial runs (every step is idempotent, so re-running resumes
     from where it left off)
   - Dry-run mode for preview (exactly one pass, nothing is written)
   - An already-complete library (audited first, so a re-run of a finished
     library costs one audit instead of a full sweep; --force-pass overrides)
+  - A stalled library (no coverage improvement for 2 passes means a
+    human decision is needed, not another identical sweep)
 
 What it shows you while it runs
 -------------------------------
@@ -55,16 +55,15 @@ sift through:
 
 Per-tool report files are written to a hidden staging folder, folded
 into that single report, and deleted: a run leaves the log, the report,
-and the durable caches that make the next run cheap. The one exception
-is subtitle_fetcher.py, whose log file *is* its durable daily-quota
-ledger (it parses it back), so it keeps its own file.
+and the durable caches that make the next run cheap.
 
 Guaranteed-finish behaviour (no silent infinite loops):
   - empty library (no movie folders)           -> exit 2, with the fix
   - log dir inside the library                 -> exit 2, with the fix
   - auditor keeps failing (3 passes in a row)  -> exit 1, with the reason
-  - no coverage improvement for 2 passes      -> wait for UTC midnight
-    (the daily caps reset and the scraping tier re-offers) and continue
+  - no coverage improvement for 2 passes       -> stop with an honest
+    PARTIAL verdict and what is left for a human (there are no daily caps
+    to wait for any more: subtitles come from the movies themselves)
 
 Usage:
     python3 jellyfin_one_shot.py                                 # default library
@@ -88,16 +87,15 @@ import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import IO
 
 # Shared implementation: everything imported here is defined exactly once,
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
 # keeps it that way.
-from organizekit.core import (  # noqa: F401  (SCRAPING_DAILY_CAP, TOOL_SCRIPTS: re-exported for callers and tests)
+from organizekit.core import (  # noqa: F401  (TOOL_SCRIPTS: re-exported for callers and tests)
     REPORT_WIDTH,
-    SCRAPING_DAILY_CAP,
     STEP_ORDER,
     STEPS,
     TOOL_SCRIPTS,
@@ -128,7 +126,7 @@ from organizekit.core import mkvmerge_installed as _mkvmerge_available  # noqa: 
 VERSION = "1.3.1"
 
 # The canonical Jellyfin movie-library root — the same default every sibling
-# tool hardcodes (subtitle_fetcher.py's LIBRARY_DIR, mkv_track_cleaner.py's
+# tool hardcodes (subtitle_extractor.py's LIBRARY_DIR, mkv_track_cleaner.py's
 # TARGET_DIR, bitdepth.py's SOURCE_DIR, sync_subtitles.py's DEFAULT_LIBRARY,
 # library_auditor.py's SOURCE_DIR and pipeline.py's DEFAULT_LIBRARY). Keeping
 # the value identical means a bare run finishes the same library the other
@@ -139,7 +137,6 @@ DEFAULT_LIBRARY = str(resolve_library())
 # single-file build. Never *inside* it - a zipapp is a file, not a place to
 # write logs.
 DEFAULT_LOG_DIR = tools_home() / "logs"
-MAX_FETCH_RETRIES = 10   # per pass, before giving up and moving on
 
 # Auditor resilience: a single audit attempt can be blocked (another process
 # holds the run lock) or fail transiently. Retry a few times inside the pass,
@@ -149,11 +146,12 @@ AUDIT_ATTEMPTS_PER_PASS = 3
 AUDIT_BACKOFF_SECONDS = (5, 15, 45)
 MAX_CONSECUTIVE_BAD_AUDITS = 3
 
-# Pacing: when two consecutive passes make no progress at all, the only thing
-# that can change the outcome is the next UTC day (provider caps reset, the
-# scraping tier re-offers held movies). Wait for the rollover instead of
-# burning a full pipeline sweep for nothing.
-STAGNATION_PASSES_BEFORE_ROLLOVER = 2
+# Pacing: with subtitles extracted from the movies themselves there is no
+# quota anywhere in the toolchain, so a pass that changes nothing will be
+# followed by an identical pass forever. Two stagnant passes in a row stop
+# the run with an honest PARTIAL verdict naming what is left for a human
+# (a held-for-review sync, an OCR backend to install, a layout to fix).
+STAGNATION_PASSES_BEFORE_STOP = 2
 
 # Full stdout/stderr transcripts are kept per tool (bounded) so a failed
 # multi-day run can be debugged after the fact.
@@ -166,13 +164,6 @@ TOOL_TRANSCRIPT_MAX_LINES = 2000
 RUN_LOG_NAME = "jellyfin_one_shot.log"
 RUN_REPORT_NAME = "jellyfin_one_shot_report.txt"
 STAGE_DIR_NAME = ".one_shot_stage"
-
-# subtitle_fetcher.py reads its own log back: the append-only log *is* its
-# durable quota/retry ledger, so it cannot share a file with anything else -
-# another tool's lines would be parsed as quota reservations. It therefore
-# keeps one dedicated file. It is durable state, like the probe caches below,
-# not a second run log: nothing is written to it that the run log lacks.
-FETCHER_LEDGER_NAME = "subtitle_fetcher_ledger.log"
 
 # Live feedback. A tool's output is streamed to the console as it happens; when
 # a tool goes quiet (a long remux prints nothing between movies) the runner
@@ -299,13 +290,13 @@ def run_tool(
     belongs to) so interleaved output stays readable.
 
     Everything the child prints is still captured: the caller scans it for the
-    markers that drive decisions (``QUOTA REACHED`` and friends), and a bounded
-    copy lands in the transcript. The child also writes the shared run log
-    itself, because ``--log`` points at it.
+    markers that drive decisions, and a bounded copy lands in the transcript.
+    The child also writes the shared run log itself, because ``--log`` points
+    at it.
 
     Args:
         runtime_log: Path to the runtime log file.
-        script_path: Path to the tool script (e.g., subtitle_fetcher.py).
+        script_path: Path to the tool script (e.g., subtitle_extractor.py).
         args: Command-line arguments to pass to the script.
         tool_name: Human-readable name for logging.
         timeout: Optional timeout in seconds. None = no timeout.
@@ -494,7 +485,7 @@ AUDIT_SUMMARY_RE = re.compile(
     re.MULTILINE,
 )
 # Fallbacks: the human scorecard (right-aligned count, then the label) and
-# the fetcher-style coverage line, so reports written by older auditor
+# the extractor-style coverage line, so reports written by older auditor
 # versions still parse.
 CANONICAL_SCORECARD_RE = re.compile(r"^\s*(\d+)\s+Canonical MKV", re.MULTILINE)
 FOLDERS_SCORECARD_RE = re.compile(r"^\s*(\d+)\s+Folders checked", re.MULTILINE)
@@ -579,39 +570,6 @@ def log_empty_library(runtime_log: Path) -> None:
                            "complete; otherwise check that --source points at the "
                            "library that holds the movie folders.")
     log_error(runtime_log, "=" * 60)
-
-
-# ---------------------------------------------------------------------------
-# UTC day rollover wait
-# ---------------------------------------------------------------------------
-def wait_for_utc_midnight(runtime_log: Path) -> None:
-    """Block until the next UTC midnight, logging progress."""
-    now = datetime.now(UTC)
-    tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    wait_seconds = (tomorrow - now).total_seconds()
-
-    log_info(runtime_log, "Waiting for UTC midnight rollover...")
-    log_info(runtime_log, f"  Current UTC time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-    log_info(runtime_log, f"  Next UTC midnight: {tomorrow.strftime('%Y-%m-%d %H:%M:%S')}")
-    log_info(runtime_log, f"  Waiting {wait_seconds:.0f} seconds...")
-
-    # Sleep in 1-hour chunks so we can log progress and be interruptible
-    while wait_seconds > 0:
-        if wait_seconds > 3600:
-            sleep_time = 3600.0
-            wait_seconds -= sleep_time
-        else:
-            sleep_time = wait_seconds
-            wait_seconds = 0.0
-
-        log_info(runtime_log, f"  Sleeping {sleep_time}s... (Ctrl+C to interrupt)")
-        try:
-            time.sleep(sleep_time)
-        except KeyboardInterrupt:
-            log_warning(runtime_log, "Interrupted during UTC wait. Resuming in next pass.")
-            return
-
-    log_info(runtime_log, "UTC day has rolled over. Resuming.")
 
 
 # The pre-flight is the auditor run *before* the sweep, so it borrows the
@@ -735,11 +693,9 @@ def render_run_report(state: RunState) -> str:
             f"Report file : {state.report_path}   (this file; rewritten in place)",
             "",
             "Durable state kept beside them (not logs or reports - these make "
-            "re-runs cheap and keep the provider quotas honest):",
-            f"  fetcher quota ledger: {state.log_dir / FETCHER_LEDGER_NAME}",
+            "re-runs cheap):",
             "  probe caches        : state.db (the mkvmerge and ffprobe payloads "
             "for unchanged files)",
-            "  sync memory         : sync_state.json",
         ],
     ))
 
@@ -996,14 +952,17 @@ def run_one_shot(
     # Discover movies in the library (for tracking purposes)
     log_info(runtime_log, "DISCOVERING MOVIES IN LIBRARY...")
     try:
-        mkv_files = sorted(library.rglob("*.mkv"), key=lambda p: str(p).casefold())
-        log_info(runtime_log, f"  Found {len(mkv_files)} MKV file(s)")
-        for mkv in mkv_files[:20]:
-            log_info(runtime_log, f"    - {mkv.relative_to(library)}")
-        if len(mkv_files) > 20:
-            log_info(runtime_log, f"    ... and {len(mkv_files) - 20} more")
-        if not mkv_files:
-            log_warning(runtime_log, "  No MKV files found - is this the right library?")
+        movie_files = sorted(
+            (p for p in library.rglob("*") if p.suffix.lower() in {".mkv", ".mp4"}),
+            key=lambda p: str(p).casefold(),
+        )
+        log_info(runtime_log, f"  Found {len(movie_files)} movie file(s)")
+        for movie in movie_files[:20]:
+            log_info(runtime_log, f"    - {movie.relative_to(library)}")
+        if len(movie_files) > 20:
+            log_info(runtime_log, f"    ... and {len(movie_files) - 20} more")
+        if not movie_files:
+            log_warning(runtime_log, "  No MKV or MP4 files found - is this the right library?")
     except OSError as e:
         log_warning(runtime_log, f"  Could not discover movies: {e}")
 
@@ -1102,12 +1061,12 @@ def run_one_shot(
             if is_library_complete(covered, total):
                 verdict = f"COMPLETE - {covered}/{total} canonical, nothing to do"
                 state.verdict = verdict
-                step.note = "already canonical: no fetch, remux, inspection or sync was run"
+                step.note = "already canonical: no extraction, remux, inspection or sync was run"
                 log_info(runtime_log, "")
                 log_info(runtime_log, "=" * 60)
                 log_info(runtime_log, "LIBRARY ALREADY COMPLETE - NOTHING TO DO")
                 log_info(runtime_log, f"The auditor reports {covered}/{total} canonical movie "
-                                      "folders, so no fetch, remux, inspection or sync was run.")
+                                      "folders, so no extraction, remux, inspection or sync was run.")
                 log_info(runtime_log, "Every step is idempotent: none of them can improve on a")
                 log_info(runtime_log, "library that already meets the contract.")
                 log_info(runtime_log, "")
@@ -1152,70 +1111,13 @@ def run_one_shot(
         write_run_report(state)
 
         # -------------------------------------------------------------------
-        # Step 1: Fetch subtitles (with quota handling)
+        # Steps 1-4: extract subtitles, clean tracks, inspect bit depth, sync
         # -------------------------------------------------------------------
-        step = begin_step("fetcher", 1, record)
-
-        fetch_success = False
-        fetch_retries = 0
-        last_fetch_code = -1
-
-        while not fetch_success and fetch_retries < MAX_FETCH_RETRIES:
-            log_info(runtime_log, f"  Subtitle fetch attempt {fetch_retries + 1}/{MAX_FETCH_RETRIES}")
-
-            # Check if we have API keys and pass them through
-            if os.environ.get("OPENSUBTITLES_API_KEY"):
-                log_info(runtime_log, "  Using OpenSubtitles API key (configured)")
-            else:
-                log_info(runtime_log, "  OpenSubtitles API key: not set (scraping fallbacks only)")
-
-            if os.environ.get("SUBDL_API_KEY"):
-                log_info(runtime_log, "  Using SubDL API key (configured)")
-            else:
-                log_info(runtime_log, "  SubDL API key: not set")
-
-            returncode, stdout, stderr = launch(step.plan, stage / "fetcher.report.txt")
-            last_fetch_code = returncode
-
-            if returncode == 0:
-                fetch_success = True
-                log_info(runtime_log, "  Subtitle fetch completed successfully.")
-                # With --allow-missing the fetcher exits 0 even when every
-                # source is out of quota; surface it so the wait below makes
-                # sense to the operator.
-                if "QUOTA REACHED" in (stdout + stderr):
-                    log_info(runtime_log, "  NOTE: some sources report QUOTA REACHED - "
-                                          "held movies are re-offered after the next UTC day rollover.")
-            else:
-                fetch_retries += 1
-                log_warning(runtime_log, f"  Subtitle fetch failed (attempt {fetch_retries}/{MAX_FETCH_RETRIES})")
-
-                # Check if it's a quota issue
-                combined_output = stdout + stderr
-                if "QUOTA REACHED" in combined_output or "daily cap exhausted" in combined_output.lower():
-                    log_info(runtime_log, "  Quota exhausted — waiting for UTC day rollover...")
-                    record.notes.append("waited for the UTC day rollover")
-                    wait_for_utc_midnight(runtime_log)
-                    fetch_retries = 0  # Reset retry counter after waiting
-                elif fetch_retries >= 3:
-                    # Non-quota error, give up after 3 attempts
-                    log_warning(runtime_log, "  Non-quota errors persisting — moving to next step.")
-                    fetch_success = True  # Break out of retry loop
-                else:
-                    # Wait a bit before retrying
-                    time.sleep(5)
-
-        finish_step(step, last_fetch_code, stage / "fetcher.report.txt")
-        log_info(runtime_log, "")
-
-        # -------------------------------------------------------------------
-        # Steps 2-4: clean tracks, inspect bit depth, sync subtitle timing
-        # -------------------------------------------------------------------
-        # One loop, because these three steps differ only in data: the tool to
+        # One loop, because these four steps differ only in data: the tool to
         # run, the binary it needs, and the words for what it was doing. Each
         # is skipped with a reason when its binary is missing - a machine
-        # without mkvmerge still gets its subtitles fetched and audited.
-        for number, key in enumerate(("cleaner", "10bit", "sync"), start=2):
+        # without ffsubsync still gets its subtitles extracted and audited.
+        for number, key in enumerate(("extractor", "cleaner", "10bit", "sync"), start=1):
             step = begin_step(key, number, record)
             plan = step.plan
             reason = step_skip_reason(key, tools)
@@ -1319,19 +1221,27 @@ def run_one_shot(
                 _discard_dir(stage)
                 return 0
 
-            # Pacing: two passes with zero progress means the only thing
-            # left to do is wait for the daily caps to reset.
+            # Pacing: two passes with zero progress means nothing in this
+            # toolchain can move the number - there are no provider caps
+            # left to wait for, so another identical sweep would only burn
+            # hours. Stop and name what is left for a human.
             if previous_coverage is not None and coverage_str == previous_coverage:
                 no_improvement_streak += 1
-                if no_improvement_streak >= STAGNATION_PASSES_BEFORE_ROLLOVER:
+                if no_improvement_streak >= STAGNATION_PASSES_BEFORE_STOP:
                     log_warning(runtime_log, f"  No improvement for {no_improvement_streak} passes "
                                              f"(coverage stuck at {coverage_str}).")
-                    log_warning(runtime_log, "  Provider daily caps reset at UTC midnight and the "
-                                             "scraping tier re-offers held movies - waiting for "
-                                             "the rollover before the next pass.")
-                    record.notes.append("waited for the UTC day rollover")
-                    wait_for_utc_midnight(runtime_log)
-                    no_improvement_streak = 0
+                    log_warning(runtime_log, "  There are no quotas or daily caps in this toolchain: ")
+                    log_warning(runtime_log, "  subtitles come from the movies themselves, so a")
+                    log_warning(runtime_log, "  third identical pass cannot change the outcome.")
+                    log_warning(runtime_log, "  What is usually left for a human: a sync held for")
+                    log_warning(runtime_log, "  review, an OCR backend to install for bitmap subs,")
+                    log_warning(runtime_log, "  a movie without any English track at all, or a")
+                    log_warning(runtime_log, "  noncanonical layout the standardizer should fix.")
+                    state.verdict = f"STALLED - coverage stuck at {coverage_str}"
+                    record.notes.append("stalled: no improvement, stopped instead of looping")
+                    record.elapsed = (datetime.now() - record.started).total_seconds()
+                    write_run_report(state)
+                    break
             else:
                 no_improvement_streak = 0
                 if previous_coverage is not None:
@@ -1426,7 +1336,11 @@ def run_one_shot(
     log_warning(runtime_log, "Review the run report:")
     log_warning(runtime_log, f"  {state.report_path}")
     log_warning(runtime_log, "=" * 60)
-    state.verdict = f"PARTIAL - {coverage_str} canonical"
+    # A stalled run keeps its reason: "PARTIAL" alone would hide the fact that
+    # the loop stopped early because identical passes cannot move the number.
+    state.verdict = (f"STALLED - coverage stuck at {coverage_str}"
+                     if state.verdict.startswith("STALLED")
+                     else f"PARTIAL - {coverage_str} canonical")
     write_run_report(state)
     _discard_dir(stage)
     return 1
@@ -1604,19 +1518,6 @@ def main(argv: list[str] | None = None) -> int:
 
     tools = check_prerequisites(runtime_log)
 
-    # Check for API keys
-    log_info(runtime_log, "")
-    log_info(runtime_log, "API KEY STATUS:")
-    if os.environ.get("OPENSUBTITLES_API_KEY"):
-        log_info(runtime_log, "  OpenSubtitles API key: configured")
-    else:
-        log_info(runtime_log, "  OpenSubtitles API key: not set (scraping fallbacks only)")
-
-    if os.environ.get("SUBDL_API_KEY"):
-        log_info(runtime_log, "  SubDL API key: configured")
-    else:
-        log_info(runtime_log, "  SubDL API key: not set")
-
     log_info(runtime_log, "")
     log_info(runtime_log, "=" * 60)
     log_info(runtime_log, "STARTING ONE-SHOT COMPLETION")
@@ -1655,16 +1556,16 @@ def main(argv: list[str] | None = None) -> int:
 def run_self_tests() -> int:
     """Field smoke test: can the completer read an audit and pace itself?
 
-    The convergence policy, the transcript folding and the quota-rollover
-    waits are covered in ``tests/selftests/``. Here we check that this copy
-    can still tell a finished library from an unfinished one, which is the
-    condition the whole loop terminates on.
+    The convergence policy and the transcript folding are covered in
+    ``tests/selftests/``. Here we check that this copy can still tell a
+    finished library from an unfinished one, which is the condition the
+    whole loop terminates on.
     """
     def a_complete_library_is_recognised() -> bool:
         return is_library_complete(10, 10) and not is_library_complete(9, 10)
 
     def the_step_order_matches_the_pipeline() -> bool:
-        return STEP_ORDER == ("fetcher", "cleaner", "10bit", "sync", "auditor")
+        return STEP_ORDER == ("extractor", "cleaner", "10bit", "sync", "auditor")
 
     def the_tool_scripts_are_present() -> bool:
         return not missing_tool_scripts(Path(__file__).resolve().parent)

@@ -413,7 +413,7 @@ class LibraryChangedUnderneathTests(CleanerRunFixture):
 
     Between the moment the cleaner reads a movie and the moment it swaps the
     remuxed copy over the original, a download client can finish writing to
-    that movie, the subtitle fetcher can replace the sidecar the remux was
+    that movie, the subtitle extractor can replace the sidecar the remux was
     planned around, or the operator can press Ctrl-C. Each of those makes the
     finished temp file wrong, and promoting it would destroy the only copy of
     something.

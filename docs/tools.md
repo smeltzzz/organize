@@ -2,8 +2,8 @@
 
 Every tool in detail: what it decides, why it decides it that way, and the
 flags worth knowing. Each one is a single file that runs out of a clone with
-no install (`python3 subtitle_fetcher.py --help`), and each is also a verb on
-the front door (`organize.py subtitles …`).
+no install (`python3 subtitle_extractor.py --help`), and each is also a verb on
+the front door (`organize.py extract …`).
 
 For the order they run in and why that order is load-bearing, see
 [The pipeline](pipeline.md). For the environment variables they share, see
@@ -11,162 +11,124 @@ For the order they run in and why that order is load-bearing, see
 
 | Tool | One line | Needs |
 | :--- | :--- | :--- |
-| [`subtitle_fetcher.py`](#1--subtitle_fetcherpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: the movie's own embedded track first, then nine sources | nothing (API keys optional) |
+| [`subtitle_extractor.py`](#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie, extracted from the movie's own embedded track | `mkvmerge` + `mkvextract` (an OCR backend for image tracks) |
 | [`mkv_track_cleaner.py`](#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep one best audio, strip commentary, dubs and embedded subtitles | `mkvmerge` |
 | [`bitdepth.py`](#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed | `ffprobe` |
 | [`library_auditor.py`](#4--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
 | [`movie_standardizer.py`](#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names, hardlink MKV/MP4 into `Title (Year)/` | `ffprobe` (optional) |
-| [`sync_subtitles.py`](#6--sync_subtitlespy--subtitle-timing-sync-ffsubsync) | Measure every sidecar against the audio and correct trustworthy drift | `ffsubsync` + `ffmpeg` |
+| [`sync_subtitles.py`](#6--sync_subtitlespy--subtitle-timing-sync-ffsubsync) | Measure a freshly extracted sidecar against the audio — once — and correct trustworthy drift | `ffsubsync` + `ffmpeg` |
 | [`jellyfin_one_shot.py`](#7--jellyfin_one_shotpy--the-never-stop-completer) | Loops the whole toolchain until the auditor reports 100% canonical | whatever its steps need |
 
 ---
 
-## 1 · `subtitle_fetcher.py` — validated English subtitles
+## 1 · `subtitle_extractor.py` — validated English subtitles
 
-Fetches one external `.eng.srt` per movie, and the goal is a subtitle beside
-**every** movie. Nine sources are consulted in tiers:
+Extracts one external `.eng.srt` per movie **from the movie's own embedded
+English subtitle track**, and the goal is a subtitle beside every movie.
+There is nothing else to consult: no providers, no API keys, no scraping,
+no network at all. (Subtitle downloading used to be this tool's other half;
+it was removed outright — an answer from a stranger's website could never be
+made as reliable as the track the release itself carries, and a movie with
+no usable embedded track is now reported for a human decision instead of
+guessed at.)
 
-1. **OpenSubtitles + SubDL as equal sources** (API keys, `subtitle_fetcher.py`
-   itself): both providers' release-identifying routes are consulted for
-   every movie — the exact OpenSubtitles moviehash (while the MKV bytes are
-   still pristine) and SubDL's release-aware filename match, whose automatic
-   picks require a score ≥ 0.80 — and the qualifying release with the
-   **most downloads** is fetched, whichever provider it came from. When
-   neither release route yields a pick, both providers' strict title/year
-   routes are pooled the same way.
-2. **Seven scraping fallbacks** (vendored in `subtitle_fetcher.py`,
-   no keys, no accounts), offered in failover order to any movie the API
-   tiers miss:
-   **Subf2m.co → Podnapisi.NET → Addic7ed.com → SubSource.net →
-   Subsunacs.net → YIFY Subtitles → Subs.sab.bz**. A scraped candidate wins
-   only when it names the movie, matches its release year, and decodes to a
-   valid English SRT. Each source has a per-run circuit breaker (3 hard or 3
-   parse failures disable it for the rest of the run) and a UTC daily search
-   cap (20 by source, `--scrape-daily-cap`), metered in the same durable
-   ledger as the API quotas.
+The movie's own track is the best source there is: it is exact for this
+release (it cannot be the wrong cut), it costs nothing, and its cues come
+from the container's own timeline. Text tracks (SRT/SSA/ASS/WebVTT) are
+extracted with `mkvextract` and converted in-process; image tracks
+(PGS/SUP, VobSub, DVB) are OCR'd by an external backend when one is
+installed. A track that is forced/signs-only, commentary, non-English, or
+too short to be the whole film is refused — the movie lands in the report's
+"needs attention" section with the reason, not with a half-subtitle beside
+it. **MP4s are read through a temporary MKV bridge** (`mkvmerge` wraps the
+MP4, `mkvextract` reads the bridge, the bridge is discarded): mkvextract
+cannot read an MP4's `mov_text` tracks directly, and the bridge means the
+same validation path covers both containers.
 
-   **Politeness is metered per host, not per run.** Every provider gets its own
-   token bucket (one request per second per site, the documented limit), so
-   asking Subf2m never waits on the request that just went to Podnapisi. On a
-   200-movie pass across the seven sources that is 30 minutes of sleeping
-   reduced to 9.5 — with every individual site still paced exactly as before
-   (`benchmarks/bench_scrape_gaps.py`). When a provider answers `429
-   Retry-After`, the whole bucket for that host is held back, because that
-   header is about the server, not about the one unlucky request.
+**The one rule that never bends: an existing `.eng.srt` is authoritative.**
+If a movie already has a validated sidecar — placed by hand, carried over,
+or extracted last week — this tool leaves it, and the movie, completely
+untouched. It is never re-extracted and never re-synced. Extraction runs
+only for movies with no sidecar at all; that is why it must run *before*
+the track cleaner, which strips every embedded subtitle once a sidecar
+exists.
 
-   **And the connection is kept, not thrown away.** urllib closes the socket
-   after every response, so each request to a host the tool is about to ask
-   again paid a fresh TCP and TLS handshake. One connection per host is now
-   held open and reused (`organizekit/core/nethttp.py`): 200 requests to a host
-   open 1 connection instead of 200, worth about 120 ms a request on a real
-   network (`benchmarks/bench_keepalive.py`). The requests, their order and the
-   pacing above are identical; set `ORGANIZE_NO_KEEPALIVE=1` to go back to a
-   socket per request.
-
-**Before any of that, it looks inside the movie.** A Jellyfin MKV very often
-already carries the English subtitle as an embedded track, and that track is
-exact for this release: it costs no provider request, it cannot be the wrong
-cut, and its cues come from the container's own timeline, so it needs no
-timing correction. Text tracks (SRT/SSA/ASS/WebVTT) are extracted with
-`mkvextract` and converted in-process; image tracks (PGS/SUP, VobSub, DVB) are
-OCR'd by an external backend when one is installed. A track that is
-forced/signs-only, commentary, non-English, or too short to be the whole film
-is refused, and the movie falls through to the providers as before.
-
-Every download — API or scraped — is re-validated (regular file, size cap,
-decodable text, at least one well-formed cue) before it is written. The
-report opens with a coverage scorecard (`17/18 (94.4%) · goal: 100%`) and
-names every uncovered movie with the verdict of **each** source; uncovered
-movies are re-offered to the scraping sources on every later UTC day. Until
-every movie is covered the process exits **1** (override with
-`--allow-missing`), so a gap is always loud. Works with zero API keys: with
-none configured, every movie goes straight to the scraping tier.
+**A fresh extraction is measured exactly once.** Every sidecar this tool
+writes is recorded with its SHA-256 in a provenance ledger outside the
+library (`ReportsAndLogs/subtitle_extractor_extracted.json`), and
+`sync_subtitles.py` reads that record: a freshly extracted sidecar is
+measured against the movie's audio and, if the drift is real and
+trustworthy, corrected — then marked done, permanently. Replace the bytes
+by hand and the record no longer matches, so the file is not "ours" any
+more and is left alone. Extraction failures (no track, OCR unavailable,
+unreadable container) are not errors — the movie is simply reported as
+uncovered; exit code is `1` only when a movie genuinely errored, `2` for
+configuration problems.
 
 ```bash
-python3 subtitle_fetcher.py --source /path/to/movies --dry-run   # preview
-python3 subtitle_fetcher.py --source /path/to/movies --limit 10  # first 10
-python3 subtitle_fetcher.py --source /path/to/movies --skip-source subf2me   # drop one site
-python3 subtitle_fetcher.py --source /path/to/movies --no-extract            # never use embedded tracks
-python3 subtitle_fetcher.py --source /path/to/movies --ocr-limit 5           # OCR at most 5 movies per run
-python3 subtitle_fetcher.py --source /path/to/movies --workers 8             # library on a NAS
+python3 subtitle_extractor.py --source /path/to/movies --dry-run   # preview
+python3 subtitle_extractor.py --source /path/to/movies --limit 10  # first 10
+python3 subtitle_extractor.py --source /path/to/movies --ocr-limit 5  # OCR at most 5 movies per run
+python3 subtitle_extractor.py --source /path/to/movies --workers 8    # library on a NAS
 ```
 
-**Parallel triage, serial spending.** Before a movie can cost a provider
-request the fetcher answers three local questions about it — is the folder
-canonical, is there already a usable English sidecar, what is the file's
-identity — and on a mostly-covered library that pre-flight *is* the run: one
-directory listing and a couple of small reads per movie. Those reads happen in
-a worker pool (`--workers`, default half the CPUs capped at 8; `1` restores the
-exact serial run). Measured on 600 movies
-(`benchmarks/bench_triage_workers.py`): from a warm page cache the threads cost
-more than they save (0.06 s → 0.23 s, and it is 0.23 s); with a 5 ms round trip
-per folder — an HDD seek, or a library on SMB/NFS — it is **3.2 s serial →
-0.50 s at 8 workers (6.3×)**.
-
-**The two API lookups are one wait, not two.** A movie that reaches the API
-tier with the title/year fallback on is offered to both providers and the
-better answer wins, so both are always asked. OpenSubtitles' search now runs on
-one background worker while SubDL's runs on the main thread — where SubDL's
-durable search reservation stays, along with the ledger, the downloads and
-every checkpoint. Against healthy providers this changes nothing (the 1.1 s
-courtesy gap is the binding constraint, and it is unchanged); when a provider
-goes slow — over about half the gap — the tier costs one round trip instead of
-two (`benchmarks/bench_provider_overlap.py`). `--workers 1` restores the fully
-serial run.
-
-Everything else downstream of triage stays on the single main thread: the quota
-ledger, the scraping tier, every download, every state checkpoint. A worker
-never spends a request, and the pool works at most 32 movies ahead of the loop,
-so a run that stops on an exhausted quota has not read the whole library. The
-verdicts come back in input order, so the console, the log and the report are
-byte-identical to the serial run — the tests assert exactly that, by running
-the same library both ways and diffing.
+**Parallel triage.** Before a movie can cost an extraction attempt the tool
+answers three local questions about it — is the folder canonical, is there
+already a usable English sidecar, what is the file's identity — and on a
+mostly-covered library that pre-flight *is* the run: one directory listing
+and a couple of small reads per movie. Those reads happen in a worker pool
+(`--workers`, default half the CPUs capped at 8; `1` restores the exact
+serial run). Measured on 600 movies
+(`benchmarks/bench_triage_workers.py`): from a warm page cache the threads
+cost more than they save (0.06 s → 0.23 s, and it is 0.23 s); with a 5 ms
+round trip per folder — an HDD seek, or a library on SMB/NFS — it is
+**3.2 s serial → 0.50 s at 8 workers (6.3×)**. The verdicts come back in
+input order, so the console, the log and the report are byte-identical to
+the serial run.
 
 **Every sweep says what it is doing.** On a terminal the auditor, the 10-bit
-inspector, the subtitle synchronizer and the standardizer each draw one status
-line — `auditing [████░░░░] 42%  1,204/2,860  ~4m30s left  Movie (2020)` — that
-is rewritten in place and erased before every permanent line, the same
-renderer the track cleaner has always used for its remux bar
-(`organizekit/core/live.py`). It is **strictly a terminal effect**: off a TTY
-— redirected, piped, under cron, or with `--json` — nothing is drawn at all,
-so log files and captured output are byte-for-byte what they were.
+inspector, the subtitle synchronizer and the standardizer each draw one
+status line — `auditing [████░░░░] 42%  1,204/2,860  ~4m30s left  Movie
+(2020)` — that is rewritten in place and erased before every permanent
+line, the same renderer the track cleaner has always used for its remux bar
+(`organizekit/core/live.py`). It is **strictly a terminal effect**: off a
+TTY — redirected, piped, under cron, or with `--json` — nothing is drawn at
+all, so log files and captured output are byte-for-byte what they were.
 
-**Embedded extraction in detail.** It is on by default and always attempted
-first; it is skipped only when it cannot help, and the report names the
-sidecars that came from the movie itself. It needs
-[MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge` + `mkvextract`) for
-every track type, plus one OCR backend for image-based (PGS/VobSub) tracks —
-`pgsrip`, `sup2srt` + Tesseract, Subtitle Edit, or PgsToSrt, auto-detected
-in that order:
+**OCR backends.** Image tracks need
+[MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge` + `mkvextract`) plus
+one OCR backend — `pgsrip`, `sup2srt` + Tesseract, Subtitle Edit, or
+PgsToSrt, auto-detected in that order:
 
 ```bash
-python3 subtitle_fetcher.py --source /path/to/movies --ocr-backend auto     # default (pgsrip first)
-python3 subtitle_fetcher.py --source /path/to/movies --ocr-backend pgsrip   # pip install pgsrip
-python3 subtitle_fetcher.py --source /path/to/movies --ocr-backend none     # text tracks only
-python3 subtitle_fetcher.py --source /path/to/movies --ocr-backend custom \
+python3 subtitle_extractor.py --source /path/to/movies --ocr-backend auto     # default (pgsrip first)
+python3 subtitle_extractor.py --source /path/to/movies --ocr-backend pgsrip   # pip install pgsrip
+python3 subtitle_extractor.py --source /path/to/movies --ocr-backend none     # text tracks only
+python3 subtitle_extractor.py --source /path/to/movies --ocr-backend custom \\
         --ocr-bin /opt/my-ocr --ocr-args "{input}" "{output}"                # your own tool
 ```
 
 `--ocr-args` must name **both** `{input}` and `{output}` (also available:
-`{track}`, `{lang}`); a template missing either is refused up front rather than
-failing one movie at a time. Subtitle Edit ships as a Windows `.exe`, so off
-Windows it is run through `mono` — without `mono` on `PATH` it counts as not
-installed and the run says so.
-
-Extracted sidecars are recorded outside the library
-(`ReportsAndLogs/subtitle_fetcher_extracted.json`), and `sync_subtitles.py`
-reads that record: a subtitle taken from the movie's own container timeline is
-already frame-accurate, so **it is never handed to ffsubsync**. Replace it with
-a download and it is measured like any other sidecar again.
-`mkv_track_cleaner.py` still strips every embedded subtitle afterwards, so the
-external `.eng.srt` remains the sole subtitle option.
+`{track}`, `{lang}`); a template missing either is refused up front rather
+than failing one movie at a time. Subtitle Edit ships as a Windows `.exe`,
+so off Windows it is run through `mono` — without `mono` on `PATH` it counts
+as not installed and the run says so. OCR is minutes of local CPU per movie,
+so `--ocr-limit` can cap the number of OCR jobs per run independently of
+everything else.
 
 ## 2 · `mkv_track_cleaner.py` — lossless remux
 
 Keeps the single best English audio track (or, for foreign films with a
 validated `.eng.srt`, the best non-commentary audio of any language) and
-strips commentary, dubs, and embedded subtitles. Video is never re-encoded.
-Movies still hardlinked to their torrent source are always deferred.
+strips commentary, dubs, and embedded subtitles — video is never
+re-encoded, and once a validated sidecar exists every embedded subtitle
+track goes, leaving the external `.eng.srt` as the sole subtitle option.
+**MP4s are converted to MKV** in the same remux (a lossless container swap
+with the transactional replace, free-space check and seeding deferral the
+MKV path already had). A movie remuxed *without* a validated sidecar keeps
+its embedded English subtitle tracks, so `subtitle_extractor.py` can still
+build one on a later run. Movies still hardlinked to their torrent source
+are always deferred.
 
 ```bash
 python3 mkv_track_cleaner.py --dir /path/to/movies --dry-run
@@ -234,12 +196,14 @@ folder is exactly what `library_auditor.py` flags as
 `MULTIPLE_DIRECT_MOVIE_FILES`, and nothing here deletes the copy that is
 already there.
 
-Be clear-eyed about what an MP4 in the library gets you: it plays, and that is
-the whole of it. The rest of the pipeline is MKV-only by design —
-`library_auditor.py` reports it as `SINGLE_OTHER_CONTAINER`, and
-`mkv_track_cleaner.py` (mkvmerge remux), `subtitle_fetcher.py` and
-`bitdepth.py` skip it. A movie you want cleaned, subtitled and audited should
-still arrive as an MKV.
+An MP4 in the library is a guest that the pipeline converts: the
+`subtitle_extractor.py` step lifts any embedded subtitles out of it through
+a temporary MKV bridge, and the `mkv_track_cleaner.py` step swaps the
+container itself for a canonical MKV — losslessly, in the same remux that
+cleans the tracks. `library_auditor.py` reports a still-unconverted MP4 as
+`SINGLE_OTHER_CONTAINER`, and `bitdepth.py` only ever sees MKVs in a
+maintained library. An MKV release still lands as an MKV, and when one
+movie arrives as both the MKV is placed.
 
 ```bash
 python3 movie_standardizer.py --source /path/to/downloads --target /path/to/movies --dry-run
@@ -247,21 +211,22 @@ python3 movie_standardizer.py --source /path/to/downloads --target /path/to/movi
 
 ## 6 · `sync_subtitles.py` — subtitle-timing sync (ffsubsync)
 
-The pipeline's final content step, right before the audit. Walks the whole
-library, pairs every `.srt` sidecar with its movie, and measures the drift
-against the actual audio with [`ffsubsync`](https://github.com/smacke/ffsubsync)
-(install once: `pip install ffsubsync`; it needs `ffmpeg` on the PATH).
-Trustworthy drift is applied by atomically swapping in the corrected sidecar;
-sub-threshold drift (`--min-offset`, default 0.1 s) leaves the file
-byte-identical; anything untrustworthy — beyond the trust window
-(`--max-offset`, default 30 s), anti-correlated scores, ffsubsync's own
-quality-gate refusal, or a plain failure — triggers another qualifying
-subtitle download. The synchronizer tests up to **10 replacement downloads
-per movie**, stopping as soon as one is already aligned or can be safely
-corrected. If none works (or fetching stops), the entry-time sidecar is
-restored byte-for-byte and **held for review, never applied**. Movie bytes are
-never touched, so the OpenSubtitles moviehash is undisturbed and the audit that
-follows sees the finished sidecars.
+The pipeline's final content step, right before the audit. It pairs the
+library's `.srt` sidecars with their movies and measures drift against the
+actual audio with [`ffsubsync`](https://github.com/smacke/ffsubsync)
+(install once: `pip install ffsubsync`; it needs `ffmpeg` on the PATH) —
+but **only a sidecar that `subtitle_extractor.py` just extracted, and only
+once**. The provenance ledger decides: a sidecar with an unspent extraction
+record is measured; trustworthy drift is applied by atomically swapping in
+the corrected sidecar; sub-threshold drift (`--min-offset`, default 0.1 s)
+leaves the file byte-identical; anything untrustworthy — beyond the trust
+window (`--max-offset`, default 30 s), anti-correlated scores, ffsubsync's
+own quality-gate refusal, or a plain failure — leaves the entry-time
+sidecar restored byte-for-byte and **held for review, never applied**.
+Every other sidecar — placed by hand, carried over from an earlier era, or
+already synced — is authoritative and never touched: an existing `.eng.srt`
+is never re-checked or re-synced. Movie bytes are never modified, so the
+audit that follows sees the finished sidecars.
 
 ```bash
 python3 sync_subtitles.py --source /path/to/movies --dry-run    # preview
@@ -281,25 +246,27 @@ is low on purpose: each worker starts an ffmpeg that is itself multi-threaded
 and reads a different movie, so a bigger fan-out turns a CPU bound into a disk
 bound.
 
-**Re-running costs nothing.** A sidecar measured "in sync", or corrected and
-swapped in, is recorded outside the library (`sync_state.json`, override with
-`--sync-ledger` or `SUBTITLE_SYNC_LEDGER`) with the subtitle's SHA-256 and the
-movie's size and mtime. The record is honoured only while **both** still
-match: re-download, re-extract, hand-edit or replace the subtitle, or remux
-the movie, and it is measured again. Held-for-review and failed syncs are
-never recorded — those still need another look. Delete the file to
-re-measure everything.
+**Re-running costs nothing.** A sidecar measured "in sync", or corrected
+and swapped in, has its extraction record marked done (in
+`subtitle_extractor_extracted.json`, the extractor's provenance ledger) and
+is never measured again. Held-for-review and failed syncs leave the record
+unmarked, so the next run retries them. A sidecar whose bytes no longer
+match the record — hand-edited, replaced from elsewhere — has no provenance
+any more, which is the safe answer: not ours, not touched.
 
 ## 7 · `jellyfin_one_shot.py` — the "never stop" completer
 
 The orchestrator that gets a library to the end result no matter what: it
-loops the pipeline (fetch → clean → 10bit → sync → audit) until the auditor
+loops the pipeline (extract → clean → 10bit → sync → audit) until the auditor
 reports 100% canonical, then exits 0. What makes it safe to leave running for
 days:
 
-- **Quota-aware pacing** — a stuck library (all sources out of daily cap)
-  sleeps until the next UTC midnight, when the caps reset and the scraping
-  tier re-offers held movies, instead of burning full passes for nothing.
+- **It stops when more passes cannot help** — two passes in a row with no
+  coverage improvement means the run stops and says so
+  (`STALLED - coverage stuck at 17/18`) instead of burning passes for
+  nothing. Every step is local work, so there is no quota to wait for: a
+  movie the toolchain cannot cover is a human decision, and the report
+  names it.
 - **Guaranteed finish** — an empty library (no movie folders) exits 2 with
   the canonical-layout reminder; a log dir inside the library is rejected up
   front (the tools refuse to write inside the media tree, and the auditor
@@ -328,8 +295,8 @@ days:
   affected steps are skipped and the completion banner says exactly which
   guarantees were not checked.
 - **A finished library is left alone** — the auditor runs *first*, and a
-  library that already reports 100% canonical exits 0 without a fetch, remux,
-  inspection or sync sweep. Every step is idempotent, so re-running a finished
+  library that already reports 100% canonical exits 0 without an extraction,
+  remux, inspection or sync sweep. Every step is idempotent, so re-running a finished
   library used to cost a full pass for nothing. Use `--force-pass` to sweep
   anyway: the auditor's verdict is the library contract (canonical folder
   layout plus a validated `.eng.srt` sidecar) and never inspects the MKV's own
@@ -347,11 +314,11 @@ python3 jellyfin_one_shot.py --source /path/to/movies --quiet          # no live
 
 > [!NOTE]
 > The two files are the only *artifacts*. A run also maintains durable state
-> beside them, which is what makes the next run cheap and keeps the provider
-> quotas honest: `subtitle_fetcher_ledger.log` (the fetcher's daily-quota
-> ledger — that tool parses its own log back, so it cannot share a file with
-> anything else), the two probe caches, `sync_state.json`, and `state.db` —
-> the rebuildable cache of verdicts that `organize status` reads.
+> beside them, which is what makes the next run cheap:
+> `subtitle_extractor_extracted.json` (the extractor's provenance ledger,
+> which `sync_subtitles.py` reads to know which sidecars it may measure),
+> the probe caches, and `state.db` — the rebuildable cache of verdicts that
+> `organize status` reads.
 
 `--source` is the Jellyfin movie-library root. Every tool in the repo resolves
 it through one shared resolver — `--source`, then `ORGANIZE_LIBRARY`, then the

@@ -41,7 +41,7 @@ TOOLS = (
     "movie_standardizer.py",
     "organize.py",
     "pipeline.py",
-    "subtitle_fetcher.py",
+    "subtitle_extractor.py",
     "sync_subtitles.py",
 )
 
@@ -92,11 +92,11 @@ class NothingMayReVendorTheCore(unittest.TestCase):
         import mkv_track_cleaner
         import movie_standardizer
         import pipeline
-        import subtitle_fetcher
+        import subtitle_extractor
         import sync_subtitles
 
         for module in (bitdepth, library_auditor, mkv_track_cleaner,
-                       movie_standardizer, pipeline, subtitle_fetcher,
+                       movie_standardizer, pipeline, subtitle_extractor,
                        sync_subtitles):
             for name in ("Report", "resolve_library", "atomic_write_text"):
                 bound = getattr(module, name, None)
@@ -185,26 +185,26 @@ class DotenvIsFoundFromWhereTheUserRuns(unittest.TestCase):
 
 
 class PipelineOrderIsLoadBearing(unittest.TestCase):
-    """The subtitle fetch must precede the remux, forever.
+    """Subtitle extraction must precede the remux, forever.
 
-    subtitle_fetcher.py searches OpenSubtitles by moviehash, computed from the
-    file size plus the first and last 64 KiB. A remux rewrites those bytes, so
-    a movie cleaned first can never reproduce its release hash and is silently
-    demoted to the far weaker title/year search. The constraint was documented
-    in three docstrings and enforced by nothing.
+    subtitle_extractor.py builds the sidecar from the movie's own embedded
+    track, and mkv_track_cleaner.py strips every embedded subtitle once a
+    validated sidecar exists. A movie cleaned first has lost that track for
+    good, so the constraint is documented in the toolchain table and enforced
+    here.
     """
 
-    def test_fetcher_runs_before_cleaner(self) -> None:
+    def test_extraction_runs_before_cleaner(self) -> None:
         import pipeline
 
         order = pipeline.STEP_ORDER
-        self.assertIn("fetcher", order)
+        self.assertIn("extractor", order)
         self.assertIn("cleaner", order)
         self.assertLess(
-            order.index("fetcher"),
+            order.index("extractor"),
             order.index("cleaner"),
-            "subtitle fetching MUST precede the remux: cleaning first destroys "
-            "the OpenSubtitles moviehash and silently degrades every lookup.",
+            "subtitle extraction MUST precede the remux: cleaning first strips "
+            "the embedded track the sidecar is extracted from.",
         )
 
     def test_sync_runs_after_cleaner_and_before_audit(self) -> None:

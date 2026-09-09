@@ -1,7 +1,7 @@
 """The tools' own offline self-tests, moved out of the shipped files.
 
 Every tool used to carry its complete offline suite inside the production file
-— 2,229 lines across the toolkit, and in ``subtitle_fetcher.py``'s case 1,047
+— 2,229 lines across the toolkit, and in ``subtitle_extractor.py``'s case even more
 lines on top of the 1,811-line unit-test module covering the same code. That
 made the shipped files longer, depressed the measured coverage of the tools
 (self-test code is production code that the unit suite never runs), and split

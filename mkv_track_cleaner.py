@@ -40,10 +40,15 @@ file becomes the new movie rather than being discarded, free space is verified
 before it starts, and the remux is refused outright when there is not enough room.
 
 Pipeline position: run this AFTER movie_standardizer.py and AFTER
-subtitle_fetcher.py. A remux rewrites the container bytes, which permanently
-changes the OpenSubtitles moviehash for that file; fetching subtitles first is
-what preserves exact-hash subtitle matching. This tool warns (but does not
-stop) whenever it remuxes a movie that has no validated external English SRT.
+subtitle_extractor.py. Extraction must come first because this remux strips
+every embedded subtitle from a movie that has a validated external English SRT
+beside it; a movie without one keeps its embedded English subtitle tracks so
+the extractor can still build the sidecar on a later run.
+
+MP4 releases are converted to MKV here: the same remux that cleans the tracks
+also writes the output as Matroska, the verified MKV is published under the
+canonical name, and only then is the superseded MP4 removed. A movie that is
+still hardlinked to its seeding source is deferred exactly like an MKV.
 
     python track_cleaner.py --dry-run
     python track_cleaner.py --dir "E:\\torrents\\final_organized"
@@ -1636,7 +1641,10 @@ def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: st
         for filename in files:
             if _interrupt_requested:
                 break
-            if not (filename.startswith(TEMP_PREFIX) and filename.lower().endswith(".mkv")):
+            # Conversion temps inherit the MP4's name, so both extensions are
+            # transaction artifacts; anything else with the prefix is legacy.
+            if not (filename.startswith(TEMP_PREFIX)
+                    and filename.lower().endswith((".mkv", ".mp4"))):
                 continue
             temp = Path(root) / filename
             try:
@@ -1684,6 +1692,15 @@ def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: st
                     level="WARNING", log_file_path=log_file_path)
                 cleanup_transaction_artifacts(temp, journal_path)
                 handled += 1
+                continue
+            if str(journal.get("output_name") or ""):
+                # A conversion names its destination. An MKV temp must never be
+                # renamed onto the absent ".mp4" source name (that would put
+                # Matroska bytes behind an MP4 extension), so this state is
+                # left for a human rather than guessed at.
+                log(f"Leaving orphan MP4-conversion temp for manual review: '{filename}'",
+                    level="WARNING", log_file_path=log_file_path)
+                preserved += 1
                 continue
             if journal.get("phase") != "verified":
                 log(f"Leaving unverified orphan remux for manual review: '{filename}'",
@@ -1754,6 +1771,33 @@ def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: st
                 continue
             original = Path(root) / source_name
             temp = Path(root) / temp_name
+            output_name = str(journal.get("output_name") or "")
+            output = Path(root) / output_name if output_name else None
+            if output is not None and output.exists() and not temp.exists():
+                # A conversion whose verified MKV landed and whose journal
+                # survived: either the MP4 was already removed (crash before
+                # the journal delete) or it still sits beside the new MKV
+                # (crash between publish and removal). The journal's snapshot
+                # proves the MKV on disk is the verified one, so the stale
+                # MP4 and the journal can both go.
+                if original.exists():
+                    if _source_snapshot_matches(output, journal.get("temp_snapshot") or {}):
+                        log(f"Finishing interrupted MP4 -> MKV conversion: removing '{source_name}' "
+                            f"beside verified '{output_name}'",
+                            level="WARNING", log_file_path=log_file_path)
+                        safe_delete(original)
+                        handled += 1
+                    else:
+                        log(f"Leaving suspected MP4/MKV pair for manual review: '{source_name}' "
+                            f"beside '{output_name}' (output does not match the journal)",
+                            level="WARNING", log_file_path=log_file_path)
+                        preserved += 1
+                        continue
+                log(f"Removing stale conversion journal beside intact MKV: '{filename}'",
+                    level="WARNING", log_file_path=log_file_path)
+                safe_delete(journal_path)
+                handled += 1
+                continue
             if original.exists() and not temp.exists():
                 log(f"Removing stale transaction journal beside intact original: '{filename}'",
                     level="WARNING", log_file_path=log_file_path)
@@ -1780,21 +1824,21 @@ def canonical_movie_layout_issue(mkv_path: Path, target_root: Path) -> str | Non
     """Return a reason when a movie does not follow the canonical folder contract."""
     parent = mkv_path.parent
     if parent == target_root:
-        return "noncanonical layout: MKV is directly under the library root"
+        return "noncanonical layout: movie file is directly under the library root"
     if mkv_path.is_symlink() or parent.is_symlink() or not mkv_path.is_file():
-        return "noncanonical layout: MKV is not a regular non-symlink file in a regular folder"
+        return "noncanonical layout: movie is not a regular non-symlink file in a regular folder"
     if mkv_path.stem.casefold() != parent.name.casefold():
-        return "noncanonical layout: MKV stem does not match its movie-folder name"
+        return "noncanonical layout: movie stem does not match its movie-folder name"
     try:
         siblings = [
             path for path in parent.iterdir()
-            if path.suffix.lower() == ".mkv" and path.is_file() and not path.is_symlink()
+            if path.suffix.lower() in {".mkv", ".mp4"} and path.is_file() and not path.is_symlink()
             and not path.name.startswith(TEMP_PREFIX) and not SAMPLE_NAME_RE.search(path.stem)
         ]
     except OSError as exc:
         return f"noncanonical layout: could not inspect movie folder ({exc})"
     if len(siblings) != 1:
-        return f"noncanonical layout: expected one regular MKV in movie folder, found {len(siblings)}"
+        return f"noncanonical layout: expected one regular movie file in movie folder, found {len(siblings)}"
     return None
 
 def discover_mkv_files(
@@ -1805,7 +1849,7 @@ def discover_mkv_files(
     skip_extras: bool = True,
     min_size: int = 0,
 ) -> tuple[list[Path], list[int], int]:
-    log(f"Scanning '{target_path}' for MKV files...", log_file_path=log_file_path)
+    log(f"Scanning '{target_path}' for movie files (MKV and MP4)...", log_file_path=log_file_path)
     found: list[tuple[Path, int]] = []
     total_bytes = 0
     last_draw = 0.0
@@ -1821,7 +1865,13 @@ def discover_mkv_files(
         for f in names:
             if _interrupt_requested:
                 break
-            if not f.lower().endswith(".mkv") or f.startswith(TEMP_PREFIX):
+            if f.lower().endswith(".mkv"):
+                pass  # the canonical container
+            elif f.lower().endswith(".mp4"):
+                pass  # accepted; converted to MKV in place by this run
+            else:
+                continue
+            if f.startswith(TEMP_PREFIX):
                 continue
             if SAMPLE_NAME_RE.search(Path(f).stem):
                 continue
@@ -1839,14 +1889,17 @@ def discover_mkv_files(
             if _console is not None:
                 now = time.monotonic()
                 if now - last_draw >= 0.12:
-                    _console.progress_message(f"Scanning...  {len(found)} MKV file(s) found")
+                    _console.progress_message(f"Scanning...  {len(found)} movie file(s) found")
                     last_draw = now
     if _console is not None:
         _console.finish_progress()
     found.sort(key=lambda item: os.path.normcase(str(item[0])))
     files = [item[0] for item in found]
     sizes = [item[1] for item in found]
-    log(f"Found {len(files)} MKV file(s) totaling {format_size(total_bytes)}", log_file_path=log_file_path)
+    mp4_count = sum(1 for path in files if path.suffix.lower() == ".mp4")
+    log(f"Found {len(files)} movie file(s) totaling {format_size(total_bytes)}"
+        + (f" ({mp4_count} MP4 to convert to MKV)" if mp4_count else ""),
+        log_file_path=log_file_path)
     return files, sizes, total_bytes
 
 def _log_live_totals(
@@ -1913,7 +1966,7 @@ SETTLED_REMUX = frozenset({STATUS_CLEANED, STATUS_ALREADY_CLEAN, STATUS_SKIPPED}
 
 # Bucket -> verdict, in priority order. A remux that lands without a validated
 # sidecar is appended to `remux_without_srt` *as well as* `cleaned`; that bucket
-# is a warning about the moviehash, not an outcome, so it is not listed here.
+# is a note about library coverage, not an outcome, so it is not listed here.
 # `errors` comes first because a movie that failed after being counted anywhere
 # else is a failure.
 VERDICT_BUCKETS: tuple[tuple[str, str], ...] = (
@@ -2276,7 +2329,13 @@ def process_mkv(
     removed_audio = plan.removed_audio
     removed_subs = plan.removed_subs
 
-    if plan.is_clean:
+    # An MP4 never "matches its plan": whatever the tracks look like, the
+    # container itself must become MKV. The remux below is the conversion -
+    # one pass, applying the same track policy any MKV gets.
+    converting = mkv_path.suffix.lower() == ".mp4"
+    output_path = mkv_path.with_suffix(".mkv") if converting else mkv_path
+
+    if plan.is_clean and not converting:
         stats["already_clean"].append(movie_name)
         if _console is not None:
             _console.end_file_inline("already clean", kind="skip")
@@ -2284,20 +2343,16 @@ def process_mkv(
             to_console=_console is None, log_file_path=log_file_path)
         return
 
-    if external_srt is None:
-        # Pipeline-ordering guardrail. The documented order is
-        # movie_standardizer -> subtitle_fetcher -> this cleaner, because a remux
-        # rewrites the container bytes and therefore permanently changes the
-        # OpenSubtitles moviehash (file size plus the first and last 64 KiB).
-        # Once this file is rewritten it can no longer reproduce the hash of the
-        # release it came from, so subtitle_fetcher.py loses its exact-match
-        # search and degrades to title/year guessing. Warn rather than block:
-        # the remux is still correct work, it just forfeits the exact hash.
+    if external_srt is None and not converting:
+        # No validated sidecar yet: this remux keeps the embedded English
+        # subtitle tracks (see plan_cleanup), so subtitle_extractor.py can
+        # still extract them on a later run. Recording the movie here keeps
+        # the report honest about which movies still owe the library a
+        # sidecar.
         stats.setdefault("remux_without_srt", []).append(movie_name)
         log(
-            f"{tag}No validated external English SRT for '{display_name}': this remux permanently "
-            "changes the OpenSubtitles moviehash, so an exact-hash subtitle match is no longer "
-            "possible for this file. Run subtitle_fetcher.py before this cleaner to preserve it. "
+            f"{tag}No validated external English SRT for '{display_name}': embedded English "
+            "subtitles are retained so subtitle_extractor.py can extract them on a later run. "
             "(Remux will continue.)",
             level="WARNING", to_console=_console is None, log_file_path=log_file_path,
         )
@@ -2309,7 +2364,8 @@ def process_mkv(
 
     if _console is not None:
         _console.mark_details()
-    log(f"{tag}Processing: {display_name} ({format_size(size_before)})",
+    log(f"{tag}Processing: {display_name} ({format_size(size_before)})"
+        + (" [MP4 -> MKV conversion]" if converting else ""),
         to_console=_console is None, log_file_path=log_file_path)
     if foreign_with_srt:
         _log_detail(
@@ -2345,9 +2401,15 @@ def process_mkv(
             "kept_subs_count": len(keep_sub_ids), "kept_subs_desc": kept_subs_descs,
             "removed_subs_count": len(removed_subs), "removed_subs_desc": removed_subs_descs,
             "external_srt": external_srt,
+            "converted_from_mp4": converting,
+            "output_name": output_path.name,
             "size_before": size_before, "size_after": size_before, "space_saved": 0,
             "elapsed_seconds": round(time.monotonic() - proc_start, 2),
         })
+        if converting:
+            stats.setdefault("converted_mp4", []).append(
+                {"name": movie_name, "mkv": output_path.name}
+            )
         return
 
     space_ok, free_bytes, required_bytes, space_warn = check_free_space(mkv_path.parent, size_before)
@@ -2366,6 +2428,12 @@ def process_mkv(
     temp_output, journal_path, transaction_token = new_transaction_paths(mkv_path)
     transaction = create_transaction(mkv_path, temp_output, transaction_token, orig_stat)
     transaction["verification_plan"] = verification_plan
+    if converting:
+        # The conversion's destination name. A remux replaces its source in
+        # place; a conversion publishes a NEW file (Title.mkv) and only then
+        # removes the MP4, and the journal has to name both so crash recovery
+        # can tell which side of that two-step the run died on.
+        transaction["output_name"] = output_path.name
     if external_srt is not None:
         transaction["external_srt"] = external_srt
     try:
@@ -2455,7 +2523,6 @@ def process_mkv(
         transaction["temp_snapshot"] = _source_snapshot(temp_output)
         write_transaction(journal_path, transaction)
 
-        _log_detail("  -> Atomic swap over original...", log_file_path)
         time.sleep(0.1)
         if _interrupt_requested:
             raise KeyboardInterrupt
@@ -2466,28 +2533,49 @@ def process_mkv(
             cleanup_transaction_artifacts(temp_output, journal_path)
             _active_temp_file = None
             return
-        safe_replace(temp_output, mkv_path)
-        _active_temp_file = None
-        safe_delete(journal_path)
-        restore_file_times(mkv_path, orig_stat)
+        if converting:
+            # Two named steps, journalled between: the verified MKV is
+            # published under its canonical name first, the superseded MP4 is
+            # removed second. A crash between them leaves both files plus a
+            # phase="converted" journal, which the next run's recovery
+            # resolves (the MP4 is only deleted once the journal proves the
+            # MKV on disk is the verified one).
+            _log_detail("  -> Atomic publish of the canonical MKV...", log_file_path)
+            safe_replace(temp_output, output_path)
+            _active_temp_file = None
+            transaction["phase"] = "converted"
+            write_transaction(journal_path, transaction)
+            _log_detail("  -> Removing the superseded MP4...", log_file_path)
+            safe_delete(mkv_path)
+            safe_delete(journal_path)
+            restore_file_times(output_path, orig_stat)
+        else:
+            _log_detail("  -> Atomic swap over original...", log_file_path)
+            safe_replace(temp_output, mkv_path)
+            _active_temp_file = None
+            safe_delete(journal_path)
+            restore_file_times(mkv_path, orig_stat)
 
-        final_stat = mkv_path.stat()
+        final_stat = output_path.stat()
         # Re-key the metadata cache onto the file that now exists. The entry
         # written above describes the *source*: a remux preserves the mtime but
         # changes the size, so that entry can never match the file it describes
         # and the next run would re-scan every movie this run just cleaned.
         # ``output_info`` is the verification probe of exactly these bytes, so
         # storing it under the new stat is the answer mkvmerge would give.
+        # A conversion additionally re-keys onto the new .mkv path, leaving the
+        # stale .mp4 entry to age out.
         if probe_cache is not None and output_info is not None:
             probe_cache.put(
-                mkv_path, final_stat.st_size, final_stat.st_mtime_ns, output_info
+                output_path, final_stat.st_size, final_stat.st_mtime_ns, output_info
             )
 
         size_after = final_stat.st_size
         saved_bytes = max(0, size_before - size_after)
         stats["total_space_saved_bytes"] += saved_bytes
         result = (
-            f"  -> Successfully cleaned: {display_name} "
+            f"  -> Successfully {'converted MP4 -> MKV and cleaned' if converting else 'cleaned'}: "
+            f"{display_name} "
             f"({format_size(size_before)} -> {format_size(size_after)} | "
             f"Saved: {format_size(saved_bytes)} | "
             f"{format_duration(time.monotonic() - proc_start)})"
@@ -2499,9 +2587,15 @@ def process_mkv(
             "kept_subs_count": len(keep_sub_ids), "kept_subs_desc": kept_subs_descs,
             "removed_subs_count": len(removed_subs), "removed_subs_desc": removed_subs_descs,
             "external_srt": external_srt,
+            "converted_from_mp4": converting,
+            "output_name": output_path.name,
             "size_before": size_before, "size_after": size_after, "space_saved": saved_bytes,
             "elapsed_seconds": round(time.monotonic() - proc_start, 2),
         })
+        if converting:
+            stats.setdefault("converted_mp4", []).append(
+                {"name": movie_name, "mkv": output_path.name}
+            )
     except KeyboardInterrupt:
         if temp_output is not None:
             cleanup_transaction_artifacts(temp_output, journal_path)
@@ -2537,6 +2631,7 @@ def generate_and_save_report(
     cleaned: list[dict[str, Any]] = list(stats.get("cleaned") or [])
     already_clean: list[Any] = list(stats.get("already_clean") or [])
     remux_without_srt: list[Any] = list(stats.get("remux_without_srt") or [])
+    converted: list[dict[str, Any]] = list(stats.get("converted_mp4") or [])
     deferred: list[Any] = list(stats.get("deferred_hardlinked") or [])
     skipped_english: list[Any] = list(stats.get("skipped_no_english") or [])
     skipped_layout: list[Any] = list(stats.get("skipped_layout") or [])
@@ -2547,7 +2642,7 @@ def generate_and_save_report(
     report = Report(
         "JELLYFIN MKV TRACK CLEANUP REPORT",
         "Lossless mkvmerge remux \u00b7 commentary, dubs and embedded bitmaps removed; "
-        "video bytes never touched",
+        "MP4s converted to MKV \u00b7 video bytes never touched",
     )
     header: list[tuple[str, Any]] = [
         ("Mode", "DRY-RUN (simulation, no files modified)" if dry_run else "LIVE RUN (changes applied)"),
@@ -2583,13 +2678,14 @@ def generate_and_save_report(
 
     rows: list[tuple[Any, str, str]] = [
         (len(cleaned), "Cleaned / remuxed", "simulated" if dry_run else "tracks pruned, video untouched"),
+        (len(converted), "Converted MP4 \u2192 MKV", "container swapped losslessly in the same remux"),
         (len(already_clean), "Already clean", "no writes needed"),
         (len(errors), "Errors", "unreadable or failed"),
-        (len(remux_without_srt), "Remuxed without SRT", "moviehash now invalidated"),
+        (len(remux_without_srt), "Cleaned without SRT", "English embedded subs kept for the extractor"),
         (len(deferred), "Deferred (hardlinked)", "still being seeded"),
         (len(skipped_layout), "Skipped (layout)", "folder is not canonical"),
         (len(skipped_english), "Skipped (no English)", "foreign film, kept as-is"),
-        (total, "Movies scanned", "every MKV found in the target"),
+        (total, "Movies scanned", "every MKV and MP4 found in the target"),
     ]
     report.blank()
     report.scorecard(rows)
@@ -2632,18 +2728,16 @@ def generate_and_save_report(
             report.blank()
             report.entries([(str(item.get("name", "?")), str(item.get("error", ""))) for item in errors])
         if remux_without_srt:
-            report.subsection("REMUXED WITH NO EXTERNAL SRT (MOVIEHASH INVALIDATED)", count=len(remux_without_srt))
+            report.subsection("REMUXED WITHOUT AN EXTERNAL SRT (EMBEDDED ENGLISH SUBS KEPT)", count=len(remux_without_srt))
             report.paragraph(
                 "These movies were remuxed without a validated external English SRT beside "
-                "them. A remux rewrites the container bytes, which permanently changes the "
-                "OpenSubtitles moviehash (file size plus the first and last 64 KiB). "
-                "subtitle_fetcher.py can no longer find an exact hash match for any movie "
-                "listed here and falls back to the less reliable title/year search, which is "
-                "held for review rather than downloaded. To keep exact-hash matching, run "
-                "subtitle_fetcher.py BEFORE this cleaner."
+                "them, so their embedded English subtitle tracks were deliberately retained: "
+                "subtitle_extractor.py can still build the sidecar from them on a later run. "
+                "Once a sidecar exists, the next pass strips every embedded subtitle and the "
+                "sidecar becomes the sole subtitle option."
             )
             report.blank()
-            report.entries([(str(name), "moviehash no longer matches the original release")
+            report.entries([(str(name), "embedded English subtitles retained")
                             for name in remux_without_srt])
         if deferred:
             report.subsection("DEFERRED (STILL HARDLINKED / SEEDED)", count=len(deferred))
@@ -2676,6 +2770,22 @@ def generate_and_save_report(
             ])
 
     # ---- what the run changed ---------------------------------------------
+    if converted:
+        report.section(
+            "CONVERTED MP4 \u2192 MKV THIS RUN" + (" (SIMULATED)" if dry_run else ""),
+            count=len(converted),
+            total=total,
+            intro=(
+                "These MP4s were remuxed into the canonical MKV container in the same pass "
+                "as the track cleanup: same track policy, same verification, same atomic "
+                "publish. The superseded MP4 was removed only after the verified MKV was "
+                "on disk."
+            ),
+        )
+        report.entries([
+            (str(item.get("name", "?")), f"-> {item.get('mkv', '')}") for item in converted
+        ])
+
     report.section(
         "CLEANED THIS RUN (SIMULATED)" if dry_run else "CLEANED THIS RUN",
         count=len(cleaned),
@@ -2690,7 +2800,10 @@ def generate_and_save_report(
         report.paragraph("None.")
     else:
         for position, item in enumerate(cleaned, start=1):
-            fields: list[tuple[str, str]] = [
+            fields: list[tuple[str, str]] = []
+            if item.get("converted_from_mp4"):
+                fields.append(("Converted", f"MP4 \u2192 {item.get('output_name', 'MKV')}"))
+            fields += [
                 ("Kept audio", str(item.get("kept_audio", ""))),
                 ("Removed audio",
                  ", ".join(item.get("removed_audio_desc") or [])
@@ -2794,8 +2907,9 @@ def _print_startup_banner(
         "  Foreign films       : cleaned when a validated external English SRT is present "
         "(best non-commentary audio kept)",
         "  Sidecar subtitles   : never modified by this cleaner (legacy .en.srt is renamed to .eng.srt)",
-        "  Pipeline order      : movie_standardizer.py -> subtitle_fetcher.py -> this cleaner",
-        "  (remuxing first invalidates the OpenSubtitles moviehash; a warning is logged per file)",
+        "  Pipeline order      : movie_standardizer.py -> subtitle_extractor.py -> this cleaner",
+        "  (extraction must happen before this remux strips the embedded subtitles)",
+        "  MP4 releases        : converted to MKV by the same remux (verified, atomic, MP4 removed after)",
         "  Hardlinked movies   : always deferred (never remuxed while seeding)",
         f"  Process priority    : {priority}",
         f"  Log file            : {log_file_path or '(disabled)'}",
@@ -2824,8 +2938,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dir", default=TARGET_DIR, help=f"Target library folder (Default: {TARGET_DIR})")
     parser.add_argument("--dry-run", action="store_true", help="Simulate cleanup without modifying any files")
     parser.add_argument(
-        "--only", action="append", default=[], metavar="MKV",
-        help="Process only this exact MKV path (may be supplied more than once)",
+        "--only", action="append", default=[], metavar="MOVIE",
+        help="Process only this exact MKV or MP4 path (may be supplied more than once)",
     )
     parser.add_argument("--mkvmerge", default=None, help="Custom path to mkvmerge executable")
     parser.add_argument("--log", default=LOG_FILE, help=f"Continuous log file path (Default: {LOG_FILE})")
@@ -2994,12 +3108,13 @@ def main(argv: list[str] | None = None) -> int:
             requested: set[str] = set()
             for raw_path in args.only:
                 candidate_path = Path(raw_path).expanduser().resolve()
-                if candidate_path.suffix.lower() != ".mkv" or candidate_path.is_symlink() or not candidate_path.is_file():
-                    raise ValueError(f"--only must name an existing regular MKV: {raw_path}")
+                if (candidate_path.suffix.lower() not in {".mkv", ".mp4"}
+                        or candidate_path.is_symlink() or not candidate_path.is_file()):
+                    raise ValueError(f"--only must name an existing regular MKV or MP4: {raw_path}")
                 try:
                     candidate_path.relative_to(target_path)
                 except ValueError as exc:
-                    raise ValueError(f"--only MKV must be inside --dir: {raw_path}") from exc
+                    raise ValueError(f"--only movie must be inside --dir: {raw_path}") from exc
                 requested.add(os.path.normcase(os.path.normpath(str(candidate_path))))
             selected = [
                 (path, size) for path, size in zip(mkv_files, file_sizes, strict=True)

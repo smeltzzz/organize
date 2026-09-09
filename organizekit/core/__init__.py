@@ -43,13 +43,6 @@ from .locking import (
     LockUnavailable,
     try_file_lock,
 )
-from .nethttp import (
-    KEEPALIVE_ENV,
-    ConnectionPool,
-    ensure_pooled_opener,
-    keepalive_disabled,
-    shared_pool,
-)
 from .parallel import (
     DEFAULT_WORKER_CAP,
     JobOutcome,
@@ -59,7 +52,6 @@ from .parallel import (
     resolve_workers,
 )
 from .probecache import MediaProbeCache, open_probe_cache, probe_cache_path
-from .ratelimit import BucketRegistry, TokenBucket, host_key
 from .report import Report
 from .runlog import RunLog
 from .smoke import run_field_smoke_test
@@ -106,14 +98,12 @@ from .text import (
 from .toolchain import (
     PREREQUISITES,
     RUN_TOOL_VERB,
-    SCRAPING_DAILY_CAP,
     STEP_BINARIES,
     STEP_ORDER,
     STEPS,
     TOOL_SCRIPTS,
     TOOLS_DIR,
     Step,
-    api_key_present,
     build_step_args,
     child_cwd,
     detect_tools,
@@ -122,7 +112,9 @@ from .toolchain import (
     ffsubsync_installed,
     ffsubsync_ready,
     missing_tool_scripts,
+    mkvextract_installed,
     mkvmerge_installed,
+    mkvtoolnix_installed,
     prerequisite_issue,
     step_skip_reason,
     tool_command,
@@ -162,21 +154,14 @@ __all__ = [
     "iter_completed",
     "map_ordered",
     "resolve_workers",
-    "KEEPALIVE_ENV",
-    "ConnectionPool",
-    "ensure_pooled_opener",
-    "keepalive_disabled",
-    "shared_pool",
     "PREREQUISITES",
     "RUN_TOOL_VERB",
-    "SCRAPING_DAILY_CAP",
     "STEPS",
     "STEP_BINARIES",
     "STEP_ORDER",
     "TOOLS_DIR",
     "TOOL_SCRIPTS",
     "Step",
-    "api_key_present",
     "build_step_args",
     "detect_tools",
     "ffmpeg_installed",
@@ -184,7 +169,9 @@ __all__ = [
     "ffsubsync_installed",
     "ffsubsync_ready",
     "missing_tool_scripts",
+    "mkvextract_installed",
     "mkvmerge_installed",
+    "mkvtoolnix_installed",
     "prerequisite_issue",
     "step_skip_reason",
     "ENV_FILE_NAME",
@@ -204,12 +191,9 @@ __all__ = [
     "ExclusiveRunLock",
     "LockTimeoutError",
     "LockUnavailable",
-    "BucketRegistry",
     "MediaProbeCache",
     "open_probe_cache",
     "probe_cache_path",
-    "TokenBucket",
-    "host_key",
     "Report",
     "RunLog",
     "atomic_write_text",

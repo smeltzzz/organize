@@ -3,12 +3,11 @@
 #
 # The default sdist picks up `tests/test_*.py` and nothing else, which is the
 # worst of both worlds: half a suite that cannot run, because the fixtures it
-# imports (`tests/property.py`, the `fake_mkvmerge.py` / `fake_ffprobe.py` /
-# `fake_provider.py` stand-ins, `tests/selftests/`) were left behind. A
-# distributor who runs the tests at build time - which is the reason to ship
-# them at all - would see import errors rather than a verdict. So the sdist
-# carries the whole suite, its fixtures, the docs the README links to, and the
-# zipapp builder.
+# imports (`tests/property.py`, the `fake_mkvmerge.py` / `fake_ffprobe.py`
+# stand-ins, `tests/selftests/`) were left behind. A distributor who runs the
+# tests at build time - which is the reason to ship them at all - would see
+# import errors rather than a verdict. So the sdist carries the whole suite,
+# its fixtures, the docs the README links to, and the zipapp builder.
 #
 # The *wheel* stays code-only: `[tool.setuptools] packages/py-modules` decides
 # that, and `organize test --unit` says so when the suite is not there.
