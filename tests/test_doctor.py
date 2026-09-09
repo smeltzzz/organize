@@ -219,8 +219,8 @@ class BinaryCheckTests(unittest.TestCase):
         def only_mkvmerge(name: str) -> str | None:
             return "/usr/bin/mkvmerge" if name == "mkvmerge" else None
 
-        fetcher = fake_module("subtitle_fetcher", find_mkvtoolnix_binary=only_mkvmerge)
-        with with_modules(subtitle_fetcher=fetcher):
+        extractor = fake_module("subtitle_extractor", find_mkvtoolnix_binary=only_mkvmerge)
+        with with_modules(subtitle_extractor=extractor):
             check = organize.check_mkvextract(context())
         self.assertEqual(check.status, "warn")
         self.assertIn("embedded subtitle tracks", check.detail)
