@@ -237,8 +237,8 @@ def classify_folder(folder: Path) -> FolderAudit:
         # its own state instead of being folded into CANONICAL_MKV.
         return FolderAudit(
             folder, "MISSING_SIDECAR", files,
-            f"no English {EXTERNAL_SRT_SUFFIX} sidecar; subtitle_extractor.py can still "
-            "build one from the embedded track",
+            f"no English {EXTERNAL_SRT_SUFFIX} sidecar; run subtitle_extractor.py before the "
+            "cleaner (it strips every embedded subtitle) or place one yourself",
         )
     # The name is right, so check the contents. A sidecar that is empty, an
     # error page, or a truncated download looks perfectly healthy to a

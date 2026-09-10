@@ -50,8 +50,8 @@ If a movie already has a validated sidecar — placed by hand, carried over,
 or extracted last week — this tool leaves it, and the movie, completely
 untouched. It is never re-extracted and never re-synced. Extraction runs
 only for movies with no sidecar at all; that is why it must run *before*
-the track cleaner, which strips every embedded subtitle once a sidecar
-exists.
+the track cleaner, which removes every embedded subtitle from every
+movie.
 
 **A fresh extraction is measured exactly once.** Every sidecar this tool
 writes is recorded with its SHA-256 in a provenance ledger outside the
@@ -118,12 +118,19 @@ everything else.
 
 ## 2 · `mkv_track_cleaner.py` — lossless remux
 
-Keeps the single best English audio track and strips commentary, dubs,
-and embedded subtitles — video is never re-encoded. A movie with no English
-audio is cleaned the same way around the best non-commentary track in the
-movie's own language, with or without an English sidecar yet. Once a
-validated sidecar exists, every embedded subtitle track goes, leaving the
-external `.eng.srt` as the sole subtitle option.
+Every movie ends up with exactly one audio track — the best-scoring one in
+the movie's own (native) language — and video is never re-encoded. Dubs,
+commentary and every other language go. The native language is decided by
+the file's own markers, in order: a track flagged *original*, a single
+shared language, the default-flagged track, then track order (dubs are
+conventionally appended last); a track titled "dub"/"dubbed" is never the
+keeper whatever its language. Every embedded subtitle is removed on every
+remux, sidecar or not — the external `.eng.srt` is the library's only
+subtitle, which is why `subtitle_extractor.py` runs first in the pipeline.
+A movie remuxed with no sidecar is named in the report (it has no subtitle
+now), and a movie with a **broken** `.eng.srt` beside it is skipped
+entirely: an existing sidecar is authoritative even when it is unusable —
+fix or delete it, and the next run cleans the movie.
 **MP4s are converted to MKV** in the same remux (a lossless container swap
 with the transactional replace, free-space check and seeding deferral the
 MKV path already had). A movie remuxed *without* a validated sidecar keeps

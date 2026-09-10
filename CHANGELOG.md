@@ -27,14 +27,24 @@ someone else's release — so it was removed outright, not disabled.
   temporary MKV bridge, because `mkvextract` cannot read `mov_text` directly.
   A movie with no usable embedded track is reported for a human decision;
   there is no download to fall back to and the report says so.
-- **Foreign films are cleaned even before an English sidecar exists.** The
-  cleaner used to leave a movie with no English audio untouched unless a
-  validated `.eng.srt` already sat beside it; it now strips such movies to
-  their best non-commentary track in the movie's own language either way.
-  The sidecar only decides the embedded subtitles: without one the English
-  embeds stay in the file for `subtitle_extractor.py` to lift out on a later
-  run; with one they all go. Only a movie whose every audio track is
-  commentary is still skipped.
+- **One audio track per movie: the best in the movie's own (native)
+  language.** The cleaner no longer prefers English audio. The native
+  language is decided by the file's own markers — a track flagged
+  `original`, a single shared language, the default-flagged track, then
+  track order — and tracks titled as dubs are never the keeper, so a
+  foreign film keeps its original-language track while an English dub of it
+  goes, and an English film keeps English while its foreign dubs go. A
+  movie whose every audio track is commentary is still skipped, now with a
+  clearer report row.
+- **No embedded subtitle survives any remux.** The old safety net — keep the
+  embedded English subs when there is no sidecar yet, so the extractor can
+  lift them out later — is gone: the `.eng.srt` beside the movie is the
+  library's only subtitle, and `subtitle_extractor.py` runs before the
+  cleaner in the pipeline, so anything worth saving is saved before the
+  strip. A movie cleaned with no sidecar is named in the report as needing
+  one (a human decision). A movie with a **broken** `.eng.srt` beside it is
+  skipped entirely: an existing sidecar is authoritative even when it is
+  unusable — fix or delete it and re-run.
 - **The sync rule is inverted.** `sync_subtitles.py` used to skip extracted
   sidecars as "already frame-accurate" and sync downloaded ones; now it is
   exactly the other way around. A sidecar the extractor just wrote is

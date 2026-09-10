@@ -5,8 +5,8 @@ Jellyfin Library One-Shot Completer
 
 Runs the full Organize toolchain repeatedly until the library auditor
 reports 100% canonical: every movie has a validated, synced .eng.srt
-or .eng.sdh.srt, exactly one best English audio track, no embedded
-subtitles, and passes 10-bit inspection.
+or .eng.sdh.srt, exactly one best audio track in the movie's own language,
+no embedded subtitles, and passes 10-bit inspection.
 
 This is the "never stop, never skip, get to the end result no matter
 what" runner. It handles:
@@ -1314,7 +1314,7 @@ def run_one_shot(
         log_info(runtime_log, "SUCCESS: Library is 100% complete.")
         log_info(runtime_log, "")
         log_info(runtime_log, "  OK  Every movie has a synced .eng.srt or .eng.sdh.srt")
-        log_info(runtime_log, "  OK  Every MKV has exactly 1 best English audio track")
+        log_info(runtime_log, "  OK  Every MKV has exactly 1 best audio track (the movie's own language)")
         log_info(runtime_log, "  OK  No embedded subtitles remain")
         log_info(runtime_log, "  OK  All movies audited and 10-bit inspected")
         if state.notes:

@@ -108,7 +108,7 @@ HINTS: dict[str, str] = {
     ),
     "extractor": (
         "Runs before the cleaner on purpose: the cleaner strips every embedded subtitle "
-        "once a validated sidecar exists, so extraction must happen while the track is "
+        "from every movie, so extraction must happen while the track is "
         "still in the file."
     ),
     "sync": (
@@ -352,7 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=("movie_standardizer.py is the qBittorrent completion hook and is not part of\n"
                 "this sweep. Subtitles are extracted before the cleaner because the cleaner\n"
-                "strips every embedded subtitle track once a validated sidecar exists.\n"
+                "strips every embedded subtitle track from every movie.\n"
                 "Subtitle sync (ffsubsync) runs just before the audit: it only rewrites\n"
                 "subtitle bytes, so the audit sees the finished sidecars."),
     )

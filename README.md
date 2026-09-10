@@ -48,7 +48,7 @@ are the usual media binaries (`mkvmerge` + `mkvextract`, `ffprobe`,
 | 🫧 **Zero pip installs** | A tool is a single file. Copy it, run it, done. |
 | 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
 | 💬 **Subtitles from the movie itself** | Each movie's own embedded English track is extracted to a validated `.eng.srt` — text tracks via `mkvextract`, image tracks via OCR, MP4s through a temporary MKV bridge — and then measured once with ffsubsync. Nothing is ever downloaded, and an existing sidecar is never re-extracted or re-synced. |
-| ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track — on a movie with no English audio, the best track in the movie's own language — and drops commentary, dubs, and embedded bitmap subtitles. Video untouched. |
+| ✂ **Lossless track cleanup** | `mkvmerge` remux keeps exactly one audio track — the best one in the movie's own (native) language — drops every dub and commentary track, and removes every embedded subtitle (the `.eng.srt` beside the movie is the only subtitle). Video untouched. |
 | 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
 | 🛡 **Safety invariants** | Advisory locks, atomic staging, and crash recovery — engineered so a power cut can never corrupt your library. |
@@ -277,7 +277,7 @@ one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
 | Tool | What it does | Needs |
 | :--- | :--- | :--- |
 | [`subtitle_extractor.py`](docs/tools.md#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie, extracted from the movie's **own embedded track** — text via `mkvextract`, image via OCR, MP4s through a temporary MKV bridge. An existing sidecar is authoritative and never touched. | `mkvmerge` + `mkvextract` |
-| [`mkv_track_cleaner.py`](docs/tools.md#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best audio track, strip commentary, dubs and embedded subtitles. Video untouched; seeding movies deferred. | `mkvmerge` |
+| [`mkv_track_cleaner.py`](docs/tools.md#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best audio track (the movie's own language), strip every dub, commentary track and embedded subtitle. Video untouched; seeding movies deferred; a broken `.eng.srt` skips the movie. | `mkvmerge` |
 | [`bitdepth.py`](docs/tools.md#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect native HDR10 / HDR10+ / Dolby Vision fail-closed, flag anything ambiguous for review. | `ffprobe` |
 | [`library_auditor.py`](docs/tools.md#4--library_auditorpy--read-only-health-check) | Strictly read-only health check of layout, naming and subtitles, with gating exit codes for cron. | nothing |
 | [`movie_standardizer.py`](docs/tools.md#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names and hardlink one movie file per `Title (Year)/` — MKV canonical, MP4 placed as-is. Zero extra bytes. | `ffprobe` (optional) |
@@ -314,11 +314,11 @@ Non-negotiable rules every tool obeys:
 1. **Hardlink-only ingestion** — `movie_standardizer.py` calls `os.link()`
    exclusively. No copy, no move, no symlink, no cross-device fallback. Your
    seeds keep seeding on the same bytes.
-2. **Extraction before remuxing** — once a validated sidecar exists the
-   cleaner strips every embedded subtitle track, so extraction must happen
-   while the track is still in the container. The pipeline enforces the
-   order; the cleaner keeps the embedded English subs when it must remux
-   without a sidecar, so nothing is lost either way.
+2. **Extraction before remuxing** — the cleaner removes every embedded
+   subtitle from every movie, so extraction must happen while the track is
+   still in the container. The pipeline enforces the order. A movie cleaned
+   with no sidecar simply never had a usable English track, and the report
+   names it: that one is a human decision.
 3. **Seeding movies are inviolable** — link count > 1 means *deferred,
    unconditionally*. No override flag exists.
 4. **Fail-closed concurrency** — all tools coordinate through advisory locks

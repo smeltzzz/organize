@@ -2,21 +2,24 @@
 """
 Lossless Canonical Jellyfin MKV Track Cleaner
 ==============================================
-Remux-only (no video/audio re-encode). Keeps the single best English audio
-track when one exists; a movie with no English audio is cleaned the same way
-around the best non-commentary track of any language (the movie's own).
-Whenever a validated external English SRT is present it becomes the sole
-subtitle option (all embedded subs stripped).
+Remux-only (no video/audio re-encode). Every movie ends up with exactly one
+audio track - the best-scoring one in the movie's own (native) language -
+with dubs, commentary and every other language removed. Every embedded
+subtitle is removed on every remux: the external .eng.srt beside the movie
+is the library's only subtitle, so subtitle_extractor.py must run first
+(the pipeline enforces that order).
 
 Safety:
   * Idempotent — already-clean files are not rewritten
-  * A movie with no English audio keeps its best non-commentary track in the
-    movie's own language, with or without an English sidecar yet
-  * Foreign films *with* a validated ``.eng.srt`` are cleaned: best audio kept,
-    commentary/DVS dropped, every embedded subtitle removed
-  * SDH, text-description, and Forced *subtitles* are kept only when no
-    validated external SRT exists (never treated as DVS)
+  * The native language is decided by the file's own markers, in order: a
+    track flagged 'original', a single shared language, the default-flagged
+    track, then track order (dubs are conventionally appended last)
+  * Tracks titled as dubs are never the keeper, whatever their language
   * DVS / commentary *audio* is dropped
+  * Every embedded subtitle is removed, with or without a sidecar; a movie
+    cleaned without one is named in the report, because it has no subtitle now
+  * A movie with a broken .eng.srt beside it is skipped entirely: an existing
+    sidecar is authoritative even when it is unusable - fix or delete it
   * Post-remux fingerprint verification (tracks, chapters, attachments, duration,
     frames, size) — a bad remux is never swapped over the original
   * Unique same-directory transaction journal + atomic replace; orphan output is
@@ -857,20 +860,54 @@ def is_matching_language(track: dict[str, Any] | None, target_languages: set[str
             return True
     return False
 
-def name_implies_english(name: str) -> bool:
-    if not name:
-        return False
-    return bool(re.search(r"\b(english|eng)\b", name.lower()))
+DUB_NAME_RE = re.compile(r"\b(dub|dubs|dubbed|voice-?over|voiceovers?)\b", re.IGNORECASE)
 
-def is_english_named_untagged(track: dict[str, Any] | None) -> bool:
+
+def is_named_dub_track(track: dict[str, Any] | None) -> bool:
+    """A track whose own title admits it is a dub.
+
+    A language is never a dub by itself - 'Spanish' beside English audio is a
+    dub only when the file says so. A title saying 'dub'/'dubbed'/'voice-over'
+    is the file saying so.
+    """
     if not track:
         return False
+    name = str((track.get("properties") or {}).get("track_name") or "")
+    return bool(DUB_NAME_RE.search(name))
+
+
+def audio_language_token(track: dict[str, Any]) -> str:
+    """The track's language as one normalized token; ``und`` when unknown."""
     props = track.get("properties") or {}
-    lang = str(props.get("language") or "").strip().lower()
-    lang_ietf = str(props.get("language_ietf") or "").strip().lower()
-    if lang not in ("und", "") or lang_ietf not in ("und", ""):
-        return False
-    return name_implies_english(str(props.get("track_name") or ""))
+    for key in ("language", "language_ietf", "tag_language"):
+        code = str(props.get(key) or "").strip().lower()
+        if code:
+            base = re.split(r"[-_.]", code)[0]
+            if base in ("und", ""):
+                break
+            return normalize_language(base)
+    return "und"
+
+
+def native_audio_language(candidates: list[dict[str, Any]]) -> str:
+    """The movie's own language, decided by the file's own markers.
+
+    In order: a track flagged ``original``; one distinct language shared by
+    every candidate; the default-flagged track's language; the first track's
+    language (dubs are conventionally appended, so the first track is the
+    likeliest original). Never a preference for any one language.
+    """
+    for track in candidates:
+        if (track.get("properties") or {}).get("flag_original"):
+            return audio_language_token(track)
+    languages = {audio_language_token(t) for t in candidates}
+    if len(languages) == 1:
+        return next(iter(languages))
+    for track in candidates:
+        if (track.get("properties") or {}).get("flag_default"):
+            return audio_language_token(track)
+    return audio_language_token(candidates[0])
+
 
 def hardlink_count(path: Path) -> int:
     """Return the visible hardlink count; treat unsupported values as one link."""
@@ -1976,6 +2013,7 @@ VERDICT_BUCKETS: tuple[tuple[str, str], ...] = (
     ("already_clean", STATUS_ALREADY_CLEAN),
     ("deferred_hardlinked", STATUS_DEFERRED),
     ("skipped_layout", STATUS_SKIPPED_LAYOUT),
+    ("skipped_sidecar", STATUS_SKIPPED),
     ("skipped_no_english", STATUS_SKIPPED),
 )
 
@@ -2080,10 +2118,12 @@ def plan_cleanup(
     """Decide which tracks survive the remux, or why the movie must be left alone.
 
     Returns ``(plan, "")`` when there is something to do (or the file is
-    already clean), and ``(None, reason)`` when no audio track can be retained
-    at all - every audio track is commentary/DVS. A movie with no English
-    audio is not a skip: the best non-commentary track of any language is
-    kept, and a validated sidecar only decides the embedded subtitles.
+    already clean), and ``(None, reason)`` when no audio track can be
+    retained - every track is commentary/DVS or a titled dub. Exactly one
+    audio track survives: the best-scoring one in the movie's native
+    language. Every embedded subtitle is removed on every remux; the
+    extractor runs before this tool, so anything worth saving is already a
+    sidecar.
 
     The caller owns all I/O: probing, hardlink checks, free-space checks, the
     mkvmerge run, verification, journaling and the atomic swap. This function
@@ -2100,61 +2140,40 @@ def plan_cleanup(
     audio_tracks = [t for t in tracks if t.get("type") == "audio"]
     subtitle_tracks = [t for t in tracks if t.get("type") == "subtitles"]
 
-    # Prefer tagged/named English audio. A movie with none is cleaned around
-    # its best non-commentary track of any language - the movie's own - with
-    # or without an English sidecar yet: the sidecar decides the embedded
-    # subtitles below, never whether the audio is cleaned.
-    english_audio = [
+    # The audio policy: one track, the best in the movie's own language.
+    # Commentary/DVS and tracks titled as dubs are out, and so is every other
+    # language: the native language comes from the file's own markers (an
+    # 'original' flag, a single shared language, the default track, then track
+    # order), never from a preference for English.
+    candidates = [
         t for t in audio_tracks
-        if is_matching_language(t, audio_langs) and not is_commentary_track(t, remove_commentary)
+        if not is_commentary_track(t, remove_commentary) and not is_named_dub_track(t)
     ]
-    if not english_audio:
-        # An untagged stream is safe only when its explicit title identifies it
-        # as English. Never guess that a bare ``und`` audio stream is English.
-        english_audio = [
-            t for t in audio_tracks
-            if is_english_named_untagged(t) and not is_commentary_track(t, remove_commentary)
-        ]
+    if not candidates:
+        if not audio_tracks:
+            return None, "no audio track to retain"
+        return None, "every audio track is commentary/descriptive or a titled dub"
 
-    foreign_with_srt = False
-    if english_audio:
-        valid_audio = english_audio
-    else:
-        # No English audio: keep the single best non-commentary track of any
-        # language - the movie's own. Whether a verified external English SRT
-        # exists only decides the embedded subtitles (kept below for the
-        # extractor while there is no sidecar), never the audio cleanup.
-        valid_audio = [
-            t for t in audio_tracks
-            if not is_commentary_track(t, remove_commentary)
-        ]
-        foreign_with_srt = external_srt is not None
-        if not valid_audio:
-            if external_srt is not None:
-                return None, "no non-commentary audio track to retain beside external English SRT"
-            any_english = any(is_matching_language(t, audio_langs) for t in audio_tracks)
-            return None, ("all English audio tracks are commentary/descriptive"
-                          if any_english else "no non-commentary audio track to retain")
-
-    best_audio = max(valid_audio, key=get_audio_quality_score)
+    native = native_audio_language(candidates)
+    pool = [t for t in candidates if audio_language_token(t) == native]
+    best_audio = max(pool, key=get_audio_quality_score)
     best_audio_id = int(best_audio["id"])
+    foreign_with_srt = bool(
+        external_srt is not None and not is_matching_language(best_audio, audio_langs)
+    )
 
-    keep_subtitles = [
-        t for t in subtitle_tracks
-        if (is_matching_language(t, sub_langs) or is_english_named_untagged(t))
-        and not is_commentary_track(t, remove_commentary)
-    ]
-    if external_srt is not None:
-        # A verified exact-stem external SRT is always the authoritative
-        # Jellyfin subtitle choice. Remove every embedded subtitle option,
-        # including normal, SDH, forced, and non-English tracks.
-        keep_subtitles = []
-    keep_sub_ids = [int(t["id"]) for t in keep_subtitles]
+    # Every embedded subtitle goes, every time: the sidecar beside the movie
+    # is the library's only subtitle. subtitle_extractor.py runs before this
+    # tool (the pipeline enforces the order), so an English track worth
+    # saving has already been saved; a movie cleaned with no sidecar is
+    # named in the report as needing one.
+    keep_subtitles: list[dict[str, Any]] = []
+    keep_sub_ids: list[int] = []
     existing_audio_ids = [int(t["id"]) for t in audio_tracks]
     existing_sub_ids = [int(t["id"]) for t in subtitle_tracks]
 
     removed_audio = [t for t in audio_tracks if int(t["id"]) != best_audio_id]
-    removed_subs = [t for t in subtitle_tracks if int(t["id"]) not in set(keep_sub_ids)]
+    removed_subs = list(subtitle_tracks)
 
     return CleanupPlan(
         best_audio=best_audio,
@@ -2300,11 +2319,21 @@ def process_mkv(
     if candidate.get("valid"):
         external_srt = candidate
     elif candidate.get("reason") != "external SRT is absent":
+        # A subtitle file sits beside this movie but cannot be trusted (empty,
+        # wrong encoding, malformed, or a legacy name that could not be
+        # promoted). An existing sidecar is authoritative even when it is
+        # broken: the movie is left completely untouched and the report says
+        # why. Fix or delete the file, and the next run cleans the movie.
+        reason = str(candidate.get("reason") or "sidecar is unusable")
+        if _console is not None:
+            _console.end_file_inline("skipped (broken sidecar)", kind="warn")
         log(
-            f"{tag}External SRT ignored for '{display_name}': {candidate.get('reason')}; "
-            "retaining the established embedded subtitle selection",
+            f"{tag}Skipping '{display_name}': an .eng.srt exists but is unusable "
+            f"({reason}). The movie is left untouched; fix or delete the file and re-run.",
             level="WARNING", to_console=_console is None, log_file_path=log_file_path,
         )
+        stats.setdefault("skipped_sidecar", []).append({"name": movie_name, "reason": reason})
+        return
 
     # Pure decision: which tracks survive, or why nothing can be retained.
     # Everything below is I/O (the remux, verification, journal, swap).
@@ -2345,17 +2374,16 @@ def process_mkv(
             to_console=_console is None, log_file_path=log_file_path)
         return
 
-    if external_srt is None and not converting:
-        # No validated sidecar yet: this remux keeps the embedded English
-        # subtitle tracks (see plan_cleanup), so subtitle_extractor.py can
-        # still extract them on a later run. Recording the movie here keeps
-        # the report honest about which movies still owe the library a
-        # sidecar.
+    if external_srt is None:
+        # No validated sidecar: this remux removes every embedded subtitle, so
+        # the movie ends up with no subtitle at all. Recorded so the report
+        # names the movies that now owe the library a sidecar.
         stats.setdefault("remux_without_srt", []).append(movie_name)
         log(
-            f"{tag}No validated external English SRT for '{display_name}': embedded English "
-            "subtitles are retained so subtitle_extractor.py can extract them on a later run. "
-            "(Remux will continue.)",
+            f"{tag}No validated external English SRT for '{display_name}': every embedded "
+            "subtitle is being removed. subtitle_extractor.py runs before this tool (the "
+            "pipeline enforces it), so an English track worth saving was already saved; "
+            "otherwise place a subtitle yourself.",
             level="WARNING", to_console=_console is None, log_file_path=log_file_path,
         )
 
@@ -2637,8 +2665,10 @@ def generate_and_save_report(
     deferred: list[Any] = list(stats.get("deferred_hardlinked") or [])
     skipped_english: list[Any] = list(stats.get("skipped_no_english") or [])
     skipped_layout: list[Any] = list(stats.get("skipped_layout") or [])
+    skipped_sidecar: list[Any] = list(stats.get("skipped_sidecar") or [])
     errors: list[dict[str, Any]] = list(stats.get("errors") or [])
-    attention = len(remux_without_srt) + len(deferred) + len(skipped_layout) + len(errors)
+    attention = (len(remux_without_srt) + len(deferred) + len(skipped_layout)
+                 + len(skipped_sidecar) + len(errors))
     total = int(stats.get("total_scanned") or 0)
 
     report = Report(
@@ -2683,10 +2713,11 @@ def generate_and_save_report(
         (len(converted), "Converted MP4 \u2192 MKV", "container swapped losslessly in the same remux"),
         (len(already_clean), "Already clean", "no writes needed"),
         (len(errors), "Errors", "unreadable or failed"),
-        (len(remux_without_srt), "Cleaned without SRT", "English embedded subs kept for the extractor"),
+        (len(remux_without_srt), "Cleaned without SRT", "no external .eng.srt; every embedded subtitle removed"),
         (len(deferred), "Deferred (hardlinked)", "still being seeded"),
         (len(skipped_layout), "Skipped (layout)", "folder is not canonical"),
-        (len(skipped_english), "Skipped (no audio to keep)", "every audio track is commentary; file kept as-is"),
+        (len(skipped_sidecar), "Skipped (broken .eng.srt)", "a sidecar exists but is unusable; movie untouched"),
+        (len(skipped_english), "Skipped (no audio to keep)", "every audio track is commentary or a titled dub; file kept as-is"),
         (total, "Movies scanned", "every MKV and MP4 found in the target"),
     ]
     report.blank()
@@ -2730,16 +2761,16 @@ def generate_and_save_report(
             report.blank()
             report.entries([(str(item.get("name", "?")), str(item.get("error", ""))) for item in errors])
         if remux_without_srt:
-            report.subsection("REMUXED WITHOUT AN EXTERNAL SRT (EMBEDDED ENGLISH SUBS KEPT)", count=len(remux_without_srt))
+            report.subsection("REMUXED WITHOUT AN EXTERNAL SRT (EMBEDDED SUBTITLES REMOVED)", count=len(remux_without_srt))
             report.paragraph(
-                "These movies were remuxed without a validated external English SRT beside "
-                "them, so their embedded English subtitle tracks were deliberately retained: "
-                "subtitle_extractor.py can still build the sidecar from them on a later run. "
-                "Once a sidecar exists, the next pass strips every embedded subtitle and the "
-                "sidecar becomes the sole subtitle option."
+                "These movies were remuxed with no validated external English SRT beside "
+                "them, and every embedded subtitle was removed. subtitle_extractor.py runs "
+                "before this tool (the pipeline enforces the order), so an English track "
+                "worth saving was already saved; a movie listed here that now has no "
+                "subtitle never had a usable English track - place one yourself."
             )
             report.blank()
-            report.entries([(str(name), "embedded English subtitles retained")
+            report.entries([(str(name), "no external English SRT; embedded subtitles removed")
                             for name in remux_without_srt])
         if deferred:
             report.subsection("DEFERRED (STILL HARDLINKED / SEEDED)", count=len(deferred))
@@ -2769,6 +2800,20 @@ def generate_and_save_report(
             report.entries([
                 (str(item.get("name", "?")), str(item.get("reason", "noncanonical layout")))
                 for item in skipped_layout
+            ])
+        if skipped_sidecar:
+            report.subsection("SKIPPED (BROKEN .ENG.SRT)", count=len(skipped_sidecar))
+            report.paragraph(
+                "A subtitle file sits beside each of these movies but it cannot be trusted "
+                "(empty, wrong encoding, malformed, or a legacy name that could not be "
+                "promoted). An existing sidecar is authoritative even when it is broken, so "
+                "the movie was left completely untouched. Fix or delete the file, and the "
+                "next run cleans the movie normally."
+            )
+            report.blank()
+            report.entries([
+                (str(item.get("name", "?")), str(item.get("reason", "sidecar unusable")))
+                for item in skipped_sidecar
             ])
 
     # ---- what the run changed ---------------------------------------------
@@ -3028,7 +3073,8 @@ def main(argv: list[str] | None = None) -> int:
 
     stats: dict[str, Any] = {
         "start_time": datetime.now(), "total_scanned": 0, "cleaned": [],
-        "already_clean": [], "skipped_no_english": [], "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
+        "already_clean": [], "skipped_no_english": [], "skipped_layout": [],
+        "skipped_sidecar": [], "deferred_hardlinked": [], "errors": [],
         "remux_without_srt": [], "diagnostics": [], "total_space_saved_bytes": 0,
     }
     report_meta: dict[str, Any] = {

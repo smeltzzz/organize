@@ -152,10 +152,10 @@ class ForeignFilmCleanupTests(unittest.TestCase):
 
     The cleaner used to leave such movies untouched unless a validated
     ``.eng.srt`` already sat beside them. It now cleans them either way: the
-    best non-commentary track of any language is kept. The sidecar only
-    decides the embedded subtitles - without one, the English embeds stay in
-    the file for subtitle_extractor.py to lift out on a later run; with one,
-    every embedded subtitle goes.
+    best non-commentary, non-dub track of any language is kept, and every
+    embedded subtitle is removed with or without a sidecar - the extractor
+    runs before the cleaner (the pipeline enforces it), so a movie cleaned
+    with no sidecar simply never had a usable English track.
     """
 
     FOREIGN_INFO = {
@@ -244,10 +244,11 @@ class ForeignFilmCleanupTests(unittest.TestCase):
         cleaned = stats["cleaned"][0]
         self.assertIn("[kor]", cleaned["kept_audio"])
         self.assertEqual(cleaned["removed_audio_count"], 1)  # commentary dropped
-        # No English sidecar yet, so the embedded English subs stay in the
-        # file for subtitle_extractor.py to lift out on a later run.
-        self.assertEqual(cleaned["kept_subs_count"], 1)
-        self.assertEqual(cleaned["removed_subs_count"], 0)
+        # No English sidecar, and every embedded subtitle is removed anyway:
+        # the extractor runs first in the pipeline, so anything worth saving
+        # was already saved before this point.
+        self.assertEqual(cleaned["kept_subs_count"], 0)
+        self.assertEqual(cleaned["removed_subs_count"], 1)
         self.assertIsNone(cleaned.get("external_srt"))
         self.assertEqual(stats["remux_without_srt"], [self.movie.name])
 
@@ -781,7 +782,8 @@ class ExternalSrtRecordPathTests(unittest.TestCase):
 
 
 def _audio(track_id: int, language: str = "eng", *, name: str = "", codec: str = "AAC",
-           channels: int = 2, commentary: bool = False) -> dict:
+           channels: int = 2, commentary: bool = False,
+           default: bool = False, original: bool = False) -> dict:
     """A minimal audio track dict in the shape mkvmerge -J returns."""
     props = {
         "language": language,
@@ -793,6 +795,10 @@ def _audio(track_id: int, language: str = "eng", *, name: str = "", codec: str =
         props["track_name"] = name
     if commentary:
         props["flag_commentary"] = True
+    if default:
+        props["flag_default"] = True
+    if original:
+        props["flag_original"] = True
     return {"id": track_id, "type": "audio", "codec": codec, "properties": props}
 
 
@@ -821,7 +827,7 @@ class CleanupPlanTests(unittest.TestCase):
         self.assertEqual(plan.removed_audio, [])
         self.assertFalse(plan.foreign_with_srt)
 
-    def test_best_english_audio_and_english_subs_are_kept(self) -> None:
+    def test_best_english_audio_is_kept_and_every_subtitle_goes(self) -> None:
         info = _media_info(
             _audio(1, name="English AAC"),
             _audio(2, codec="TrueHD", channels=8, name="Atmos"),
@@ -838,9 +844,9 @@ class CleanupPlanTests(unittest.TestCase):
         # TrueHD beats AAC, commentary and dubs are dropped.
         self.assertEqual(plan.best_audio_id, 2)
         self.assertEqual([t["id"] for t in plan.removed_audio], [1, 3, 4])
-        # English subtitles survive (including SDH/forced); Spanish is dropped.
-        self.assertEqual(plan.keep_sub_ids, [5, 6, 8])
-        self.assertEqual([t["id"] for t in plan.removed_subs], [7])
+        # Every embedded subtitle goes, English (SDH/forced included) or not.
+        self.assertEqual(plan.keep_sub_ids, [])
+        self.assertEqual([t["id"] for t in plan.removed_subs], [5, 6, 7, 8])
         self.assertFalse(plan.is_clean)
         self.assertFalse(plan.foreign_with_srt)
 
@@ -890,10 +896,10 @@ class CleanupPlanTests(unittest.TestCase):
         self.assertFalse(plan.foreign_with_srt)
         self.assertEqual(plan.best_audio_id, 1)
         self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3])
-        # No sidecar yet: the English embed stays for the extractor; the
-        # Spanish one goes.
-        self.assertEqual(plan.keep_sub_ids, [5])
-        self.assertEqual([t["id"] for t in plan.removed_subs], [4])
+        # No sidecar, and the subs still go: extraction happens before this
+        # tool in the pipeline, so retention buys nothing.
+        self.assertEqual(plan.keep_sub_ids, [])
+        self.assertEqual([t["id"] for t in plan.removed_subs], [4, 5])
 
     def test_all_english_audio_commentary_is_left_alone(self) -> None:
         plan, reason = tc.plan_cleanup(
@@ -909,7 +915,49 @@ class CleanupPlanTests(unittest.TestCase):
             external_srt=srt,
         )
         self.assertIsNone(plan)
-        self.assertIn("no non-commentary audio", reason)
+        self.assertIn("commentary/descriptive or a titled dub", reason)
+
+    def test_a_titled_dub_is_never_the_keeper(self) -> None:
+        """A foreign film with an English dub track: the movie's own audio wins."""
+        plan, reason = tc.plan_cleanup(_media_info(
+            _audio(1, language="jpn", codec="TrueHD", channels=8, name="Japanese DTS-HD MA"),
+            _audio(2, language="eng", name="English Dub"),
+        ))
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertEqual(plan.best_audio_id, 1)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [2])
+
+    def test_the_original_flag_names_the_native_language(self) -> None:
+        """No default flag, better English track - the flagged original still wins."""
+        plan, reason = tc.plan_cleanup(_media_info(
+            _audio(1, language="eng", codec="TrueHD", channels=8),
+            _audio(2, language="kor", name="Korean", original=True),
+        ))
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertEqual(plan.best_audio_id, 2)
+
+    def test_the_default_flag_breaks_a_language_tie(self) -> None:
+        """An English film with an unmarked foreign track: default names the native."""
+        plan, reason = tc.plan_cleanup(_media_info(
+            _audio(1, language="eng", name="English 5.1", default=True),
+            _audio(2, language="spa", name="Spanish"),
+        ))
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertEqual(plan.best_audio_id, 1)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [2])
+
+    def test_without_markers_the_first_track_is_the_original(self) -> None:
+        """Dubs are conventionally appended, so track order is the last tie-break."""
+        plan, reason = tc.plan_cleanup(_media_info(
+            _audio(1, language="jpn", name="Japanese"),
+            _audio(2, language="eng", name="English"),
+        ))
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertEqual(plan.best_audio_id, 1)
 
     def test_untagged_audio_named_english_is_retained(self) -> None:
         plan, reason = tc.plan_cleanup(

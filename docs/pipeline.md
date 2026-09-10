@@ -38,10 +38,10 @@ python3 /opt/organize/pipeline.py --source /path/to/movies
 ## 🔄 The order, and why it is fixed
 
 Five maintenance tools, one fixed order. The order between **extraction**
-and **remux** is load-bearing — the cleaner strips every embedded subtitle
-track once a validated sidecar exists, so extraction must happen *while the
-track is still in the container*; after the remux, a subtitle that was
-already in the file is gone for good. Subtitle **sync** runs last of the
+and **remux** is load-bearing — the cleaner removes every embedded subtitle
+from every movie, so extraction must happen *while the track is still in
+the container*; after the remux, a subtitle that was already in the file is
+gone for good. Subtitle **sync** runs last of the
 content steps on purpose: it rewrites subtitle bytes only (never movie
 bytes), and it must finish before the audit so the audit validates the
 finished sidecars. (Subtitle downloading used to be part of this pipeline;

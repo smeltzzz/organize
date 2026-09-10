@@ -149,7 +149,7 @@ class EndToEndRunTests(CleanerRunFixture):
         self.assertEqual([name for kind, name in tracks if kind == "video"], [""],
                          "the video track is never touched")
         self.assertEqual([name for kind, name in tracks if kind == "subtitles"],
-                         ["English"], "English subs stay when there is no .eng.srt sidecar")
+                         [], "every embedded subtitle goes, sidecar or not")
         self.assertEqual(self._leftovers(), [], "no staging file, no journal")
         self.assertFalse((self.library / tc.LOCK_FILENAME).exists(), "the lock is released")
         self.assertIn("Film (2000).mkv", self._report_text())

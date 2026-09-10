@@ -289,44 +289,42 @@ class RemuxPlanTests(PropertyTestCase):
             )
         self.for_all(plan_case, prop)
 
-    def test_english_audio_always_beats_a_foreign_track(self) -> None:
+    def test_the_keeper_is_in_the_movies_native_language(self) -> None:
+        """One language survives: the movie's own, decided by the file's markers."""
         def prop(case: dict[str, Any]) -> None:
             plan, _reason = self.plan(case)
             if plan is None:
                 return
             audio = [t for t in case["info"]["tracks"] if t.get("type") == "audio"]
-            english = [
+            candidates = [
                 t for t in audio
-                if (mtc.is_matching_language(t, mtc.AUDIO_LANGUAGES) or mtc.is_english_named_untagged(t))
-                and not mtc.is_commentary_track(t, True)
+                if not mtc.is_commentary_track(t, True) and not mtc.is_named_dub_track(t)
             ]
-            if english:
-                self.assertTrue(
-                    mtc.is_matching_language(plan.best_audio, mtc.AUDIO_LANGUAGES)
-                    or mtc.is_english_named_untagged(plan.best_audio),
-                    "a foreign track was kept while usable English audio existed",
-                )
-                self.assertFalse(plan.foreign_with_srt)
+            native = mtc.native_audio_language(candidates)
+            self.assertEqual(
+                mtc.audio_language_token(plan.best_audio), native,
+                "the keeper is not in the movie's native language",
+            )
         self.for_all(plan_case, prop)
 
-    def test_the_kept_track_is_the_best_scoring_one_in_its_own_pool(self) -> None:
-        """Quality decides *within* a pool; the pools themselves are ranked first.
+    def test_the_kept_track_is_the_best_scoring_one_in_its_pool(self) -> None:
+        """Quality decides *within* the native-language pool; the pool is fixed.
 
-        The order is deliberate and not a quality judgement: a language-tagged
-        English track always beats an untagged one whose title merely says
-        "English", however good the untagged one sounds, and both beat the
-        foreign-audio-plus-sidecar case. Inside whichever pool applies, the
-        best-scoring track wins.
+        The pool is every non-commentary, non-titled-dub track in the movie's
+        native language (see the property above for how that language is
+        chosen). Inside it, the best-scoring track wins.
         """
         def prop(case: dict[str, Any]) -> None:
             plan, _reason = self.plan(case)
             if plan is None:
                 return
             audio = [t for t in case["info"]["tracks"] if t.get("type") == "audio"]
-            playable = [t for t in audio if not mtc.is_commentary_track(t, True)]
-            tagged = [t for t in playable if mtc.is_matching_language(t, mtc.AUDIO_LANGUAGES)]
-            named = [t for t in playable if mtc.is_english_named_untagged(t)]
-            pool = tagged or named or playable
+            candidates = [
+                t for t in audio
+                if not mtc.is_commentary_track(t, True) and not mtc.is_named_dub_track(t)
+            ]
+            native = mtc.native_audio_language(candidates)
+            pool = [t for t in candidates if mtc.audio_language_token(t) == native]
             best = max(mtc.get_audio_quality_score(t) for t in pool)
             self.assertEqual(mtc.get_audio_quality_score(plan.best_audio), best)
         self.for_all(plan_case, prop)
@@ -337,9 +335,11 @@ class RemuxPlanTests(PropertyTestCase):
         The property above re-derives "best" from `get_audio_quality_score`,
         which makes it a consistency check rather than a test of the ranking:
         invert that function and both sides invert with it. This one states an
-        ordering the product owns - lossless English Atmos 7.1 at 5 Mbps beats
-        every lossy stereo track in the file - and plants exactly such a track
-        among the random ones. Reverse the ranking and this fails.
+        ordering the product owns - lossless Atmos 7.1 at 5 Mbps beats every
+        lossy stereo track in the same language - and plants exactly such a
+        pair among the random ones. Whenever the planted language is the one
+        the file settles on, the great track must be the keeper. Reverse the
+        ranking and this fails.
         """
         def prop(case: dict[str, Any]) -> None:
             best_id = 999
@@ -357,8 +357,13 @@ class RemuxPlanTests(PropertyTestCase):
                 },
             })
             plan, reason = self.plan(case)
-            self.assertIsNotNone(plan, f"a perfectly good English track was refused: {reason}")
+            self.assertIsNotNone(plan, f"a perfectly good track was refused: {reason}")
             assert plan is not None
+            if mtc.audio_language_token(plan.best_audio) != "en":
+                # The file settled on another language: the planted English
+                # track is not native and must not survive.
+                self.assertNotIn(plan.best_audio_id, {best_id})
+                return
             self.assertEqual(
                 plan.best_audio_id, best_id,
                 f"kept {plan.best_audio.get('codec')!r} over lossless English Atmos 7.1",
@@ -401,6 +406,14 @@ class RemuxPlanTests(PropertyTestCase):
         self.for_all(plan_case, prop)
 
     def test_the_decision_does_not_depend_on_the_order_the_tracks_were_listed(self) -> None:
+        """Order is a tie-break of last resort, by design.
+
+        A file that marks its native language - one shared language, an
+        'original' flag, or a default flag - must decide the same way whatever
+        order the tracks are listed in. A file with several unmarked languages
+        falls through to track order (dubs are conventionally appended), and
+        for those cases order is the only information there is.
+        """
         def prop(case: dict[str, Any]) -> None:
             first, first_reason = self.plan(case)
             shuffled = {"tracks": list(reversed(case["info"]["tracks"]))}
@@ -409,12 +422,24 @@ class RemuxPlanTests(PropertyTestCase):
             if first is None or second is None:
                 self.assertEqual(first_reason, second_reason)
                 return
+            self.assertEqual(set(first.keep_sub_ids), set(second.keep_sub_ids))
+            self.assertEqual(first.is_clean, second.is_clean)
+            audio = [t for t in case["info"]["tracks"] if t.get("type") == "audio"]
+            candidates = [
+                t for t in audio
+                if not mtc.is_commentary_track(t, True) and not mtc.is_named_dub_track(t)
+            ]
+            marked = (
+                len({mtc.audio_language_token(t) for t in candidates}) == 1
+                or any((t.get("properties") or {}).get("flag_original") for t in candidates)
+                or any((t.get("properties") or {}).get("flag_default") for t in candidates)
+            )
+            if not marked:
+                return  # track order is the tie-break here; see the docstring
             self.assertEqual(
                 mtc.get_audio_quality_score(first.best_audio),
                 mtc.get_audio_quality_score(second.best_audio),
             )
-            self.assertEqual(set(first.keep_sub_ids), set(second.keep_sub_ids))
-            self.assertEqual(first.is_clean, second.is_clean)
         self.for_all(plan_case, prop)
 
 
