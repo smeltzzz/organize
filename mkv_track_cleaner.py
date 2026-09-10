@@ -3,14 +3,15 @@
 Lossless Canonical Jellyfin MKV Track Cleaner
 ==============================================
 Remux-only (no video/audio re-encode). Keeps the single best English audio
-track when one exists; for foreign films with no English audio, a validated
-external English SRT unlocks the same cleanup using the best non-commentary
-audio of any language. Whenever a validated external English SRT is present it
-becomes the sole subtitle option (all embedded subs stripped).
+track when one exists; a movie with no English audio is cleaned the same way
+around the best non-commentary track of any language (the movie's own).
+Whenever a validated external English SRT is present it becomes the sole
+subtitle option (all embedded subs stripped).
 
 Safety:
   * Idempotent — already-clean files are not rewritten
-  * Foreign films without a validated external English SRT are left untouched
+  * A movie with no English audio keeps its best non-commentary track in the
+    movie's own language, with or without an English sidecar yet
   * Foreign films *with* a validated ``.eng.srt`` are cleaned: best audio kept,
     commentary/DVS dropped, every embedded subtitle removed
   * SDH, text-description, and Forced *subtitles* are kept only when no
@@ -2080,8 +2081,9 @@ def plan_cleanup(
 
     Returns ``(plan, "")`` when there is something to do (or the file is
     already clean), and ``(None, reason)`` when no audio track can be retained
-    for an English library - the foreign-film case without a validated sidecar,
-    or a movie whose only English audio is commentary/DVS.
+    at all - every audio track is commentary/DVS. A movie with no English
+    audio is not a skip: the best non-commentary track of any language is
+    kept, and a validated sidecar only decides the embedded subtitles.
 
     The caller owns all I/O: probing, hardlink checks, free-space checks, the
     mkvmerge run, verification, journaling and the atomic swap. This function
@@ -2098,10 +2100,10 @@ def plan_cleanup(
     audio_tracks = [t for t in tracks if t.get("type") == "audio"]
     subtitle_tracks = [t for t in tracks if t.get("type") == "subtitles"]
 
-    # Prefer tagged/named English audio. A foreign original-language track is
-    # only considered when a validated external English SRT is present — that
-    # sidecar is what makes the movie playable for an English library, so the
-    # same cleanup (one best audio, no embeds) is safe and useful.
+    # Prefer tagged/named English audio. A movie with none is cleaned around
+    # its best non-commentary track of any language - the movie's own - with
+    # or without an English sidecar yet: the sidecar decides the embedded
+    # subtitles below, never whether the audio is cleaned.
     english_audio = [
         t for t in audio_tracks
         if is_matching_language(t, audio_langs) and not is_commentary_track(t, remove_commentary)
@@ -2117,22 +2119,22 @@ def plan_cleanup(
     foreign_with_srt = False
     if english_audio:
         valid_audio = english_audio
-    elif external_srt is not None:
-        # Foreign / untagged-audio film with a verified external English SRT:
-        # keep the single best non-commentary audio of any language and strip
-        # every embedded subtitle so the sidecar is the sole subtitle option.
+    else:
+        # No English audio: keep the single best non-commentary track of any
+        # language - the movie's own. Whether a verified external English SRT
+        # exists only decides the embedded subtitles (kept below for the
+        # extractor while there is no sidecar), never the audio cleanup.
         valid_audio = [
             t for t in audio_tracks
             if not is_commentary_track(t, remove_commentary)
         ]
-        foreign_with_srt = True
+        foreign_with_srt = external_srt is not None
         if not valid_audio:
-            return None, "no non-commentary audio track to retain beside external English SRT"
-    else:
-        any_english = any(is_matching_language(t, audio_langs) for t in audio_tracks)
-        reason = ("all English audio tracks are commentary/descriptive"
-                  if any_english else "foreign film / no tagged or explicitly named English audio")
-        return None, reason
+            if external_srt is not None:
+                return None, "no non-commentary audio track to retain beside external English SRT"
+            any_english = any(is_matching_language(t, audio_langs) for t in audio_tracks)
+            return None, ("all English audio tracks are commentary/descriptive"
+                          if any_english else "no non-commentary audio track to retain")
 
     best_audio = max(valid_audio, key=get_audio_quality_score)
     best_audio_id = int(best_audio["id"])
@@ -2684,7 +2686,7 @@ def generate_and_save_report(
         (len(remux_without_srt), "Cleaned without SRT", "English embedded subs kept for the extractor"),
         (len(deferred), "Deferred (hardlinked)", "still being seeded"),
         (len(skipped_layout), "Skipped (layout)", "folder is not canonical"),
-        (len(skipped_english), "Skipped (no English)", "foreign film, kept as-is"),
+        (len(skipped_english), "Skipped (no audio to keep)", "every audio track is commentary; file kept as-is"),
         (total, "Movies scanned", "every MKV and MP4 found in the target"),
     ]
     report.blank()

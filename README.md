@@ -48,7 +48,7 @@ are the usual media binaries (`mkvmerge` + `mkvextract`, `ffprobe`,
 | 🫧 **Zero pip installs** | A tool is a single file. Copy it, run it, done. |
 | 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
 | 💬 **Subtitles from the movie itself** | Each movie's own embedded English track is extracted to a validated `.eng.srt` — text tracks via `mkvextract`, image tracks via OCR, MP4s through a temporary MKV bridge — and then measured once with ffsubsync. Nothing is ever downloaded, and an existing sidecar is never re-extracted or re-synced. |
-| ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track (or best non-commentary audio on foreign films with a validated `.eng.srt`) and drops commentary, dubs, and embedded bitmap subtitles — video untouched. |
+| ✂ **Lossless track cleanup** | `mkvmerge` remux keeps the single best English audio track — on a movie with no English audio, the best track in the movie's own language — and drops commentary, dubs, and embedded bitmap subtitles. Video untouched. |
 | 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
 | 🛡 **Safety invariants** | Advisory locks, atomic staging, and crash recovery — engineered so a power cut can never corrupt your library. |

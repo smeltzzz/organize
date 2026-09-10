@@ -118,11 +118,12 @@ everything else.
 
 ## 2 · `mkv_track_cleaner.py` — lossless remux
 
-Keeps the single best English audio track (or, for foreign films with a
-validated `.eng.srt`, the best non-commentary audio of any language) and
-strips commentary, dubs, and embedded subtitles — video is never
-re-encoded, and once a validated sidecar exists every embedded subtitle
-track goes, leaving the external `.eng.srt` as the sole subtitle option.
+Keeps the single best English audio track and strips commentary, dubs,
+and embedded subtitles — video is never re-encoded. A movie with no English
+audio is cleaned the same way around the best non-commentary track in the
+movie's own language, with or without an English sidecar yet. Once a
+validated sidecar exists, every embedded subtitle track goes, leaving the
+external `.eng.srt` as the sole subtitle option.
 **MP4s are converted to MKV** in the same remux (a lossless container swap
 with the transactional replace, free-space check and seeding deferral the
 MKV path already had). A movie remuxed *without* a validated sidecar keeps

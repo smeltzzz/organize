@@ -147,13 +147,15 @@ class HardlinkDeferralTests(unittest.TestCase):
         self.assertNotIn("allow_hardlinked", tc.process_mkv.__code__.co_varnames)
 
 
-class ForeignFilmWithExternalSrtTests(unittest.TestCase):
-    """A foreign film with a validated ``.eng.srt`` is cleaned, not skipped.
+class ForeignFilmCleanupTests(unittest.TestCase):
+    """A movie with no English audio is cleaned around its own best track.
 
-    Without English audio the cleaner used to bail entirely, which left PGS
-    embeds beside a perfectly good external SRT (e.g. Parasite). With a
-    validated sidecar the original-language audio is kept and every embedded
-    subtitle is stripped.
+    The cleaner used to leave such movies untouched unless a validated
+    ``.eng.srt`` already sat beside them. It now cleans them either way: the
+    best non-commentary track of any language is kept. The sidecar only
+    decides the embedded subtitles - without one, the English embeds stay in
+    the file for subtitle_extractor.py to lift out on a later run; with one,
+    every embedded subtitle goes.
     """
 
     FOREIGN_INFO = {
@@ -235,11 +237,19 @@ class ForeignFilmWithExternalSrtTests(unittest.TestCase):
             tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=True, log_file_path=None)
         return stats
 
-    def test_foreign_without_srt_is_still_skipped(self) -> None:
+    def test_foreign_without_srt_is_cleaned_to_its_own_audio(self) -> None:
         stats = self._run()
-        self.assertEqual(len(stats["skipped_no_english"]), 1)
-        self.assertEqual(stats["cleaned"], [])
-        self.assertIn("foreign film", stats["skipped_no_english"][0]["reason"])
+        self.assertEqual(stats["skipped_no_english"], [])
+        self.assertEqual(len(stats["cleaned"]), 1)
+        cleaned = stats["cleaned"][0]
+        self.assertIn("[kor]", cleaned["kept_audio"])
+        self.assertEqual(cleaned["removed_audio_count"], 1)  # commentary dropped
+        # No English sidecar yet, so the embedded English subs stay in the
+        # file for subtitle_extractor.py to lift out on a later run.
+        self.assertEqual(cleaned["kept_subs_count"], 1)
+        self.assertEqual(cleaned["removed_subs_count"], 0)
+        self.assertIsNone(cleaned.get("external_srt"))
+        self.assertEqual(stats["remux_without_srt"], [self.movie.name])
 
     def test_foreign_with_validated_srt_is_cleaned(self) -> None:
         self._write_srt()
@@ -867,10 +877,23 @@ class CleanupPlanTests(unittest.TestCase):
         self.assertEqual(plan.keep_sub_ids, [])
         self.assertEqual([t["id"] for t in plan.removed_subs], [4])
 
-    def test_foreign_film_without_srt_is_left_alone(self) -> None:
-        plan, reason = tc.plan_cleanup(_media_info(_audio(1, language="spa")))
-        self.assertIsNone(plan)
-        self.assertIn("foreign film", reason)
+    def test_foreign_film_without_srt_keeps_its_own_best_audio(self) -> None:
+        plan, reason = tc.plan_cleanup(_media_info(
+            _audio(1, language="spa", codec="TrueHD", channels=8),
+            _audio(2, language="spa"),
+            _audio(3, language="und", name="Director Commentary", commentary=True),
+            _sub(4, language="spa"),
+            _sub(5, language="eng"),
+        ))
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertFalse(plan.foreign_with_srt)
+        self.assertEqual(plan.best_audio_id, 1)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3])
+        # No sidecar yet: the English embed stays for the extractor; the
+        # Spanish one goes.
+        self.assertEqual(plan.keep_sub_ids, [5])
+        self.assertEqual([t["id"] for t in plan.removed_subs], [4])
 
     def test_all_english_audio_commentary_is_left_alone(self) -> None:
         plan, reason = tc.plan_cleanup(
@@ -896,10 +919,16 @@ class CleanupPlanTests(unittest.TestCase):
         assert plan is not None
         self.assertEqual(plan.best_audio_id, 1)
 
-    def test_bare_untagged_audio_is_never_guessed_english(self) -> None:
+    def test_bare_untagged_audio_is_kept_whatever_it_is(self) -> None:
+        """The old rule refused to guess that a bare ``und`` stream was English
+        and skipped the whole movie. The new rule never needs the guess: the
+        stream is kept as the best (only) audio, and nothing claims it is
+        English - that verdict belongs to the tags and names, not the cleaner."""
         plan, reason = tc.plan_cleanup(_media_info(_audio(1, language="und")))
-        self.assertIsNone(plan)
-        self.assertIn("foreign film", reason)
+        self.assertEqual(reason, "")
+        assert plan is not None
+        self.assertEqual(plan.best_audio_id, 1)
+        self.assertFalse(plan.foreign_with_srt)
 
     def test_remove_commentary_false_keeps_commentary_in_the_pool(self) -> None:
         # remove_commentary=False is the operator's explicit override: the
