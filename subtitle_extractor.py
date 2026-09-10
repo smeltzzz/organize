@@ -67,11 +67,10 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 import traceback
 import uuid
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field, replace
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any

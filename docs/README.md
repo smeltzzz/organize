@@ -18,10 +18,12 @@ Also in this folder:
   `.github/workflows/ci.yml` held as a patch rather than a commit, because
   the bot that pushes this branch has no `workflows` permission: the syntax
   gate's byte-compile list still names `subtitle_fetcher.py` (renamed to
-  `subtitle_extractor.py` in 4.0.0), and the coverage floor drops 88% → 85%
-  to follow the code that was deleted. Apply with
-  `git apply docs/ci-workflow.patch`. (The release-workflow patch that used
-  to sit beside it has been applied and committed; `release.yml` is live.)
+  `subtitle_extractor.py` in 4.0.0) and `jellyfin_one_shot.py` (deleted with
+  the second runner — the pipeline is the only thing that runs the
+  toolchain), and the coverage floor drops 88% → 85% to follow the code that
+  was deleted. Apply with `git apply docs/ci-workflow.patch`. (The
+  release-workflow patch that used to sit beside it has been applied and
+  committed; `release.yml` is live.)
 
 Elsewhere in the repo: [`CHANGELOG.md`](../CHANGELOG.md) (what changed and
 why), [`OVERHAUL.md`](../OVERHAUL.md) (the measured plan the recent work

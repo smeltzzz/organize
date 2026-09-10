@@ -11,7 +11,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-1295%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-1223%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -95,10 +95,9 @@ One file, one purpose. Nothing else.
 | `library_auditor.py` | Tool 4 — read-only health check of layout, naming, and subtitles. |
 | `movie_standardizer.py` | Tool 5 — the torrent-completion hook: parse scene names, hardlink into `Title (Year)/`. |
 | `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. Sidecars extracted from the movie itself are skipped (they are already frame-accurate). |
-| `pipeline.py` | Runs the maintenance tools in the one correct order. |
-| `jellyfin_one_shot.py` | **The "never stop" completer** — runs the whole toolchain pass after pass until the auditor reports 100% canonical, with UTC-rollover pacing, retry, and guaranteed-finish edge-case handling. |
+| `pipeline.py` | **The one runner.** Runs the maintenance tools in the one correct order: extract → clean → 10-bit → sync → audit. |
 | `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock — and `live.py` is the overwritable status line every sweep draws on a terminal and never anywhere else. |
-| `tests/` | Fully offline unit tests (1,295), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus `fake_mkvmerge.py`, `fake_ffprobe.py` and `fakebin.py`, stand-ins real enough to drive an end-to-end remux, an extraction, a sync and a library inspection. |
+| `tests/` | Fully offline unit tests (1,223), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus `fake_mkvmerge.py`, `fake_ffprobe.py` and `fakebin.py`, stand-ins real enough to drive an end-to-end remux, an extraction, a sync and a library inspection. |
 | `docs/` | The long-form documentation this page links to: the [tool reference](docs/tools.md), [the pipeline](docs/pipeline.md), [configuration](docs/configuration.md), [testing & development](docs/development.md) and, for maintainers, [merging & releasing](docs/merge-and-release.md). |
 | `benchmarks/` | The scripts behind every speed claim in this repo — stdlib-only, offline, re-runnable. |
 | `.env.example` | Every supported environment variable, annotated. |
@@ -166,33 +165,7 @@ python3 organize.py run               # subtitles -> remux -> 10-bit -> sync -> 
 python3 organize.py run --nice        # low priority: Jellyfin streaming is never starved
 ```
 
-### 3 · Let the one-shot completer get the library to 100%
-
-The one-shot completer runs the entire toolchain pass after pass — extract
-subtitles, clean tracks, inspect bit depth, sync timing, audit — until the
-auditor reports **100% canonical**. It retries transient failures every
-pass, and it knows when to stop: two passes with no coverage improvement
-means it reports the exact number it is stuck at and exits with a clear
-verdict instead of hot-looping. It fails fast with the exact fix when
-misconfigured (empty library, log dir inside the library), and every step
-is idempotent, so an interrupted run resumes where it left off.
-
-```bash
-python3 jellyfin_one_shot.py                                     # default library
-python3 jellyfin_one_shot.py --source /path/to/movies --dry-run  # one-pass preview
-python3 jellyfin_one_shot.py --source /path/to/movies            # run to 100%
-python3 organize.py one-shot --source /path/to/movies --nice     # same, lower priority
-```
-
-With no `--source` it uses the same library root every other tool defaults to
-— `ORGANIZE_LIBRARY` if set, else the legacy `MOVIE_STD_TARGET`, else the
-platform default (`E:\torrents\final_organized` on Windows, `~/Media/Movies`
-elsewhere). An explicit `--source` always wins.
-
-All logs, per-tool reports, and full output transcripts land in one place
-(`--log-dir`, default `./logs`, which must be outside the library).
-
-### 4 · Ask what is left
+### 3 · Ask what is left
 
 ```bash
 python3 organize.py status                        # one screen: done vs. remaining
@@ -218,7 +191,7 @@ Sync      401 synced   1 review   10 unmeasured
 Nothing to do for 388 movie(s) - the next pass will touch 24.
 ```
 
-### 5 · Point Jellyfin at the organized folder
+### 4 · Point Jellyfin at the organized folder
 
 Done — every movie is canonically named, subtitle-complete, and direct-play
 safe. For the fully automatic flow (torrent finishes → standardized →
@@ -257,20 +230,19 @@ Prerequisites per tool:
 | `library_auditor.py` | — | — |
 | `movie_standardizer.py` | `ffprobe` (optional, for duplicate upgrades) | — |
 | `sync_subtitles.py` | `ffsubsync` (`pip install ffsubsync`) + `ffmpeg` (FFmpeg) | — |
-| `jellyfin_one_shot.py` | whatever the tools it runs need (missing binaries are skipped, not fatal) | — |
 
 Shared behaviour belongs in `organizekit/core/` and is imported, not copied.
 The test suite fails the build if a tool defines a helper the core already
 provides. That includes the toolchain itself: which binary a step needs, and
 the reason printed when it is missing, come from `organizekit/core/toolchain.py`,
-so `pipeline.py`, `jellyfin_one_shot.py` and `organize.py doctor` cannot
-disagree about whether this machine is provisioned.
+so `pipeline.py` and `organize.py doctor` cannot disagree about whether
+this machine is provisioned.
 
 ---
 
 ## 🧰 The tools
 
-Six tools do the work; two orchestrators run them in the one correct order.
+Six tools do the work; one runner runs them in the one correct order.
 Each is a single file with no imports from this repository, so you can adopt
 one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
 
@@ -282,8 +254,7 @@ one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
 | [`library_auditor.py`](docs/tools.md#4--library_auditorpy--read-only-health-check) | Strictly read-only health check of layout, naming and subtitles, with gating exit codes for cron. | nothing |
 | [`movie_standardizer.py`](docs/tools.md#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names and hardlink one movie file per `Title (Year)/` — MKV canonical, MP4 placed as-is. Zero extra bytes. | `ffprobe` (optional) |
 | [`sync_subtitles.py`](docs/tools.md#6--sync_subtitlespy--subtitle-timing-sync-ffsubsync) | Measure a freshly extracted sidecar against the actual audio — exactly once — and apply only trustworthy drift; anything doubtful is held for review, never applied. Pre-existing sidecars are never touched. | `ffsubsync` + `ffmpeg` |
-| [`pipeline.py`](docs/pipeline.md) | The five maintenance steps in the one safe order. | — |
-| [`jellyfin_one_shot.py`](docs/tools.md#7--jellyfin_one_shotpy--the-never-stop-completer) | Loops the whole toolchain, pass after pass, until the auditor reports 100% canonical — resumable, and honest about the point where more passes will not help. | whatever its steps need |
+| [`pipeline.py`](docs/pipeline.md) | The five maintenance steps in the one safe order — subtitles are extracted before the remux strips them, and the audit sees finished sidecars. | — |
 
 ---
 

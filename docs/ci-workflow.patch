@@ -8,15 +8,16 @@
 #
 # What they change, in the order they appear:
 #
-#   * the syntax gate's byte-compile list still names `subtitle_fetcher.py`,
-#     which was renamed to `subtitle_extractor.py` when subtitle downloading
-#     was removed (4.0.0). Until this is applied, the gate fails on a file
-#     that no longer exists;
-#   * the coverage floor drops from 88% to 85%. The deleted fetching code was
-#     100%-covered and large, so the suite's overall number followed the code
-#     down to 86%; the floor keeps its usual point of slack below the real
-#     figure. It is a ratchet, not a target - raise it again in a later
-#     testing pass, never lower it further.
+#   * the syntax gate's byte-compile list still names `subtitle_fetcher.py`
+#     (renamed to `subtitle_extractor.py` when subtitle downloading was
+#     removed) and `jellyfin_one_shot.py` (deleted with the second runner:
+#     the pipeline is the only thing that runs the toolchain). Until this is
+#     applied, the gate fails on files that no longer exist;
+#   * the coverage floor drops from 88% to 85%. The 4.0.0 deletions (subtitle
+#     fetching, then the one-shot runner and its tests) were 100%-covered
+#     code, so the suite's overall number settled at 86%; the floor keeps its
+#     usual point of slack below the real figure. It is a ratchet, not a
+#     target - raise it again in a later testing pass, never lower it further.
 #
 # (The earlier held changes - byte-compiling the organizekit package, the
 # no-install import check, the single-file organize.pyz job, the organizekit
@@ -26,28 +27,34 @@
 # Verified with `git apply --check` against the ci.yml at the tip of this
 # branch.
 
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 16ffc52..c150f3c 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
-@@ -42,7 +42,7 @@
+@@ -40,9 +40,9 @@ jobs:
+       - name: Byte-compile the package and every script (syntax gate)
+         run: >-
            python -m compileall -q organizekit
-           organize.py pipeline.py jellyfin_one_shot.py bitdepth.py
+-          organize.py pipeline.py jellyfin_one_shot.py bitdepth.py
++          organize.py pipeline.py bitdepth.py
            library_auditor.py mkv_track_cleaner.py movie_standardizer.py
 -          subtitle_fetcher.py sync_subtitles.py
 +          subtitle_extractor.py sync_subtitles.py
  
        - name: A clone must run with no install and no PYTHONPATH
          run: python -c "import bitdepth, organizekit.core; assert bitdepth.Report is organizekit.core.Report"
-@@ -76,6 +76,9 @@
+@@ -76,6 +76,10 @@ jobs:
      # 65 -> 72 with the crash-safety, end-to-end and destructive-path suites.
      # The suite measures 75% on this runner; the floor keeps a few points of
      # slack because the end-to-end remux tests are skipped off POSIX.
-+    # 88 -> 85 with the subtitle-fetcher removal (4.0.0): that code was
-+    # 100%-covered and deleted with the tool. The suite measures 86% without
-+    # it; the floor follows the code and ratchets back up in a later pass.
++    # 88 -> 85 with the 4.0.0 deletions (subtitle fetching, then the one-shot
++    # runner): that code was 100%-covered and deleted with its tests, and the
++    # suite measures 86% without it. The floor keeps its point of slack; it
++    # is a ratchet - raise it again in a later testing pass, never lower it.
      name: Coverage gate
      runs-on: ubuntu-latest
      steps:
-@@ -89,7 +92,7 @@
+@@ -89,7 +93,7 @@ jobs:
        - name: Report and enforce the floor
          run: |
            python -m coverage report

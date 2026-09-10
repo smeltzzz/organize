@@ -205,25 +205,18 @@ class LauncherRulesTests(unittest.TestCase):
         self.assertEqual(command, [sys.executable, str(self.archive),
                                    "run-tool", "bitdepth.py", "--self-test"])
 
-    def test_a_script_dir_that_is_the_archive_means_the_archive(self) -> None:
-        # jellyfin_one_shot's --script-dir defaults to "next to me", which
-        # inside the archive is the archive; it must not become a path join.
+    def test_inside_the_archive_a_tool_is_a_module_not_a_file(self) -> None:
+        # The archive is the only file there is: availability is answered by
+        # import, never by joining a script name onto the archive path.
         with self.as_archive():
-            command = toolchain.tool_command("bitdepth.py", script_dir=self.archive)
+            command = toolchain.tool_command("bitdepth.py", ["--self-test"])
             self.assertEqual(command[1:3], [str(self.archive), "run-tool"])
-            self.assertTrue(toolchain.tool_is_available("bitdepth.py", script_dir=self.archive))
+            self.assertTrue(toolchain.tool_is_available("bitdepth.py"))
             self.assertFalse(toolchain.tool_is_available("not_a_tool.py"))
-            self.assertEqual(toolchain.missing_tool_scripts(self.archive), [])
-
-    def test_an_explicit_script_dir_still_wins(self) -> None:
-        elsewhere = self.home / "toolkit"
-        elsewhere.mkdir()
-        (elsewhere / "bitdepth.py").write_text("", encoding="utf-8")
-        with self.as_archive():
-            command = toolchain.tool_command("bitdepth.py", script_dir=elsewhere)
-            self.assertEqual(command, [sys.executable, str(elsewhere / "bitdepth.py")])
-            self.assertTrue(toolchain.tool_is_available("bitdepth.py", script_dir=elsewhere))
-            self.assertEqual(toolchain.child_cwd(elsewhere), elsewhere)
+            self.assertTrue(
+                all(toolchain.tool_is_available(s) for s in toolchain.TOOL_SCRIPTS),
+                "every step's script must be runnable from the archive",
+            )
 
     def test_children_never_run_inside_the_archive(self) -> None:
         # A .pyz is a file: using it as a working directory raises
@@ -231,7 +224,6 @@ class LauncherRulesTests(unittest.TestCase):
         with self.as_archive():
             self.assertEqual(toolchain.tools_home(), self.home)
             self.assertEqual(toolchain.child_cwd(), self.home)
-            self.assertEqual(toolchain.child_cwd(self.archive), self.home)
         self.assertTrue(toolchain.child_cwd().is_dir())
 
 

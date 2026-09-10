@@ -27,7 +27,6 @@ from __future__ import annotations
 import contextlib
 import tempfile
 import unittest
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest import mock

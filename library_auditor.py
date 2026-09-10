@@ -538,7 +538,7 @@ def build_report(audit: Audit, cfg: Config) -> str:
     canonical = counts["CANONICAL_MKV"]
     pct = (100.0 * canonical / total) if total else 100.0
     report.footer([
-        # Machine-readable verdict for orchestrators (jellyfin_one_shot.py):
+        # Machine-readable verdict for orchestrators and cron wrappers:
         # one stable line, no layout assumptions.
         f"AUDIT SUMMARY: canonical={canonical}; total={total}; pct={pct:.1f}%",
         "Scope: direct feature containers plus direct SRT sidecar names. Artwork, NFO files, "

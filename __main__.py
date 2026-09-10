@@ -29,10 +29,9 @@ import sys
 from organizekit.core.toolchain import RUN_TOOL_VERB, TOOL_SCRIPTS, tool_module_name
 
 # The tools this entry point will start. Everything the toolkit runs as a step
-# plus the two orchestrators and the CLI itself; nothing else, because the
+# plus the orchestrator and the CLI itself; nothing else, because the
 # argument naming the module arrives from a command line.
-RUNNABLE = (*TOOL_SCRIPTS, "organize.py", "pipeline.py", "jellyfin_one_shot.py",
-            "movie_standardizer.py")
+RUNNABLE = (*TOOL_SCRIPTS, "organize.py", "pipeline.py", "movie_standardizer.py")
 
 
 def run_tool(argv: list[str]) -> int:

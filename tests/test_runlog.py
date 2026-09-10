@@ -185,8 +185,8 @@ class ThreadSafetyTests(RunLogTestCase):
             self.assertEqual(sorted(line.split("] ", 1)[1] for line in lines), expected)
 
     def test_the_lock_is_public_so_other_writers_can_share_it(self) -> None:
-        # jellyfin_one_shot echoes child-tool output from reader threads while
-        # the run log writes status lines; they take this one lock.
+        # Tools echo child-process output from reader threads while the run
+        # log writes status lines; they take this one lock.
         self.assertTrue(hasattr(self.log, "lock"))
         with self.log.lock:
             self.assertFalse(self.log.lock.acquire(blocking=False))
@@ -197,7 +197,6 @@ class ToolAdoptionTests(unittest.TestCase):
 
     def test_every_adopter_logs_through_the_shared_implementation(self) -> None:
         import bitdepth
-        import jellyfin_one_shot
         import library_auditor
         import subtitle_extractor
         import sync_subtitles
@@ -205,22 +204,6 @@ class ToolAdoptionTests(unittest.TestCase):
         for module in (bitdepth, library_auditor, sync_subtitles, subtitle_extractor):
             with self.subTest(module=module.__name__):
                 self.assertIsInstance(module.log, RunLog)
-        self.assertIsInstance(jellyfin_one_shot._RUN_LOG, RunLog)
-
-    def test_the_orchestrator_keeps_its_bracketed_transcript_form(self) -> None:
-        import jellyfin_one_shot
-
-        with TemporaryDirectory() as tmp:
-            target = Path(tmp) / "runtime.log"
-            buffer = io.StringIO()
-            with redirect_stdout(buffer):
-                jellyfin_one_shot.log(target, "INFO", "starting")
-                jellyfin_one_shot.log_to_file(target, "DEBUG", "detail")
-            written = target.read_text(encoding="utf-8").splitlines()
-        self.assertRegex(written[0], r"^\[[\d\- :]+\] \[INFO\] starting$")
-        self.assertRegex(written[1], r"^\[[\d\- :]+\] \[DEBUG\] detail$")
-        self.assertIn("[INFO] starting", buffer.getvalue())
-        self.assertNotIn("detail", buffer.getvalue())
 
     def test_the_extractor_writes_nowhere_unless_told_to(self) -> None:
         # Like its siblings the extractor passes cfg.log_file at every call

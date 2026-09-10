@@ -17,8 +17,8 @@ the tool exactly as it did when it lived there.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 import subtitle_extractor as tool
 from tests.selftests import bind_to_tool

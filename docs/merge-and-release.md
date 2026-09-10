@@ -26,10 +26,11 @@ git push origin main
 
 **Expect the `Byte-compile` job on that merge to be red, and push anyway.**
 The workflow file as it exists on the branch still names `subtitle_fetcher.py`
-in the syntax gate, and the bot cannot fix a workflow file — the fix is the
-patch you apply in step 2. Every other check is green: the whole suite
-(1,295 tests) on Linux, macOS and Windows across Python 3.11–3.13, packaging,
-the single-file build and the doctor smoke test.
+and `jellyfin_one_shot.py` in the syntax gate — files the merge deletes —
+and the bot cannot fix a workflow file; the fix is the patch you apply in
+step 2. Every other check is green: the whole suite (1,223 tests) on Linux,
+macOS and Windows across Python 3.11–3.13, packaging, the single-file build
+and the doctor smoke test.
 
 (If you would rather the merge commit be born green, apply step 2's patch to
 the branch and push it first — your push carries the permission the bot's
@@ -41,19 +42,20 @@ does not — then merge.)
 git checkout main && git pull
 git apply docs/ci-workflow.patch
 git add .github/workflows/ci.yml
-git commit -m "CI: byte-compile subtitle_extractor.py; coverage floor follows the code down (88 -> 85)"
+git commit -m "CI: byte-compile the 4.0.0 file list; coverage floor follows the code down (88 -> 85)"
 git push
 ```
 
-Two changes, both explained in the patch header:
+Three changes, all explained in the patch header:
 
 - the byte-compile list follows the `subtitle_fetcher.py` →
-  `subtitle_extractor.py` rename;
-- the coverage floor drops 88% → 85%. The deleted fetching code was
-  100%-covered and large, so the suite's overall number followed the code
-  down to 86%; the floor keeps its usual point of slack below the real
-  figure. It is a ratchet, not a target — raise it again in a later testing
-  pass, never lower it further.
+  `subtitle_extractor.py` rename and drops `jellyfin_one_shot.py`, which the
+  merge deleted;
+- the coverage floor drops 88% → 85%. The 4.0.0 deletions (the fetching code,
+  then the one-shot runner and its tests) were 100%-covered, so the suite's
+  overall number settled at 86%; the floor keeps its usual point of slack
+  below the real figure. It is a ratchet, not a target — raise it again in a
+  later testing pass, never lower it further.
 
 The push needs a credential with `workflows` scope (your normal PAT or
 `gh auth login` as the owner; editing the file in the GitHub web editor works
@@ -101,7 +103,9 @@ python3 organize.pyz doctor
 ```
 
 Worth saying in whatever you announce with the release: **subtitle
-downloading is gone**. `OPENSUBTITLES_API_KEY` / `SUBDL_API_KEY` are ignored
+downloading is gone**, and **`organize run` is the one runner** (the separate
+one-shot completer was deleted with it — one pass of the five steps, and
+re-running is the loop). `OPENSUBTITLES_API_KEY` / `SUBDL_API_KEY` are ignored
 (and unknown) now, the tool answers to `subtitle_extractor.py` /
 `organize extract`, and an existing `.eng.srt` is authoritative — never
 re-checked, never re-synced. A library that came through the fetching era

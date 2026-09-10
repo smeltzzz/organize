@@ -16,6 +16,18 @@ someone else's release — so it was removed outright, not disabled.
   fallbacks, their API keys, quotas, ledgers, rate limits and connection
   pooling (`nethttp.py`, `ratelimit.py`), and every `--source`/`--skip-source`
   flag. No network access exists anywhere in the toolkit now.
+- **The second runner: `pipeline.py` is the only thing that runs the
+  toolchain.** `jellyfin_one_shot.py` looped the same five tools until the
+  auditor reported 100% canonical — a second description of the same work,
+  with its own log, report, pass loop, pacing and edge cases. It is deleted,
+  along with its `organize.py one-shot`/`oneshot`/`complete` verbs, the
+  `jellyfin_completer.sh` compatibility wrapper and `tests/test_one_shot.py`.
+  `organize.py run` (or `python3 pipeline.py`) is the one runner: one pass of
+  the five steps in the right order, and re-running it is the loop. The step
+  table in `organizekit/core/toolchain.py` lost every field that existed only
+  for the deleted runner's banners, caches, timeouts and transcripts;
+  `build_step_args`, `detect_tools`, `step_skip_reason` and the `--script-dir`
+  plumbing went with it.
 - `OPENSUBTITLES_API_KEY`, `SUBDL_API_KEY` and `ORGANIZE_NO_KEEPALIVE` from
   the environment surface; `organize doctor` no longer checks provider keys.
 

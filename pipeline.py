@@ -72,10 +72,9 @@ from organizekit.core import (
     tool_is_available,
 )
 
-# The binary probes, under the names this module has always used for them.
-# They are re-exported rather than wrapped so that patching one here patches
-# the one the prerequisite table actually calls.
-from organizekit.core import mkvtoolnix_installed as _mkvtoolnix_present  # noqa: F401
+# The sync-readiness probe, under the name this module has always used for
+# it. It is re-exported rather than wrapped so that patching the tool's own
+# resolver in a test changes what this name answers.
 from organizekit.core import ffsubsync_ready as _ffsubsync_present  # noqa: F401
 
 VERSION = "1.0.0"
@@ -136,9 +135,9 @@ class Run:
 # ---------------------------------------------------------------------------
 # Calling a step
 #
-# The step table, the prerequisite checks and the long-run argv builder all
-# live in organizekit.core.toolchain: jellyfin_one_shot.py runs the same five
-# tools and must not be able to disagree with this file about any of it.
+# The step table and the prerequisite checks live in organizekit.core.toolchain:
+# one description of the five tools, so this file cannot disagree with the
+# table about any of it.
 # ---------------------------------------------------------------------------
 
 def build_command(step: Step, cfg: Config) -> list[str]:

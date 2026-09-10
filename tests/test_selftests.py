@@ -25,7 +25,6 @@ from types import ModuleType
 
 from tests.selftests import (
     bitdepth_selftests,
-    jellyfin_one_shot_selftests,
     library_auditor_selftests,
     mkv_track_cleaner_selftests,
     movie_standardizer_selftests,
@@ -36,7 +35,6 @@ from tests.selftests import (
 
 SUITES = (
     ("bitdepth", bitdepth_selftests.run_self_tests),
-    ("jellyfin_one_shot", jellyfin_one_shot_selftests.run_self_tests),
     ("library_auditor", library_auditor_selftests.run_self_tests),
     ("mkv_track_cleaner", mkv_track_cleaner_selftests.run_self_tests),
     ("movie_standardizer", movie_standardizer_selftests.run_canonical_self_tests),

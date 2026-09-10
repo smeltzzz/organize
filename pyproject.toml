@@ -61,7 +61,6 @@ packages = ["organizekit", "organizekit.core"]
 py-modules = [
     "organize",
     "pipeline",
-    "jellyfin_one_shot",
     "bitdepth",
     "library_auditor",
     "mkv_track_cleaner",

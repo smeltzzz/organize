@@ -17,7 +17,6 @@ For the order they run in and why that order is load-bearing, see
 | [`library_auditor.py`](#4--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
 | [`movie_standardizer.py`](#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names, hardlink MKV/MP4 into `Title (Year)/` | `ffprobe` (optional) |
 | [`sync_subtitles.py`](#6--sync_subtitlespy--subtitle-timing-sync-ffsubsync) | Measure a freshly extracted sidecar against the audio — once — and correct trustworthy drift | `ffsubsync` + `ffmpeg` |
-| [`jellyfin_one_shot.py`](#7--jellyfin_one_shotpy--the-never-stop-completer) | Loops the whole toolchain until the auditor reports 100% canonical | whatever its steps need |
 
 ---
 
@@ -261,81 +260,6 @@ is never measured again. Held-for-review and failed syncs leave the record
 unmarked, so the next run retries them. A sidecar whose bytes no longer
 match the record — hand-edited, replaced from elsewhere — has no provenance
 any more, which is the safe answer: not ours, not touched.
-
-## 7 · `jellyfin_one_shot.py` — the "never stop" completer
-
-The orchestrator that gets a library to the end result no matter what: it
-loops the pipeline (extract → clean → 10bit → sync → audit) until the auditor
-reports 100% canonical, then exits 0. What makes it safe to leave running for
-days:
-
-- **It stops when more passes cannot help** — two passes in a row with no
-  coverage improvement means the run stops and says so
-  (`STALLED - coverage stuck at 17/18`) instead of burning passes for
-  nothing. Every step is local work, so there is no quota to wait for: a
-  movie the toolchain cannot cover is a human decision, and the report
-  names it.
-- **Guaranteed finish** — an empty library (no movie folders) exits 2 with
-  the canonical-layout reminder; a log dir inside the library is rejected up
-  front (the tools refuse to write inside the media tree, and the auditor
-  would count a log folder as a movie folder); three passes in a row without
-  a usable audit report exits 1 with the transcript paths to debug.
-- **It narrates itself** — before the first pass it prints the plan (which
-  steps will run, which are skipped and why), every step announces what it
-  does and why it runs in that position, and each tool's output streams to
-  the console as it happens, tagged with the step it came from
-  (`[clean] remuxed Movie (2020).mkv`). A tool that goes quiet is not a tool
-  that has died: every `--heartbeat` seconds (60 by default) the runner
-  reports how long it has been running and how long since its last line.
-  `--quiet` turns the streaming off and keeps the banners, decisions,
-  heartbeats and summaries.
-- **Two files, and only two** — a run writes one log and one report, both
-  under `--log-dir`, both with a fixed name:
-  `jellyfin_one_shot.log` (appended by every run and by all five tools, each
-  run starting with a banner) and `jellyfin_one_shot_report.txt` (rewritten
-  after *every step*, so it is always the current state of the run even
-  while it is still going or if it is killed). The report holds the full
-  detail of the current pass plus a one-line history of every pass before
-  it, with every tool's own report folded in verbatim. Per-tool report files
-  are staged in a hidden folder, folded in, and deleted — so there is never a
-  pile of per-run artifacts to sift through.
-- **Honest reporting** — if `mkvmerge`/`ffprobe`/`ffsubsync` are missing the
-  affected steps are skipped and the completion banner says exactly which
-  guarantees were not checked.
-- **A finished library is left alone** — the auditor runs *first*, and a
-  library that already reports 100% canonical exits 0 without an extraction,
-  remux, inspection or sync sweep. Every step is idempotent, so re-running a finished
-  library used to cost a full pass for nothing. Use `--force-pass` to sweep
-  anyway: the auditor's verdict is the library contract (canonical folder
-  layout plus a validated `.eng.srt` sidecar) and never inspects the MKV's own
-  tracks, so a movie still carrying extra audio or embedded subtitles audits
-  as canonical.
-
-```bash
-python3 jellyfin_one_shot.py                                          # default library
-python3 jellyfin_one_shot.py --source /path/to/movies --dry-run    # one-pass preview
-python3 jellyfin_one_shot.py --source /path/to/movies              # run until 100%
-python3 jellyfin_one_shot.py --source /path/to/movies --max-passes 5   # bound a run
-python3 jellyfin_one_shot.py --source /path/to/movies --force-pass     # sweep anyway
-python3 jellyfin_one_shot.py --source /path/to/movies --quiet          # no live streaming
-```
-
-> [!NOTE]
-> The two files are the only *artifacts*. A run also maintains durable state
-> beside them, which is what makes the next run cheap:
-> `subtitle_extractor_extracted.json` (the extractor's provenance ledger,
-> which `sync_subtitles.py` reads to know which sidecars it may measure),
-> the probe caches, and `state.db` — the rebuildable cache of verdicts that
-> `organize status` reads.
-
-`--source` is the Jellyfin movie-library root. Every tool in the repo resolves
-it through one shared resolver — `--source`, then `ORGANIZE_LIBRARY`, then the
-legacy `MOVIE_STD_TARGET`, then the platform default — so `python3
-jellyfin_one_shot.py` with no arguments finishes the same library the rest of
-the toolchain maintains. The library it resolved, and where that value came
-from, is written to the runtime log at the start of every run.
-
----
 
 [← Back to the README](../README.md) · [The pipeline](pipeline.md) ·
 [Configuration](configuration.md) · [Development](development.md)
