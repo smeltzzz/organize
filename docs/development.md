@@ -33,9 +33,9 @@ command you type is unaffected: `pip install organizekit` gives you `organize`.
 
 A version on PyPI is immutable. A broken 4.0.0 cannot be fixed, only answered
 with 4.0.1, so everything that can be checked before the upload is checked
-before the upload — by
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) in CI,
-and by this list if you are doing it by hand:
+before the upload — by `.github/workflows/release.yml` in CI (the workflow
+ships only in a checkout, so it is named here rather than linked), and by
+this list if you are doing it by hand:
 
 ```bash
 # 1. One version, in one place. Everything else reads organizekit.VERSION.

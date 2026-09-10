@@ -13,8 +13,9 @@ repository.
 
 ## 1. Merge the branch into `main`
 
-No pull request was opened for `arena/01a08710-organize`; merge it whichever
-way you prefer. Locally:
+The branch is [PR #36](https://github.com/smeltzzz/organize/pull/36) — merge
+it with the green button (a normal merge, not squash: the seven commits carry
+the story), or locally:
 
 ```bash
 git fetch origin
