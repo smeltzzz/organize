@@ -31,11 +31,11 @@ command you type is unaffected: `pip install organizekit` gives you `organize`.
 
 ## Cutting a release
 
-A version on PyPI is immutable. A broken 3.6.0 cannot be fixed, only answered
-with 3.6.1, so everything that can be checked before the upload is checked
+A version on PyPI is immutable. A broken 4.0.0 cannot be fixed, only answered
+with 4.0.1, so everything that can be checked before the upload is checked
 before the upload — by
-[`docs/release-workflow.patch`](release-workflow.patch) in CI, and by this list
-if you are doing it by hand:
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) in CI,
+and by this list if you are doing it by hand:
 
 ```bash
 # 1. One version, in one place. Everything else reads organizekit.VERSION.

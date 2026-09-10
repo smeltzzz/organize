@@ -1,8 +1,9 @@
-# Merging the overhaul, and cutting 3.6.0
+# Merging the subtitle-fetcher removal, and cutting 4.0.0
 
 Everything in this file needs a permission the bot that wrote the branch does
-not have: pushing a file under `.github/workflows/`, and publishing to PyPI.
-That is the only reason these steps are yours rather than already done.
+not have: pushing to `main`, pushing a file under `.github/workflows/`, and
+moving a tag. That is the only reason these steps are yours rather than
+already done.
 
 Run them in order. Each one either passes or tells you what is wrong; nothing
 here is destructive, and nothing before step 4 is visible outside the
@@ -10,96 +11,103 @@ repository.
 
 ---
 
-## 1. Merge the pull request
+## 1. Merge the branch into `main`
+
+No pull request was opened for `arena/01a08710-organize`; merge it whichever
+way you prefer. Locally:
 
 ```bash
-gh pr checks 34                    # 15 jobs; `Packaging` is red, see below
-gh pr merge 34 --merge             # or --squash, if you prefer one commit
+git fetch origin
+git checkout main && git pull
+git merge --no-ff arena/01a08710-organize \
+  -m "Merge the subtitle-fetcher removal: extraction from the movie's own tracks only (4.0.0)"
+git push origin main
 ```
 
-**Expect `Packaging (install + console script)` to be red, and merge anyway.**
-That job runs the workflow *as it exists on `main`*, which asks
-`importlib.metadata` for a distribution called `organize`. The project is
-`organizekit` on PyPI (`organize` has been taken since 2011); the corrected
-step is in the patch you apply in step 2. Every other check — the whole suite
-on Linux, macOS and Windows across Python 3.11, 3.12 and 3.13, plus lint,
-coverage and both CLI smoke tests — is green.
+**Expect the `Byte-compile` job on that merge to be red, and push anyway.**
+The workflow file as it exists on the branch still names `subtitle_fetcher.py`
+in the syntax gate, and the bot cannot fix a workflow file — the fix is the
+patch you apply in step 2. Every other check is green: the whole suite
+(1,295 tests) on Linux, macOS and Windows across Python 3.11–3.13, packaging,
+the single-file build and the doctor smoke test.
 
-## 2. Apply the two held workflow patches
+(If you would rather the merge commit be born green, apply step 2's patch to
+the branch and push it first — your push carries the permission the bot's
+does not — then merge.)
+
+## 2. Apply the held workflow patch
 
 ```bash
 git checkout main && git pull
 git apply docs/ci-workflow.patch
-git apply docs/release-workflow.patch
-git add .github/workflows/ci.yml .github/workflows/release.yml
-git commit -m "CI: apply the held workflow patches (needs the workflows permission)"
+git add .github/workflows/ci.yml
+git commit -m "CI: byte-compile subtitle_extractor.py; coverage floor follows the code down (88 -> 85)"
 git push
 ```
 
-`ci.yml` gains a `single-file` job (builds and runs `organize.pyz`), a
-`doctor-smoke` job, byte-compilation of the `organizekit` package, an import
-check against the installed wheel, the corrected distribution name, and a
-coverage floor of 88% (measured: 91%). `release.yml` is new.
+Two changes, both explained in the patch header:
 
-The suite stays green after this: the test that guards these patches accepts
-"already applied" as a pass. Once you no longer want the patches around,
-delete them and their two entries in `docs/README.md` — the test skips itself
+- the byte-compile list follows the `subtitle_fetcher.py` →
+  `subtitle_extractor.py` rename;
+- the coverage floor drops 88% → 85%. The deleted fetching code was
+  100%-covered and large, so the suite's overall number followed the code
+  down to 86%; the floor keeps its usual point of slack below the real
+  figure. It is a ratchet, not a target — raise it again in a later testing
+  pass, never lower it further.
+
+The push needs a credential with `workflows` scope (your normal PAT or
+`gh auth login` as the owner; editing the file in the GitHub web editor works
+too). The suite stays green after this: the test that guards held patches
+accepts "already applied" as a pass. Once you no longer want the patch
+around, delete it and its entry in `docs/README.md` — the test skips itself
 when there are none.
 
-## 3. Register the PyPI publisher (once, before the first release)
+## 3. PyPI publisher — already done
 
-The release workflow authenticates with **Trusted Publishing (OIDC)**, so
-there is no API token to store or rotate. It has to be registered on PyPI
-first, and `organizekit` does not exist there yet, so use the *pending*
-publisher form:
-
-<https://pypi.org/manage/account/publishing/>
-
-| Field | Value |
-| :--- | :--- |
-| PyPI project name | `organizekit` |
-| Owner | `smeltzzz` |
-| Repository name | `organize` |
-| Workflow name | `release.yml` |
-| Environment name | `pypi` |
-
-Then create the `pypi` environment in the repository settings
-(<https://github.com/smeltzzz/organize/settings/environments>) so the job can
-reference it. Protection rules are optional; a required reviewer on that
-environment means no release ever publishes without a human clicking approve.
+`organizekit` is already live on PyPI (3.6.0 was published through it), so
+Trusted Publishing is registered and the `pypi` environment exists. For the
+record, the registration at <https://pypi.org/manage/account/publishing/> is:
+owner `smeltzzz`, repository `organize`, workflow `release.yml`, environment
+`pypi`. Nothing to do here unless that was undone.
 
 ## 4. Tag it
 
 ```bash
-git tag -a v3.6.0 -m "3.6.0"
-git push origin v3.6.0
+git tag -a v4.0.0 -m "4.0.0"
+git push origin v4.0.0
 ```
 
 The tag is what triggers `release.yml`. It runs the whole offline suite
 *before* building anything, refuses a tag that disagrees with
-`organizekit.VERSION` (currently `3.6.0`), builds the wheel, the sdist and the
-zipapp, installs the wheel into a clean virtualenv and runs it from outside
-the source tree, runs the sdist's own test suite, publishes to PyPI, and
-attaches `organize.pyz` to a GitHub release. A version on PyPI is immutable,
-which is why the order is that pedantic.
-
-If you would rather not publish yet, skip this step entirely: nothing else
-depends on it.
+`organizekit.VERSION` (currently `4.0.0`), builds the wheel, the sdist and
+the zipapp, installs the wheel into a clean virtualenv and runs it from
+outside the source tree, runs the sdist's own test suite, publishes to PyPI,
+and attaches `organize.pyz` to a GitHub release. A version on PyPI is
+immutable, which is why the order is that pedantic.
 
 ## 5. Check what people will actually get
 
 ```bash
-pipx install organizekit        # or: pip install organizekit
+pip install --upgrade organizekit     # or: pipx install organizekit
 organize doctor
-organize --version              # 3.6.0
+organize --version                    # 4.0.0
 ```
 
 And the no-install path, which is the one that matters on a NAS:
 
 ```bash
-curl -LO https://github.com/smeltzzz/organize/releases/download/v3.6.0/organize.pyz
+curl -LO https://github.com/smeltzzz/organize/releases/download/v4.0.0/organize.pyz
 python3 organize.pyz doctor
 ```
+
+Worth saying in whatever you announce with the release: **subtitle
+downloading is gone**. `OPENSUBTITLES_API_KEY` / `SUBDL_API_KEY` are ignored
+(and unknown) now, the tool answers to `subtitle_extractor.py` /
+`organize extract`, and an existing `.eng.srt` is authoritative — never
+re-checked, never re-synced. A library that came through the fetching era
+keeps its sidecars, and its old `subtitle_fetcher_extracted.json` provenance
+ledger is still read (never written), so a sidecar extracted back then and
+never synced gets its one measurement.
 
 ---
 
@@ -109,14 +117,15 @@ python3 organize.pyz doctor
 nothing was published, because the version gate fails before the build:
 
 ```bash
-git push --delete origin v3.6.0 && git tag -d v3.6.0
+git push --delete origin v4.0.0 && git tag -d v4.0.0
 ```
 
-**PyPI rejects the upload as "not configured".** The pending publisher in
-step 3 has not been created, or one of its five fields does not match exactly
-— the environment name `pypi` is the one most often left blank.
+**PyPI rejects the upload as "not configured".** Only possible if the
+registration in step 3 was undone; the environment name `pypi` is the field
+most often wrong.
 
 **A patch will not apply in step 2.** Something changed under
-`.github/workflows/` since it was written. `git apply --3way docs/…patch`
-resolves the common cases; otherwise the patch header says what the change is
-meant to achieve, and it is short enough to redo by hand.
+`.github/workflows/` since it was written. `git apply --3way
+docs/ci-workflow.patch` resolves the common cases; otherwise the patch header
+says what the change is meant to achieve, and it is two small edits to redo
+by hand.

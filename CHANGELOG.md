@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.0.0] - 2026-09-09
 
 **Subtitle fetching is gone: the movie's own tracks are the only subtitle
 source.** Downloading subtitles was the one part of this toolkit that could
@@ -43,6 +43,11 @@ someone else's release — so it was removed outright, not disabled.
 - After extraction and sync, the cleaner strips **every** embedded subtitle
   track from the MKV, leaving the external `.eng.srt` as the sole subtitle
   option. This behaviour is unchanged; it is now the whole subtitle story.
+- CI's coverage floor follows the code down (88% → 85%): the deleted fetching
+  code was 100%-covered, and the suite measures 86% without it. The floor is
+  a ratchet, not a target; it goes back up in a later testing pass. The suite
+  itself is 1,295 tests, all green, and the wheel/sdist/zipapp builds are
+  exercised end to end.
 
 ## [3.6.0] - 2026-09-07
 
