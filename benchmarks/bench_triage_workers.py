@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""What the fetcher's triage pool is for, and what it is not for.
+"""What the extractor's triage pool is for, and what it is not for.
 
-Before the fetcher can spend a provider request on a movie it answers three
+Before the extractor can attempt a movie it answers three
 local questions about it: is the folder canonical, is there already a usable
 English sidecar, what is the file's identity. On a library that is mostly
 covered - the steady state this toolkit is aimed at - that pre-flight *is* the
 run: a directory listing and a couple of small reads per movie, thousands of
-round trips, none of which needs the network or the quota ledger.
+round trips, none of which needs mkvextract or an OCR backend.
 
 On a local SSD those reads cost microseconds and threads cost more than they
 save. The case the pool exists for is a library on a NAS, where every listing
@@ -39,7 +39,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-import subtitle_fetcher as sf  # noqa: E402  (needs the path bootstrap above)
+import subtitle_extractor as sx  # noqa: E402  (needs the path bootstrap above)
 
 MOVIES = 600
 LATENCY_SECONDS = 0.005
@@ -58,7 +58,7 @@ def build_library(root: Path) -> tuple[Path, list[Path]]:
         video = folder / f"{name}.mkv"
         video.write_bytes(os.urandom(4096))
         # A mostly-covered library, which is the case the pool has to be fast
-        # for: most movies are settled by triage and never reach a provider.
+        # for: most movies are settled by triage and never reach an extraction.
         if index % 5:
             (folder / f"{name}.eng.srt").write_text(SIDECAR, encoding="utf-8")
         videos.append(video)
@@ -66,7 +66,7 @@ def build_library(root: Path) -> tuple[Path, list[Path]]:
 
 
 def timed(library: Path, videos: list[Path], workers: int) -> tuple[float, list[tuple[str, str]]]:
-    queue = sf.TriageQueue(videos, library, workers=workers, chunk=sf.TRIAGE_LOOKAHEAD)
+    queue = sx.TriageQueue(videos, library, workers=workers, chunk=sx.TRIAGE_LOOKAHEAD)
     started = time.perf_counter()
     verdicts = [queue.at(index) for index in range(1, len(videos) + 1)]
     elapsed = time.perf_counter() - started
@@ -82,12 +82,12 @@ def main() -> int:
             ("local storage", 0.0),
             (f"{LATENCY_SECONDS * 1000:.0f} ms round trip", LATENCY_SECONDS),
         ):
-            real_inspect = sf.inspect_existing_sidecars
+            real_inspect = sx.inspect_existing_sidecars
             if latency:
                 def inspect(video: Path, _real=real_inspect, _wait=latency):
                     time.sleep(_wait)
                     return _real(video)
-                sf.inspect_existing_sidecars = inspect
+                sx.inspect_existing_sidecars = inspect
             print(f"{MOVIES} movies, {label}")
             baseline = 0.0
             for workers in (1, 2, 4, 8):
@@ -95,13 +95,13 @@ def main() -> int:
                 seen.append(verdicts)
                 baseline = baseline or elapsed
                 print(f"  workers={workers}: {elapsed:6.2f}s  ({baseline / elapsed:4.1f}x)")
-            sf.inspect_existing_sidecars = real_inspect
+            sx.inspect_existing_sidecars = real_inspect
 
         if any(verdicts != seen[0] for verdicts in seen):
             print("FAIL: the triage verdicts changed with the worker count", file=sys.stderr)
             return 1
         print("every run produced the identical verdicts, in the identical order")
-        print("provider requests, the quota ledger and every write stay on the main thread")
+        print("extraction attempts, the provenance ledger and every write stay on the main thread")
     return 0
 
 

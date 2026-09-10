@@ -1,22 +1,21 @@
 """End-to-end integration for the subtitle toolchain.
 
-Chains the *real* orchestration code of ``subtitle_fetcher.py``,
+Chains the *real* orchestration code of ``subtitle_extractor.py``,
 ``mkv_track_cleaner.py`` and ``sync_subtitles.py`` down the canonical pipeline
-(``fetcher -> cleaner -> sync``), faking only the external binaries
+(``extractor -> cleaner -> sync``), faking only the external binaries
 (``mkvmerge`` / ``ffsubsync``) exactly the way the individual tool suites do.
 
 The properties pinned here are the cross-tool contracts that keep the pipeline
 lossless end to end:
 
-* the fetcher's canonical ``<stem>.eng.srt`` naming is what the cleaner
+* the extractor's canonical ``<stem>.eng.srt`` naming is what the cleaner
   validates before it dares to drop embedded subtitles;
 * a successful remux swaps the MKV but leaves the sidecar byte-identical, so
-  the fetcher's extraction record (keyed on sidecar SHA-256) still round-trips
-  and the sync tool can short-circuit an extracted subtitle;
-* with no extraction record the sync tool runs ffsubsync and atomically swaps
-  the aligned sidecar;
-* a failed sync can ask the fetcher for a replacement download through a stable
-  import contract that degrades gracefully when no API key is configured.
+  the extractor's record (keyed on sidecar SHA-256) still round-trips across
+  the remux that strips the embedded tracks;
+* a freshly extracted sidecar is measured by ffsubsync exactly once, and the
+  mark survives the swap: the second measurement never launches ffsubsync;
+* a sidecar with no extraction record is never touched by the sync tool.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ import unittest
 from pathlib import Path
 
 import mkv_track_cleaner as tc
-import subtitle_fetcher as sf
+import subtitle_extractor as sx
 import sync_subtitles as ss
 
 ORIG: dict = {
@@ -108,18 +107,18 @@ class SubtitlePipelineIntegrationTests(unittest.TestCase):
         self.movie = self.folder / "Movie (2020).mkv"
         self.movie.write_bytes(b"x" * 4096)
         self.srt = self.folder / "Movie (2020).eng.srt"
-        # The fetcher writes every sidecar as UTF-8 with LF newlines
+        # The extractor writes every sidecar as UTF-8 with LF newlines
         # (atomic_write_text uses newline="\n"), so the on-disk bytes match
         # sha256_text() on Windows too. Mirror that here or the
         # extraction-ledger shortcut under test would mismatch on Windows
         # (\r\n on disk vs \n in the stored hash).
         self.srt.write_text(SRT_TEXT, encoding="utf-8", newline="\n")
-        self.srt_sha = sf.sha256_text(SRT_TEXT)
+        self.srt_sha = sx.sha256_text(SRT_TEXT)
 
         self._real_mkvmerge = tc._run_mkvmerge
         self._real_target_root = tc._target_root
         self._real_sync = ss.run_ffsubsync
-        self._saved_ledger_env = os.environ.get(sf.EXTRACTED_LEDGER_ENV)
+        self._saved_ledger_env = os.environ.get(sx.EXTRACTED_LEDGER_ENV)
         self.addCleanup(self._restore)
 
     def _restore(self) -> None:
@@ -127,9 +126,9 @@ class SubtitlePipelineIntegrationTests(unittest.TestCase):
         tc._target_root = self._real_target_root
         ss.run_ffsubsync = self._real_sync
         if self._saved_ledger_env is None:
-            os.environ.pop(sf.EXTRACTED_LEDGER_ENV, None)
+            os.environ.pop(sx.EXTRACTED_LEDGER_ENV, None)
         else:
-            os.environ[sf.EXTRACTED_LEDGER_ENV] = self._saved_ledger_env
+            os.environ[sx.EXTRACTED_LEDGER_ENV] = self._saved_ledger_env
 
     def _install_fake_mkvmerge(self) -> list[list[str]]:
         """Fake mkvmerge: real remux file write + source/remuxed -J metadata."""
@@ -155,13 +154,12 @@ class SubtitlePipelineIntegrationTests(unittest.TestCase):
         return ss.Config(
             library=self.lib, log_file=self.out / "sync.log",
             report_file=self.out / "sync.txt",
-            sync_ledger=self.out / "sync_state.json",
             min_offset_seconds=0.1, max_offset_seconds=30.0,
             timeout_seconds=30.0, ffsubsync_binary="ffsubsync",
         )
 
-    def test_fetcher_sidecar_is_the_cleaner_contract(self) -> None:
-        """The fetcher's canonical sidecar is what the cleaner validates."""
+    def test_extractor_sidecar_is_the_cleaner_contract(self) -> None:
+        """The extractor's canonical sidecar is what the cleaner validates."""
         verdict = tc.validate_exact_external_english_srt(self.movie)
         self.assertTrue(verdict.get("valid"), verdict.get("reason"))
         self.assertEqual(Path(str(verdict["path"])).name, "Movie (2020).eng.srt")
@@ -181,61 +179,51 @@ class SubtitlePipelineIntegrationTests(unittest.TestCase):
         self.assertTrue(cleaned.get("external_srt", {}).get("valid"))
 
         # The remux swapped the MKV but never touched the sidecar, so the
-        # fetcher's SHA-keyed extraction record stays valid across the remux.
+        # extractor's SHA-keyed record stays valid across the remux.
         self.assertEqual(self.movie.read_bytes(), b"y" * 8192)
         self.assertEqual(self.srt.read_text(encoding="utf-8"), SRT_TEXT)
-        self.assertEqual(sf.sha256_text(self.srt.read_text(encoding="utf-8")), self.srt_sha)
+        self.assertEqual(sx.sha256_text(self.srt.read_text(encoding="utf-8")), self.srt_sha)
 
         # No transaction debris left in the folder.
         names = {p.name for p in self.folder.iterdir()}
         self.assertFalse(any(n.startswith("temp_clean_") for n in names))
         self.assertFalse(any(n.startswith(".track_cleaner.") for n in names))
 
-    def test_sync_short_circuits_extracted_sidecar(self) -> None:
-        """After a remux, the fetcher's extraction record still short-circuits sync."""
+    def _record_extraction(self, ledger: Path) -> None:
+        os.environ[sx.EXTRACTED_LEDGER_ENV] = str(ledger)
+        track = sx.EmbeddedSubtitleTrack(
+            track_id=3, codec_id="S_HDMV/PGS", language="eng", name="",
+            kind="image", extension=".sup", default=False, forced=False, sdh=False, rank=0,
+        )
+        self.assertTrue(sx.record_extracted_sidecar(
+            self.movie, self.srt, track=track, method="ocr", cue_count=1,
+            sha256=self.srt_sha, ocr_backend="tesseract", path=ledger,
+        ))
+
+    def test_extracted_sidecar_is_synced_exactly_once(self) -> None:
+        """After the remux, the extractor's record authorises exactly one sync.
+
+        The first sync runs ffsubsync, swaps the aligned sidecar and marks the
+        record; the second must not launch ffsubsync at all.
+        """
         self._install_fake_mkvmerge()
         stats = _empty_stats()
         with contextlib.redirect_stdout(io.StringIO()):
             tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=False, log_file_path=None)
         self.assertEqual(stats["errors"], [])
 
-        ledger = self.out / "subtitle_fetcher_extracted.json"
-        os.environ[sf.EXTRACTED_LEDGER_ENV] = str(ledger)
-        track = sf.EmbeddedSubtitleTrack(
-            track_id=3, codec_id="S_HDMV/PGS", language="eng", name="",
-            kind="image", extension=".sup", default=False, forced=False, sdh=False, rank=0,
-        )
-        self.assertTrue(sf.record_extracted_sidecar(
-            self.movie, self.srt, track=track, method="ocr", cue_count=1,
-            sha256=self.srt_sha, ocr_backend="tesseract", path=ledger,
-        ))
-        self.assertIsNotNone(sf.find_extracted_record(self.srt, self.srt_sha))
+        self._record_extraction(self.out / "subtitle_extractor_extracted.json")
+        self.assertIsNotNone(sx.find_extracted_record(self.srt, self.srt_sha))
 
         jobs, skips, video_count = ss.discover_jobs(self.lib)
         self.assertEqual((len(jobs), skips, video_count), (1, [], 1))
         self.assertEqual((jobs[0].srt, jobs[0].video), (self.srt, self.movie))
 
-        launched: list[list[str]] = []
-
-        def never_run(cfg, command):
-            launched.append(list(command))
-            raise AssertionError("ffsubsync must not run for an extracted sidecar")
-
-        ss.run_ffsubsync = never_run
-        result = ss.sync_one(jobs[0], self._sync_config(), "ffsubsync",
-                             ss.FfsubsyncFeatures(), state={})
-
-        self.assertEqual(launched, [])
-        self.assertEqual(result.status, ss.STATUS_EXTRACTED)
-        self.assertEqual(self.srt.read_text(encoding="utf-8"), SRT_TEXT)
-
-    def test_sync_runs_ffsubsync_without_ledger(self) -> None:
-        """No extraction record: the sidecar goes through ffsubsync and is swapped."""
-        jobs, skips, video_count = ss.discover_jobs(self.lib)
-        self.assertEqual((len(jobs), skips, video_count), (1, [], 1))
+        launches: list[list[str]] = []
 
         def fake_ffsubsync(cfg, command):
             argv = [str(part) for part in command]
+            launches.append(argv)
             staging = Path(argv[argv.index("-o") + 1])
             staging.write_text(SYNCED_SRT_TEXT, encoding="utf-8", newline="\n")
             return 0, "", (
@@ -245,21 +233,32 @@ class SubtitlePipelineIntegrationTests(unittest.TestCase):
             )
 
         ss.run_ffsubsync = fake_ffsubsync
-        result = ss.sync_one(jobs[0], self._sync_config(), "ffsubsync",
-                             ss.FfsubsyncFeatures(), state={})
-
-        self.assertEqual(result.status, ss.STATUS_SYNCED)
-        self.assertAlmostEqual(result.offset_seconds or 0.0, 1.5)
+        first = ss.sync_one(jobs[0], self._sync_config(), "ffsubsync", ss.FfsubsyncFeatures())
+        self.assertEqual(first.status, ss.STATUS_SYNCED)
+        self.assertAlmostEqual(first.offset_seconds or 0.0, 1.5)
         self.assertEqual(self.srt.read_text(encoding="utf-8"), SYNCED_SRT_TEXT)
+        self.assertEqual(len(launches), 1)
 
-    def test_refetch_contract_degrades_gracefully(self) -> None:
-        """The sync tool's replacement-fetch import degrades without an API key."""
-        os.environ.pop("OPENSUBTITLES_API_KEY", None)
-        os.environ.pop("SUBDL_API_KEY", None)
-        ok, file_id, detail = ss._refetch_sidecar(self.movie, self.srt, exclude_ids=[], log_file=None)
-        self.assertFalse(ok)
-        self.assertEqual(file_id, "")
-        self.assertIn("API key", detail)
+        # The record was re-pointed at the synced bytes and marked done.
+        synced_sha = sx.sha256_text(SYNCED_SRT_TEXT)
+        self.assertIsNotNone(sx.find_extracted_record(self.srt, synced_sha))
+
+        second = ss.sync_one(jobs[0], self._sync_config(), "ffsubsync", ss.FfsubsyncFeatures())
+        self.assertEqual(second.status, ss.STATUS_SKIPPED)
+        self.assertEqual(len(launches), 1, "a marked sidecar must never respawn ffsubsync")
+
+    def test_sidecar_without_a_record_is_never_touched(self) -> None:
+        """No extraction record: the sidecar is somebody else's file."""
+        os.environ[sx.EXTRACTED_LEDGER_ENV] = str(self.out / "empty_ledger.json")
+        jobs, _skips, _video_count = ss.discover_jobs(self.lib)
+
+        def never_run(cfg, command):
+            raise AssertionError("ffsubsync must not run for an unproven sidecar")
+
+        ss.run_ffsubsync = never_run
+        result = ss.sync_one(jobs[0], self._sync_config(), "ffsubsync", ss.FfsubsyncFeatures())
+        self.assertEqual(result.status, ss.STATUS_SKIPPED)
+        self.assertEqual(self.srt.read_text(encoding="utf-8"), SRT_TEXT)
 
 
 if __name__ == "__main__":

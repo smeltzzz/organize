@@ -3,31 +3,32 @@
 
 ``movie_standardizer.py`` is the qBittorrent completion hook and runs by itself
 the moment a download stops, so it is deliberately not part of this sweep. What
-is left — fetching subtitles, cleaning tracks, checking bit depth, syncing
+is left — extracting subtitles, cleaning tracks, checking bit depth, syncing
 subtitle timing, auditing the library — is five separate commands, and the
 order between the first two is load-bearing:
 
-    subtitle_fetcher.py   MUST run before mkv_track_cleaner.py
+    subtitle_extractor.py   MUST run before mkv_track_cleaner.py
 
-``subtitle_fetcher.py`` searches OpenSubtitles by moviehash, which is the file
-size plus the sum of the first and last 64 KiB. It can then use SubDL's
-score-gated release-aware fallback. A remux rewrites those bytes, so any movie cleaned
-first can never reproduce its release hash and is silently demoted to the much
-weaker title/year search. ``sync_subtitles.py`` runs last of the content
-steps, just before the audit: it rewrites subtitle bytes only (never movie
-bytes), so the moviehash is undisturbed - but the audit must see the finished
-sidecars. Running the five scripts
+``subtitle_extractor.py`` builds each movie's English sidecar from the
+movie's own embedded subtitle track. ``mkv_track_cleaner.py`` then strips every
+embedded subtitle once a validated sidecar exists - so a movie cleaned before
+its track was extracted has lost that track for good (a re-extraction would
+find nothing). ``sync_subtitles.py`` runs last of the content steps, just
+before the audit: it measures a freshly extracted sidecar against the movie's
+real audio and corrects the timing when the drift is real, and the audit must
+see the finished sidecars. Running the five scripts
 by hand makes that easy to get wrong on a busy day; this script cannot get it
 wrong.
 
 Each tool runs as its own subprocess so it keeps its own locks, logs and
 reports exactly as it would standalone. Steps whose prerequisites are missing
-are skipped with a clear reason rather than crashing the run — no API key means
-no fetching, no mkvmerge means no cleaning, no ffprobe means no bit-depth scan.
+are skipped with a clear reason rather than crashing the run — no MKVToolNix
+means no extraction, no mkvmerge means no cleaning, no ffprobe means no
+bit-depth scan.
 
     python pipeline.py --dry-run
     python pipeline.py --source "E:\\torrents\\final_organized"
-    python pipeline.py --steps fetcher,auditor
+    python pipeline.py --steps extractor,auditor
     python pipeline.py --self-test
 
 Stdlib only. No Python packages required.
@@ -71,10 +72,9 @@ from organizekit.core import (
     tool_is_available,
 )
 
-# The binary probes, under the names this module has always used for them.
-# They are re-exported rather than wrapped so that patching one here patches
-# the one the prerequisite table actually calls.
-from organizekit.core import api_key_present as _api_key_present  # noqa: F401
+# The sync-readiness probe, under the name this module has always used for
+# it. It is re-exported rather than wrapped so that patching the tool's own
+# resolver in a test changes what this name answers.
 from organizekit.core import ffsubsync_ready as _ffsubsync_present  # noqa: F401
 
 VERSION = "1.0.0"
@@ -105,15 +105,16 @@ HINTS: dict[str, str] = {
         "is a hardlink, so your library copy keeps the data) or set qBittorrent to remove the "
         "content when seeding stops."
     ),
-    "fetcher": (
-        "Runs before the cleaner on purpose: a remux rewrites the OpenSubtitles moviehash, "
-        "so cleaning first would force the weaker title/year search."
+    "extractor": (
+        "Runs before the cleaner on purpose: the cleaner strips every embedded subtitle "
+        "from every movie, so extraction must happen while the track is "
+        "still in the file."
     ),
     "sync": (
         "Runs after every other tool on purpose: it rewrites subtitle bytes, never movie "
-        "bytes, so the moviehash is undisturbed - but it must finish before the audit so the "
-        "audit sees the finished sidecars. A bad sync is worse than none: untrusted alignments "
-        "are held for review, never applied."
+        "bytes - but it must finish before the audit so the audit sees the finished "
+        "sidecars. A bad sync is worse than none: untrusted alignments are held for "
+        "review, never applied."
     ),
 }
 
@@ -134,9 +135,9 @@ class Run:
 # ---------------------------------------------------------------------------
 # Calling a step
 #
-# The step table, the prerequisite checks and the long-run argv builder all
-# live in organizekit.core.toolchain: jellyfin_one_shot.py runs the same five
-# tools and must not be able to disagree with this file about any of it.
+# The step table and the prerequisite checks live in organizekit.core.toolchain:
+# one description of the five tools, so this file cannot disagree with the
+# table about any of it.
 # ---------------------------------------------------------------------------
 
 def build_command(step: Step, cfg: Config) -> list[str]:
@@ -275,7 +276,7 @@ def build_summary(run: Run, cfg: Config) -> str:
 
     report = Report(
         "JELLYFIN MOVIE PIPELINE SUMMARY",
-        "Every tool, in the order that keeps exact-hash subtitle matching possible",
+        "Every tool, in the order that keeps the embedded tracks alive long enough",
     )
     report.metas([
         ("Library", cfg.library),
@@ -346,11 +347,11 @@ def resolve_steps(requested: Sequence[str]) -> tuple[str, ...]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=("Run the manual Jellyfin movie steps in the correct order: "
-                     "subtitles, then track cleaning, then bit depth, then subtitle sync, then audit."),
+                     "subtitle extraction, then track cleaning, then bit depth, then subtitle sync, then audit."),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=("movie_standardizer.py is the qBittorrent completion hook and is not part of\n"
-                "this sweep. Subtitles are fetched before the remux because a remux rewrites\n"
-                "the OpenSubtitles moviehash and would force a weaker title/year search.\n"
+                "this sweep. Subtitles are extracted before the cleaner because the cleaner\n"
+                "strips every embedded subtitle track from every movie.\n"
                 "Subtitle sync (ffsubsync) runs just before the audit: it only rewrites\n"
                 "subtitle bytes, so the audit sees the finished sidecars."),
     )
@@ -432,12 +433,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 def run_self_tests() -> int:
     """Field smoke test: is the step order intact in this copy?
 
-    The order between the fetcher and the cleaner is the single load-bearing
-    invariant of the whole toolkit — a remux rewrites the bytes OpenSubtitles
-    hashes — so it is worth asserting even in a 5-second smoke test.
+    The order between the extractor and the cleaner is the single load-bearing
+    invariant of the whole toolkit — the cleaner destroys the embedded track
+    the extractor needs — so it is worth asserting even in a 5-second smoke
+    test.
     """
-    def fetch_precedes_remux() -> bool:
-        return STEP_ORDER.index("fetcher") < STEP_ORDER.index("cleaner")
+    def extraction_precedes_remux() -> bool:
+        return STEP_ORDER.index("extractor") < STEP_ORDER.index("cleaner")
 
     def sync_precedes_audit() -> bool:
         return (STEP_ORDER.index("cleaner") < STEP_ORDER.index("sync")
@@ -450,7 +452,7 @@ def run_self_tests() -> int:
         return all(tool_is_available(STEPS[key].script) for key in STEP_ORDER)
 
     return run_field_smoke_test("pipeline.py", [
-        ("subtitles are fetched before the remux", fetch_precedes_remux),
+        ("subtitles are extracted before the remux", extraction_precedes_remux),
         ("sync runs after the remux, before the audit", sync_precedes_audit),
         ("every ordered step has a definition", every_step_is_defined),
         ("every tool script is present", the_tools_are_present),

@@ -53,10 +53,18 @@ def run_self_tests() -> int:
     check(is_forced_subtitle(forced), "forced flag")
     check(not is_commentary_track(forced, True), "forced sub kept")
 
-    und_eng = {"type": "subtitles", "properties": {"language": "und", "track_name": "English"}}
-    und_unknown = {"type": "audio", "properties": {"language": "und", "track_name": ""}}
-    check(is_english_named_untagged(und_eng), "untagged English by name")
-    check(not is_english_named_untagged(und_unknown), "untagged unknown is not English")
+    dub = {"type": "audio", "properties": {"language": "eng", "track_name": "English Dub"}}
+    plain = {"type": "audio", "properties": {"language": "spa", "track_name": "Spanish"}}
+    check(is_named_dub_track(dub), "a titled dub is a dub")
+    check(not is_named_dub_track(plain), "a language alone is not a dub")
+
+    jpn = {"type": "audio", "properties": {"language": "jpn", "track_name": "Japanese"}}
+    eng = {"type": "audio", "properties": {"language": "eng", "track_name": "English", "flag_default": True}}
+    kor_original = {"type": "audio", "properties": {"language": "kor", "flag_original": True}}
+    check(native_audio_language([jpn, eng]) == "en", "the default flag names the native language")
+    check(native_audio_language([kor_original, eng]) == "ko", "the original flag outranks the default")
+    check(native_audio_language([jpn]) == "ja", "a single language needs no marker")
+    check(audio_language_token(jpn) == "ja", "language tokens are normalized")
 
     truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
     aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}

@@ -16,7 +16,6 @@ from __future__ import annotations
 import collections
 import io
 import json
-import os
 import sys
 import tempfile
 import types
@@ -219,18 +218,18 @@ class BinaryCheckTests(unittest.TestCase):
         def only_mkvmerge(name: str) -> str | None:
             return "/usr/bin/mkvmerge" if name == "mkvmerge" else None
 
-        fetcher = fake_module("subtitle_fetcher", find_mkvtoolnix_binary=only_mkvmerge)
-        with with_modules(subtitle_fetcher=fetcher):
+        extractor = fake_module("subtitle_extractor", find_mkvtoolnix_binary=only_mkvmerge)
+        with with_modules(subtitle_extractor=extractor):
             check = organize.check_mkvextract(context())
         self.assertEqual(check.status, "warn")
         self.assertIn("embedded subtitle tracks", check.detail)
 
     def test_mkvextract_found_names_both_paths(self) -> None:
-        fetcher = fake_module(
-            "subtitle_fetcher",
+        extractor = fake_module(
+            "subtitle_extractor",
             find_mkvtoolnix_binary=lambda name: f"/usr/bin/{name}",
         )
-        with with_modules(subtitle_fetcher=fetcher), patch.object(organize, "get_binary_version", return_value="v80.0"):
+        with with_modules(subtitle_extractor=extractor), patch.object(organize, "get_binary_version", return_value="v80.0"):
             check = organize.check_mkvextract(context())
         self.assertEqual(check.status, "ok")
         self.assertIn("/usr/bin/mkvextract", check.detail)
@@ -242,30 +241,30 @@ class BinaryCheckTests(unittest.TestCase):
                          organize.check_ffsubsync, organize.check_mkvextract):
             with self.subTest(check=check_fn.__name__), \
                     patch.dict(sys.modules, {"mkv_track_cleaner": None, "bitdepth": None,
-                                             "sync_subtitles": None, "subtitle_fetcher": None}):
+                                             "sync_subtitles": None, "subtitle_extractor": None}):
                 self.assertEqual(check_fn(context()).status, "warn")
 
 
 class OcrCheckTests(unittest.TestCase):
     def test_backend_found_reports_its_label(self) -> None:
         backend = types.SimpleNamespace(label="pgsrip")
-        fetcher = fake_module(
-            "subtitle_fetcher",
+        extractor = fake_module(
+            "subtitle_extractor",
             OCR_BACKEND_AUTO="auto",
             detect_ocr_backend=lambda mode: (backend, ""),
         )
-        with with_modules(subtitle_fetcher=fetcher):
+        with with_modules(subtitle_extractor=extractor):
             check = organize.check_ocr_backend(context())
         self.assertEqual(check.status, "ok")
         self.assertEqual(check.message, "Found: pgsrip")
 
     def test_no_backend_keeps_the_reason_from_the_detector(self) -> None:
-        fetcher = fake_module(
-            "subtitle_fetcher",
+        extractor = fake_module(
+            "subtitle_extractor",
             OCR_BACKEND_AUTO="auto",
             detect_ocr_backend=lambda mode: (None, "tesseract not installed"),
         )
-        with with_modules(subtitle_fetcher=fetcher):
+        with with_modules(subtitle_extractor=extractor):
             check = organize.check_ocr_backend(context())
         self.assertEqual(check.status, "warn")
         self.assertTrue(check.detail.startswith("tesseract not installed. "))
@@ -276,65 +275,11 @@ class OcrCheckTests(unittest.TestCase):
         def explode(mode: str) -> tuple[object, str]:
             raise ValueError("bad OCR config")
 
-        fetcher = fake_module("subtitle_fetcher", OCR_BACKEND_AUTO="auto", detect_ocr_backend=explode)
-        with with_modules(subtitle_fetcher=fetcher):
+        extractor = fake_module("subtitle_extractor", OCR_BACKEND_AUTO="auto", detect_ocr_backend=explode)
+        with with_modules(subtitle_extractor=extractor):
             check = organize.check_ocr_backend(context())
         self.assertEqual(check.status, "warn")
-        self.assertIn("subtitle_fetcher is unavailable (bad OCR config)", check.detail)
-
-
-class ProviderKeyCheckTests(unittest.TestCase):
-    """Zero, one or both keys - and never a key printed in full."""
-
-    OPENSUBTITLES = "os-secret-key-1234567890"
-    SUBDL = "subdl-secret-key-0987654321"
-
-    def keys(self, opensubtitles: str, subdl: str) -> list[organize.DiagnosticCheck]:
-        fetcher = fake_module("subtitle_fetcher", OPENSUBTITLES_API_KEY="", SUBDL_API_KEY="")
-        env = {"OPENSUBTITLES_API_KEY": opensubtitles, "SUBDL_API_KEY": subdl}
-        with with_modules(subtitle_fetcher=fetcher), patch.dict(os.environ, env, clear=False):
-            return organize.check_provider_keys(context())
-
-    def test_no_keys_produces_one_warning(self) -> None:
-        checks = self.keys("", "")
-        self.assertEqual([c.name for c in checks], ["Subtitle Provider API Key"])
-        self.assertEqual(checks[0].status, "warn")
-        self.assertIn("opensubtitles.com", checks[0].remedy)
-        self.assertIn("subdl.com", checks[0].remedy)
-
-    def test_one_key_is_enough_to_silence_the_warning(self) -> None:
-        checks = self.keys(self.OPENSUBTITLES, "")
-        self.assertEqual([c.name for c in checks], ["OpenSubtitles API Key"])
-        self.assertEqual(checks[0].status, "ok")
-
-    def test_subdl_alone_is_a_supported_configuration(self) -> None:
-        checks = self.keys("", self.SUBDL)
-        self.assertEqual([c.name for c in checks], ["SubDL API Key"])
-        self.assertIn("sole provider", checks[0].detail)
-
-    def test_both_keys_produce_two_rows_and_no_warning(self) -> None:
-        checks = self.keys(self.OPENSUBTITLES, self.SUBDL)
-        self.assertEqual([c.name for c in checks], ["OpenSubtitles API Key", "SubDL API Key"])
-        self.assertTrue(all(c.status == "ok" for c in checks))
-
-    def test_a_key_is_never_printed_in_full(self) -> None:
-        """A doctor report gets pasted into issues; a key must not ride along."""
-        for check in self.keys(self.OPENSUBTITLES, self.SUBDL):
-            rendered = f"{check.message} {check.detail} {check.remedy}"
-            self.assertNotIn(self.OPENSUBTITLES, rendered)
-            self.assertNotIn(self.SUBDL, rendered)
-            self.assertNotIn(self.OPENSUBTITLES[4:-4], rendered)
-
-    def test_whitespace_only_key_counts_as_unset(self) -> None:
-        self.assertEqual([c.name for c in self.keys("   ", "\t")], ["Subtitle Provider API Key"])
-
-    def test_mask_shows_the_ends_of_a_long_key(self) -> None:
-        self.assertEqual(organize.mask_key("abcdefghijklmnop"), "abcd...mnop")
-
-    def test_mask_hides_a_short_key_entirely(self) -> None:
-        """Eight characters or fewer: the ends would be most of the key."""
-        self.assertEqual(organize.mask_key("12345678"), "***")
-        self.assertEqual(organize.mask_key(""), "***")
+        self.assertIn("subtitle_extractor is unavailable (bad OCR config)", check.detail)
 
 
 class DirectoryCheckTests(unittest.TestCase):
@@ -650,16 +595,6 @@ class JsonRenderTests(unittest.TestCase):
             code, output = self.run_json(library_path=Path("/tmp"), source_path=Path("/tmp"))
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(output)["exit_code"], 1)
-
-    def test_a_key_is_not_leaked_into_the_json_either(self) -> None:
-        """The masking lives in the check, so both renderers inherit it - prove it."""
-        secret = "os-secret-key-1234567890"
-        fetcher = fake_module("subtitle_fetcher", OPENSUBTITLES_API_KEY="", SUBDL_API_KEY="")
-        with with_modules(subtitle_fetcher=fetcher), \
-                patch.dict(os.environ, {"OPENSUBTITLES_API_KEY": secret, "SUBDL_API_KEY": ""}):
-            _, output = self.run_json(library_path=Path("/tmp"), source_path=Path("/tmp"))
-        self.assertIn("os-s...7890", output)
-        self.assertNotIn(secret, output)
 
     def test_unicode_is_written_as_text_not_escapes(self) -> None:
         document = organize.diagnostics_document(context(), [

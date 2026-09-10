@@ -2,27 +2,42 @@
 """
 Subtitle Synchronizer for Jellyfin Movies (ffsubsync)
 =====================================================
-The pipeline's final content step, run just before the library audit. Walks
-the canonical movie library, pairs every external ``.srt`` sidecar with its
-movie file, and uses ``ffsubsync`` to measure how far the subtitle timing
-drifts from the actual audio. When the drift is real and trustworthy the
-sidecar is atomically replaced with the corrected copy; when it is
-essentially zero the file is left byte-identical. When a candidate is
-untrustworthy - or ffsubsync fails outright - up to 10 different replacement
-downloads are tested. If none can be synced, the entry-time sidecar is restored
-byte-for-byte and the movie is held for review.
+The pipeline's final content step, run just before the library audit. It has
+exactly one job: measure every sidecar that subtitle_extractor.py just built
+from a movie's own embedded track against that movie's real audio, and correct
+the timing when - and only when - the drift is real and trustworthy.
+
+Which sidecars are synced is a closed rule:
+
+* a sidecar extracted from the movie's own embedded track is synced exactly
+  once, on the run that follows its extraction. The extractor's provenance
+  ledger names those files, and this tool marks each one done after it has
+  been measured (whether it needed a correction or not);
+* every other sidecar - one that already existed beside the movie, was
+  placed by hand, downloaded in the fetching era, or already synced - is
+  left untouched. An existing ``.eng.srt`` is authoritative; re-syncing it
+  is not this tool's call.
+
+A container's own timestamps are not always honest, which is why even an
+extracted sidecar is measured once rather than trusted blindly. When the
+drift is real and within the trust window the sidecar is atomically replaced
+with the corrected copy; when it is essentially zero the file is left
+byte-identical and marked done; when the measurement is untrustworthy the
+movie is held for review and the sidecar stays unmarked, so the next run
+tries again. There are no replacement downloads any more - the fetching
+machinery is gone - so a held sidecar stays exactly as it is until a human
+decides otherwise.
 
 Why this position:
 
-* ``subtitle_fetcher.py`` fetches the right subtitle for the movie, but a
-  fetched subtitle is only as well timed as the upload: it was authored
-  against the distributor's cut, and small (or large) offsets against the
-  bytes you actually own are common.
-* Syncing rewrites subtitle bytes only - never movie bytes - so it does not
-  disturb the OpenSubtitles moviehash. Unlike a remux it is safe at any point
-  after fetching.
-* It runs immediately before ``library_auditor.py`` so the audit validates
-  the finished state of the library, synced sidecars included.
+* ``subtitle_extractor.py`` writes the sidecar from the movie's own track;
+  the cleaner that follows strips every embedded subtitle, so the sync must
+  happen after extraction (else it would measure against a movie whose
+  audio it will no longer have) and before the audit (which must see the
+  finished state).
+* Syncing rewrites subtitle bytes only - never movie bytes - so it is safe
+  against whatever container the movie currently is (the MP4 -> MKV
+  conversion preserves the audio stream's timeline).
 
 ``ffsubsync`` (https://github.com/smacke/ffsubsync) is an external program
 installed separately - ``pip install ffsubsync`` - and needs ``ffmpeg`` on
@@ -43,26 +58,11 @@ Trust window (fail-closed):
   likely the wrong file than a badly desynced one. Such movies are held for
   review with the original kept.
 * Offsets below ``--min-offset`` (default 0.1 s, just over one 24 fps frame)
-  count as "already in sync": the original bytes are untouched.
-* Every replacement stages to a dot-prefixed sibling (``.ffsync_staging.``)
+  count as "already in sync": the original bytes are untouched and the
+  sidecar is marked done.
+* Every candidate stages to a dot-prefixed sibling (``.ffsync_staging.``)
   that every other tool in the pipeline treats as junk, then swaps it in
   with ``os.replace`` - a power cut can never leave a half-synced subtitle.
-
-Remembered verdicts (idempotent re-runs):
-
-* Measuring a movie costs a full ffsubsync run - an audio decode and an
-  alignment pass - and the answer does not change while the two files are
-  unchanged. A sidecar measured "in sync", or corrected and swapped in, is
-  therefore recorded outside the library (``sync_state.json``) with the
-  subtitles' SHA-256 and the movie's size and mtime.
-* The record is evidence, never a decision: it is used only while **both**
-  the sidecar bytes and the movie bytes still match it. Re-download,
-  re-extract, hand-edit or replace the subtitle, or remux/replace the movie,
-  and the sidecar is measured again like any other.
-* Held-for-review and failed syncs are never recorded - those still need a
-  human or another attempt. Nothing here can make the tool blind to a change
-  it must react to; a missing, corrupt or foreign state file is simply an
-  empty memory.
 
     py -3 sync_subtitles.py --dry-run
     py -3 sync_subtitles.py --source "E:\\torrents\\final_organized"
@@ -80,7 +80,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import re
 import shutil
@@ -91,10 +90,7 @@ import traceback
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
-from threading import Lock
-from typing import Any
 
 # Shared implementation: everything imported here is defined exactly once,
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
@@ -148,19 +144,10 @@ DEFAULT_LIBRARY = str(resolve_library())
 LOG_FILE = str(default_tool_dir("sync_subtitles") / "sync_subtitles.log")
 REPORT_FILE = str(default_tool_dir("sync_subtitles") / "sync_subtitles_report.txt")
 
-# Remembered sync verdicts, outside the library like every other artifact.
-# Keyed by sidecar path; a record is honoured only while the sidecar's own
-# SHA-256 and the movie's size and mtime still match it. Override with
-# SUBTITLE_SYNC_LEDGER or --sync-ledger.
-SYNC_STATE_FILE = str(default_tool_dir("sync_subtitles") / "sync_state.json")
-SYNC_STATE_ENV = "SUBTITLE_SYNC_LEDGER"
-SYNC_STATE_SCHEMA = 1
-MAX_SYNC_STATE_ENTRIES = 20000  # oldest forgotten first; a miss only costs time
-
 # Staging files sit next to the sidecar (so the final os.replace stays atomic
 # on one filesystem) with a leading dot: every other tool in the pipeline
 # treats dot-prefixed names as junk, so an in-flight sync is invisible to the
-# auditor, the fetcher, the cleaner and the inspector.
+# auditor, the extractor, the cleaner and the inspector.
 STAGING_PREFIX = ".ffsync_staging."
 
 # The entry points ``pip install ffsubsync`` registers; any of them works.
@@ -206,24 +193,14 @@ DEFAULT_TIMEOUT_SECONDS = 1800.0  # a feature film's audio, with margin
 MAX_SYNC_WORKERS = 4
 DEFAULT_LOCK_TIMEOUT_SECONDS = 60.0
 
-# When ffsubsync cannot trust the current sidecar, download a different
-# qualifying English SRT and retry.  This counts replacement downloads only:
-# the sidecar that entered the sync step was fetched earlier in the workflow
-# (or supplied by the user) and does not consume this retry budget.  Keep the
-# cap finite so one movie cannot consume an unbounded provider quota.
-MAX_SYNC_REFETCHES = 10
-
 # Result statuses. Reading order in the report is urgency order:
-# review -> failed -> synced -> preview -> skipped -> in_sync -> remembered
-# -> extracted.
+# review -> failed -> synced -> preview -> skipped -> in_sync.
 STATUS_REVIEW = "review"
 STATUS_FAILED = "failed"
 STATUS_SYNCED = "synced"
 STATUS_PREVIEW = "preview"
 STATUS_SKIPPED = "skipped"
 STATUS_IN_SYNC = "in_sync"
-STATUS_REMEMBERED = "remembered"
-STATUS_EXTRACTED = "extracted"
 
 # ffsubsync writes its diagnostics to stderr (stdout is reserved for subtitle
 # output, so piping stays clean). Every version logs the three measurements
@@ -538,160 +515,47 @@ def _remove_staging(staging: Path) -> None:
     except OSError:
         pass
 
-def _refetch_sidecar(video: Path, srt: Path, exclude_ids: list[str], log_file: Path | None) -> tuple[bool, str, str]:
-    """Download a different qualifying English SRT over ``srt``."""
-    try:
-        from subtitle_fetcher import refetch_english_srt
-    except ImportError as exc:
-        return False, "", f"subtitle_fetcher unavailable ({exc})"
-    return refetch_english_srt(video, srt, exclude_ids=exclude_ids, log_file=log_file)
 
+def _sidecar_needs_sync(srt: Path, sha256: str) -> tuple[bool, str]:
+    """Ask the extractor's provenance ledger whether this sidecar may be synced.
 
-def _extracted_sidecar_record(srt: Path, sha256: str) -> dict[str, Any] | None:
-    """subtitle_fetcher's extraction record for this sidecar, when it has one.
-
-    A sidecar extracted from the movie's own embedded track carries the
-    container's own timestamps, so it is already frame-accurate for this exact
-    file. Import is lazy and failure-tolerant: without subtitle_fetcher.py
-    beside this script (or with a damaged record) every sidecar is simply
-    measured like before.
+    The closed rule this tool runs on: only a sidecar extracted from the
+    movie's own embedded track - and not yet marked done - is measured.
+    Everything else (a pre-existing ``.eng.srt``, a hand-placed file, an
+    already-synced extraction) is left untouched. Import is lazy and
+    failure-tolerant: without subtitle_extractor.py beside this script the
+    answer is simply "not ours", which is the safe default.
     """
     try:
-        from subtitle_fetcher import find_extracted_record
+        import subtitle_extractor as sx
     except ImportError:
-        return None
+        return False, "subtitle_extractor is unavailable; no sidecar can be proven extracted"
     try:
-        record = find_extracted_record(srt, sha256)
+        needs = sx.extracted_sidecar_needs_sync(srt, sha256)
+        record = sx.find_extracted_record(srt, sha256)
     except Exception:  # noqa: BLE001 - reaching into another tool's ledger: any
         # failure at all means "no provenance record", which is the safe answer.
-        return None
-    return record if isinstance(record, dict) else None
+        return False, "the extraction ledger could not be read"
+    if not needs:
+        if record is not None and str(record.get("synced_utc") or ""):
+            return False, f"already synced on {record['synced_utc']}; marked done in the extraction ledger"
+        return False, "not extracted from this movie's own tracks; an existing sidecar is authoritative"
+    return True, ""
 
 
-def default_sync_ledger() -> Path:
-    """Where remembered verdicts live: env override, then the documented path."""
-    return Path(os.environ.get(SYNC_STATE_ENV) or SYNC_STATE_FILE).expanduser()
+def _mark_sidecar_synced(srt: Path, provenance_sha: str, new_sha: str | None = None) -> None:
+    """Flag the provenance record so this sidecar is never re-synced.
 
-
-def sync_state_key(srt: Path) -> str:
-    """One stable key per sidecar, normalized the way every tool compares paths."""
-    return os.path.normcase(os.path.normpath(str(srt)))
-
-
-def _video_snapshot(video: Path) -> dict[str, int] | None:
-    """The two facts that prove the movie's bytes are unchanged."""
-    try:
-        stat_result = video.stat()
-    except OSError:
-        return None
-    return {"size": int(stat_result.st_size), "mtime_ns": int(stat_result.st_mtime_ns)}
-
-
-def load_sync_state(path: Path) -> dict[str, Any]:
-    """Read remembered verdicts. Fail-open: an absent, unreadable, corrupt or
-    foreign file is simply an empty memory, and the run measures everything."""
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(raw, dict) or raw.get("schema") != SYNC_STATE_SCHEMA:
-        return {}
-    entries = raw.get("entries")
-    if not isinstance(entries, dict):
-        return {}
-    return {str(key): value for key, value in entries.items() if isinstance(value, dict)}
-
-
-def sync_state_matches(record: dict[str, Any], srt_sha: str, video: Path) -> bool:
-    """True only while **both** files still match the recorded measurement.
-
-    A sidecar re-downloaded, re-extracted, replaced by a sync or edited by
-    hand has a different SHA-256; a remuxed or replaced movie has a different
-    size or mtime. Either one makes the record stale and the sidecar is
-    measured again exactly as if it had never been checked.
+    ``provenance_sha`` is the sha that authorised the sync (the extraction
+    record's own sha); ``new_sha`` re-points the record at the replaced bytes
+    when ffsubsync's output was swapped in.
     """
-    if not srt_sha or record.get("srt_sha256") != srt_sha:
-        return False
-    recorded = record.get("video")
-    if not isinstance(recorded, dict):
-        return False
-    current = _video_snapshot(video)
-    if current is None:
-        return False
-    return (
-        int(recorded.get("size", -1)) == current["size"]
-        and int(recorded.get("mtime_ns", -1)) == current["mtime_ns"]
-    )
-
-
-# The remembered-verdict ledger is one dict shared by every worker. Only this
-# one function mutates it, so one lock here is the whole story.
-_STATE_LOCK = Lock()
-
-
-def remember_sync_state(
-    state: dict[str, Any],
-    srt: Path,
-    srt_sha: str,
-    video: Path,
-    status: str,
-    offset_seconds: float | None,
-) -> None:
-    """Record a finished measurement so the next run does not repeat it."""
-    snapshot = _video_snapshot(video)
-    if not srt_sha or snapshot is None:
-        return
-    key = sync_state_key(srt)
-    with _STATE_LOCK:
-        state.pop(key, None)  # pop-then-insert refreshes recency
-        state[key] = {
-            "srt_sha256": srt_sha,
-            "video": snapshot,
-            "status": status,
-            "offset_seconds": offset_seconds,
-            "measured_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        }
-
-
-def save_sync_state(path: Path, state: dict[str, Any]) -> None:
-    """Persist remembered verdicts atomically, forgetting dead entries first."""
-    if not state and not path.exists():
-        return  # nothing measured and nothing to forget: leave no file behind
-    live = {key: value for key, value in state.items() if Path(key).is_file()}
-    while len(live) > MAX_SYNC_STATE_ENTRIES:
-        live.pop(next(iter(live)), None)
-    document = {"schema": SYNC_STATE_SCHEMA, "entries": live}
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(
-            path, json.dumps(document, separators=(",", ":"), ensure_ascii=False) + "\n"
-        )
-    except OSError:
-        pass  # a state file that cannot be saved costs the next run's speed only
-
-
-def _remembered_offset(record: dict[str, Any]) -> float | None:
-    value = record.get("offset_seconds")
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value)
-
-
-def _restore_sidecar_bytes(path: Path, content: bytes) -> str | None:
-    """Atomically restore the entry-time sidecar bytes; return an error detail."""
-    try:
-        if path.is_file() and not path.is_symlink() and path.read_bytes() == content:
-            return None
-    except OSError:
+        import subtitle_extractor as sx
+        sx.mark_extracted_sidecar_synced(srt, provenance_sha, new_sha256=new_sha)
+    except Exception:  # noqa: BLE001 - best effort: a lost mark costs the next
+        # run one redundant measurement, never a wrong sync.
         pass
-    staging = path.with_name(f"{STAGING_PREFIX}restore.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        staging.write_bytes(content)
-        os.replace(staging, path)
-        return None
-    except OSError as exc:
-        _remove_staging(staging)
-        return f"CRITICAL: could not restore original sidecar ({exc})"
 
 
 def sync_one(
@@ -699,17 +563,13 @@ def sync_one(
     cfg: Config,
     binary: str,
     features: FfsubsyncFeatures,
-    state: dict[str, Any] | None = None,
 ) -> SyncResult:
-    """Sync one sidecar against its movie: validate, stage, run, decide, swap.
+    """Sync one extracted sidecar against its movie: validate, stage, run, decide, swap.
 
-    If ffsubsync cannot complete a trusted sync, fetch a different sidecar
-    (up to ``MAX_SYNC_REFETCHES`` extra downloads) and retry until one is
-    already in sync or can be synced.
-
-    ``state`` carries the remembered verdicts of earlier runs: a sidecar whose
-    bytes and whose movie's bytes are unchanged since a finished measurement
-    is reported instead of being measured again.
+    Only a sidecar the extractor's provenance ledger names - and has not yet
+    marked done - reaches ffsubsync. A held-for-review or failed measurement
+    leaves the record unmarked, so the next run retries it; a synced or
+    in-sync outcome marks it done, permanently.
     """
     srt, video = job.srt, job.video
     started = time.monotonic()
@@ -726,170 +586,89 @@ def sync_one(
         return SyncResult(srt=srt, video=video, status=STATUS_SKIPPED,
                           detail=f"could not stat movie file ({exc})")
 
-    # Keep the entry-time bytes for the whole retry transaction.  Replacement
-    # candidates may temporarily occupy the canonical path because ffsubsync
-    # consumes that path, but every terminal REVIEW/FAILED result restores
-    # these exact bytes before returning.
     try:
         entry_bytes = srt.read_bytes()
     except OSError as exc:
         return SyncResult(srt=srt, video=video, status=STATUS_SKIPPED,
                           detail=f"could not read sidecar ({exc})")
-    entry_sha = hashlib.sha256(entry_bytes).hexdigest()
-    original_sha = entry_sha
+    original_sha = hashlib.sha256(entry_bytes).hexdigest()
 
-    # Extracted, not downloaded: the cues came out of this movie's own
-    # container timeline, so there is no drift to correct. Measuring it would
-    # spend an ffsubsync run (audio decode + alignment) to prove a known zero.
-    record = _extracted_sidecar_record(srt, original_sha)
-    if record is not None:
-        track = record.get("track_id") or "?"
-        codec = record.get("codec_id") or "embedded"
-        return SyncResult(
-            srt=srt, video=video, status=STATUS_EXTRACTED,
-            detail=(f"extracted from this movie's own {codec} track {track} - "
-                    "frame-accurate by construction, no sync needed"),
-            seconds=time.monotonic() - started,
-            original_sha=original_sha,
-            new_sha=original_sha,
-        )
-
-    # Already measured, and nothing has changed since: ffsubsync would spend a
-    # full audio decode and alignment pass to reach the answer this run
-    # already recorded. The record is checked against the sidecar's SHA-256
-    # *and* the movie's size and mtime, so any change to either file sends the
-    # sidecar back through ffsubsync.
-    if state is not None:
-        remembered = state.get(sync_state_key(srt))
-        if isinstance(remembered, dict) and sync_state_matches(remembered, original_sha, video):
-            when = str(remembered.get("measured_at") or "an earlier run")
-            offset = _remembered_offset(remembered)
-            detail = f"measured in sync on {when}; unchanged since, so ffsubsync was not re-run"
-            if offset is not None:
-                detail = (f"measured in sync on {when} (offset {offset:+.3f}s); "
-                          "unchanged since, so ffsubsync was not re-run")
-            return SyncResult(
-                srt=srt, video=video, status=STATUS_REMEMBERED, detail=detail,
-                offset_seconds=offset, seconds=time.monotonic() - started,
-                original_sha=original_sha, new_sha=original_sha,
-            )
+    # The closed rule: sync exactly the sidecars extracted from the movie's
+    # own tracks, exactly once. Everything else is somebody else's file.
+    needs_sync, sync_skip_reason = _sidecar_needs_sync(srt, original_sha)
+    if not needs_sync:
+        return SyncResult(srt=srt, video=video, status=STATUS_SKIPPED,
+                          detail=sync_skip_reason,
+                          seconds=time.monotonic() - started,
+                          original_sha=original_sha, new_sha=original_sha)
 
     if cfg.dry_run:
         return SyncResult(srt=srt, video=video, status=STATUS_PREVIEW,
                           detail="would run ffsubsync and replace the sidecar only on a trusted sync")
 
-    exclude_ids: list[str] = []
-    last: SyncResult | None = None
-    for attempt in range(MAX_SYNC_REFETCHES + 1):
-        staging = srt.with_name(f"{STAGING_PREFIX}{os.getpid()}.{uuid.uuid4().hex}.srt")
-        command = build_ffsubsync_command(binary, video, srt, staging, features)
+    staging = srt.with_name(f"{STAGING_PREFIX}{os.getpid()}.{uuid.uuid4().hex}.srt")
+    command = build_ffsubsync_command(binary, video, srt, staging, features)
+    try:
+        rc, _stdout, stderr = run_ffsubsync(cfg, command)
+    except subprocess.TimeoutExpired:
+        _remove_staging(staging)
+        return SyncResult(srt=srt, video=video, status=STATUS_FAILED,
+                          detail=f"ffsubsync timed out after {cfg.timeout_seconds:.0f}s",
+                          seconds=time.monotonic() - started,
+                          error_tail=error_tail_from("timeout"))
+    except OSError as exc:
+        _remove_staging(staging)
+        return SyncResult(srt=srt, video=video, status=STATUS_FAILED,
+                          detail=f"could not run ffsubsync ({exc})",
+                          seconds=time.monotonic() - started)
+
+    parsed = parse_ffsubsync_output(stderr)
+    if parsed.offset_seconds is not None:
+        log(
+            f"ffsubsync measured: offset {parsed.offset_seconds:+.3f}s, "
+            f"framerate x{parsed.scale_factor if parsed.scale_factor is not None else 0:.3f}, "
+            f"score {parsed.score if parsed.score is not None else 0:.1f}"
+        )
+    staged_valid, staged_reason = False, "no output file was written"
+    if staging.exists():
+        staged_valid, staged_reason = validate_srt_sidecar(staging)
+
+    status, detail = classify_outcome(rc, staging.exists(), staged_valid,
+                                      staged_reason, parsed, cfg)
+    error_tail = error_tail_from(stderr) if (rc != 0 or parsed.failed_marker) else ""
+
+    if status == STATUS_SYNCED:
+        new_sha = sha256_file(staging)
         try:
-            rc, _stdout, stderr = run_ffsubsync(cfg, command)
-        except subprocess.TimeoutExpired:
-            _remove_staging(staging)
-            last = SyncResult(srt=srt, video=video, status=STATUS_FAILED,
-                              detail=f"ffsubsync timed out after {cfg.timeout_seconds:.0f}s",
-                              seconds=time.monotonic() - started,
-                              error_tail=error_tail_from("timeout"))
-            break
+            os.replace(staging, srt)
         except OSError as exc:
             _remove_staging(staging)
-            last = SyncResult(srt=srt, video=video, status=STATUS_FAILED,
-                              detail=f"could not run ffsubsync ({exc})",
-                              seconds=time.monotonic() - started)
-            break
-
-        parsed = parse_ffsubsync_output(stderr)
-        if parsed.offset_seconds is not None:
-            log(
-                f"ffsubsync measured: offset {parsed.offset_seconds:+.3f}s, "
-                f"framerate x{parsed.scale_factor if parsed.scale_factor is not None else 0:.3f}, "
-                f"score {parsed.score if parsed.score is not None else 0:.1f}"
-            )
-        staged_valid, staged_reason = False, "no output file was written"
-        if staging.exists():
-            staged_valid, staged_reason = validate_srt_sidecar(staging)
-
-        status, detail = classify_outcome(rc, staging.exists(), staged_valid,
-                                          staged_reason, parsed, cfg)
-        error_tail = error_tail_from(stderr) if (rc != 0 or parsed.failed_marker) else ""
-
-        if status == STATUS_SYNCED:
-            new_sha = sha256_file(staging)
-            try:
-                os.replace(staging, srt)
-            except OSError as exc:
-                status, detail = STATUS_FAILED, f"could not replace sidecar ({exc})"
-                _remove_staging(staging)
-            else:
-                detail = (
-                    f"offset {parsed.offset_seconds:+.3f}s"
-                    + (f", framerate x{parsed.scale_factor:.3f}" if parsed.scale_factor is not None else "")
-                )
-                if state is not None:
-                    # The bytes now on disk are the aligned ones: remember them,
-                    # not the sidecar that was just replaced.
-                    remember_sync_state(state, srt, new_sha, video, STATUS_SYNCED,
-                                        parsed.offset_seconds)
-                return SyncResult(srt=srt, video=video, status=status, detail=detail,
-                                  offset_seconds=parsed.offset_seconds,
-                                  scale_factor=parsed.scale_factor, score=parsed.score,
-                                  seconds=time.monotonic() - started,
-                                  original_sha=entry_sha, new_sha=new_sha)
-
-        _remove_staging(staging)
-        last = SyncResult(srt=srt, video=video, status=status, detail=detail,
+            return SyncResult(srt=srt, video=video, status=STATUS_FAILED,
+                              detail=f"could not replace sidecar ({exc})",
+                              seconds=time.monotonic() - started,
+                              original_sha=original_sha, error_tail=error_tail)
+        detail = (
+            f"offset {parsed.offset_seconds:+.3f}s"
+            + (f", framerate x{parsed.scale_factor:.3f}" if parsed.scale_factor is not None else "")
+        )
+        _mark_sidecar_synced(srt, original_sha, new_sha=new_sha)
+        return SyncResult(srt=srt, video=video, status=status, detail=detail,
                           offset_seconds=parsed.offset_seconds,
                           scale_factor=parsed.scale_factor, score=parsed.score,
                           seconds=time.monotonic() - started,
-                          original_sha=entry_sha, error_tail=error_tail)
-        if status not in {STATUS_REVIEW, STATUS_FAILED}:
-            if status == STATUS_IN_SYNC and attempt > 0:
-                # A downloaded candidate is a real sidecar replacement even
-                # when ffsubsync measures no correction.  Report the write
-                # honestly instead of claiming the entry-time file was
-                # untouched.
-                candidate_sha = sha256_file(srt)
-                last.status = STATUS_SYNCED
-                last.detail = (
-                    "replacement subtitle verified in sync"
-                    + (f" (offset {parsed.offset_seconds:+.3f}s)"
-                       if parsed.offset_seconds is not None else "")
-                )
-                last.new_sha = candidate_sha
-                if state is not None:
-                    remember_sync_state(state, srt, candidate_sha, video, STATUS_SYNCED,
-                                        parsed.offset_seconds)
-            elif status == STATUS_IN_SYNC and state is not None:
-                # Nothing was written, so these are the bytes that measured
-                # in sync. Held-for-review and failed syncs are never recorded.
-                remember_sync_state(state, srt, entry_sha, video, STATUS_IN_SYNC,
-                                    parsed.offset_seconds)
-            return last
-        if attempt >= MAX_SYNC_REFETCHES:
-            restore_error = _restore_sidecar_bytes(srt, entry_bytes)
-            if restore_error:
-                last.status = STATUS_FAILED
-                last.detail = f"{last.detail}; {restore_error}"
-            return last
-        ok, file_id, fetch_detail = _refetch_sidecar(video, srt, exclude_ids, cfg.log_file)
-        if file_id:
-            exclude_ids.append(str(file_id))
-        if not ok:
-            last.detail = f"{last.detail}; replacement fetch stopped: {fetch_detail}"
-            restore_error = _restore_sidecar_bytes(srt, entry_bytes)
-            if restore_error:
-                last.status = STATUS_FAILED
-                last.detail = f"{last.detail}; {restore_error}"
-            return last
-        log(f"fetched replacement subtitle id={file_id} ({fetch_detail}); retrying ffsubsync")
-        original_sha = sha256_file(srt)
-    assert last is not None
-    restore_error = _restore_sidecar_bytes(srt, entry_bytes)
-    if restore_error:
-        last.status = STATUS_FAILED
-        last.detail = f"{last.detail}; {restore_error}"
-    return last
+                          original_sha=original_sha, new_sha=new_sha)
+
+    _remove_staging(staging)
+    if status == STATUS_IN_SYNC:
+        # Measured and already aligned: these are the bytes that measured in
+        # sync, so the sidecar is done. Held-for-review and failed syncs stay
+        # unmarked - those still need another attempt.
+        _mark_sidecar_synced(srt, original_sha)
+    return SyncResult(srt=srt, video=video, status=status, detail=detail,
+                      offset_seconds=parsed.offset_seconds,
+                      scale_factor=parsed.scale_factor, score=parsed.score,
+                      seconds=time.monotonic() - started,
+                      original_sha=original_sha, error_tail=error_tail)
 
 
 # =============================================================================
@@ -901,7 +680,6 @@ class Config:
     library: Path = field(default_factory=lambda: Path(DEFAULT_LIBRARY))
     log_file: Path = field(default_factory=lambda: Path(LOG_FILE))
     report_file: Path = field(default_factory=lambda: Path(REPORT_FILE))
-    sync_ledger: Path = field(default_factory=default_sync_ledger)
     min_offset_seconds: float = DEFAULT_MIN_OFFSET_SECONDS
     max_offset_seconds: float = DEFAULT_MAX_OFFSET_SECONDS
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
@@ -922,8 +700,6 @@ def validate_config(cfg: Config) -> list[str]:
         errors.append("--report must be outside the Jellyfin media library")
     if path_is_within(cfg.log_file, cfg.library) or cfg.log_file == cfg.library:
         errors.append("--log must be outside the Jellyfin media library")
-    if path_is_within(cfg.sync_ledger, cfg.library) or cfg.sync_ledger == cfg.library:
-        errors.append("--sync-ledger must be outside the Jellyfin media library")
     if cfg.min_offset_seconds < 0:
         errors.append("--min-offset must be non-negative")
     if cfg.max_offset_seconds <= cfg.min_offset_seconds:
@@ -970,7 +746,7 @@ def build_report(
     """Render the run report in the shared layout."""
     report = Report(
         "JELLYFIN SUBTITLE SYNCHRONIZER (FFSUBSYNC)",
-        "Every .srt sidecar checked against its movie - the final content step, right before the library audit",
+        "Freshly extracted sidecars measured against their movie - the final content step, right before the library audit",
     )
     report.metas([
         ("Mode", "DRY-RUN (nothing will be written)" if cfg.dry_run else "LIVE"),
@@ -991,17 +767,13 @@ def build_report(
     preview = [r for r in results if r.status == STATUS_PREVIEW]
     skipped = [r for r in results if r.status == STATUS_SKIPPED]
     in_sync = [r for r in results if r.status == STATUS_IN_SYNC]
-    extracted = [r for r in results if r.status == STATUS_EXTRACTED]
-    remembered = [r for r in results if r.status == STATUS_REMEMBERED]
 
     report.scorecard([
         (len(synced), "Synced", "timing corrected, sidecar replaced atomically"),
-        (len(in_sync), "In sync", "already aligned, file untouched"),
-        (len(extracted), "Extracted (not synced)", "built from the movie's own track; no drift exists"),
-        (len(remembered), "Remembered in sync", "measured on an earlier run; unchanged, not re-measured"),
-        (len(review), "Held for review", "untrustworthy sync, original kept"),
-        (len(failed), "Failed", "ffsubsync error, original kept"),
-        (len(skipped), "Skipped", "nothing to sync (no video / unusable sidecar)"),
+        (len(in_sync), "In sync", "already aligned, file untouched, marked done"),
+        (len(review), "Held for review", "untrustworthy sync, original kept, retried next run"),
+        (len(failed), "Failed", "ffsubsync error, original kept, retried next run"),
+        (len(skipped), "Skipped", "not extracted this era: existing sidecars are authoritative"),
         (len(results), "Sidecars checked", "every non-junk .srt in the library"),
     ])
     if truncated:
@@ -1022,8 +794,9 @@ def build_report(
         report.section("SUBTITLES HELD FOR REVIEW", count=len(review),
                        intro="A sync was measured but refused: the offset is beyond the trust window, "
                              "the alignment is anti-correlated, or ffsubsync's own quality gate rejected "
-                             "it. The original file is byte-identical. Watch the movie or re-fetch the "
-                             "subtitle for the cut you actually own.")
+                             "it. The original file is byte-identical and its provenance record stays "
+                             "unmarked, so the next run tries again. There is no replacement download "
+                             "any more: watch the movie, or place a correct .eng.srt yourself.")
         for res in review:
             report.entry(str(res.srt), detail=res.detail, fields=[
                 ("Offset", _fmt_offset(res.offset_seconds)),
@@ -1064,47 +837,29 @@ def build_report(
 
     if skipped:
         report.section("SKIPPED (NOTHING SYNCED)", count=len(skipped),
-                       intro="No sync was attempted: there is no matching movie file, or the sidecar "
-                             "fails the shared subtitle contract (delete it and re-run the fetcher).")
+                       intro="No sync was attempted, by rule: the sidecar was not extracted from its "
+                             "movie's own embedded track (an existing .eng.srt is authoritative), it "
+                             "was already synced on an earlier run, there is no matching movie file, "
+                             "or it fails the shared subtitle contract. Only freshly extracted "
+                             "sidecars are ever synced.")
         for res in skipped:
             report.entry(str(res.srt), detail=res.detail)
 
     if in_sync:
         report.section("ALREADY IN SYNC", count=len(in_sync),
                        intro="Measured drift below the threshold (and no framerate correction): the "
-                             "original bytes were deliberately left untouched.")
+                             "original bytes were deliberately left untouched, and the sidecar is "
+                             "marked done in the extraction ledger so it is never re-measured.")
         for res in in_sync:
             report.entry(str(res.srt), detail=res.detail, fields=[
                 ("Offset", _fmt_offset(res.offset_seconds)),
                 ("Took", f"{res.seconds:.1f}s"),
             ])
 
-    if remembered:
-        report.section("REMEMBERED IN SYNC (NOT RE-MEASURED)", count=len(remembered),
-                       intro="An earlier run measured these sidecars, and both the subtitle and the "
-                             "movie are byte-identical since, so ffsubsync was deliberately not run "
-                             "again: re-measuring cannot produce a different answer and costs a full "
-                             "audio decode per movie. Replace, re-download, re-extract or hand-edit "
-                             "the subtitle, or remux the movie, and it is measured again.")
-        for res in remembered:
-            report.entry(str(res.srt), detail=res.detail, fields=[
-                ("Offset", _fmt_offset(res.offset_seconds)),
-                ("Video", res.video or "-"),
-            ])
-
-    if extracted:
-        report.section("EXTRACTED FROM THE MOVIE (SYNC NOT NEEDED)", count=len(extracted),
-                       intro="subtitle_fetcher.py built these sidecars from the movie's own embedded "
-                             "subtitle track. The cues carry that container's timestamps, so they are "
-                             "already aligned to this exact file; ffsubsync was deliberately not run. "
-                             "A sidecar that is later replaced by a download is measured normally again.")
-        for res in extracted:
-            report.entry(str(res.srt), detail=res.detail, fields=[("Video", res.video or "-")])
-
     if not results:
         report.section("NOTHING FOUND")
         report.paragraph("No .srt sidecars exist anywhere in the library - there is nothing to sync. "
-                         "Run subtitle_fetcher.py first to create the sidecars this tool aligns.")
+                         "Run subtitle_extractor.py first to create the sidecars this tool aligns.")
 
     closing = [
         f"Sidecars checked: {len(results)} - movies with a video file: {video_count}",
@@ -1127,11 +882,11 @@ def write_report(text: str, cfg: Config) -> None:
 def publish_state(results: list[SyncResult], cfg: Config) -> int:
     """Record each sidecar's timing verdict in the shared state cache.
 
-    The sync ledger (``--sync-ledger``) remains the authority for "do I need to
-    re-measure this?" - it is keyed by the subtitle's SHA-256 *and* the movie's
-    size and mtime, which is a stricter question than this cache asks. What
-    goes here is the answer ``organize status`` displays, and losing it costs a
-    line of a summary, nothing more.
+    The extraction provenance ledger remains the authority for "may this
+    sidecar be synced at all?" - it is written by subtitle_extractor.py and
+    marked done by this tool, which is a stricter question than this cache
+    asks. What goes here is the answer ``organize status`` displays, and
+    losing it costs a line of a summary, nothing more.
     """
     if cfg.dry_run:
         return 0  # a dry run measured nothing; it has nothing to publish
@@ -1195,7 +950,7 @@ def run(cfg: Config) -> int:
 
     banner = Report(
         "JELLYFIN SUBTITLE SYNCHRONIZER (FFSUBSYNC)",
-        "Every .srt sidecar checked against its movie - the final content step, right before the library audit",
+        "Freshly extracted sidecars measured against their movie - the final content step, right before the library audit",
     )
     banner.metas([
         ("Mode", "DRY-RUN (nothing will be written)" if cfg.dry_run else "LIVE"),
@@ -1221,7 +976,6 @@ def run(cfg: Config) -> int:
         f"timeout {cfg.timeout_seconds:.0f}s/movie")
     log(f"Log      : {cfg.log_file}")
     log(f"Report   : {cfg.report_file}")
-    log(f"Memory   : {cfg.sync_ledger}")
     log("")
 
     log.file = cfg.log_file
@@ -1236,9 +990,6 @@ def run(cfg: Config) -> int:
     video_count = 0
     truncated = False
     started = time.monotonic()
-    # Remembered verdicts from earlier runs. A dry run reads them to show what
-    # a live run would skip, and never writes: it measures nothing new.
-    sync_state = load_sync_state(cfg.sync_ledger)
     try:
         with CoordinationLock(cfg.library, timeout_seconds=cfg.lock_timeout_seconds):
             jobs, skipped, video_count = discover_jobs(cfg.library)
@@ -1260,7 +1011,7 @@ def run(cfg: Config) -> int:
                 # what is in flight rather than announcing everything at once.
                 index, job = numbered
                 log(f"[{index}/{len(jobs)}] syncing {job.srt.name} against {job.video.name}")
-                return sync_one(job, cfg, binary or "", features, state=sync_state)
+                return sync_one(job, cfg, binary or "", features)
 
             for outcome in iter_completed(list(enumerate(jobs, 1)), _measure, workers=workers):
                 index, job = outcome.item
@@ -1296,22 +1047,16 @@ def run(cfg: Config) -> int:
             write_report(text, cfg)
         except OSError as exc:
             log(f"could not write report: {exc}", level="ERROR")
-        if not cfg.dry_run:
-            # A dry run measured nothing, so it has nothing new to remember.
-            save_sync_state(cfg.sync_ledger, sync_state)
         publish_state(results, cfg)
 
     review = sum(1 for r in results if r.status == STATUS_REVIEW)
     failed = sum(1 for r in results if r.status == STATUS_FAILED)
     synced = sum(1 for r in results if r.status == STATUS_SYNCED)
     in_sync = sum(1 for r in results if r.status == STATUS_IN_SYNC)
-    remembered = sum(1 for r in results if r.status == STATUS_REMEMBERED)
     log("")
     log("SYNC COMPLETE")
     log(f"  Synced (replaced)   : {synced}")
     log(f"  Already in sync     : {in_sync}")
-    log(f"  Remembered (skipped): {remembered}")
-    log(f"  Extracted (skipped) : {sum(1 for r in results if r.status == STATUS_EXTRACTED)}")
     log(f"  Held for review     : {review}")
     log(f"  Failed              : {failed}")
     log(f"  Skipped             : {sum(1 for r in results if r.status == STATUS_SKIPPED)}")
@@ -1332,9 +1077,10 @@ def run(cfg: Config) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Sync every external .srt sidecar with its movie using ffsubsync: "
+            "Sync freshly extracted .srt sidecars with their movie using ffsubsync: "
             "trustworthy drift is applied atomically, zero drift leaves the file "
-            "untouched, and untrustworthy drift is held for review."
+            "untouched, and untrustworthy drift is held for review. Sidecars that "
+            "were not extracted from the movie's own embedded track are never touched."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -1345,11 +1091,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Single replaceable human-readable report outside the library")
     parser.add_argument("--log", type=Path, default=Path(LOG_FILE),
                         help="Append-only execution log outside the media library")
-    parser.add_argument("--sync-ledger", type=Path, default=default_sync_ledger(),
-                        metavar="PATH",
-                        help="Remembered sync verdicts outside the media library "
-                             f"(env {SYNC_STATE_ENV} also works). Delete it to "
-                             "re-measure every sidecar.")
     parser.add_argument("--min-offset", type=float, default=DEFAULT_MIN_OFFSET_SECONDS, metavar="SEC",
                         help="Smallest |offset| (seconds) that counts as drift; below it the file is untouched")
     parser.add_argument("--max-offset", type=float, default=DEFAULT_MAX_OFFSET_SECONDS, metavar="SEC",
@@ -1362,7 +1103,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Check at most N sidecars (0 means all)")
     parser.add_argument("--no-state", action="store_true",
                         help="Do not record these verdicts in the shared state cache "
-                             "that `organize status` reads (the sync ledger is unaffected)")
+                             "that `organize status` reads")
     parser.add_argument("--state-db", type=Path, default=None, metavar="PATH",
                         help="Where that cache lives (default: beside the logs and reports)")
     parser.add_argument("--workers", type=int, default=0, metavar="N",
@@ -1383,7 +1124,6 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         library=args.source.resolve(),
         log_file=args.log.resolve(),
         report_file=args.report.resolve(),
-        sync_ledger=args.sync_ledger.expanduser().resolve(),
         min_offset_seconds=float(args.min_offset),
         max_offset_seconds=float(args.max_offset),
         timeout_seconds=float(args.timeout),

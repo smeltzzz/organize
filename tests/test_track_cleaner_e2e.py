@@ -149,7 +149,7 @@ class EndToEndRunTests(CleanerRunFixture):
         self.assertEqual([name for kind, name in tracks if kind == "video"], [""],
                          "the video track is never touched")
         self.assertEqual([name for kind, name in tracks if kind == "subtitles"],
-                         ["English"], "English subs stay when there is no .eng.srt sidecar")
+                         [], "every embedded subtitle goes, sidecar or not")
         self.assertEqual(self._leftovers(), [], "no staging file, no journal")
         self.assertFalse((self.library / tc.LOCK_FILENAME).exists(), "the lock is released")
         self.assertIn("Film (2000).mkv", self._report_text())
@@ -413,7 +413,7 @@ class LibraryChangedUnderneathTests(CleanerRunFixture):
 
     Between the moment the cleaner reads a movie and the moment it swaps the
     remuxed copy over the original, a download client can finish writing to
-    that movie, the subtitle fetcher can replace the sidecar the remux was
+    that movie, the subtitle extractor can replace the sidecar the remux was
     planned around, or the operator can press Ctrl-C. Each of those makes the
     finished temp file wrong, and promoting it would destroy the only copy of
     something.

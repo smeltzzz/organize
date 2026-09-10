@@ -54,10 +54,11 @@ v3.5 MP4 releases are placed
   a folder already holds one container, the other is declined and reported
   rather than added beside it, because two features in one folder is precisely
   what ``library_auditor.py`` flags as MULTIPLE_DIRECT_MOVIE_FILES.
-- The rest of the pipeline is MKV-only by design: ``library_auditor.py``
-  reports a placed MP4 as SINGLE_OTHER_CONTAINER, and ``mkv_track_cleaner.py``,
-  ``subtitle_fetcher.py`` and ``bitdepth.py`` skip it. An MP4 in the library is
-  a playable movie, not a fully maintained one.
+- The rest of the pipeline accepts the placed MP4 until the track cleaner
+  converts it: ``subtitle_extractor.py`` builds its sidecar from the embedded
+  track through a temp-MKV bridge, ``library_auditor.py`` reports it as
+  SINGLE_OTHER_CONTAINER until then, and ``mkv_track_cleaner.py`` converts it
+  to the canonical MKV in the same remux that cleans its tracks.
 
 v2.6 canonical movie-and-English-subtitle output
 --------------------------------------------------
@@ -241,12 +242,12 @@ SKIP_TV_SHOWS = True
 MIN_MOVIE_SIZE_MB = 300
 
 # Two containers are placed as-is: MKV, which the rest of the pipeline can
-# remux and inspect, and MP4, which Jellyfin direct-plays as happily but which
-# the MKV-only tools downstream (track cleaner, subtitle fetcher, 10-bit audit)
-# will leave alone. Anything else is left in the source folder: this script
-# never transcodes, and renaming a container it cannot rewrite would be a lie
-# about the file. MKV stays *canonical* - when a movie arrives in both, the MKV
-# is the one that is placed.
+# remux and inspect, and MP4, which Jellyfin direct-plays as happily and which
+# mkv_track_cleaner.py later converts to the canonical MKV (subtitle_extractor.py
+# bridges it first, so its embedded subs survive the conversion). Anything else
+# is left in the source folder: this script never transcodes, and renaming a
+# container it cannot rewrite would be a lie about the file. MKV stays
+# *canonical* - when a movie arrives in both, the MKV is the one that is placed.
 CANONICAL_VIDEO_EXTENSION = ".mkv"
 VIDEO_EXTENSIONS = {CANONICAL_VIDEO_EXTENSION, ".mp4"}
 # What to call the accepted set in a message, in preference order.

@@ -21,25 +21,25 @@ from organizekit import core
 
 class StepOrderTests(unittest.TestCase):
     def test_canonical_order(self) -> None:
-        self.assertEqual(pl.STEP_ORDER, ("fetcher", "cleaner", "10bit", "sync", "auditor"))
+        self.assertEqual(pl.STEP_ORDER, ("extractor", "cleaner", "10bit", "sync", "auditor"))
 
-    def test_fetcher_precedes_cleaner(self) -> None:
-        """The moviehash is destroyed by a remux, so this is load-bearing."""
-        self.assertLess(pl.STEP_ORDER.index("fetcher"), pl.STEP_ORDER.index("cleaner"))
+    def test_extractor_precedes_cleaner(self) -> None:
+        """The embedded track is destroyed by the remux, so this is load-bearing."""
+        self.assertLess(pl.STEP_ORDER.index("extractor"), pl.STEP_ORDER.index("cleaner"))
 
     def test_sync_precedes_auditor(self) -> None:
         """The audit must see the finished (synced) sidecars."""
         self.assertLess(pl.STEP_ORDER.index("sync"), pl.STEP_ORDER.index("auditor"))
 
     def test_order_survives_any_input_order(self) -> None:
-        for requested in (["auditor", "fetcher"], ["10bit", "cleaner", "fetcher"],
+        for requested in (["auditor", "extractor"], ["10bit", "cleaner", "extractor"],
                           ["cleaner"], ["auditor", "10bit", "fetcher", "cleaner"]):
             with self.subTest(requested=requested):
                 expected = tuple(k for k in pl.STEP_ORDER if k in set(requested))
                 self.assertEqual(pl.resolve_steps(requested), expected)
 
     def test_step_order_does_not_leak_requested_order(self) -> None:
-        self.assertEqual(pl.resolve_steps(["cleaner", "fetcher"]), ("fetcher", "cleaner"))
+        self.assertEqual(pl.resolve_steps(["cleaner", "extractor"]), ("extractor", "cleaner"))
 
     def test_empty_selection(self) -> None:
         self.assertEqual(pl.resolve_steps([]), ())
@@ -96,7 +96,7 @@ class CommandBuildingTests(unittest.TestCase):
         self.library = Path("/media/movies")
 
     def test_root_flags(self) -> None:
-        self.assertEqual(pl.STEPS["fetcher"].root_flag, "--source")
+        self.assertEqual(pl.STEPS["extractor"].root_flag, "--source")
         self.assertEqual(pl.STEPS["cleaner"].root_flag, "--dir")
         self.assertEqual(pl.STEPS["10bit"].root_flag, "--source")
         self.assertEqual(pl.STEPS["sync"].root_flag, "--source")
@@ -111,7 +111,7 @@ class CommandBuildingTests(unittest.TestCase):
 
     def test_dry_run_forwarded_only_where_supported(self) -> None:
         cfg = pl.Config(library=self.library, dry_run=True)
-        self.assertIn("--dry-run", pl.build_command(pl.STEPS["fetcher"], cfg))
+        self.assertIn("--dry-run", pl.build_command(pl.STEPS["extractor"], cfg))
         self.assertIn("--dry-run", pl.build_command(pl.STEPS["cleaner"], cfg))
         self.assertIn("--dry-run", pl.build_command(pl.STEPS["sync"], cfg))
         # The auditor is already read-only and has no --dry-run to accept.
@@ -119,7 +119,7 @@ class CommandBuildingTests(unittest.TestCase):
 
     def test_limit_forwarded_only_where_supported(self) -> None:
         cfg = pl.Config(library=self.library, limit=5)
-        self.assertEqual(pl.build_command(pl.STEPS["fetcher"], cfg)[-2:], ["--limit", "5"])
+        self.assertEqual(pl.build_command(pl.STEPS["extractor"], cfg)[-2:], ["--limit", "5"])
         self.assertIn("--limit", pl.build_command(pl.STEPS["sync"], cfg))
         self.assertNotIn("--limit", pl.build_command(pl.STEPS["auditor"], cfg))
 
@@ -156,14 +156,13 @@ class PrerequisiteTests(unittest.TestCase):
             with self.subTest(step=key):
                 self.assertTrue((pl.HERE / pl.STEPS[key].script).is_file())
 
-    def test_subdl_key_satisfies_fetcher_prerequisite(self) -> None:
-        with mock.patch.dict(
-            os.environ,
-            {"OPENSUBTITLES_API_KEY": "", "SUBDL_API_KEY": "subdl-test-key"},
-            clear=False,
-        ):
-            self.assertTrue(pl._api_key_present())
-            self.assertIsNone(pl.prerequisite_issue(pl.STEPS["fetcher"]))
+    def test_extractor_prerequisite_needs_mkvtoolnix(self) -> None:
+        import subtitle_extractor as sx
+        with mock.patch.object(sx, "find_mkvtoolnix_binary",
+                               side_effect=lambda name: f"/usr/bin/{name}"), \
+                mock.patch.dict(os.environ, {"ORGANIZE_NO_KEEPALIVE": "0"}, clear=False):
+            issue = pl.prerequisite_issue(pl.STEPS["extractor"])
+        self.assertIsNone(issue, f"both binaries present must satisfy the extractor: {issue}")
 
     def test_sync_skipped_without_ffsubsync(self) -> None:
         import sync_subtitles as ss
@@ -227,7 +226,7 @@ class DryRunDoesNotExecuteTests(unittest.TestCase):
         run = pl.run_pipeline(cfg, dry_run=False)
         statuses = {r.key: r.status for r in run.results}
         self.assertEqual(statuses["auditor"], "ran")
-        for key in ("fetcher", "cleaner", "10bit"):
+        for key in ("extractor", "cleaner", "10bit"):
             if statuses[key] != "ran":
                 with self.subTest(step=key):
                     self.assertNotEqual(statuses[key], "ran")
@@ -242,8 +241,10 @@ class HintTests(unittest.TestCase):
         self.assertNotIn("--allow-hardlinked", hint)
         self.assertIn("safe - it", hint, "the hint should reassure that deleting is safe")
 
-    def test_fetcher_hint_explains_the_ordering(self) -> None:
-        self.assertIn("moviehash", pl.HINTS["fetcher"])
+    def test_extractor_hint_explains_the_ordering(self) -> None:
+        hint = pl.HINTS["extractor"]
+        self.assertIn("strips every embedded subtitle", hint)
+        self.assertIn("extraction must happen while the track is", hint)
 
     def test_sync_hint_explains_the_position_and_safety(self) -> None:
         hint = pl.HINTS["sync"]

@@ -37,16 +37,17 @@ python3 /opt/organize/pipeline.py --source /path/to/movies
 
 ## 🔄 The order, and why it is fixed
 
-Five maintenance tools, one fixed order. The order between **subtitles** and
-**remux** is load-bearing — a remux rewrites the container bytes that
-OpenSubtitles hashes, so fetching subtitles *after* cleaning permanently
-destroys the exact-match search. It also matters that extraction happens
-*before* the remux: once the embedded tracks are stripped, a subtitle that was
-already in the file can only be downloaded. Subtitle **sync** runs last of the content
-steps on purpose: it rewrites subtitle bytes only (never movie bytes), so the
-moviehash is undisturbed — but it must finish before the audit so the audit
-validates the finished sidecars. `pipeline.py` exists so you cannot get this
-wrong.
+Five maintenance tools, one fixed order. The order between **extraction**
+and **remux** is load-bearing — the cleaner removes every embedded subtitle
+from every movie, so extraction must happen *while the track is still in
+the container*; after the remux, a subtitle that was already in the file is
+gone for good. Subtitle **sync** runs last of the
+content steps on purpose: it rewrites subtitle bytes only (never movie
+bytes), and it must finish before the audit so the audit validates the
+finished sidecars. (Subtitle downloading used to be part of this pipeline;
+it was removed outright — the movie's own tracks are the only source now,
+and a movie with no usable track is reported for a human decision.)
+`pipeline.py` exists so you cannot get this wrong.
 
 ```
  torrent finishes
@@ -57,20 +58,20 @@ wrong.
 └───────────┬───────────┘
             ▼
 ┌───────────────────────┐   extract the movie's own embedded English track
-│ 2 · subtitles         │   first (exact, free, in sync); else OpenSubtitles
-└───────────┬───────────┘   moviehash + SubDL release match + 7 scrapers
+│ 2 · subtitles         │   into <movie>.eng.srt (text, OCR, or the MP4
+└───────────┬───────────┘   bridge); an existing sidecar is authoritative
             ▼
-┌───────────────────────┐   lossless mkvmerge remux: 1 best audio,
-│ 3 · clean             │   strip commentary / dubs / embedded subs
+┌───────────────────────┐   lossless mkvmerge remux: 1 best audio, strip
+│ 3 · clean             │   commentary / dubs / embedded subs; MP4 → MKV
 └───────────┬───────────┘
             ▼
 ┌───────────────────────┐   ffprobe sweep: QUEUE 8-bit SDR, KEEP native HDR,
 │ 4 · 10bit             │   REVIEW ambiguous metadata — never guess
 └───────────┬───────────┘
             ▼
-┌───────────────────────┐   ffsubsync timing sync of every .srt sidecar;
-│ 5 · sync              │   bad syncs held for review, originals never lost
-└───────────┬───────────┘
+┌───────────────────────┐   ffsubsync timing sync of freshly extracted
+│ 5 · sync              │   sidecars (exactly once); bad syncs held for
+└───────────┬───────────┘   review, originals never lost
             ▼
 ┌───────────────────────┐   100% read-only layout + subtitle health check
 │ 6 · audit             │   gating exit codes for cron / Task Scheduler

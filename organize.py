@@ -8,14 +8,13 @@ Python 3.11+ Jellyfin movie library toolkit.
 Commands:
     doctor       Diagnose environment, external binaries, paths, and hardlink capability
     status       Summarise what is done and what the next pass will touch (read-only)
-    run          Run the automated maintenance pipeline (subtitles -> remux -> 10-bit -> sync -> audit)
+    run          Run the automated maintenance pipeline (extract -> remux -> 10-bit -> sync -> audit)
     standardize  Rename and hardlink completed downloads into Title (Year)/Title (Year).mkv
-    subtitles    Fetch validated English human UTF-8 SRT sidecars (OpenSubtitles + SubDL)
-    clean        Lossless remux: keep single best English audio, strip commentary/DVS
+    extract      Extract embedded English tracks into validated <movie>.eng.srt sidecars
+    clean        Lossless remux: keep 1 best audio (the movie's own language), strip subs, MP4 -> MKV
     10bit        ffprobe inspection: queue 8-bit SDR for HandBrake; protect HDR & 10-bit
-    sync         ffsubsync timing sync of every .srt sidecar against its movie (pre-audit)
+    sync         ffsubsync timing sync of freshly extracted sidecars against their movie
     audit        Read-only health check of library layout, MKV naming, and subtitle sidecars
-    one-shot     Run the whole toolchain until the auditor reports 100% canonical
     test         Run the test suite across all tools
 
 Quickstart:
@@ -160,8 +159,8 @@ def print_dashboard() -> None:
 
     print(bold("  WORKFLOW PIPELINE:"))
     print(f"    {cyan('1. standardize')} {SYM_ARROW} qBittorrent completion hook: hardlinks & names into Title (Year)")
-    print(f"    {cyan('2. subtitles')}   {SYM_ARROW} OpenSubtitles + SubDL equal sources (SubDL release match scored ≥ 0.80): English UTF-8 SRT (pre-remux)")
-    print(f"    {cyan('3. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps 1 audio, drops commentary & bloat")
+    print(f"    {cyan('2. extract')}     {SYM_ARROW} subtitle_extractor: embedded English track -> <movie>.eng.srt (no downloads, ever)")
+    print(f"    {cyan('3. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps 1 audio, strips subs (MP4 -> MKV)")
     print(f"    {cyan('4. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect native HDR")
     print(f"    {cyan('5. sync')}        {SYM_ARROW} ffsubsync subtitle-timing sync: trust window applies, bad syncs held for review")
     print(f"    {cyan('6. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
@@ -174,7 +173,6 @@ def print_dashboard() -> None:
     print(f"    {green('python organize.py run --dry-run')}      Preview pipeline commands without executing")
     print(f"    {green('python organize.py standardize [PATH]')} Standardize a specific torrent download or batch scan")
     print(f"    {green('python organize.py audit')}              Audit current library layout and subtitle coverage")
-    print(f"    {green('python organize.py one-shot')}           Run every tool until the library is 100% canonical")
     print(f"    {green('python organize.py test')}               Run built-in test suite (all self-tests + unit tests)")
     print()
 
@@ -287,7 +285,7 @@ class DoctorContext:
 
 
 # A check answers with one verdict, several when a single probe settles more
-# than one question (the provider keys), or none when there is nothing to say.
+# than one question, or none when there is nothing to say.
 DoctorProbe = Callable[["DoctorContext"], "DiagnosticCheck | list[DiagnosticCheck]"]
 
 T = TypeVar("T")
@@ -461,10 +459,10 @@ def check_mkvextract(_ctx: DoctorContext) -> DiagnosticCheck:
     """
 
     def probe() -> tuple[str | None, str | None]:
-        import subtitle_fetcher as sf_extract
+        import subtitle_extractor as sx_extract
         return (
-            sf_extract.find_mkvtoolnix_binary("mkvmerge"),
-            sf_extract.find_mkvtoolnix_binary("mkvextract"),
+            sx_extract.find_mkvtoolnix_binary("mkvmerge"),
+            sx_extract.find_mkvtoolnix_binary("mkvextract"),
         )
 
     mkvmerge_bin, mkvextract_bin = probe_quietly(probe) or (None, None)
@@ -479,8 +477,8 @@ def check_mkvextract(_ctx: DoctorContext) -> DiagnosticCheck:
         name="mkvextract (embedded subs)",
         status="warn",
         message="Not found on PATH",
-        detail="subtitle_fetcher.py cannot read the movie's own embedded subtitle tracks, "
-               "so those movies are downloaded from the provider sources instead",
+        detail="subtitle_extractor.py cannot read the movie's own embedded subtitle tracks, "
+               "so no sidecar can be created for a movie without one",
         remedy=(
             "Windows: winget install MoritzBunkus.MKVToolNix\n"
             "Debian/Ubuntu: sudo apt install -y mkvtoolnix\n"
@@ -493,12 +491,12 @@ def check_ocr_backend(_ctx: DoctorContext) -> DiagnosticCheck:
     """Image-subtitle OCR - optional, and only for PGS/VobSub embedded tracks."""
 
     def probe() -> tuple[Any, str]:
-        import subtitle_fetcher as sf_ocr
-        return sf_ocr.detect_ocr_backend(sf_ocr.OCR_BACKEND_AUTO)
+        import subtitle_extractor as sx_ocr
+        return sx_ocr.detect_ocr_backend(sx_ocr.OCR_BACKEND_AUTO)
 
     detected, exc = probe_outcome(probe)
     if detected is None:
-        ocr_backend, ocr_note = None, f"subtitle_fetcher is unavailable ({exc})"
+        ocr_backend, ocr_note = None, f"subtitle_extractor is unavailable ({exc})"
     else:
         ocr_backend, ocr_note = detected
     if ocr_backend is not None:
@@ -514,66 +512,18 @@ def check_ocr_backend(_ctx: DoctorContext) -> DiagnosticCheck:
         message="No OCR backend found",
         detail=(
             (f"{ocr_note}. " if ocr_note else "")
-            + "Text tracks (SRT/SSA/ASS) are still extracted; image-only movies fall "
-              "through to the download sources"
+            + "Text tracks (SRT/SSA/ASS) are still extracted; image-only movies stay "
+              "uncovered until one is installed"
         ),
         remedy=(
             "pgsrip: pip install pgsrip  (needs MKVToolNix, tesseract and tessdata)\n"
             "sup2srt + Tesseract: https://github.com/retrontology/sup2srt\n"
             "Subtitle Edit: https://www.nikse.dk/subtitleedit\n"
             "PgsToSrt: set PGSTOSRT_DLL to the dll path (needs dotnet)\n"
-            "Or point subtitle_fetcher.py at your own tool: --ocr-backend custom "
+            "Or point subtitle_extractor.py at your own tool: --ocr-backend custom "
             "--ocr-bin <program> --ocr-args \"{input}\" \"{output}\""
         ),
     )
-
-
-def mask_key(value: str) -> str:
-    """Show enough of a key to recognise it, never enough to use it."""
-    return value[:4] + "..." + value[-4:] if len(value) > 8 else "***"
-
-
-def check_provider_keys(_ctx: DoctorContext) -> list[DiagnosticCheck]:
-    """Subtitle provider configuration: zero, one or both keys."""
-
-    def probe() -> tuple[str, str]:
-        import subtitle_fetcher as sf
-        return (
-            (os.environ.get("OPENSUBTITLES_API_KEY") or sf.OPENSUBTITLES_API_KEY).strip(),
-            (os.environ.get("SUBDL_API_KEY") or sf.SUBDL_API_KEY).strip(),
-        )
-
-    opensubtitles_key, subdl_key = probe_quietly(probe) or ("", "")
-    checks: list[DiagnosticCheck] = []
-    if opensubtitles_key:
-        checks.append(DiagnosticCheck(
-            name="OpenSubtitles API Key",
-            status="ok",
-            message=f"Configured ({mask_key(opensubtitles_key)})",
-            detail="Enables byte-identical OSHash subtitle matching (an equal source to SubDL)",
-        ))
-    if subdl_key:
-        checks.append(DiagnosticCheck(
-            name="SubDL API Key",
-            status="ok",
-            message=f"Configured ({mask_key(subdl_key)})",
-            detail="Enables score-gated release-aware matching (score ≥ 0.80) as an equal source; can also run as the sole provider",
-        ))
-    if not opensubtitles_key and not subdl_key:
-        checks.append(DiagnosticCheck(
-            name="Subtitle Provider API Key",
-            status="warn",
-            message="Neither OPENSUBTITLES_API_KEY nor SUBDL_API_KEY is set",
-            detail="Subtitle fetching will be skipped until at least one provider is configured",
-            remedy=(
-                "OpenSubtitles (recommended exact-match source): https://www.opensubtitles.com/en/consumers\n"
-                "SubDL (score-gated release-aware fallback): https://subdl.com/panel/api\n"
-                "Windows (PowerShell): [Environment]::SetEnvironmentVariable('OPENSUBTITLES_API_KEY', 'your-key', 'User')\n"
-                "or: [Environment]::SetEnvironmentVariable('SUBDL_API_KEY', 'your-key', 'User')\n"
-                "Linux/macOS (bash): export OPENSUBTITLES_API_KEY='your-key'  # or export SUBDL_API_KEY='your-key'"
-            ),
-        ))
-    return checks
 
 
 def check_library_directory(ctx: DoctorContext) -> DiagnosticCheck:
@@ -656,7 +606,6 @@ DOCTOR_CHECKS: tuple[tuple[str, DoctorProbe], ...] = (
     ("ffsubsync", check_ffsubsync),
     ("mkvextract", check_mkvextract),
     ("ocr", check_ocr_backend),
-    ("provider-keys", check_provider_keys),
     ("library-dir", check_library_directory),
     ("source-dir", check_source_directory),
     ("hardlinks", check_hardlink_compatibility),
@@ -898,8 +847,7 @@ def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
     settled_verdicts: dict[str, frozenset[str] | None] = {
         KIND_REMUX: remux_mod.SETTLED_REMUX,
         KIND_BITDEPTH: frozenset({probe_mod.STATUS_SKIP_SDR, probe_mod.STATUS_SKIP_HDR}),
-        KIND_SYNC: frozenset({sync_mod.STATUS_SYNCED, sync_mod.STATUS_IN_SYNC,
-                              sync_mod.STATUS_REMEMBERED}),
+        KIND_SYNC: frozenset({sync_mod.STATUS_SYNCED, sync_mod.STATUS_IN_SYNC}),
     }
     cached_kinds = tuple(settled_verdicts)
 
@@ -1235,11 +1183,10 @@ def run_all_self_tests() -> int:
         ("bitdepth.py", ["--self-test"]),
         ("library_auditor.py", ["--self-test"]),
         ("movie_standardizer.py", ["--self-test"]),
-        ("subtitle_fetcher.py", ["--self-test"]),
+        ("subtitle_extractor.py", ["--self-test"]),
         ("mkv_track_cleaner.py", ["--self-test"]),
         ("sync_subtitles.py", ["--self-test"]),
         ("pipeline.py", ["--self-test"]),
-        ("jellyfin_one_shot.py", ["--self-test"]),
     ]
 
     failed = 0
@@ -1342,24 +1289,20 @@ def build_parser() -> argparse.ArgumentParser:
     # standardize
     subparsers.add_parser("standardize", aliases=["std"], help="Rename & hardlink completed torrents into Title (Year)", add_help=False)
 
-    # subtitles
-    subparsers.add_parser("subtitles", aliases=["subs"], help="Fetch English human UTF-8 SRT sidecars from OpenSubtitles + SubDL", add_help=False)
+    # extract
+    subparsers.add_parser("extract", aliases=["extract-subs"], help="Extract embedded English tracks into validated <movie>.eng.srt sidecars", add_help=False)
 
     # clean
-    subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep 1 best audio, strip commentary/DVS", add_help=False)
+    subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep 1 best audio, strip subs; MP4 converted to MKV", add_help=False)
 
     # 10bit
     subparsers.add_parser("10bit", aliases=["probe"], help="FFprobe 8-bit vs 10-bit & native HDR compliance check", add_help=False)
 
     # sync
-    subparsers.add_parser("sync", aliases=["sync-subtitles"], help="ffsubsync subtitle-timing sync of every .srt sidecar (pre-audit)", add_help=False)
+    subparsers.add_parser("sync", aliases=["sync-subtitles"], help="ffsubsync timing sync of freshly extracted .srt sidecars (pre-audit)", add_help=False)
 
     # audit
     subparsers.add_parser("audit", help="Read-only audit of library layout, naming, and SRT sidecars", add_help=False)
-
-    # one-shot
-    subparsers.add_parser("one-shot", aliases=["oneshot", "complete"],
-                          help="Run the whole toolchain until the auditor reports 100%% canonical", add_help=False)
 
     # test
     p_test = subparsers.add_parser("test", aliases=["tests"], help="Run test suite (self-tests and/or unit tests)")
@@ -1448,8 +1391,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if command in {"standardize", "std"}:
         return delegate_to_script("movie_standardizer.py", sub_args)
 
-    if command in {"subtitles", "subs"}:
-        return delegate_to_script("subtitle_fetcher.py", sub_args)
+    if command in {"extract", "extract-subs"}:
+        return delegate_to_script("subtitle_extractor.py", sub_args)
 
     if command in {"clean", "remux"}:
         return delegate_to_script("mkv_track_cleaner.py", sub_args)
@@ -1462,9 +1405,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if command in {"audit"}:
         return delegate_to_script("library_auditor.py", sub_args)
-
-    if command in {"one-shot", "oneshot", "complete"}:
-        return delegate_to_script("jellyfin_one_shot.py", sub_args)
 
     if command in {"test", "tests"}:
         code = run_all_self_tests()

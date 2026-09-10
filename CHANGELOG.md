@@ -4,6 +4,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-09-09
+
+**Subtitle fetching is gone: the movie's own tracks are the only subtitle
+source.** Downloading subtitles was the one part of this toolkit that could
+not be made reliable — an answer from a stranger's website is a guess about
+someone else's release — so it was removed outright, not disabled.
+
+### Removed
+- **All subtitle downloading**: OpenSubtitles, SubDL and the seven scraping
+  fallbacks, their API keys, quotas, ledgers, rate limits and connection
+  pooling (`nethttp.py`, `ratelimit.py`), and every `--source`/`--skip-source`
+  flag. No network access exists anywhere in the toolkit now.
+- **The second runner: `pipeline.py` is the only thing that runs the
+  toolchain.** `jellyfin_one_shot.py` looped the same five tools until the
+  auditor reported 100% canonical — a second description of the same work,
+  with its own log, report, pass loop, pacing and edge cases. It is deleted,
+  along with its `organize.py one-shot`/`oneshot`/`complete` verbs, the
+  `jellyfin_completer.sh` compatibility wrapper and `tests/test_one_shot.py`.
+  `organize.py run` (or `python3 pipeline.py`) is the one runner: one pass of
+  the five steps in the right order, and re-running it is the loop. The step
+  table in `organizekit/core/toolchain.py` lost every field that existed only
+  for the deleted runner's banners, caches, timeouts and transcripts;
+  `build_step_args`, `detect_tools`, `step_skip_reason` and the `--script-dir`
+  plumbing went with it.
+- `OPENSUBTITLES_API_KEY`, `SUBDL_API_KEY` and `ORGANIZE_NO_KEEPALIVE` from
+  the environment surface; `organize doctor` no longer checks provider keys.
+
+### Changed
+- **`subtitle_fetcher.py` is now `subtitle_extractor.py`** (pipeline step
+  `extractor`, CLI verb `organize.py extract`). It extracts the movie's own
+  embedded English track into a validated `<movie>.eng.srt` — text tracks
+  via `mkvextract`, image tracks via an OCR backend, and MP4s through a
+  temporary MKV bridge, because `mkvextract` cannot read `mov_text` directly.
+  A movie with no usable embedded track is reported for a human decision;
+  there is no download to fall back to and the report says so.
+- **One audio track per movie: the best in the movie's own (native)
+  language.** The cleaner no longer prefers English audio. The native
+  language is decided by the file's own markers — a track flagged
+  `original`, a single shared language, the default-flagged track, then
+  track order — and tracks titled as dubs are never the keeper, so a
+  foreign film keeps its original-language track while an English dub of it
+  goes, and an English film keeps English while its foreign dubs go. A
+  movie whose every audio track is commentary is still skipped, now with a
+  clearer report row.
+- **No embedded subtitle survives any remux.** The old safety net — keep the
+  embedded English subs when there is no sidecar yet, so the extractor can
+  lift them out later — is gone: the `.eng.srt` beside the movie is the
+  library's only subtitle, and `subtitle_extractor.py` runs before the
+  cleaner in the pipeline, so anything worth saving is saved before the
+  strip. A movie cleaned with no sidecar is named in the report as needing
+  one (a human decision). A movie with a **broken** `.eng.srt` beside it is
+  skipped entirely: an existing sidecar is authoritative even when it is
+  unusable — fix or delete it and re-run.
+- **The sync rule is inverted.** `sync_subtitles.py` used to skip extracted
+  sidecars as "already frame-accurate" and sync downloaded ones; now it is
+  exactly the other way around. A sidecar the extractor just wrote is
+  measured against the movie's audio **once** (and corrected if the drift is
+  real and trustworthy); every other sidecar — placed by hand, carried over,
+  or already synced — is authoritative and never touched. An existing
+  `.eng.srt` beside a movie is never re-checked, by either tool.
+- **`mkv_track_cleaner.py` converts MP4s to MKVs.** The container swap is a
+  lossless remux with everything the MKV path already had (transactional
+  replace, free-space check, seeding deferral), and it runs after the
+  extractor has lifted any embedded subtitles out through the bridge. A
+  movie remuxed without a validated sidecar keeps its embedded English
+  subtitle tracks so the extractor can still build one later.
+- After extraction and sync, the cleaner strips **every** embedded subtitle
+  track from the MKV, leaving the external `.eng.srt` as the sole subtitle
+  option. This behaviour is unchanged; it is now the whole subtitle story.
+- CI's coverage floor follows the code down (88% → 85%): the deleted fetching
+  code was 100%-covered, and the suite measures 86% without it. The floor is
+  a ratchet, not a target; it goes back up in a later testing pass. The suite
+  itself is 1,295 tests, all green, and the wheel/sdist/zipapp builds are
+  exercised end to end.
+
 ## [3.6.0] - 2026-09-07
 
 **MP4 placement, the four deferred items, and a suite that runs on every

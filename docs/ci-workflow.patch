@@ -6,122 +6,60 @@
 #
 #     git apply docs/ci-workflow.patch && git add .github && git commit
 #
-# What they add, in the order they appear:
+# What they change, in the order they appear:
 #
-#   * byte-compile the organizekit package too, not only the nine scripts;
-#   * assert that a bare clone imports with no install and no PYTHONPATH, and
-#     that a tool binds the core implementation itself rather than a copy;
-#   * raise the coverage floor from 55 to 74 (the real figure is 77%; the
-#     floor is a ratchet, not a target);
-#   * a `single-file` job on Linux and Windows that builds dist/organize.pyz,
-#     runs it from OUTSIDE the source tree (--version, doctor, test - which
-#     starts all nine tools as child processes out of the archive) and uploads
-#     it as a build artifact. The offline suite already builds and exercises
-#     the archive; this job is the cross-platform half of that.
+#   * the syntax gate's byte-compile list still names `subtitle_fetcher.py`
+#     (renamed to `subtitle_extractor.py` when subtitle downloading was
+#     removed) and `jellyfin_one_shot.py` (deleted with the second runner:
+#     the pipeline is the only thing that runs the toolchain). Until this is
+#     applied, the gate fails on files that no longer exist;
+#   * the coverage floor drops from 88% to 85%. The 4.0.0 deletions (subtitle
+#     fetching, then the one-shot runner and its tests) were 100%-covered
+#     code, so the suite's overall number settled at 86%; the floor keeps its
+#     usual point of slack below the real figure. It is a ratchet, not a
+#     target - raise it again in a later testing pass, never lower it further.
+#
+# (The earlier held changes - byte-compiling the organizekit package, the
+# no-install import check, the single-file organize.pyz job, the organizekit
+# wheel name - and docs/release-workflow.patch have all been applied and
+# committed already; that patch is gone.)
 #
 # Verified with `git apply --check` against the ci.yml at the tip of this
 # branch.
 
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 5b752f0..a58f773 100644
+index 16ffc52..c150f3c 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
-@@ -37,13 +37,16 @@ jobs:
-         with:
-           python-version: ${{ matrix.python-version }}
- 
--      - name: Byte-compile every script (syntax gate)
-+      - name: Byte-compile the package and every script (syntax gate)
+@@ -40,9 +40,9 @@ jobs:
+       - name: Byte-compile the package and every script (syntax gate)
          run: >-
--          python -m compileall -q
-+          python -m compileall -q organizekit
-           organize.py pipeline.py jellyfin_one_shot.py bitdepth.py
+           python -m compileall -q organizekit
+-          organize.py pipeline.py jellyfin_one_shot.py bitdepth.py
++          organize.py pipeline.py bitdepth.py
            library_auditor.py mkv_track_cleaner.py movie_standardizer.py
-           subtitle_fetcher.py sync_subtitles.py
+-          subtitle_fetcher.py sync_subtitles.py
++          subtitle_extractor.py sync_subtitles.py
  
-+      - name: A clone must run with no install and no PYTHONPATH
-+        run: python -c "import bitdepth, organizekit.core; assert bitdepth.Report is organizekit.core.Report"
-+
-       - name: Built-in self-tests (one per tool)
-         run: python organize.py test
- 
-@@ -67,6 +70,12 @@ jobs:
-   coverage:
-     # A floor, not a target. Raise `--fail-under` whenever the real number
-     # comfortably clears it so coverage can only ratchet upwards.
-+    # 55 -> 65 when the tools' self-tests moved into tests/selftests/: they had
-+    # always been production lines that the unit suite never executed, which
-+    # depressed the number by ~9 points while testing nothing extra.
-+    # 65 -> 72 with the crash-safety, end-to-end and destructive-path suites.
-+    # The suite measures 75% on this runner; the floor keeps a few points of
-+    # slack because the end-to-end remux tests are skipped off POSIX.
+       - name: A clone must run with no install and no PYTHONPATH
+         run: python -c "import bitdepth, organizekit.core; assert bitdepth.Report is organizekit.core.Report"
+@@ -76,6 +76,10 @@ jobs:
+     # 65 -> 72 with the crash-safety, end-to-end and destructive-path suites.
+     # The suite measures 75% on this runner; the floor keeps a few points of
+     # slack because the end-to-end remux tests are skipped off POSIX.
++    # 88 -> 85 with the 4.0.0 deletions (subtitle fetching, then the one-shot
++    # runner): that code was 100%-covered and deleted with its tests, and the
++    # suite measures 86% without it. The floor keeps its point of slack; it
++    # is a ratchet - raise it again in a later testing pass, never lower it.
      name: Coverage gate
      runs-on: ubuntu-latest
      steps:
-@@ -80,7 +89,7 @@ jobs:
+@@ -89,7 +93,7 @@ jobs:
        - name: Report and enforce the floor
          run: |
            python -m coverage report
--          python -m coverage report --fail-under=55
-+          python -m coverage report --fail-under=88
+-          python -m coverage report --fail-under=88
++          python -m coverage report --fail-under=85
  
    packaging:
      # Regression guard for the broken console entry point: pyproject declared
-@@ -111,17 +120,54 @@ jobs:
-           organize doctor
-           organize audit --help
-         shell: bash
--      - name: The wheel's version must match organize.VERSION
-+      - name: The shared core must be importable from the wheel
-+        working-directory: ${{ runner.temp }}
-+        run: python -c "import organizekit.core as c; assert c.Report and c.atomic_write_text"
-+        shell: bash
-+      - name: The wheel's version must match organizekit.VERSION
-         working-directory: ${{ runner.temp }}
-         run: |
-           python -c "
--          import importlib.metadata as m, organize, sys
--          wheel, src = m.version('organize'), organize.VERSION
-+          import importlib.metadata as m, organizekit, sys
-+          wheel, src = m.version('organizekit'), organizekit.VERSION
-           print(f'wheel={wheel} source={src}')
-           sys.exit(0 if wheel == src else 1)
-           "
-         shell: bash
- 
-+  single-file:
-+    # The other install path: one file copied to a machine with nothing on it
-+    # but Python. The archive has no script files in it, so this is also the
-+    # regression guard for the launcher - a step that cannot start is the
-+    # failure mode, and only a real archive shows it.
-+    name: Single-file build (organize.pyz)
-+    runs-on: ${{ matrix.os }}
-+    strategy:
-+      fail-fast: false
-+      matrix:
-+        os: [ubuntu-latest, windows-latest]
-+    steps:
-+      - uses: actions/checkout@v4
-+      - uses: actions/setup-python@v5
-+        with:
-+          python-version: "3.11"
-+      - name: Build the archive
-+        run: python scripts/build_pyz.py
-+        shell: bash
-+      - name: It must work from OUTSIDE the source tree
-+        run: |
-+          cp dist/organize.pyz "${{ runner.temp }}/organize.pyz"
-+          cd "${{ runner.temp }}"
-+          python organize.pyz --version
-+          python organize.pyz doctor
-+          python organize.pyz test
-+        shell: bash
-+      - uses: actions/upload-artifact@v4
-+        if: matrix.os == 'ubuntu-latest'
-+        with:
-+          name: organize-pyz
-+          path: dist/organize.pyz
-+
-   doctor-smoke:
-     # Verifies the unified CLI boots and the diagnostic doctor runs green-box
-     # on a pristine machine (no binaries, no API key — warnings, not crashes).

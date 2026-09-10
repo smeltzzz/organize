@@ -14,7 +14,7 @@ The copies are gone. Every shared helper now lives exactly once in
 
 * nothing may re-vendor a core helper into a tool,
 * the durability guarantee is asserted on the single implementation,
-* the two orchestrators must still agree on the load-bearing step order,
+* the orchestrator must bind the shared step table rather than a copy,
 * and the prerequisite checks must still agree with each other.
 """
 
@@ -35,13 +35,12 @@ from organizekit import core  # noqa: E402  (needs the path bootstrap above)
 # Every module that used to vendor helpers, plus the two orchestrators.
 TOOLS = (
     "bitdepth.py",
-    "jellyfin_one_shot.py",
     "library_auditor.py",
     "mkv_track_cleaner.py",
     "movie_standardizer.py",
     "organize.py",
     "pipeline.py",
-    "subtitle_fetcher.py",
+    "subtitle_extractor.py",
     "sync_subtitles.py",
 )
 
@@ -92,11 +91,11 @@ class NothingMayReVendorTheCore(unittest.TestCase):
         import mkv_track_cleaner
         import movie_standardizer
         import pipeline
-        import subtitle_fetcher
+        import subtitle_extractor
         import sync_subtitles
 
         for module in (bitdepth, library_auditor, mkv_track_cleaner,
-                       movie_standardizer, pipeline, subtitle_fetcher,
+                       movie_standardizer, pipeline, subtitle_extractor,
                        sync_subtitles):
             for name in ("Report", "resolve_library", "atomic_write_text"):
                 bound = getattr(module, name, None)
@@ -185,26 +184,26 @@ class DotenvIsFoundFromWhereTheUserRuns(unittest.TestCase):
 
 
 class PipelineOrderIsLoadBearing(unittest.TestCase):
-    """The subtitle fetch must precede the remux, forever.
+    """Subtitle extraction must precede the remux, forever.
 
-    subtitle_fetcher.py searches OpenSubtitles by moviehash, computed from the
-    file size plus the first and last 64 KiB. A remux rewrites those bytes, so
-    a movie cleaned first can never reproduce its release hash and is silently
-    demoted to the far weaker title/year search. The constraint was documented
-    in three docstrings and enforced by nothing.
+    subtitle_extractor.py builds the sidecar from the movie's own embedded
+    track, and mkv_track_cleaner.py strips every embedded subtitle once a
+    validated sidecar exists. A movie cleaned first has lost that track for
+    good, so the constraint is documented in the toolchain table and enforced
+    here.
     """
 
-    def test_fetcher_runs_before_cleaner(self) -> None:
+    def test_extraction_runs_before_cleaner(self) -> None:
         import pipeline
 
         order = pipeline.STEP_ORDER
-        self.assertIn("fetcher", order)
+        self.assertIn("extractor", order)
         self.assertIn("cleaner", order)
         self.assertLess(
-            order.index("fetcher"),
+            order.index("extractor"),
             order.index("cleaner"),
-            "subtitle fetching MUST precede the remux: cleaning first destroys "
-            "the OpenSubtitles moviehash and silently degrades every lookup.",
+            "subtitle extraction MUST precede the remux: cleaning first strips "
+            "the embedded track the sidecar is extracted from.",
         )
 
     def test_sync_runs_after_cleaner_and_before_audit(self) -> None:
@@ -223,21 +222,18 @@ class PipelineOrderIsLoadBearing(unittest.TestCase):
             "the audit must see the finished sidecars.",
         )
 
-    def test_one_shot_agrees_with_the_pipeline_order(self) -> None:
-        """The two orchestrators must not disagree about the running order.
+    def test_the_pipeline_binds_the_shared_step_table(self) -> None:
+        """The runner must not carry its own copy of the step order.
 
-        They no longer *can*: the order, the scripts, the flags and the
-        prerequisites are one table in organizekit.core.toolchain, and both
-        orchestrators bind that object rather than a copy of it. Asserting
-        identity (not equality) is what makes drift unrepresentable.
+        The order, the scripts, the flags and the prerequisites are one table
+        in organizekit.core.toolchain, and the pipeline binds that object
+        rather than a copy of it. Asserting identity (not equality) is what
+        makes a second table unrepresentable.
         """
-        import jellyfin_one_shot
         import pipeline
 
         self.assertIs(pipeline.STEP_ORDER, core.STEP_ORDER)
-        self.assertIs(jellyfin_one_shot.STEP_ORDER, core.STEP_ORDER)
         self.assertIs(pipeline.STEPS, core.STEPS)
-        self.assertIs(jellyfin_one_shot.STEPS, core.STEPS)
 
     def test_the_step_table_is_the_only_list_of_the_tools(self) -> None:
         """Every script named in the table exists, and nothing else runs."""
@@ -251,38 +247,43 @@ class PipelineOrderIsLoadBearing(unittest.TestCase):
 
 
 class PrerequisiteChecksAgree(unittest.TestCase):
-    """All three prerequisite surfaces must answer the same question.
+    """Every prerequisite surface must answer the same question.
 
-    jellyfin_one_shot.py used a bare ``shutil.which("mkvmerge")`` while
-    pipeline.py and organize.py doctor delegated to
-    ``mkv_track_cleaner.resolve_mkvmerge_path()``, which also searches the
-    standard install locations. The Windows MKVToolNix installer does not put
-    itself on PATH, so a fully-provisioned machine had one-shot silently
-    skipping the remux while doctor reported everything green.
+    A second runner (deleted in 4.0.0) used to answer "is mkvmerge installed?"
+    with a bare ``shutil.which`` while pipeline.py and organize.py doctor
+    delegated to ``mkv_track_cleaner.resolve_mkvmerge_path()``, which also
+    searches the standard install locations. The Windows MKVToolNix installer
+    does not put itself on PATH, so a fully-provisioned machine had the remux
+    silently skipped while doctor reported everything green. These tests keep
+    the pipeline honest about the same question.
     """
 
-    def test_one_shot_delegates_binary_detection(self) -> None:
-        import jellyfin_one_shot as one_shot
+    def test_the_pipeline_delegates_binary_detection(self) -> None:
         import mkv_track_cleaner
+        import pipeline
         import sync_subtitles
 
-        # mkvmerge: resolvable via the cleaner's resolver => one-shot agrees.
+        # mkvmerge: the cleaner step asks the cleaner's own resolver, so the
+        # pipeline's skip decision agrees with the tool that runs the binary.
         try:
             mkv_track_cleaner.resolve_mkvmerge_path()
             expected_mkvmerge = True
         except (FileNotFoundError, OSError):
             expected_mkvmerge = False
-        self.assertEqual(expected_mkvmerge, one_shot._mkvmerge_available())
+        self.assertEqual(
+            expected_mkvmerge,
+            pipeline.prerequisite_issue(pipeline.STEPS["cleaner"]) is None,
+        )
 
         expected_ffsubsync = sync_subtitles.find_ffsubsync() is not None
-        self.assertEqual(expected_ffsubsync, one_shot._ffsubsync_available())
+        self.assertEqual(expected_ffsubsync, pipeline._ffsubsync_present())
 
-    def test_one_shot_finds_binaries_off_PATH(self) -> None:
+    def test_the_pipeline_finds_binaries_off_PATH(self) -> None:
         """The regression itself: a binary present but not on PATH."""
         import tempfile
 
-        import jellyfin_one_shot as one_shot
         import mkv_track_cleaner
+        import pipeline
 
         with tempfile.TemporaryDirectory() as td:
             # shutil.which() only accepts a PATHEXT extension on Windows, and
@@ -299,9 +300,9 @@ class PrerequisiteChecksAgree(unittest.TestCase):
             try:
                 # Present in a known install location, absent from PATH.
                 mkv_track_cleaner.KNOWN_MKVMERGE_PATHS = [str(fake)]
-                self.assertTrue(
-                    one_shot._mkvmerge_available(),
-                    "one-shot must find mkvmerge in a standard install "
+                self.assertIsNone(
+                    pipeline.prerequisite_issue(pipeline.STEPS["cleaner"]),
+                    "the pipeline must find mkvmerge in a standard install "
                     "location, not only on PATH",
                 )
             finally:
