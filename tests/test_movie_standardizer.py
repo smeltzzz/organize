@@ -304,7 +304,10 @@ class DeclineReasonPrecisionTests(_RunStateMixin):
         outside.write_bytes(b"x" * 15360 * 1024)
         folder = self.root / "final" / "Linked.Movie.2018"
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / "Linked.Movie.2018.avi").symlink_to(outside)
+        try:
+            (folder / "Linked.Movie.2018.avi").symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(f"symlink creation not supported on this machine: {exc}")
 
         ms.handle_directory(folder)
 
@@ -528,7 +531,10 @@ class SymlinkedNestedVideoTests(_RunStateMixin):
         folder.mkdir(parents=True)
         real = folder / "Real.Movie.2015.mkv"
         real.write_bytes(b"mkv")
-        (folder / "link.mkv").symlink_to(real)
+        try:
+            (folder / "link.mkv").symlink_to(real)
+        except OSError as exc:
+            self.skipTest(f"symlink creation not supported on this machine: {exc}")
 
         ms.handle_directory(folder)
 
@@ -541,7 +547,10 @@ class SymlinkedNestedVideoTests(_RunStateMixin):
         outside.write_bytes(b"mkv")
         folder = self.root / "final" / "Phantom.Movie.2014"
         folder.mkdir(parents=True)
-        (folder / "Phantom.Movie.2014.mkv").symlink_to(outside)
+        try:
+            (folder / "Phantom.Movie.2014.mkv").symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(f"symlink creation not supported on this machine: {exc}")
 
         ms.handle_directory(folder)
 
@@ -554,7 +563,10 @@ class SymlinkedNestedVideoTests(_RunStateMixin):
         outside.write_bytes(b"outside-bytes")
         folder = self.root / "final" / "Only.Link.2013"
         folder.mkdir(parents=True)
-        (folder / "Only.Link.2013.mkv").symlink_to(outside)
+        try:
+            (folder / "Only.Link.2013.mkv").symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(f"symlink creation not supported on this machine: {exc}")
 
         scan = ms.scan_tree(folder)
 

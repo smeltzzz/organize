@@ -102,7 +102,21 @@ def no_media_tools() -> Iterator[None]:
             mock.patch.object(sync_subtitles, "find_ffsubsync", lambda explicit=None: None), \
             mock.patch.object(bitdepth, "find_ffprobe", lambda explicit=None: None), \
             mock.patch.object(bitdepth, "ffprobe_works", lambda binary: False), \
-            mock.patch.object(movie_standardizer, "find_ffprobe", lambda explicit="ffprobe": None):
+            mock.patch.object(movie_standardizer, "find_ffprobe", lambda explicit="ffprobe": None), \
+            mock.patch.object(subtitle_extractor, "_resolve_program",
+                              lambda explicit, name, *search_paths: None), \
+            mock.patch.object(subtitle_extractor, "_subtitleedit_program", lambda explicit="": None), \
+            mock.patch.object(subtitle_extractor, "_pgstosrt_program", lambda explicit="": None), \
+            mock.patch.object(subtitle_extractor, "build_ocr_backend", lambda key, explicit_bin="": None), \
+            mock.patch.object(subtitle_extractor, "detect_ocr_backend",
+                              lambda preferred="auto", explicit_bin="", arg_template="":
+                              (None, "no image-subtitle OCR backend found; install one image-subtitle "
+                                     "OCR backend to extract PGS/VobSub tracks: pgsrip "
+                                     "(pip install pgsrip, needs MKVToolNix + tesseract + tessdata), "
+                                     "sup2srt + Tesseract (https://github.com/retrontology/sup2srt), "
+                                     "Subtitle Edit (https://www.nikse.dk/subtitleedit), or PgsToSrt "
+                                     "with PGSTOSRT_DLL set; text subtitle tracks are extracted without "
+                                     "any of them")):
         yield
 
 

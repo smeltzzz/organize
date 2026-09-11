@@ -331,6 +331,29 @@ class ChoosingAnOcrBackendTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+        def _resolve_without_known(explicit: str, name: str, *search_paths: str) -> str | None:
+            if explicit:
+                pp = Path(explicit)
+                if pp.is_file():
+                    return str(pp)
+                found = sx.shutil.which(explicit)
+                if found:
+                    return found
+            found = sx.shutil.which(name)
+            if found:
+                return found
+            return None
+
+        patcher2 = mock.patch.object(sx, "_resolve_program", side_effect=_resolve_without_known)
+        patcher2.start()
+        self.addCleanup(patcher2.stop)
+        patcher3 = mock.patch.object(sx, "_subtitleedit_program", lambda explicit="": None)
+        patcher3.start()
+        self.addCleanup(patcher3.stop)
+        patcher4 = mock.patch.object(sx, "_pgstosrt_program", lambda explicit="": None)
+        patcher4.start()
+        self.addCleanup(patcher4.stop)
+
     def on_path(self, **programs: str) -> None:
         patcher = mock.patch.object(sx.shutil, "which", lambda name: programs.get(name))
         patcher.start()
@@ -355,7 +378,9 @@ class ChoosingAnOcrBackendTests(unittest.TestCase):
 
     def test_a_known_install_location_is_tried_after_the_path(self) -> None:
         """Subtitle Edit and PgsToSrt are not usually on PATH at all."""
-        self.nothing_on_path()
+        patcher = mock.patch.object(sx.shutil, "which", lambda _name: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         installed = self.program("SubtitleEdit.exe")
         # _resolve_program is the shared lookup behind every backend; the
         # known-location list is what makes a GUI install work unattended.

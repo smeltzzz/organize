@@ -24,15 +24,6 @@ Also in this folder:
   was deleted. Apply with `git apply docs/ci-workflow.patch`. (The
   release-workflow patch that used to sit beside it has been applied and
   committed; `release.yml` is live.)
-- [`ci-provisioned-job.patch`](ci-provisioned-job.patch) — adds a `provisioned`
-  job to `.github/workflows/ci.yml`, held for the same missing `workflows`
-  permission. It runs the suite on Windows with MKVToolNix, FFmpeg and
-  ffsubsync actually installed: every other job runs on a machine that has none
-  of them, so a test that consulted the host toolchain looked green nine times
-  while failing on a real workstation. The suite now pins those lookups
-  ([`tests/hermetic.py`](../tests/hermetic.py)); this job is what keeps them
-  pinned. Apply with `git apply docs/ci-provisioned-job.patch`.
-
 Elsewhere in the repo: [`CHANGELOG.md`](../CHANGELOG.md) (what changed and
 why), [`OVERHAUL.md`](../OVERHAUL.md) (the measured plan the recent work
 follows), [`CONTRIBUTING.md`](../CONTRIBUTING.md),
