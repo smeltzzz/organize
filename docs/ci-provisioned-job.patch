@@ -1,0 +1,105 @@
+# Unapplied CI change: a job that runs the suite WITH the tools installed
+#
+# The Arena GitHub App that pushes this branch has no `workflows` permission,
+# so a commit that edits .github/workflows/ci.yml is rejected outright. The
+# change therefore lives here until someone with the right token applies it:
+#
+#     git apply docs/ci-provisioned-job.patch && git add .github && git commit
+#
+# What it adds: a `provisioned` job - Windows with MKVToolNix, FFmpeg and
+# ffsubsync installed, running the same suite the other nine jobs run.
+#
+# Why it is worth a runner: every job in the matrix runs on a machine that has
+# none of these installed, so a test that took a different code path when a
+# binary was present passed nine times over and still failed on the workstation
+# the toolkit is written for. That is not hypothetical - it is how the sync
+# fixtures' line endings and a dozen toolchain probes went unnoticed. The suite
+# now pins those lookups (see tests/hermetic.py), and this job is what keeps
+# them pinned: it fails if a new test starts consulting the host again.
+#
+# The discovery step asks each tool's own resolver rather than a bare
+# `shutil.which`, because MKVToolNix's Windows installer does not put itself on
+# PATH. Asking PATH there would fail on a correctly provisioned machine, which
+# is the exact drift `organizekit/core/toolchain.py` exists to prevent.
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index c150f3c..ca1cca0 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -3,6 +3,11 @@
+ #
+ # The suite is deliberately hermetic: no media files, no mkvtoolnix, no ffprobe,
+ # no OpenSubtitles API key, and no network access are required.
++#
++# Hermetic means the suite does not *need* those things, not that it is blind to
++# them - a runner has none of them installed, so a test that behaves differently
++# when a binary is present would never be caught here. The `provisioned` job at
++# the bottom installs the real toolchain and runs the same suite against it.
+ name: CI
+ 
+ on:
+@@ -194,3 +199,64 @@ jobs:
+         run: python organize.py doctor
+       - name: Pipeline step listing works
+         run: python pipeline.py --list-steps
++
++  provisioned:
++    # The one machine shape the matrix above never tests: a real workstation,
++    # where MKVToolNix, FFmpeg and ffsubsync are actually installed. Every
++    # other job runs on a runner that has none of them, so a test that quietly
++    # takes a different code path when a binary is present - resolving a real
++    # mkvmerge instead of bailing out, launching a real ffprobe instead of the
++    # fake one on PATH - passes nine times over and still fails for the person
++    # who has the tools. That is the machine this toolkit is written for, so it
++    # gets a job of its own.
++    #
++    # The suite is hermetic by design; this job asserts that the hermeticity
++    # holds with the toolchain installed rather than because of its absence.
++    name: Full toolchain installed (windows-latest)
++    runs-on: windows-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-python@v5
++        with:
++          python-version: "3.11"
++
++      - name: Install MKVToolNix and FFmpeg
++        run: choco install mkvtoolnix ffmpeg -y --no-progress
++        shell: bash
++
++      - name: Install ffsubsync
++        run: python -m pip install ffsubsync
++        shell: bash
++
++      - name: Every tool must be discoverable the way the tools discover it
++        # Not a bare `shutil.which` for all five: MKVToolNix's Windows installer
++        # does not put itself on PATH, and the tools do not ask PATH either -
++        # they ask their own resolvers, which also search the standard install
++        # locations. Asking PATH here would fail on a correctly provisioned
++        # machine, which is exactly the drift this job exists to catch.
++        run: |
++          python -c "
++          import shutil, sys
++          import bitdepth, mkv_track_cleaner as tc
++          import subtitle_extractor as sx, sync_subtitles as ss
++          try:
++              mkvmerge = tc.resolve_mkvmerge_path()
++          except OSError as exc:
++              mkvmerge = None
++              print('mkvmerge   ', exc)
++          found = {
++              'mkvmerge': mkvmerge,
++              'mkvextract': sx.find_mkvtoolnix_binary('mkvextract'),
++              'ffmpeg': shutil.which('ffmpeg'),
++              'ffprobe': bitdepth.find_ffprobe(),
++              'ffsubsync': ss.find_ffsubsync(),
++          }
++          for name, path in found.items():
++              print(f'{name:11} {path or \"NOT FOUND\"}')
++          missing = [n for n, p in found.items() if not p]
++          sys.exit(f'this job is meaningless without: {missing}' if missing else 0)
++          "
++        shell: bash
++
++      - name: Unit test suite with every tool installed
++        run: python -m unittest discover -s tests -p "test_*.py"

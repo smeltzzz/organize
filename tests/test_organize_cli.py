@@ -10,11 +10,13 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+import hermetic
+
 import bitdepth
 import organize
 
 
-class OrganizeCliTests(unittest.TestCase):
+class OrganizeCliTests(hermetic.HermeticToolsMixin, unittest.TestCase):
     def test_dashboard_when_no_arguments(self) -> None:
         buf = io.StringIO()
         with redirect_stdout(buf):

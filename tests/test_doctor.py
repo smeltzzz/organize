@@ -24,6 +24,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+import hermetic
+
 import organize
 
 
@@ -350,7 +352,7 @@ class HardlinkCheckTests(unittest.TestCase):
         self.assertIn("nope", checks[0].message)
 
 
-class CheckTableTests(unittest.TestCase):
+class CheckTableTests(hermetic.HermeticToolsMixin, unittest.TestCase):
     def test_every_check_is_registered_once_under_a_unique_key(self) -> None:
         keys = [key for key, _ in organize.DOCTOR_CHECKS]
         self.assertEqual(len(keys), len(set(keys)))
@@ -460,7 +462,7 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("warnings", buf.getvalue())
 
 
-class SlugIdTests(unittest.TestCase):
+class SlugIdTests(hermetic.HermeticToolsMixin, unittest.TestCase):
     """Machine-readable ids: what a consumer is allowed to match on."""
 
     def test_a_name_becomes_a_lowercase_hyphenated_slug(self) -> None:
@@ -554,7 +556,7 @@ class JsonDocumentTests(unittest.TestCase):
         self.assertNotIn("generated", first)
 
 
-class JsonRenderTests(unittest.TestCase):
+class JsonRenderTests(hermetic.HermeticToolsMixin, unittest.TestCase):
     def run_json(self, **kwargs: object) -> tuple[int, str]:
         buf = io.StringIO()
         with redirect_stdout(buf):
@@ -608,7 +610,7 @@ class JsonRenderTests(unittest.TestCase):
         self.assertNotIn("\\u00b7", buf.getvalue())
 
 
-class DoctorCliTests(unittest.TestCase):
+class DoctorCliTests(hermetic.HermeticToolsMixin, unittest.TestCase):
     """`organize doctor` end to end, both renderers, through main()."""
 
     def test_json_flag_is_accepted_and_produces_a_document(self) -> None:
@@ -649,7 +651,7 @@ class DoctorCliTests(unittest.TestCase):
         self.assertEqual(advertised, dispatched)
 
 
-class RunDoctorTests(unittest.TestCase):
+class RunDoctorTests(hermetic.HermeticToolsMixin, unittest.TestCase):
     """The whole command, still behaving as it did before the table existed."""
 
     def test_prints_the_banner_every_check_and_the_scorecard(self) -> None:
