@@ -49,6 +49,24 @@ def _program(directory: Path, name: str) -> Path:
     return program
 
 
+def _is_the_same_program(found: str | None, expected: Path) -> bool:
+    """Whether ``shutil.which`` answered with the program we installed.
+
+    Compared through ``os.path.normcase``, never with ``==`` on the raw
+    strings. On Windows ``shutil.which`` builds its candidate names from
+    ``PATHEXT`` - which is spelled ``.COM;.EXE;.BAT;...`` - and returns
+    ``os.path.join(directory, candidate)``, so it reports ``ffprobe.BAT`` for a
+    file this module created as ``ffprobe.bat``. An exact string comparison
+    passes on Linux and macOS and fails on Windows, where the filesystem does
+    not care about the difference. ``normcase`` is a no-op on POSIX and folds
+    case and separators on Windows, which is the comparison both want.
+    """
+    if not found:
+        return False
+    return (os.path.normcase(str(Path(found).resolve()))
+            == os.path.normcase(str(expected.resolve())))
+
+
 class ThePinHoldsTests(unittest.TestCase):
     def test_every_toolchain_lookup_answers_not_installed(self) -> None:
         """The whole point: one answer, on a bare runner and on a workstation."""
@@ -83,38 +101,41 @@ class ThePinHoldsTests(unittest.TestCase):
 
 
 class ThePinIsSurgicalTests(unittest.TestCase):
+    """The pin hides the toolchain and nothing else - and then lets go."""
+
+    def _install_on_path(self, name: str) -> Path:
+        """Put a real program called ``name`` on the PATH for this test only."""
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        program = _program(Path(td.name), name)
+        saved = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{td.name}{os.pathsep}{saved}"
+        self.addCleanup(lambda: os.environ.__setitem__("PATH", saved))
+        return program
+
     def test_an_unrelated_program_is_still_found(self) -> None:
         """The pin must not blind the suite to every program on the machine."""
-        with tempfile.TemporaryDirectory() as td:
-            program = _program(Path(td), "not_a_media_tool")
-            saved = os.environ.get("PATH")
-            os.environ["PATH"] = f"{td}{os.pathsep}{saved}"
-            self.addCleanup(lambda: os.environ.__setitem__("PATH", saved))
-            with hermetic.no_media_tools():
-                self.assertEqual(shutil.which("not_a_media_tool"), str(program))
+        program = self._install_on_path("not_a_media_tool")
+        with hermetic.no_media_tools():
+            self.assertTrue(_is_the_same_program(shutil.which("not_a_media_tool"), program),
+                            "the pin hid a program that is not part of the toolchain")
 
     def test_a_media_tool_on_the_path_is_invisible_while_pinned(self) -> None:
         """The same PATH, one name that is the toolchain's: not found."""
-        with tempfile.TemporaryDirectory() as td:
-            _program(Path(td), "ffprobe")
-            saved = os.environ.get("PATH")
-            os.environ["PATH"] = f"{td}{os.pathsep}{saved}"
-            self.addCleanup(lambda: os.environ.__setitem__("PATH", saved))
-            self.assertIsNotNone(shutil.which("ffprobe"), "the fixture did not install")
-            with hermetic.no_media_tools():
-                self.assertIsNone(shutil.which("ffprobe"))
-                self.assertIsNone(shutil.which("ffprobe.exe"))
+        installed = self._install_on_path("ffprobe")
+        self.assertTrue(_is_the_same_program(shutil.which("ffprobe"), installed),
+                        "the fixture did not install")
+        with hermetic.no_media_tools():
+            self.assertIsNone(shutil.which("ffprobe"))
+            self.assertIsNone(shutil.which("ffprobe.exe"))
 
     def test_the_pin_does_not_outlive_its_block(self) -> None:
         """A leak would silently neuter every test that runs afterwards."""
-        with tempfile.TemporaryDirectory() as td:
-            installed = _program(Path(td), "ffprobe")
-            saved = os.environ.get("PATH")
-            os.environ["PATH"] = f"{td}{os.pathsep}{saved}"
-            self.addCleanup(lambda: os.environ.__setitem__("PATH", saved))
-            with hermetic.no_media_tools():
-                pass
-            self.assertEqual(shutil.which("ffprobe"), str(installed))
+        installed = self._install_on_path("ffprobe")
+        with hermetic.no_media_tools():
+            self.assertIsNone(shutil.which("ffprobe"), "the pin did not take hold")
+        self.assertTrue(_is_the_same_program(shutil.which("ffprobe"), installed),
+                        "the pin outlived its block")
 
 
 class TheMixinPinsTheWholeTestTests(hermetic.HermeticToolsMixin, unittest.TestCase):
