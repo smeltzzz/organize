@@ -34,6 +34,11 @@ def _record_extraction(video: Path, sidecar: Path, ledger: Path) -> None:
 
     Sync only ever touches a sidecar the extractor recorded, so every test
     library starts with provenance for the sidecars that should be measured.
+    The sidecar must be written with pinned LF endings (``newline="\n"``,
+    like the extractor's own ``atomic_write_text``): the record's sha is the
+    hash of the LF text, while the sync hashes the file's raw bytes, and on
+    Windows a translating ``write_text`` would put CRLF in the file and make
+    every record miss.
     """
     track = sx.EmbeddedSubtitleTrack(
         track_id=2, codec_id="S_TEXT/UTF8", language="eng", name="English",
@@ -372,9 +377,12 @@ class FakeFfsubsync:
             lines.append(f"INFO: framerate scale factor: {self.scale:.3f}")
         if self.write_output:
             index = command.index("-o")
+            # newline="\n": the staged file must carry exactly the bytes the
+            # record's new sha is computed from, on Windows too (no CRLF
+            # translation), matching the crash suite's fake.
             Path(str(command[index + 1])).write_text(
                 self.output_content if self.output_content is not None else SHIFTED_SRT,
-                encoding="utf-8",
+                encoding="utf-8", newline="\n",
             )
         return self.rc, "", "\n".join(lines)
 
@@ -395,7 +403,7 @@ class EndToEndTests(unittest.TestCase):
         self.mkv = self.movie_dir / "Film (2000).mkv"
         self.mkv.write_bytes(b"fake video")
         self.srt = self.movie_dir / "Film (2000).eng.srt"
-        self.srt.write_text(GOOD_SRT, encoding="utf-8")
+        self.srt.write_text(GOOD_SRT, encoding="utf-8", newline="\n")
         self.log = self.tmp / "out" / "sync_subtitles.log"
         self.report = self.tmp / "out" / "sync_subtitles_report.txt"
         self.ledger = self.tmp / "out" / "subtitle_extractor_extracted.json"
@@ -513,7 +521,7 @@ class EndToEndTests(unittest.TestCase):
         other_dir = self.lib / "Other (2001)"
         other_dir.mkdir()
         (other_dir / "Other (2001).mkv").write_bytes(b"v")
-        (other_dir / "Other (2001).eng.srt").write_text(GOOD_SRT, encoding="utf-8")
+        (other_dir / "Other (2001).eng.srt").write_text(GOOD_SRT, encoding="utf-8", newline="\n")
         fake = FakeFfsubsync(offset=-4.0)
         code = self._run(fake, "--limit", "1")
         self.assertEqual(code, 0)
@@ -615,7 +623,7 @@ class _SyncedLibraryFixture(unittest.TestCase):
         self.mkv = self.movie_dir / "Film (2000).mkv"
         self.mkv.write_bytes(b"fake video")
         self.srt = self.movie_dir / "Film (2000).eng.srt"
-        self.srt.write_text(GOOD_SRT, encoding="utf-8")
+        self.srt.write_text(GOOD_SRT, encoding="utf-8", newline="\n")
         self.log = self.tmp / "out" / "sync_subtitles.log"
         self.report = self.tmp / "out" / "sync_subtitles_report.txt"
         self.ledger = self.tmp / "out" / "subtitle_extractor_extracted.json"
@@ -910,7 +918,7 @@ class ParallelMeasurementTests(unittest.TestCase):
             folder = self.lib / name
             folder.mkdir(parents=True)
             (folder / f"{name}.mkv").write_bytes(b"fake video")
-            (folder / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8")
+            (folder / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8", newline="\n")
         self.log = self.tmp / "out" / "sync.log"
         self.report = self.tmp / "out" / "sync_report.txt"
         self.ledger = self.tmp / "out" / "subtitle_extractor_extracted.json"
@@ -932,7 +940,7 @@ class ParallelMeasurementTests(unittest.TestCase):
         """
         for index in range(self.MOVIES):
             name = f"Film {index:02d} (2000)"
-            (self.lib / name / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8")
+            (self.lib / name / f"{name}.eng.srt").write_text(GOOD_SRT, encoding="utf-8", newline="\n")
         self._record_all()
 
     def _run(self, workers: int) -> int:

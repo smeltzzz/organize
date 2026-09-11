@@ -481,12 +481,16 @@ class SidecarCrashTests(unittest.TestCase):
         self.movie = self.folder / "Film (2000).mkv"
         self.movie.write_bytes(b"fake video" * 100)
         self.srt = self.folder / "Film (2000).eng.srt"
-        self.srt.write_text(SRT, encoding="utf-8")
+        self.srt.write_text(SRT, encoding="utf-8", newline="\n")
         self.cfg = ss.Config(library=self.root, log_file=self.root / "s.log",
                              report_file=self.root / "s.txt", use_state=False)
         self.features = ss.FfsubsyncFeatures(True, True, True)
         # The provenance record is what authorises the rewrite at all: only a
         # sidecar the extractor just wrote may be measured and replaced.
+        # newline="\n" above mirrors the extractor's own LF-pinned writer: the
+        # record's sha is the LF-text hash and the sync hashes raw bytes, so a
+        # translating write would put CRLF in the file and lose the record on
+        # Windows.
         self.assertTrue(sx.record_extracted_sidecar(
             self.movie, self.srt,
             track=sx.EmbeddedSubtitleTrack(2, "S_TEXT/UTF8", "eng", "English", "text", ".srt"),
@@ -502,7 +506,7 @@ class SidecarCrashTests(unittest.TestCase):
         """A stand-in ffsubsync that measures a large, trustworthy correction."""
         def run(cfg, command):
             command = list(map(str, command))
-            Path(command[command.index("-o") + 1]).write_text(SHIFTED_SRT, encoding="utf-8")
+            Path(command[command.index("-o") + 1]).write_text(SHIFTED_SRT, encoding="utf-8", newline="\n")
             if crash_after_write:
                 raise Crash("power cut while ffsubsync was running")
             return 0, "", "\n".join([
