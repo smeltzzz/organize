@@ -373,11 +373,18 @@ class NonTerminalRunsAreUnchangedTests(unittest.TestCase):
         self._assert_plain((self.root / "ms.log").read_text(encoding="utf-8"))
 
     def test_the_live_line_of_each_tool_is_inert_off_a_terminal(self) -> None:
+        non_tty = io.StringIO()
         for module in (la, bd, ss):
             with self.subTest(tool=module.__name__):
-                live = module.log.attach_live()
-                self.assertFalse(live.is_tty)
-        self.assertFalse(ms.LIVE.is_tty)
+                saved = module.log.stream
+                try:
+                    module.log.stream = non_tty
+                    live = module.log.attach_live()
+                    self.assertFalse(live.is_tty)
+                finally:
+                    module.log.stream = saved
+        self.assertFalse(LiveLine(stream=io.StringIO()).is_tty)
+        self.assertFalse(LiveLine(stream=non_tty).is_tty)
 
 
 class TerminalRunsDrawTests(unittest.TestCase):
