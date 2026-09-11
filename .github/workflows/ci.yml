@@ -40,9 +40,9 @@ jobs:
       - name: Byte-compile the package and every script (syntax gate)
         run: >-
           python -m compileall -q organizekit
-          organize.py pipeline.py jellyfin_one_shot.py bitdepth.py
+          organize.py pipeline.py bitdepth.py
           library_auditor.py mkv_track_cleaner.py movie_standardizer.py
-          subtitle_fetcher.py sync_subtitles.py
+          subtitle_extractor.py sync_subtitles.py
 
       - name: A clone must run with no install and no PYTHONPATH
         run: python -c "import bitdepth, organizekit.core; assert bitdepth.Report is organizekit.core.Report"
@@ -76,6 +76,10 @@ jobs:
     # 65 -> 72 with the crash-safety, end-to-end and destructive-path suites.
     # The suite measures 75% on this runner; the floor keeps a few points of
     # slack because the end-to-end remux tests are skipped off POSIX.
+    # 88 -> 85 with the 4.0.0 deletions (subtitle fetching, then the one-shot
+    # runner): that code was 100%-covered and deleted with its tests, and the
+    # suite measures 86% without it. The floor keeps its point of slack; it
+    # is a ratchet - raise it again in a later testing pass, never lower it.
     name: Coverage gate
     runs-on: ubuntu-latest
     steps:
@@ -89,7 +93,7 @@ jobs:
       - name: Report and enforce the floor
         run: |
           python -m coverage report
-          python -m coverage report --fail-under=88
+          python -m coverage report --fail-under=85
 
   packaging:
     # Regression guard for the broken console entry point: pyproject declared
