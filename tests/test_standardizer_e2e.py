@@ -28,6 +28,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import hermetic
+
 import movie_standardizer as ms
 
 BIG = 8 * 1024 * 1024
@@ -284,7 +286,7 @@ class WhatItRefusesToIngestTests(StandardizerRunFixture):
         self.assertIn("smaller than the 1 MB minimum", text)
 
 
-class ExistingLibraryTests(StandardizerRunFixture):
+class ExistingLibraryTests(hermetic.HermeticToolsMixin, StandardizerRunFixture):
     """An occupied destination is the one place ingest could destroy data."""
 
     def setUp(self) -> None:
@@ -519,7 +521,7 @@ class RunEndingTests(StandardizerRunFixture):
         self.assertEqual(self.library_tree(), [], "no partial file was left behind")
 
 
-class SelfTestTests(StandardizerRunFixture):
+class SelfTestTests(hermetic.HermeticToolsMixin, StandardizerRunFixture):
     """`--self-test` is the field check on a machine with no test suite."""
 
     def test_it_passes_on_a_healthy_copy(self) -> None:

@@ -29,7 +29,7 @@ git push origin main
 The workflow file as it exists on the branch still names `subtitle_fetcher.py`
 and `jellyfin_one_shot.py` in the syntax gate — files the merge deletes —
 and the bot cannot fix a workflow file; the fix is the patch you apply in
-step 2. Every other check is green: the whole suite (1,223 tests) on Linux,
+step 2. Every other check is green: the whole suite (1,229 tests) on Linux,
 macOS and Windows across Python 3.11–3.13, packaging, the single-file build
 and the doctor smoke test.
 

@@ -23,6 +23,8 @@ import unittest
 from pathlib import Path
 from types import ModuleType
 
+import hermetic
+
 from tests.selftests import (
     bitdepth_selftests,
     library_auditor_selftests,
@@ -83,7 +85,7 @@ def load_pristine(module_name: str) -> ModuleType:
     return module
 
 
-class ShippedFieldSmokeTests(unittest.TestCase):
+class ShippedFieldSmokeTests(hermetic.HermeticToolsMixin, unittest.TestCase):
     """``--self-test`` is what an operator runs on the NAS. It has to work.
 
     It is also the one piece of every tool that the rest of the suite cannot
@@ -106,7 +108,7 @@ class ShippedFieldSmokeTests(unittest.TestCase):
                 self.assertIn(f"{module_name}.py", printed)
 
 
-class MovedSelfTestsStillPass(unittest.TestCase):
+class MovedSelfTestsStillPass(hermetic.HermeticToolsMixin, unittest.TestCase):
     """Each tool's own suite, unchanged, run from its new home."""
 
     def test_every_tool_suite_reports_success(self) -> None:

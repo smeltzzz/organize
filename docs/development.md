@@ -8,9 +8,18 @@ claims instead of restating them.
 The whole suite is **offline**: no media files, no `mkvmerge`, no `ffprobe`,
 no API keys, no network.
 
+Offline means the suite does not *need* those things — not that it ignores
+them. `organize.py doctor` answers by probing the machine, and `--ffprobe` is a
+hint that falls through to whatever is on the `PATH`, so a test that runs the
+real command takes a different branch on a workstation than on a CI runner.
+`tests/hermetic.py` pins every toolchain lookup to "not installed" for the
+tests that would otherwise consult the host; `tests/test_hermetic.py` is what
+stops the pin from quietly rotting. A test that wants a tool to be *present*
+patches the lookup itself, inside the test body.
+
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,223 unit tests, ~25 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,229 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```

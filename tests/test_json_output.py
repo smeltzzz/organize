@@ -22,6 +22,8 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
+import hermetic
+
 import library_auditor as la
 import organize
 import pipeline as pl
@@ -64,8 +66,9 @@ class EnvelopeTests(unittest.TestCase):
         self.assertEqual(slug_id("MKVToolNix (mkvmerge)"), "mkvtoolnix-mkvmerge")
 
 
-class FourCommandsOneShapeTests(unittest.TestCase):
+class FourCommandsOneShapeTests(hermetic.HermeticToolsMixin, unittest.TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._td = tempfile.TemporaryDirectory(prefix="json_contract_")
         self.root = Path(self._td.name)
         self.library = self.root / "library"
