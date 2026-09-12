@@ -12,25 +12,20 @@ than a screen lives here.
 | [Testing & development](development.md) | The offline suite, the single-file `organize.pyz` build, the field smoke tests, and the crash tests. |
 | [Merging & releasing](merge-and-release.md) | The steps that need a permission the branch bot does not have: merging into main, applying the held workflow patch, and tagging the release. |
 
-Also in this folder — two sets of changes to `.github/workflows/ci.yml`, held
-as patches rather than commits because the bot that pushes these branches has
-no `workflows` permission:
+Also in this folder — nothing is held any more. The two CI patches that used
+to live here (`ci-workflow.patch`, which renamed `subtitle_fetcher.py` to
+`subtitle_extractor.py` in the syntax gate's byte-compile list, dropped
+`jellyfin_one_shot.py`, and lowered the coverage floor 88% → 85%; and
+`ci-workflow-sync-removal.patch`, which dropped the deleted `sync_subtitles.py`
+and the `ffsubsync` requirements) have both been applied and committed to
+`.github/workflows/ci.yml`, and the files are gone — exactly like
+`release-workflow.patch` before them. What each changed is recorded in
+[Merging & releasing](merge-and-release.md) and in
+[`CHANGELOG.md`](../CHANGELOG.md), and `tests/test_docs.py` skips its
+held-patch class while `docs/` holds no patches. If a future branch needs a
+`workflows` change the bot cannot push, hold it as a new patch here and list
+it in this file again.
 
-- [`ci-workflow.patch`](ci-workflow.patch) — **already applied and committed**;
-  kept for the record. It renamed `subtitle_fetcher.py` to
-  `subtitle_extractor.py` in the syntax gate's byte-compile list, dropped
-  `jellyfin_one_shot.py` (deleted with the second runner), and lowered the
-  coverage floor 88% → 85% to follow the code that was deleted. `git apply`
-  fails on it and `git apply --reverse` succeeds, which is how the suite knows
-  it is done. (The release-workflow patch that used to sit beside it has been
-  applied and committed too; `release.yml` is live.)
-- [`ci-workflow-sync-removal.patch`](ci-workflow-sync-removal.patch) —
-  **waiting to be applied.** It drops the deleted `sync_subtitles.py` from the
-  byte-compile list, stops the `provisioned` job from installing and requiring
-  ffsubsync, and follows the tool count down from five steps to four. Until it
-  is applied the `Byte-compile` job is red on a branch that has deleted that
-  file. Apply with `git apply docs/ci-workflow-sync-removal.patch`; see
-  [Merging & releasing](merge-and-release.md).
 Elsewhere in the repo: [`CHANGELOG.md`](../CHANGELOG.md) (what changed and
 why), [`OVERHAUL.md`](../OVERHAUL.md) (the measured plan the recent work
 follows), [`CONTRIBUTING.md`](../CONTRIBUTING.md),
