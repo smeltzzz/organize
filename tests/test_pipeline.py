@@ -21,15 +21,15 @@ from organizekit import core
 
 class StepOrderTests(unittest.TestCase):
     def test_canonical_order(self) -> None:
-        self.assertEqual(pl.STEP_ORDER, ("extractor", "cleaner", "10bit", "sync", "auditor"))
+        self.assertEqual(pl.STEP_ORDER, ("extractor", "cleaner", "10bit", "auditor"))
 
     def test_extractor_precedes_cleaner(self) -> None:
         """The embedded track is destroyed by the remux, so this is load-bearing."""
         self.assertLess(pl.STEP_ORDER.index("extractor"), pl.STEP_ORDER.index("cleaner"))
 
-    def test_sync_precedes_auditor(self) -> None:
-        """The audit must see the finished (synced) sidecars."""
-        self.assertLess(pl.STEP_ORDER.index("sync"), pl.STEP_ORDER.index("auditor"))
+    def test_the_auditor_runs_last(self) -> None:
+        """The audit is read-only and must see the sidecars extraction wrote."""
+        self.assertEqual(len(pl.STEP_ORDER) - 1, pl.STEP_ORDER.index("auditor"))
 
     def test_order_survives_any_input_order(self) -> None:
         for requested in (["auditor", "extractor"], ["10bit", "cleaner", "extractor"],
@@ -99,7 +99,6 @@ class CommandBuildingTests(unittest.TestCase):
         self.assertEqual(pl.STEPS["extractor"].root_flag, "--source")
         self.assertEqual(pl.STEPS["cleaner"].root_flag, "--dir")
         self.assertEqual(pl.STEPS["10bit"].root_flag, "--source")
-        self.assertEqual(pl.STEPS["sync"].root_flag, "--source")
         self.assertEqual(pl.STEPS["auditor"].root_flag, "--source")
 
     def test_library_root_is_always_passed(self) -> None:
@@ -113,14 +112,14 @@ class CommandBuildingTests(unittest.TestCase):
         cfg = pl.Config(library=self.library, dry_run=True)
         self.assertIn("--dry-run", pl.build_command(pl.STEPS["extractor"], cfg))
         self.assertIn("--dry-run", pl.build_command(pl.STEPS["cleaner"], cfg))
-        self.assertIn("--dry-run", pl.build_command(pl.STEPS["sync"], cfg))
+        self.assertIn("--dry-run", pl.build_command(pl.STEPS["10bit"], cfg))
         # The auditor is already read-only and has no --dry-run to accept.
         self.assertNotIn("--dry-run", pl.build_command(pl.STEPS["auditor"], cfg))
 
     def test_limit_forwarded_only_where_supported(self) -> None:
         cfg = pl.Config(library=self.library, limit=5)
         self.assertEqual(pl.build_command(pl.STEPS["extractor"], cfg)[-2:], ["--limit", "5"])
-        self.assertIn("--limit", pl.build_command(pl.STEPS["sync"], cfg))
+        self.assertIn("--limit", pl.build_command(pl.STEPS["10bit"], cfg))
         self.assertNotIn("--limit", pl.build_command(pl.STEPS["auditor"], cfg))
 
     def test_cleaner_specific_flags(self) -> None:
@@ -163,25 +162,6 @@ class PrerequisiteTests(unittest.TestCase):
                 mock.patch.dict(os.environ, {"ORGANIZE_NO_KEEPALIVE": "0"}, clear=False):
             issue = pl.prerequisite_issue(pl.STEPS["extractor"])
         self.assertIsNone(issue, f"both binaries present must satisfy the extractor: {issue}")
-
-    def test_sync_skipped_without_ffsubsync(self) -> None:
-        import sync_subtitles as ss
-        with mock.patch.object(ss, "find_ffsubsync", return_value=None), \
-                mock.patch("shutil.which", return_value=None):
-            self.assertFalse(pl._ffsubsync_present())
-            issue = pl.prerequisite_issue(pl.STEPS["sync"])
-            self.assertIsNotNone(issue, "missing ffsubsync must be a skip reason")
-            self.assertIn("ffsubsync", issue)
-
-    def test_sync_needs_ffmpeg_as_well(self) -> None:
-        """ffsubsync shells out to ffmpeg; both are prerequisites."""
-        import sync_subtitles as ss
-        with mock.patch.object(ss, "find_ffsubsync", return_value="/usr/bin/ffsubsync"), \
-                mock.patch("shutil.which", side_effect=lambda name: "/usr/bin/ffmpeg" if name == "ffmpeg" else None):
-            self.assertTrue(pl._ffsubsync_present())
-        with mock.patch.object(ss, "find_ffsubsync", return_value="/usr/bin/ffsubsync"), \
-                mock.patch("shutil.which", return_value=None):
-            self.assertFalse(pl._ffsubsync_present())
 
 
 class DryRunDoesNotExecuteTests(unittest.TestCase):
@@ -245,12 +225,6 @@ class HintTests(unittest.TestCase):
         hint = pl.HINTS["extractor"]
         self.assertIn("strips every embedded subtitle", hint)
         self.assertIn("extraction must happen while the track is", hint)
-
-    def test_sync_hint_explains_the_position_and_safety(self) -> None:
-        hint = pl.HINTS["sync"]
-        self.assertIn("subtitle bytes, never movie bytes", hint)
-        self.assertIn("before the audit", hint)
-        self.assertIn("held for review, never applied", hint)
 
     def test_hints_are_shown_only_for_steps_that_will_run(self) -> None:
         seen: list[str] = []

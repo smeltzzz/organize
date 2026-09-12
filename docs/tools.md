@@ -16,7 +16,6 @@ For the order they run in and why that order is load-bearing, see
 | [`bitdepth.py`](#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed | `ffprobe` |
 | [`library_auditor.py`](#4--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
 | [`movie_standardizer.py`](#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names, hardlink MKV/MP4 into `Title (Year)/` | `ffprobe` (optional) |
-| [`sync_subtitles.py`](#6--sync_subtitlespy--subtitle-timing-sync-ffsubsync) | Measure a freshly extracted sidecar against the audio — once — and correct trustworthy drift | `ffsubsync` + `ffmpeg` |
 
 ---
 
@@ -47,19 +46,28 @@ same validation path covers both containers.
 **The one rule that never bends: an existing `.eng.srt` is authoritative.**
 If a movie already has a validated sidecar — placed by hand, carried over,
 or extracted last week — this tool leaves it, and the movie, completely
-untouched. It is never re-extracted and never re-synced. Extraction runs
+untouched. It is never re-extracted and never rewritten. Extraction runs
 only for movies with no sidecar at all; that is why it must run *before*
 the track cleaner, which removes every embedded subtitle from every
 movie.
 
-**A fresh extraction is measured exactly once.** Every sidecar this tool
-writes is recorded with its SHA-256 in a provenance ledger outside the
-library (`ReportsAndLogs/subtitle_extractor_extracted.json`), and
-`sync_subtitles.py` reads that record: a freshly extracted sidecar is
-measured against the movie's audio and, if the drift is real and
-trustworthy, corrected — then marked done, permanently. Replace the bytes
-by hand and the record no longer matches, so the file is not "ours" any
-more and is left alone. Extraction failures (no track, OCR unavailable,
+**No offline timing pass.** A sidecar built from the movie's own track
+carries the container's own timestamps, so it is already frame-accurate
+for that exact file and there is nothing for this toolkit to correct.
+Any drift a client does notice is a playback-time concern — Jellyfin's
+own subtitle-offset support, or a plugin such as Lapse, handles it
+without rewriting a byte of the library. (An offline `ffsubsync` stage
+used to sit at the end of the pipeline for exactly this; it was removed,
+because a second program measuring and rewriting sidecars bought nothing
+the container's own timeline had not already given.)
+
+**Every sidecar this tool writes is recorded.** The provenance ledger
+outside the library (`ReportsAndLogs/subtitle_extractor_extracted.json`)
+holds the movie, the track, the method, the OCR backend, the cue count,
+the SHA-256 of the bytes written and the timestamp — the durable answer
+to "did this tool write this sidecar?", and what makes a re-run cheap.
+Replace the bytes by hand and the record no longer matches, so the file
+is not "ours" any more. Extraction failures (no track, OCR unavailable,
 unreadable container) are not errors — the movie is simply reported as
 uncovered; exit code is `1` only when a movie genuinely errored, `2` for
 configuration problems.
@@ -86,7 +94,7 @@ input order, so the console, the log and the report are byte-identical to
 the serial run.
 
 **Every sweep says what it is doing.** On a terminal the auditor, the 10-bit
-inspector, the subtitle synchronizer and the standardizer each draw one
+inspector, the extractor and the standardizer each draw one
 status line — `auditing [████░░░░] 42%  1,204/2,860  ~4m30s left  Movie
 (2020)` — that is rewritten in place and erased before every permanent
 line, the same renderer the track cleaner has always used for its remux bar
@@ -215,51 +223,6 @@ movie arrives as both the MKV is placed.
 ```bash
 python3 movie_standardizer.py --source /path/to/downloads --target /path/to/movies --dry-run
 ```
-
-## 6 · `sync_subtitles.py` — subtitle-timing sync (ffsubsync)
-
-The pipeline's final content step, right before the audit. It pairs the
-library's `.srt` sidecars with their movies and measures drift against the
-actual audio with [`ffsubsync`](https://github.com/smacke/ffsubsync)
-(install once: `pip install ffsubsync`; it needs `ffmpeg` on the PATH) —
-but **only a sidecar that `subtitle_extractor.py` just extracted, and only
-once**. The provenance ledger decides: a sidecar with an unspent extraction
-record is measured; trustworthy drift is applied by atomically swapping in
-the corrected sidecar; sub-threshold drift (`--min-offset`, default 0.1 s)
-leaves the file byte-identical; anything untrustworthy — beyond the trust
-window (`--max-offset`, default 30 s), anti-correlated scores, ffsubsync's
-own quality-gate refusal, or a plain failure — leaves the entry-time
-sidecar restored byte-for-byte and **held for review, never applied**.
-Every other sidecar — placed by hand, carried over from an earlier era, or
-already synced — is authoritative and never touched: an existing `.eng.srt`
-is never re-checked or re-synced. Movie bytes are never modified, so the
-audit that follows sees the finished sidecars.
-
-```bash
-python3 sync_subtitles.py --source /path/to/movies --dry-run    # preview
-python3 sync_subtitles.py --source /path/to/movies --limit 10   # first 10
-python3 sync_subtitles.py --source /path/to/movies --workers 4  # measure 4 at once
-python3 sync_subtitles.py --source /path/to/movies --fail-on-review  # cron gating
-```
-
-**Sidecars are measured in parallel.** ffsubsync is the slowest thing the
-toolchain does — it decodes the movie's audio and correlates it against the
-subtitle — and each sidecar is an independent measurement, so they run
-concurrently (`--workers`, default: half the CPUs capped at 4; `1` restores the
-serial run). Measured on 8 movies with a 0.5 s-per-sync stand-in
-(`benchmarks/bench_sync_workers.py`): **4.2 s serial → 1.2 s at 4 workers
-(3.6×)**, same outcome for every sidecar. The cap
-is low on purpose: each worker starts an ffmpeg that is itself multi-threaded
-and reads a different movie, so a bigger fan-out turns a CPU bound into a disk
-bound.
-
-**Re-running costs nothing.** A sidecar measured "in sync", or corrected
-and swapped in, has its extraction record marked done (in
-`subtitle_extractor_extracted.json`, the extractor's provenance ledger) and
-is never measured again. Held-for-review and failed syncs leave the record
-unmarked, so the next run retries them. A sidecar whose bytes no longer
-match the record — hand-edited, replaced from elsewhere — has no provenance
-any more, which is the safe answer: not ours, not touched.
 
 [← Back to the README](../README.md) · [The pipeline](pipeline.md) ·
 [Configuration](configuration.md) · [Development](development.md)

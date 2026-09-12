@@ -4,6 +4,103 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-09-12
+
+**The subtitle-sync stage is gone: `organize run` is now four steps —
+extract → clean → 10-bit → audit.** A sidecar extracted from the movie's own
+embedded track already carries the container's timestamps, so it is
+frame-accurate for that exact file and there was nothing for an offline pass to
+correct. Whatever drift a client still notices is a playback-time concern,
+handled by Jellyfin's own subtitle-offset support or a plugin such as Lapse —
+not by a second program measuring and rewriting sidecars on disk. This is a
+major version because a documented command (`organize sync`) and a shipped
+module (`sync_subtitles.py`) no longer exist.
+
+### Removed
+- **`sync_subtitles.py`, deleted outright** — the tool, its report, its log,
+  its `--min-offset` / `--max-offset` / `--fail-on-review` / `--sync-ledger`
+  flags, its trust window and its held-for-review queue. It was the fourth of
+  the pipeline's five steps — the last one that touched content — and the only
+  tool that rewrote a sidecar after the extractor had written it.
+- **The `sync` pipeline step.** `organizekit/core/toolchain.py`'s `STEP_ORDER`
+  is now `("extractor", "cleaner", "10bit", "auditor")` and its `STEPS` table
+  has four entries. `organize run` and `pipeline.py` no longer print a
+  `STEP sync` banner and no longer print a "skipped: ffsubsync not found" line
+  for a step that does not exist. `pipeline.py`'s own field smoke test asserts
+  the new invariant — *the audit is the last step* — in place of the old
+  *sync runs after the remux, before the audit*.
+- **`organize sync` (and its `sync-subtitles` alias)** from the CLI: the
+  subcommand, its dispatch, its dashboard row (`5. sync`, with `6. audit`
+  renumbered to `5. audit`) and the command list in `--help`.
+- **Two `organize doctor` checks: `ffsubsync` and `ffmpeg`.** `ffmpeg`-the-
+  binary was needed by nothing except ffsubsync, which shelled out to it to
+  decode audio. `ffprobe` is a different program from the same distribution
+  and stays: the 10-bit step needs it. `organize doctor` now reports 9 checks
+  instead of 11.
+- **The `Sync` row in `organize status`**, and with it the `sync` verdict kind
+  (`KIND_SYNC`) from `organizekit/core/state.py`'s vocabulary and from
+  `organizekit.core`'s exports. Nothing can write a `sync` verdict any more;
+  rows already in an existing `state.db` are simply never queried, and the
+  cache stays rebuildable-by-deletion as it always was.
+- **The sync handshake in the extractor's provenance ledger**:
+  `mark_extracted_sidecar_synced()`, `extracted_sidecar_needs_sync()` and the
+  `synced_utc` field. The ledger itself stays — see *Changed*.
+- **`ffsubsync_installed()`, `ffsubsync_ready()` and `ffmpeg_installed()`**
+  from `organizekit/core/toolchain.py`, the `"sync"` entry in its
+  `PREREQUISITES` table, and their re-exports from `organizekit.core`.
+  `pipeline.py`'s `_ffsubsync_present` alias went with them.
+- **`sync_subtitles` from `[tool.setuptools] py-modules`**, so it is in
+  neither the wheel nor the sdist nor `dist/organize.pyz` (the zipapp's module
+  list is derived from that same table, so the archive follows automatically:
+  29 modules → 28, 227 KiB → 210 KiB).
+- **`benchmarks/bench_sync_workers.py`**, which measured ffsubsync's
+  parallelism, and the `Subtitle sync` section of `.env.example`.
+- **Tests for the deleted tool**: `tests/test_sync_subtitles.py` and
+  `tests/selftests/sync_subtitles_selftests.py`, the `SidecarCrashTests` class
+  in `tests/test_crash_safety.py` (it killed ffsubsync mid-rewrite), the
+  sync-side half of `tests/test_pipeline_integration.py`, and the ffsubsync
+  pin in `tests/hermetic.py`.
+
+### Changed
+- **The extractor's provenance ledger survives, without the sync fields.**
+  `subtitle_extractor_extracted.json` still records every sidecar the tool
+  writes — the movie, the track id and codec, the language, the method, the
+  OCR backend, the cue count, the SHA-256 of the bytes written and the
+  timestamp. That is the durable answer to "did this tool write this
+  sidecar?", it is what makes a re-run cheap, and it is how a hand-edited
+  sidecar stops being mistaken for an extracted one. Only the fields and
+  functions whose sole consumer was the sync step are gone. The legacy
+  `subtitle_fetcher_extracted.json` is still read (never written) for
+  libraries that came through the fetching era.
+- **`subtitle_extractor.py`'s wording** no longer promises a later
+  measurement: "never re-extracted or re-synced" is now "never re-extracted or
+  rewritten", in the report, the CLI description and the module docstring. Its
+  field smoke test checks the provenance round-trip (record → find by SHA →
+  refuse a replaced file) instead of the sync handshake.
+- **`organize status`'s footnote** now says `run organize run to fill in the
+  remaining rows` rather than naming `organize 10bit` and `organize sync`.
+- **Docs and the front page follow the tool count down**: six tools → five,
+  five maintenance steps → four, the tool table, the prerequisite table, the
+  pipeline diagram, the doctor sample JSON, the `status` sample output and the
+  safety invariants (rule 7 is now *a sidecar is never rewritten behind your
+  back*). The unit-test count in the README badge and `docs/development.md` is
+  1,229 → 1,136.
+- **Coverage measured 85.30%** after the deletion (85.51% before): the
+  deleted module was 87.7%-covered, slightly above the suite average, so the
+  total moved down by 0.21 points. The CI floor stays at 85% — it is a ratchet
+  and this does not clear the bar for lowering it — but the slack is now a
+  third of a point, so the next testing pass should raise it rather than lean
+  on it.
+
+### Notes for whoever applies this
+- `.github/workflows/ci.yml` still names the deleted file, because the bot that
+  pushes these branches has no `workflows` permission. The fix is held as
+  `docs/ci-workflow-sync-removal.patch`; until it is applied the `Byte-compile`
+  job is red and the `provisioned` job still installs ffsubsync. See
+  `docs/merge-and-release.md`.
+- Nothing else needs doing on an existing library: no sidecar is rewritten, no
+  record is lost, and deleting `state.db` remains free.
+
 ## [4.0.0] - 2026-09-09
 
 **Subtitle fetching is gone: the movie's own tracks are the only subtitle

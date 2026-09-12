@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import organize
-from organizekit.core import KIND_BITDEPTH, KIND_REMUX, KIND_SYNC, open_state
+from organizekit.core import KIND_BITDEPTH, KIND_REMUX, open_state
 
 SRT = "1\n00:00:01,000 --> 00:00:02,000\nhello\n\n"
 
@@ -120,10 +120,10 @@ class StatusTests(StatusFixture, unittest.TestCase):
     def test_cached_verdicts_are_shown_per_step(self) -> None:
         alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
         self._record(alpha, KIND_BITDEPTH, "SKIP_HDR")
-        self._record(alpha, KIND_SYNC, "synced")
+        self._record(alpha, KIND_REMUX, "cleaned")
         out = self._run()[1]
         self.assertIn("1 SKIP_HDR", out)
-        self.assertIn("1 synced", out)
+        self.assertIn("1 cleaned", out)
 
     def test_a_verdict_about_changed_bytes_is_reported_unknown(self) -> None:
         alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
@@ -170,9 +170,9 @@ class StatusTests(StatusFixture, unittest.TestCase):
     def test_settled_requires_every_recorded_step_to_agree(self) -> None:
         alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
         bravo = self._movie("Bravo (2002)", sidecar="Bravo (2002).eng.srt")
-        for movie, sync in ((alpha, "synced"), (bravo, "review")):
+        for movie, remux in ((alpha, "cleaned"), (bravo, "deferred")):
             self._record(movie, KIND_BITDEPTH, "SKIP_HDR")
-            self._record(movie, KIND_SYNC, sync)
+            self._record(movie, KIND_REMUX, remux)
         out = self._run()[1]
         self.assertIn("Nothing to do for 1 movie(s)", out)
         self.assertIn("the next pass will touch 1", out)
@@ -299,9 +299,9 @@ class StatusJsonTests(StatusFixture, unittest.TestCase):
         self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
         steps = self._json()[1]["steps"]
         self.assertEqual([step["id"] for step in steps],
-                         ["layout", "subtitles", "remux", "bit-depth", "sync"])
+                         ["layout", "subtitles", "remux", "bit-depth"])
         self.assertEqual([step["label"] for step in steps],
-                         ["Layout", "Subtitles", "Remux", "Bit depth", "Sync"])
+                         ["Layout", "Subtitles", "Remux", "Bit depth"])
 
     def test_counts_are_reported_per_step(self) -> None:
         self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
@@ -326,11 +326,11 @@ class StatusJsonTests(StatusFixture, unittest.TestCase):
 
     def test_a_stale_verdict_is_counted_as_stale_not_as_an_answer(self) -> None:
         alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
-        self._record(alpha, KIND_SYNC, "synced")
+        self._record(alpha, KIND_REMUX, "cleaned")
         alpha.write_bytes(b"y" * 8192)  # the bytes the verdict described are gone
-        sync = {step["id"]: step for step in self._json()[1]["steps"]}["sync"]
-        self.assertEqual(sync["stale"], 1)
-        self.assertEqual(sync["counts"], {})
+        remux = {step["id"]: step for step in self._json()[1]["steps"]}["remux"]
+        self.assertEqual(remux["stale"], 1)
+        self.assertEqual(remux["counts"], {})
 
     def test_the_state_cache_reports_whether_it_was_used(self) -> None:
         alpha = self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")

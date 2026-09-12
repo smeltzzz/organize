@@ -5,7 +5,7 @@ they moved out here the fetcher still had a scrape registry, two providers and
 a refetch loop to assert against. Extraction has none of that. What is left to
 assert offline - and what a broken checkout must never lose - is the
 conversion and selection math that turns an embedded track into a sidecar,
-plus the ledger handshake ``sync_subtitles.py`` depends on.
+plus the provenance ledger the tool writes for every sidecar it creates.
 
 Each function is rebound to the tool module's namespace by
 :func:`bind_to_tool`, so a body that reads or patches a module global affects
@@ -101,7 +101,7 @@ def run_self_tests() -> int:
     check(not is_covering_english_sidecar(video.parent / "Other (2020).eng.srt", video),
           "a foreign-stem sidecar is not covering")
 
-    # -- the extraction ledger handshake sync_subtitles.py depends on -------
+    # -- the provenance ledger written for every extracted sidecar ---------
     with tempfile.TemporaryDirectory(prefix="sx_selftest_") as td:
         root = Path(td)
         library = root / "library" / "Movie (2020)"
@@ -119,23 +119,21 @@ def run_self_tests() -> int:
             sha256=sha256_text(sidecar.read_text(encoding="utf-8")),
             path=ledger,
         )
-        needs = extracted_sidecar_needs_sync(
-            sidecar, sha256_text(sidecar.read_text(encoding="utf-8")), path=ledger)
-        check(needs, "a freshly recorded extraction needs its one sync")
-        mark_extracted_sidecar_synced(sidecar, path=ledger)
-        needs2 = extracted_sidecar_needs_sync(
-            sidecar, sha256_text(sidecar.read_text(encoding="utf-8")), path=ledger)
-        check(not needs2, "a marked sidecar is never re-synced")
-        record = find_extracted_record(sidecar, path=ledger)
-        check(isinstance(record, dict) and record.get("synced_utc"),
-              "the ledger records the sync timestamp")
+        sha = sha256_text(sidecar.read_text(encoding="utf-8"))
+        record = find_extracted_record(sidecar, sha, path=ledger)
+        check(isinstance(record, dict) and record.get("extracted_utc"),
+              "the ledger records when the sidecar was extracted")
+        check(isinstance(record, dict) and record.get("movie") == str(video),
+              "the ledger names the movie the sidecar came from")
+        check(find_extracted_record(sidecar, sha256_text("edited"), path=ledger) is None,
+              "replaced bytes lose their provenance rather than inherit it")
 
     if errors:
         print("SELF-TEST FAILED:")
         for error in errors:
             print("  -", error)
         return 1
-    print("SELF-TEST PASSED (conversion + classification + sidecar contract + ledger handshake)")
+    print("SELF-TEST PASSED (conversion + classification + sidecar contract + provenance ledger)")
     return 0
 
 

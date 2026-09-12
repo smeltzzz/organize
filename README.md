@@ -11,7 +11,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-1229%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-1136%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -28,7 +28,7 @@ lossless track cleanup.**
 
 ## 🧭 What is Organize?
 
-Six purpose-built Python 3.11+ tools that maintain a canonical movie
+Five purpose-built Python 3.11+ tools that maintain a canonical movie
 library for Jellyfin / Plex:
 
 ```
@@ -40,14 +40,14 @@ Title (Year)/
 Every tool is **100% standard-library Python**: no pip installs, no venv, no
 containers, no daemons, and no network — subtitles come from the movie's own
 embedded tracks, never from a download site. The only things some tools need
-are the usual media binaries (`mkvmerge` + `mkvextract`, `ffprobe`,
-`ffsubsync`, and an OCR backend for image-based subtitle tracks).
+are the usual media binaries (`mkvmerge` + `mkvextract`, `ffprobe`, and an
+OCR backend for image-based subtitle tracks).
 
 | | |
 | :--- | :--- |
 | 🫧 **Zero pip installs** | A tool is a single file. Copy it, run it, done. |
 | 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
-| 💬 **Subtitles from the movie itself** | Each movie's own embedded English track is extracted to a validated `.eng.srt` — text tracks via `mkvextract`, image tracks via OCR, MP4s through a temporary MKV bridge — and then measured once with ffsubsync. Nothing is ever downloaded, and an existing sidecar is never re-extracted or re-synced. |
+| 💬 **Subtitles from the movie itself** | Each movie's own embedded English track is extracted to a validated `.eng.srt` — text tracks via `mkvextract`, image tracks via OCR, MP4s through a temporary MKV bridge. Nothing is ever downloaded, and an existing sidecar is never re-extracted or rewritten. Its cues come from the container's own timeline, so they are already frame-accurate for that exact file. |
 | ✂ **Lossless track cleanup** | `mkvmerge` remux keeps exactly one audio track — the best one in the movie's own (native) language — drops every dub and commentary track, and removes every embedded subtitle (the `.eng.srt` beside the movie is the only subtitle). Video untouched. |
 | 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
@@ -71,7 +71,7 @@ you want any of the following, which the usual containers do not give you:
 - **HDR is protected fail-closed.** Anything uncertain is never queued for
   re-encoding — the tool would rather do nothing than turn your Dolby Vision
   master into a green-and-purple mess.
-- **No Docker, no daemon, no database you have to keep.** Nine files, the
+- **No Docker, no daemon, no database you have to keep.** Eight files, the
   standard library, and binaries you already have. Every run is stateless,
   idempotent, and safe to Ctrl-C at any point. There is a SQLite *cache* of
   what each tool last decided and of the `ffprobe`/`mkvmerge` output for files
@@ -94,10 +94,9 @@ One file, one purpose. Nothing else.
 | `bitdepth.py` | Tool 3 — ffprobe sweep: queue 8-bit SDR for HandBrake, protect HDR. |
 | `library_auditor.py` | Tool 4 — read-only health check of layout, naming, and subtitles. |
 | `movie_standardizer.py` | Tool 5 — the torrent-completion hook: parse scene names, hardlink into `Title (Year)/`. |
-| `sync_subtitles.py` | Tool 6 — ffsubsync timing sync of every `.srt` sidecar against its movie; the pipeline's last content step. Sidecars extracted from the movie itself are skipped (they are already frame-accurate). |
-| `pipeline.py` | **The one runner.** Runs the maintenance tools in the one correct order: extract → clean → 10-bit → sync → audit. |
-| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock — and `live.py` is the overwritable status line every sweep draws on a terminal and never anywhere else. |
-| `tests/` | Fully offline unit tests (1,229), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus `fake_mkvmerge.py`, `fake_ffprobe.py` and `fakebin.py`, stand-ins real enough to drive an end-to-end remux, an extraction, a sync and a library inspection. |
+| `pipeline.py` | **The one runner.** Runs the maintenance tools in the one correct order: extract → clean → 10-bit → audit. |
+| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the four steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock — and `live.py` is the overwritable status line every sweep draws on a terminal and never anywhere else. |
+| `tests/` | Fully offline unit tests (1,136), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus `fake_mkvmerge.py`, `fake_ffprobe.py` and `fakebin.py`, stand-ins real enough to drive an end-to-end remux, an extraction and a library inspection. |
 | `docs/` | The long-form documentation this page links to: the [tool reference](docs/tools.md), [the pipeline](docs/pipeline.md), [configuration](docs/configuration.md), [testing & development](docs/development.md) and, for maintainers, [merging & releasing](docs/merge-and-release.md). |
 | `benchmarks/` | The scripts behind every speed claim in this repo — stdlib-only, offline, re-runnable. |
 | `.env.example` | Every supported environment variable, annotated. |
@@ -146,9 +145,9 @@ python3 organize.py doctor
 ```
 
 `doctor` verifies Python, the MKVToolNix pair (`mkvmerge` + `mkvextract`),
-`ffprobe`/`ffmpeg` (FFmpeg), `ffsubsync`, an OCR backend for image subtitles,
-and — crucially — that your download folder and library sit on the **same
-filesystem** so hardlinks work. Missing pieces are reported with the exact
+`ffprobe` (FFmpeg), an OCR backend for image subtitles, and — crucially —
+that your download folder and library sit on the **same filesystem** so
+hardlinks work. Missing pieces are reported with the exact
 fix, never a crash. It exits `1` only if something
 is actually broken; a missing optional tool is a warning, because that step
 simply skips.
@@ -161,7 +160,7 @@ JSON document and nothing else — see
 
 ```bash
 python3 organize.py run --dry-run     # preview every command first
-python3 organize.py run               # subtitles -> remux -> 10-bit -> sync -> audit
+python3 organize.py run               # subtitles -> remux -> 10-bit -> audit
 python3 organize.py run --nice        # low priority: Jellyfin streaming is never starved
 ```
 
@@ -174,7 +173,7 @@ python3 organize.py status --library /path/to/movies
 
 `status` re-scans layout and subtitles live (they are cheap, and they are the
 two things you can change by moving a file), then joins the expensive verdicts
-— bit depth, sync, remux — from the shared state cache each tool writes as it
+— bit depth and the remux — from the shared state cache each tool writes as it
 runs. A cached verdict is shown **only while it still describes the bytes on
 disk**: replace a movie and its old verdict is reported as `stale`, never as an
 answer. `--no-state` ignores the cache entirely and shows just the live half.
@@ -186,7 +185,6 @@ Layout    408 CANONICAL_MKV   4 MISSING_SIDECAR
 Subtitles 408 present   4 missing
 Remux     404 cleaned   6 already-clean   2 deferred
 Bit depth 388 SKIP_HDR   21 QUEUE_FOR_HANDBRAKE   3 stale
-Sync      401 synced   1 review   10 unmeasured
 
 Nothing to do for 388 movie(s) - the next pass will touch 24.
 ```
@@ -229,7 +227,6 @@ Prerequisites per tool:
 | `bitdepth.py` | `ffprobe` (FFmpeg) | — |
 | `library_auditor.py` | — | — |
 | `movie_standardizer.py` | `ffprobe` (optional, for duplicate upgrades) | — |
-| `sync_subtitles.py` | `ffsubsync` (`pip install ffsubsync`) + `ffmpeg` (FFmpeg) | — |
 
 Shared behaviour belongs in `organizekit/core/` and is imported, not copied.
 The test suite fails the build if a tool defines a helper the core already
@@ -242,7 +239,7 @@ this machine is provisioned.
 
 ## 🧰 The tools
 
-Six tools do the work; one runner runs them in the one correct order.
+Five tools do the work; one runner runs them in the one correct order.
 Each is a single file with no imports from this repository, so you can adopt
 one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
 
@@ -253,8 +250,7 @@ one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
 | [`bitdepth.py`](docs/tools.md#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect native HDR10 / HDR10+ / Dolby Vision fail-closed, flag anything ambiguous for review. | `ffprobe` |
 | [`library_auditor.py`](docs/tools.md#4--library_auditorpy--read-only-health-check) | Strictly read-only health check of layout, naming and subtitles, with gating exit codes for cron. | nothing |
 | [`movie_standardizer.py`](docs/tools.md#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names and hardlink one movie file per `Title (Year)/` — MKV canonical, MP4 placed as-is. Zero extra bytes. | `ffprobe` (optional) |
-| [`sync_subtitles.py`](docs/tools.md#6--sync_subtitlespy--subtitle-timing-sync-ffsubsync) | Measure a freshly extracted sidecar against the actual audio — exactly once — and apply only trustworthy drift; anything doubtful is held for review, never applied. Pre-existing sidecars are never touched. | `ffsubsync` + `ffmpeg` |
-| [`pipeline.py`](docs/pipeline.md) | The five maintenance steps in the one safe order — subtitles are extracted before the remux strips them, and the audit sees finished sidecars. | — |
+| [`pipeline.py`](docs/pipeline.md) | The four maintenance steps in the one safe order — subtitles are extracted before the remux strips them, and the read-only audit closes the sweep. | — |
 
 ---
 
@@ -265,14 +261,14 @@ Python and nothing else — build the whole thing into one file and copy it
 across:
 
 ```bash
-python3 scripts/build_pyz.py          # writes dist/organize.pyz (~270 KiB)
+python3 scripts/build_pyz.py          # writes dist/organize.pyz (~210 KiB)
 scp dist/organize.pyz nas:/volume1/
 ssh nas 'cd /volume1 && python3 organize.pyz doctor'
 ```
 
-It is the same toolkit, not a cut-down one: `organize.pyz test` runs all nine
-field smoke tests, `organize.pyz run-tool pipeline.py --source …` runs the full
-five-step pass, and each step is still its own process with its own locks, log,
+It is the same toolkit, not a cut-down one: `organize.pyz test` runs every
+field smoke test, `organize.pyz run-tool pipeline.py --source …` runs the full
+four-step pass, and each step is still its own process with its own locks, log,
 report and exit code. Logs and reports land *beside* the archive, never inside
 it. [How it is built and tested →](docs/development.md#one-file-no-install)
 
@@ -302,11 +298,10 @@ Non-negotiable rules every tool obeys:
 6. **Unique data is never deleted** — declines are reported, duplicates
    default to `REPORT` mode, and destructive maintenance modes
    (`QUARANTINE`, `DELETE`) are strictly opt-in.
-7. **A bad subtitle sync is worse than none** — `sync_subtitles.py` applies a
-   drift only when it is measurable and inside the trust window; anything
-   untrustworthy (huge offsets, anti-correlated scores, ffsubsync's own
-   quality-gate refusal, or a plain failure) is held for review with the
-   original sidecar byte-identical.
+7. **A sidecar is never rewritten behind your back** — the extractor creates
+   `.eng.srt` files and nothing in this toolkit ever edits one afterwards. An
+   existing sidecar is authoritative; timing is a playback-time concern, not
+   an offline pass over your library.
 
 ---
 
@@ -315,7 +310,7 @@ Non-negotiable rules every tool obeys:
 | Document | What's in it |
 | :--- | :--- |
 | [Tool reference](docs/tools.md) | Every tool in detail — what it decides, why, and the flags worth knowing. |
-| [The pipeline](docs/pipeline.md) | The qBittorrent hook, the five steps, the order that is load-bearing, and how to read the reports. |
+| [The pipeline](docs/pipeline.md) | The qBittorrent hook, the four steps, the order that is load-bearing, and how to read the reports. |
 | [Configuration](docs/configuration.md) | Environment variables, the `.env` file, platform-aware path defaults. |
 | [Testing & development](docs/development.md) | The offline suite, the `organize.pyz` build, the field smoke tests, the crash tests. |
 | [CHANGELOG](CHANGELOG.md) · [OVERHAUL](OVERHAUL.md) | What changed and why; the measured plan the recent work follows. |

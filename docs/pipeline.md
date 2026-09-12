@@ -1,6 +1,6 @@
 # The pipeline
 
-How a finished torrent becomes a canonical movie: the ingest hook, the five
+How a finished torrent becomes a canonical movie: the ingest hook, the four
 maintenance steps and the order they must run in, and how to read what they
 write.
 
@@ -37,17 +37,20 @@ python3 /opt/organize/pipeline.py --source /path/to/movies
 
 ## 🔄 The order, and why it is fixed
 
-Five maintenance tools, one fixed order. The order between **extraction**
+Four maintenance tools, one fixed order. The order between **extraction**
 and **remux** is load-bearing — the cleaner removes every embedded subtitle
 from every movie, so extraction must happen *while the track is still in
 the container*; after the remux, a subtitle that was already in the file is
-gone for good. Subtitle **sync** runs last of the
-content steps on purpose: it rewrites subtitle bytes only (never movie
-bytes), and it must finish before the audit so the audit validates the
-finished sidecars. (Subtitle downloading used to be part of this pipeline;
-it was removed outright — the movie's own tracks are the only source now,
-and a movie with no usable track is reported for a human decision.)
-`pipeline.py` exists so you cannot get this wrong.
+gone for good. The **audit** closes the sweep on purpose: it is read-only,
+so it can only report the library the other three steps just finished
+writing. (Two stages used to sit in this pipeline and no longer do.
+Subtitle *downloading* was removed outright — the movie's own tracks are
+the only source now, and a movie with no usable track is reported for a
+human decision. Subtitle *timing sync* was removed because a sidecar built
+from the movie's own track already carries the container's timestamps, and
+whatever drift a client still notices is corrected at playback time rather
+than by rewriting the library offline.) `pipeline.py` exists so you cannot
+get this wrong.
 
 ```
  torrent finishes
@@ -69,17 +72,13 @@ and a movie with no usable track is reported for a human decision.)
 │ 4 · 10bit             │   REVIEW ambiguous metadata — never guess
 └───────────┬───────────┘
             ▼
-┌───────────────────────┐   ffsubsync timing sync of freshly extracted
-│ 5 · sync              │   sidecars (exactly once); bad syncs held for
-└───────────┬───────────┘   review, originals never lost
-            ▼
 ┌───────────────────────┐   100% read-only layout + subtitle health check
-│ 6 · audit             │   gating exit codes for cron / Task Scheduler
+│ 5 · audit             │   gating exit codes for cron / Task Scheduler
 └───────────────────────┘
 ```
 
 `1 · standardize` fires automatically from the qBittorrent hook; `organize.py
-run` (or `pipeline.py`) executes steps 2 → 6 in order. Every step skips
+run` (or `pipeline.py`) executes steps 2 → 5 in order. Every step skips
 cleanly (with the reason printed) when its prerequisite is missing.
 
 ```bash
@@ -118,15 +117,15 @@ organize doctor --json | jq -r '.checks[] | select(.status != "ok") | "\(.status
   "command": "doctor",
   "library": "/srv/media/Movies",
   "source": "/srv/torrents/final",
-  "summary": { "ok": 11, "warn": 1, "fail": 0, "total": 12 },
+  "summary": { "ok": 9, "warn": 1, "fail": 0, "total": 10 },
   "exit_code": 0,
   "checks": [
     {
-      "id": "ffsubsync",
-      "name": "ffsubsync",
+      "id": "ffmpeg-ffprobe",
+      "name": "FFmpeg (ffprobe)",
       "status": "ok",
-      "message": "Found: 0.4.25",
-      "detail": "/usr/local/bin/ffsubsync",
+      "message": "Found: ffprobe version 6.1",
+      "detail": "/usr/local/bin/ffprobe",
       "remedy": ""
     }
   ]
@@ -148,7 +147,7 @@ organize status --json | jq '{movies, settled, pending}'
 organize status --json | jq -r '.steps[] | select(.recorded) | "\(.id)\t\(.settled)/\(.stale + .unmeasured) pending"'
 ```
 
-Each of the five steps is one row with `id`, `label`, `settled`, `stale`,
+Each of the four steps is one row with `id`, `label`, `settled`, `stale`,
 `unmeasured` and its `counts`, plus `recorded` — which is how a consumer tells
 *"nothing left to do"* apart from *"nobody has measured this yet"*, the
 distinction the printed report spells out in a footnote. `state_cache` reports
@@ -191,7 +190,7 @@ describe something that can be read in one shot; a full pipeline is an hour of
 work, and the questions worth asking about it — *which step is running now, how
 long did the remux take, what failed at 03:12* — cannot be answered by a file
 that only appears once it is over. It also cannot print to stdout: stdout
-belongs to the five tools the run launches. So the run reports to files, and it
+belongs to the four tools the run launches. So the run reports to files, and it
 reports twice.
 
 ```bash

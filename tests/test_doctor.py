@@ -188,34 +188,6 @@ class BinaryCheckTests(unittest.TestCase):
         with with_modules(bitdepth=probe_mod), patch.object(organize, "get_binary_version", return_value=""):
             self.assertEqual(organize.check_ffprobe(context()).message, "Found: ffprobe")
 
-    def test_ffmpeg_found_on_path(self) -> None:
-        with patch.object(organize.shutil, "which", return_value="/usr/bin/ffmpeg"), \
-                patch.object(organize, "get_binary_version", return_value="ffmpeg version 6.1"):
-            check = organize.check_ffmpeg(context())
-        self.assertEqual(check.status, "ok")
-        self.assertEqual(check.detail, "/usr/bin/ffmpeg")
-
-    def test_ffmpeg_missing_explains_that_sync_needs_it(self) -> None:
-        with patch.object(organize.shutil, "which", return_value=None):
-            check = organize.check_ffmpeg(context())
-        self.assertEqual(check.status, "warn")
-        self.assertIn("ffsubsync needs ffmpeg", check.detail)
-
-    def test_ffsubsync_found(self) -> None:
-        sync = fake_module("sync_subtitles", find_ffsubsync=lambda: "/usr/local/bin/ffsubsync")
-        with with_modules(sync_subtitles=sync), patch.object(organize, "get_binary_version", return_value="0.4.25"):
-            check = organize.check_ffsubsync(context())
-        self.assertEqual(check.status, "ok")
-        self.assertEqual(check.message, "Found: 0.4.25")
-
-    def test_ffsubsync_missing_warns_rather_than_fails(self) -> None:
-        """Sync is an optional step, so its absence must not stop a scheduler."""
-        sync = fake_module("sync_subtitles", find_ffsubsync=lambda: None)
-        with with_modules(sync_subtitles=sync):
-            check = organize.check_ffsubsync(context())
-        self.assertEqual(check.status, "warn")
-        self.assertIn("pip install ffsubsync", check.remedy)
-
     def test_mkvextract_needs_both_programs_not_either(self) -> None:
         def only_mkvmerge(name: str) -> str | None:
             return "/usr/bin/mkvmerge" if name == "mkvmerge" else None
@@ -240,10 +212,10 @@ class BinaryCheckTests(unittest.TestCase):
     def test_an_unimportable_sibling_is_a_warning_not_a_crash(self) -> None:
         """The doctor runs on machines where a sibling tool is broken."""
         for check_fn in (organize.check_mkvtoolnix, organize.check_ffprobe,
-                         organize.check_ffsubsync, organize.check_mkvextract):
+                         organize.check_mkvextract):
             with self.subTest(check=check_fn.__name__), \
                     patch.dict(sys.modules, {"mkv_track_cleaner": None, "bitdepth": None,
-                                             "sync_subtitles": None, "subtitle_extractor": None}):
+                                             "subtitle_extractor": None}):
                 self.assertEqual(check_fn(context()).status, "warn")
 
 
@@ -492,8 +464,8 @@ class JsonDocumentTests(unittest.TestCase):
     def sample(self) -> tuple[organize.DiagnosticCheck, ...]:
         return (
             organize.DiagnosticCheck(name="Python Runtime", status="ok", message="Python 3.11.2"),
-            organize.DiagnosticCheck(name="ffsubsync", status="warn", message="Not found on PATH",
-                                     detail="skipped", remedy="pip install ffsubsync"),
+            organize.DiagnosticCheck(name="ffprobe", status="warn", message="Not found on PATH",
+                                     detail="skipped", remedy="winget install Gyan.FFmpeg"),
             organize.DiagnosticCheck(name="Hardlink Compatibility", status="fail", message="different devices"),
         )
 
@@ -530,13 +502,13 @@ class JsonDocumentTests(unittest.TestCase):
     def test_each_check_row_carries_id_name_status_message_detail_remedy(self) -> None:
         rows = self.document(*self.sample())["checks"]
         self.assertEqual(sorted(rows[1]), ["detail", "id", "message", "name", "remedy", "status"])
-        self.assertEqual(rows[1]["id"], "ffsubsync")
+        self.assertEqual(rows[1]["id"], "ffprobe")
         self.assertEqual(rows[1]["status"], "warn")
-        self.assertEqual(rows[1]["remedy"], "pip install ffsubsync")
+        self.assertEqual(rows[1]["remedy"], "winget install Gyan.FFmpeg")
 
     def test_rows_keep_the_order_of_the_check_table(self) -> None:
         rows = self.document(*self.sample())["checks"]
-        self.assertEqual([r["name"] for r in rows], ["Python Runtime", "ffsubsync", "Hardlink Compatibility"])
+        self.assertEqual([r["name"] for r in rows], ["Python Runtime", "ffprobe", "Hardlink Compatibility"])
 
     def test_an_empty_run_is_still_a_valid_document(self) -> None:
         document = self.document()

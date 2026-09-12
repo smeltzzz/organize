@@ -1,7 +1,7 @@
 """The one step table, and the prerequisite checks that guard it.
 
 ``pipeline.py`` and a second runner (deleted in 4.0.0) used to describe the
-same five tools twice: two step tables, two sets of binary probes, two
+same toolchain twice: two step tables, two sets of binary probes, two
 skip-reason functions and six hand-written argv lists inside one 660-line
 function. The copies disagreed - the second runner probed PATH while
 everything else asked the tool that owns the binary - and every new flag had
@@ -37,7 +37,7 @@ class TheTableDescribesEveryTool(unittest.TestCase):
     def test_every_step_spells_its_root_flag_the_way_its_tool_parses_it(self) -> None:
         # The cleaner is the odd one out: --dir, not --source.
         self.assertEqual(tc.STEPS["cleaner"].root_flag, "--dir")
-        for key in ("extractor", "10bit", "sync", "auditor"):
+        for key in ("extractor", "10bit", "auditor"):
             with self.subTest(step=key):
                 self.assertEqual(tc.STEPS[key].root_flag, "--source")
 

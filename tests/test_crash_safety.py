@@ -32,18 +32,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import library_auditor
 import mkv_track_cleaner as tc
-import subtitle_extractor as sx
-import sync_subtitles as ss
 from organizekit import core
 
 # Both must clear the tool's own truncation guards: an output under 1 KiB, or
 # under half the source, is rejected as a botched remux before it is promoted.
 MOVIE_BYTES = b"ORIGINAL-MOVIE-BYTES" * 400   # 8000 bytes
 REMUXED_BYTES = b"REMUXED-MOVIE-BYTES-" * 300  # 6000 bytes, a plausible saving
-SRT = "1\n00:00:05,000 --> 00:00:07,000\nHello.\n\n"
-SHIFTED_SRT = "1\n00:00:01,000 --> 00:00:03,000\nHello.\n\n"
 
 SOURCE_INFO = {
     "container": {"recognized": True, "supported": True,
@@ -457,136 +452,6 @@ class DurableWriteTests(unittest.TestCase):
         journal = self.root / ".track_cleaner.ghi.json"
         journal.write_text('{"schema": 1, "token": "aaa', encoding="utf-8")
         self.assertIsNone(tc.read_transaction(journal))
-
-
-class SidecarCrashTests(unittest.TestCase):
-    """The sidecar half of the promise: a subtitle is never lost to a crash.
-
-    ``sync_subtitles`` rewrites a freshly-extracted sidecar in place when
-    ffsubsync finds a trustworthy correction. These tests kill it mid-rewrite
-    and check that the subtitle the user already had is still there and still
-    plays. The fixture sidecar carries an extraction record, because that is
-    the only file this tool is ever allowed to rewrite.
-    """
-
-    def setUp(self) -> None:
-        self._td = tempfile.TemporaryDirectory(prefix="crash_srt_")
-        self.root = Path(self._td.name)
-        self.addCleanup(self._td.cleanup)
-        self._saved_ledger = os.environ.get(sx.EXTRACTED_LEDGER_ENV)
-        os.environ[sx.EXTRACTED_LEDGER_ENV] = str(self.root / "extracted.json")
-        self.addCleanup(self._restore_ledger_env)
-        self.folder = self.root / "Film (2000)"
-        self.folder.mkdir()
-        self.movie = self.folder / "Film (2000).mkv"
-        self.movie.write_bytes(b"fake video" * 100)
-        self.srt = self.folder / "Film (2000).eng.srt"
-        self.srt.write_text(SRT, encoding="utf-8", newline="\n")
-        self.cfg = ss.Config(library=self.root, log_file=self.root / "s.log",
-                             report_file=self.root / "s.txt", use_state=False)
-        self.features = ss.FfsubsyncFeatures(True, True, True)
-        # The provenance record is what authorises the rewrite at all: only a
-        # sidecar the extractor just wrote may be measured and replaced.
-        # newline="\n" above mirrors the extractor's own LF-pinned writer: the
-        # record's sha is the LF-text hash and the sync hashes raw bytes, so a
-        # translating write would put CRLF in the file and lose the record on
-        # Windows.
-        self.assertTrue(sx.record_extracted_sidecar(
-            self.movie, self.srt,
-            track=sx.EmbeddedSubtitleTrack(2, "S_TEXT/UTF8", "eng", "English", "text", ".srt"),
-            method="text", cue_count=1, sha256=sx.sha256_text(SRT)))
-
-    def _restore_ledger_env(self) -> None:
-        if self._saved_ledger is None:
-            os.environ.pop(sx.EXTRACTED_LEDGER_ENV, None)
-        else:
-            os.environ[sx.EXTRACTED_LEDGER_ENV] = self._saved_ledger
-
-    def _ffsubsync(self, *, crash_after_write: bool = False):
-        """A stand-in ffsubsync that measures a large, trustworthy correction."""
-        def run(cfg, command):
-            command = list(map(str, command))
-            Path(command[command.index("-o") + 1]).write_text(SHIFTED_SRT, encoding="utf-8", newline="\n")
-            if crash_after_write:
-                raise Crash("power cut while ffsubsync was running")
-            return 0, "", "\n".join([
-                "INFO: score: 40.000",
-                "INFO: offset seconds: -4.000",
-                "INFO: framerate scale factor: 1.000",
-            ])
-        return run
-
-    def _sync(self, run, *, expect_crash: bool = True):
-        with contextlib.redirect_stdout(io.StringIO()), \
-                mock.patch.object(ss, "run_ffsubsync", run):
-            if expect_crash:
-                with self.assertRaises(Crash):
-                    ss.sync_one(ss.Job(srt=self.srt, video=self.movie), self.cfg,
-                                "fake-ffsubsync", self.features)
-                return None
-            return ss.sync_one(ss.Job(srt=self.srt, video=self.movie), self.cfg,
-                               "fake-ffsubsync", self.features)
-
-    def _staging(self) -> list[Path]:
-        return sorted(p for p in self.folder.iterdir()
-                      if p.name.startswith(ss.STAGING_PREFIX))
-
-    def _assert_subtitle_survived(self) -> None:
-        self.assertEqual(self.srt.read_text(encoding="utf-8"), SRT,
-                         "the subtitle the user already had must be byte-identical")
-        ok, reason = core.validate_srt_sidecar(self.srt)
-        self.assertTrue(ok, f"and still usable ({reason})")
-
-    def test_the_uninterrupted_sync_does_replace_the_sidecar(self) -> None:
-        # The control: without a crash this run rewrites the file, so the
-        # tests below are really about the interruption and not about a
-        # code path that never writes.
-        result = self._sync(self._ffsubsync(), expect_crash=False)
-        self.assertEqual(result.status, ss.STATUS_SYNCED)
-        self.assertEqual(self.srt.read_text(encoding="utf-8"), SHIFTED_SRT)
-        self.assertEqual(self._staging(), [], "staging is consumed by the swap")
-        # And the rewritten sidecar is marked done: never measured again.
-        self.assertFalse(sx.extracted_sidecar_needs_sync(self.srt, sx.sha256_text(SHIFTED_SRT)))
-
-    def test_a_crash_while_ffsubsync_runs_leaves_the_subtitle_alone(self) -> None:
-        self._sync(self._ffsubsync(crash_after_write=True))
-        self._assert_subtitle_survived()
-
-    def test_a_crash_during_the_swap_leaves_the_subtitle_alone(self) -> None:
-        with mock.patch("sync_subtitles.os.replace", side_effect=Crash("power cut mid-swap")):
-            self._sync(self._ffsubsync())
-        self._assert_subtitle_survived()
-
-    def test_the_debris_a_crash_leaves_is_invisible_to_the_other_tools(self) -> None:
-        """A crash strands a staging file. It must not look like a subtitle."""
-        self._sync(self._ffsubsync(crash_after_write=True))
-        stranded = self._staging()
-        self.assertEqual(len(stranded), 1, "the crash did strand a staging file")
-
-        # Nothing may mistake it for the movie's subtitle: not this tool's own
-        # discovery, and not the auditor that decides what needs attention.
-        jobs, skipped, _videos = ss.discover_jobs(self.root)
-        self.assertEqual([job.srt for job in jobs], [self.srt])
-        self.assertEqual(skipped, [])
-        self.assertTrue(ss.is_junk_filename(stranded[0].name))
-
-        audit = library_auditor.classify_folder(self.folder)
-        self.assertEqual([movie.name for movie in audit.movie_files], [self.movie.name])
-        self.assertNotIn(stranded[0].name, audit.detail)
-
-    def test_a_failed_sync_restores_the_entry_time_bytes(self) -> None:
-        """Not a crash, but the same promise: a bad sync gives the file back."""
-        def hopeless(cfg, command):
-            command = list(map(str, command))
-            Path(command[command.index("-o") + 1]).write_text("garbage", encoding="utf-8")
-            return 1, "", "ERROR: ffsubsync failed to sync the input"
-
-        result = self._sync(hopeless, expect_crash=False)
-        self.assertIn(result.status, {ss.STATUS_FAILED, ss.STATUS_REVIEW})
-        self._assert_subtitle_survived()
-        # A failed measurement leaves the record unmarked, so the next run
-        # retries the sidecar rather than declaring it permanently done.
-        self.assertTrue(sx.extracted_sidecar_needs_sync(self.srt, sx.sha256_text(SRT)))
 
 
 if __name__ == "__main__":

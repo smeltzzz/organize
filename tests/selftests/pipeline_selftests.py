@@ -33,11 +33,11 @@ def run_self_tests() -> int:
             errors.append(msg)
 
     # The ordering is the whole point of this script.
-    check(STEP_ORDER == ("extractor", "cleaner", "10bit", "sync", "auditor"), "canonical step order")
+    check(STEP_ORDER == ("extractor", "cleaner", "10bit", "auditor"), "canonical step order")
     check(STEP_ORDER.index("extractor") < STEP_ORDER.index("cleaner"),
           "subtitles must be extracted before the remux strips the embedded tracks")
-    check(STEP_ORDER.index("sync") < STEP_ORDER.index("auditor"),
-          "subtitle sync must finish before the audit sees the sidecars")
+    check(STEP_ORDER.index("auditor") == len(STEP_ORDER) - 1,
+          "the read-only audit closes the sweep, so it sees the finished sidecars")
 
     # Order is preserved no matter how the user types the flag.
     for requested in (["auditor", "extractor"], ["10bit", "cleaner", "extractor"],
@@ -78,7 +78,6 @@ def run_self_tests() -> int:
     check(STEPS["extractor"].root_flag == "--source", "extractor uses --source")
     check(STEPS["cleaner"].root_flag == "--dir", "cleaner uses --dir")
     check(STEPS["10bit"].root_flag == "--source", "10bit uses --source")
-    check(STEPS["sync"].root_flag == "--source", "sync uses --source")
     check(STEPS["auditor"].root_flag == "--source", "auditor uses --source")
 
     library = Path("/media/movies")

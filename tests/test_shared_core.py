@@ -41,7 +41,6 @@ TOOLS = (
     "organize.py",
     "pipeline.py",
     "subtitle_extractor.py",
-    "sync_subtitles.py",
 )
 
 CORE_NAMES = frozenset(core.__all__)
@@ -92,11 +91,9 @@ class NothingMayReVendorTheCore(unittest.TestCase):
         import movie_standardizer
         import pipeline
         import subtitle_extractor
-        import sync_subtitles
 
         for module in (bitdepth, library_auditor, mkv_track_cleaner,
-                       movie_standardizer, pipeline, subtitle_extractor,
-                       sync_subtitles):
+                       movie_standardizer, pipeline, subtitle_extractor):
             for name in ("Report", "resolve_library", "atomic_write_text"):
                 bound = getattr(module, name, None)
                 if bound is None:
@@ -206,20 +203,15 @@ class PipelineOrderIsLoadBearing(unittest.TestCase):
             "the embedded track the sidecar is extracted from.",
         )
 
-    def test_sync_runs_after_cleaner_and_before_audit(self) -> None:
+    def test_the_audit_runs_last(self) -> None:
         import pipeline
 
         order = pipeline.STEP_ORDER
-        self.assertLess(
-            order.index("cleaner"),
-            order.index("sync"),
-            "syncing before the remux wastes the work: the remux republishes "
-            "the movie the sidecar was aligned against.",
-        )
-        self.assertLess(
-            order.index("sync"),
+        self.assertEqual(
+            len(order) - 1,
             order.index("auditor"),
-            "the audit must see the finished sidecars.",
+            "the audit is read-only and must see the sidecars the extractor "
+            "finished writing, so it closes the sweep.",
         )
 
     def test_the_pipeline_binds_the_shared_step_table(self) -> None:
@@ -261,7 +253,6 @@ class PrerequisiteChecksAgree(unittest.TestCase):
     def test_the_pipeline_delegates_binary_detection(self) -> None:
         import mkv_track_cleaner
         import pipeline
-        import sync_subtitles
 
         # mkvmerge: the cleaner step asks the cleaner's own resolver, so the
         # pipeline's skip decision agrees with the tool that runs the binary.
@@ -274,9 +265,6 @@ class PrerequisiteChecksAgree(unittest.TestCase):
             expected_mkvmerge,
             pipeline.prerequisite_issue(pipeline.STEPS["cleaner"]) is None,
         )
-
-        expected_ffsubsync = sync_subtitles.find_ffsubsync() is not None
-        self.assertEqual(expected_ffsubsync, pipeline._ffsubsync_present())
 
     def test_the_pipeline_finds_binaries_off_PATH(self) -> None:
         """The regression itself: a binary present but not on PATH."""

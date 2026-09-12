@@ -82,7 +82,7 @@ class TheArchiveRunsTests(unittest.TestCase):
         self.assertIn(VERSION, result.stdout)
 
     def test_every_tool_passes_its_own_field_smoke_test_inside_the_archive(self) -> None:
-        # `organize test` starts all nine tools as child processes. In a
+        # `organize test` starts every tool as a child process. In a
         # checkout that is `python bitdepth.py --self-test`; here there is no
         # bitdepth.py on disk, so it has to re-enter the archive instead. If
         # the launcher is wrong, this is what says so.

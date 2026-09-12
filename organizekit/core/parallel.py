@@ -1,8 +1,8 @@
 """Running the same job over many movies, with a worker pool when it pays.
 
 Three of the tools walk a library and do one independent unit of work per
-movie: probe it with ffprobe, measure a sidecar against it with ffsubsync,
-classify its folder. Each of those is bound by something that is not the CPU -
+movie: probe it with ffprobe, extract its embedded subtitle track, classify
+its folder. Each of those is bound by something that is not the CPU -
 a subprocess, a network share, a disk seek - so doing them one at a time leaves
 the machine idle for most of a run.
 
@@ -41,9 +41,9 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 # A ceiling that applies whatever the machine claims. These pools drive
-# subprocesses (ffprobe, ffsubsync/ffmpeg) that are themselves multi-threaded,
-# so "one worker per core" oversubscribes badly on a big box and thrashes a
-# small one.
+# subprocesses (ffprobe, mkvextract, an OCR backend) that are themselves
+# multi-threaded, so "one worker per core" oversubscribes badly on a big box
+# and thrashes a small one.
 DEFAULT_WORKER_CAP = 8
 
 
