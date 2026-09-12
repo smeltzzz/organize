@@ -20,7 +20,7 @@ never an authority, and it obeys three rules that keep it that way:
 What it buys: ``organize status`` can answer "what is left to do?" in
 milliseconds without touching a single media byte, and a long convergence run
 can tell which movies are actually pending instead of re-deriving the whole
-library five times per pass.
+library once per tool per pass.
 
 Probe payloads live here too (the ``probe`` table), keyed by
 ``(path_key, tool)`` and stamped the same way, so the mkvmerge and ffprobe
@@ -30,7 +30,7 @@ instead of in two ad-hoc JSON caches with two different layouts.
 The schema deliberately differs from one wide ``movie`` row per file: verdicts
 live in their own table keyed by ``(path_key, kind)`` and carry their own
 size/mtime stamp, because the bit-depth answer for a movie can be current while
-the sync answer for the same movie is stale. A single row per movie cannot
+the remux answer for the same movie is stale. A single row per movie cannot
 express that, and would quietly report a stale verdict as fresh.
 """
 
@@ -59,8 +59,7 @@ KIND_LAYOUT = "layout"
 KIND_SUBTITLE = "subtitle"
 KIND_REMUX = "remux"
 KIND_BITDEPTH = "bitdepth"
-KIND_SYNC = "sync"
-KINDS = (KIND_LAYOUT, KIND_SUBTITLE, KIND_REMUX, KIND_BITDEPTH, KIND_SYNC)
+KINDS = (KIND_LAYOUT, KIND_SUBTITLE, KIND_REMUX, KIND_BITDEPTH)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS movie (

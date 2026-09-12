@@ -7,7 +7,7 @@ no MKVToolNix, no Tesseract, and no media file is needed.
 The properties pinned here are the ones that decide whether a sidecar is
 trustworthy: a movie's own track must only win when it is complete English
 (never a forced/signs-only stream, never OCR noise), and a sidecar built that
-way is handed to ffsubsync exactly once - while a sidecar that was already
+way is recorded in the provenance ledger - while a sidecar that was already
 there before this tool ran is never touched at all.
 """
 
@@ -23,7 +23,6 @@ from pathlib import Path
 from unittest import mock
 
 import subtitle_extractor as sx
-import sync_subtitles as ss
 
 ASS_TRACK = (
     "[Script Info]\nTitle: demo\n\n[V4+ Styles]\n"
@@ -962,17 +961,18 @@ class RunIntegrationTests(unittest.TestCase):
         self.assertIn("Extracted this run", text)
 
 
-class SyncHandshakeTests(unittest.TestCase):
-    """Which sidecars sync_subtitles may touch: only fresh extractions, once.
+class ProvenanceLedgerTests(unittest.TestCase):
+    """What the extraction ledger says about a sidecar, and what it refuses to.
 
-    The rule runs in the opposite direction from the fetching era: a sidecar
-    the extractor just wrote is measured and corrected exactly once, and every
-    other sidecar - placed by hand, carried over from an earlier era, or
-    already synced - is authoritative and never touched.
+    The ledger is the durable answer to "did this tool write this sidecar?".
+    A sidecar the extractor just wrote is recorded against the movie, the track
+    and the exact bytes; every other sidecar - placed by hand, carried over
+    from an earlier era, or edited afterwards - has no record, and the tool
+    says so rather than guessing.
     """
 
     def setUp(self) -> None:
-        self._td = tempfile.TemporaryDirectory(prefix="sync_extract_")
+        self._td = tempfile.TemporaryDirectory(prefix="ledger_extract_")
         self.tmp = Path(self._td.name)
         self.addCleanup(self._td.cleanup)
         self._saved_ledger = os.environ.get(sx.EXTRACTED_LEDGER_ENV)
@@ -1005,25 +1005,21 @@ class SyncHandshakeTests(unittest.TestCase):
             self.video, self.srt, track=self.track, method="text", cue_count=11,
             sha256=self.sha))
 
-    def _sync_one(self) -> ss.SyncResult:
-        cfg = ss.Config(library=self.tmp / "library", log_file=self.tmp / "sync.log",
-                        report_file=self.tmp / "sync_report.txt")
-        job = ss.Job(srt=self.srt, video=self.video)
-        features = ss.FfsubsyncFeatures()
-        return ss.sync_one(job, cfg, "ffsubsync", features)
-
-    def test_a_sidecar_with_no_extraction_record_is_never_touched(self) -> None:
-        with mock.patch.object(ss, "run_ffsubsync", side_effect=AssertionError("ffsubsync ran")):
-            result = self._sync_one()
-        self.assertEqual(result.status, ss.STATUS_SKIPPED)
-        self.assertIn("not extracted", result.detail)
+    def test_a_sidecar_with_no_extraction_record_has_no_provenance(self) -> None:
+        self.assertIsNone(sx.find_extracted_record(self.srt, self.sha))
         self.assertEqual(self.srt.read_text(encoding="utf-8"), self.body, "file untouched")
 
-    def test_a_fresh_extraction_is_eligible_for_sync(self) -> None:
+    def test_a_fresh_extraction_is_recorded_against_its_movie_and_track(self) -> None:
         self._record_extraction()
-        self.assertTrue(sx.extracted_sidecar_needs_sync(self.srt, self.sha))
-        needs, reason = ss._sidecar_needs_sync(self.srt, self.sha)
-        self.assertTrue(needs, reason)
+        record = sx.find_extracted_record(self.srt, self.sha)
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record["movie"], str(self.video))
+        self.assertEqual(record["track_id"], 2)
+        self.assertEqual(record["codec_id"], "S_TEXT/ASS")
+        self.assertEqual(record["method"], "text")
+        self.assertEqual(record["cue_count"], 11)
+        self.assertTrue(record["extracted_utc"], "the record is stamped")
 
     def test_a_replaced_sidecar_is_no_longer_the_extraction(self) -> None:
         self._record_extraction()
@@ -1031,30 +1027,18 @@ class SyncHandshakeTests(unittest.TestCase):
         # provenance record, so it is not the extracted copy any more.
         self.srt.write_bytes((self.body + "\n").encode("utf-8"))
         replaced_sha = sx.sha256_text(self.body + "\n")
-        needs, _reason = ss._sidecar_needs_sync(self.srt, replaced_sha)
-        self.assertFalse(needs, "a replaced sidecar is not ours to sync")
-        self.assertIsNone(sx.find_extracted_record(self.srt, replaced_sha))
+        self.assertIsNone(sx.find_extracted_record(self.srt, replaced_sha),
+                          "a replaced sidecar must not inherit the old record")
+        # Without a sha to compare, the record is still there by path - which is
+        # exactly why every caller that matters passes the sha.
+        self.assertIsNotNone(sx.find_extracted_record(self.srt))
 
-    def test_a_marked_synced_sidecar_is_not_synced_again(self) -> None:
+    def test_a_damaged_ledger_reads_as_an_empty_one(self) -> None:
         self._record_extraction()
-        sx.mark_extracted_sidecar_synced(self.srt, self.sha)
-        with mock.patch.object(ss, "run_ffsubsync", side_effect=AssertionError("ffsubsync ran")):
-            result = self._sync_one()
-        self.assertEqual(result.status, ss.STATUS_SKIPPED)
-        self.assertIn("already synced", result.detail)
-        self.assertEqual(self.srt.read_text(encoding="utf-8"), self.body, "file untouched")
-
-    def test_the_report_names_what_was_left_alone(self) -> None:
-        self._record_extraction()
-        sx.mark_extracted_sidecar_synced(self.srt, self.sha)
-        with mock.patch.object(ss, "run_ffsubsync", side_effect=AssertionError("ffsubsync ran")):
-            result = self._sync_one()
-        cfg = ss.Config(library=self.tmp / "library", log_file=self.tmp / "sync.log",
-                        report_file=self.tmp / "sync_report.txt")
-        text = ss.build_report([result], cfg, video_count=1, ffsubsync_info="ffsubsync 1.0",
-                               features=ss.FfsubsyncFeatures(), elapsed_sec=0.1, truncated=False)
-        self.assertIn("SKIPPED (NOTHING SYNCED)", text)
-        self.assertIn("Skipped", text)
+        Path(os.environ[sx.EXTRACTED_LEDGER_ENV]).write_text("{not json", encoding="utf-8")
+        self.assertEqual(sx.load_extracted_ledger(), {"version": sx.EXTRACTED_LEDGER_VERSION,
+                                                      "sidecars": {}})
+        self.assertIsNone(sx.find_extracted_record(self.srt, self.sha))
 
 
 class WhatTheContainerClaimsTests(unittest.TestCase):

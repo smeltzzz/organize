@@ -3,9 +3,9 @@
 
 ``movie_standardizer.py`` is the qBittorrent completion hook and runs by itself
 the moment a download stops, so it is deliberately not part of this sweep. What
-is left — extracting subtitles, cleaning tracks, checking bit depth, syncing
-subtitle timing, auditing the library — is five separate commands, and the
-order between the first two is load-bearing:
+is left — extracting subtitles, cleaning tracks, checking bit depth, auditing
+the library — is four separate commands, and the order between the first two is
+load-bearing:
 
     subtitle_extractor.py   MUST run before mkv_track_cleaner.py
 
@@ -13,12 +13,15 @@ order between the first two is load-bearing:
 movie's own embedded subtitle track. ``mkv_track_cleaner.py`` then strips every
 embedded subtitle once a validated sidecar exists - so a movie cleaned before
 its track was extracted has lost that track for good (a re-extraction would
-find nothing). ``sync_subtitles.py`` runs last of the content steps, just
-before the audit: it measures a freshly extracted sidecar against the movie's
-real audio and corrects the timing when the drift is real, and the audit must
-see the finished sidecars. Running the five scripts
+find nothing). ``library_auditor.py`` runs last: it is read-only, and it must
+see the sidecars the extractor finished writing. Running the four scripts
 by hand makes that easy to get wrong on a busy day; this script cannot get it
 wrong.
+
+Subtitle *timing* is deliberately not a step here. A sidecar extracted from the
+movie's own track is frame-accurate by construction, and any remaining drift is
+corrected at playback time by the Jellyfin plugin, so there is nothing offline
+for this sweep to fix.
 
 Each tool runs as its own subprocess so it keeps its own locks, logs and
 reports exactly as it would standalone. Steps whose prerequisites are missing
@@ -72,11 +75,6 @@ from organizekit.core import (
     tool_is_available,
 )
 
-# The sync-readiness probe, under the name this module has always used for
-# it. It is re-exported rather than wrapped so that patching the tool's own
-# resolver in a test changes what this name answers.
-from organizekit.core import ffsubsync_ready as _ffsubsync_present  # noqa: F401
-
 VERSION = "1.0.0"
 
 HERE = Path(__file__).resolve().parent
@@ -110,12 +108,6 @@ HINTS: dict[str, str] = {
         "from every movie, so extraction must happen while the track is "
         "still in the file."
     ),
-    "sync": (
-        "Runs after every other tool on purpose: it rewrites subtitle bytes, never movie "
-        "bytes - but it must finish before the audit so the audit sees the finished "
-        "sidecars. A bad sync is worse than none: untrusted alignments are held for "
-        "review, never applied."
-    ),
 }
 
 @dataclass
@@ -136,7 +128,7 @@ class Run:
 # Calling a step
 #
 # The step table and the prerequisite checks live in organizekit.core.toolchain:
-# one description of the five tools, so this file cannot disagree with the
+# one description of the four tools, so this file cannot disagree with the
 # table about any of it.
 # ---------------------------------------------------------------------------
 
@@ -238,7 +230,7 @@ def summary_document(run: Run, cfg: Config) -> dict[str, object]:
     """The printed summary as a JSON document, for whatever reads runs.
 
     Written to a file rather than stdout, unlike every other ``--json`` in this
-    toolkit: a pipeline run's stdout belongs to the five tools it launches, and
+    toolkit: a pipeline run's stdout belongs to the four tools it launches, and
     interleaving a document with a remux's progress output would produce
     neither a readable log nor parseable JSON.
     """
@@ -347,13 +339,13 @@ def resolve_steps(requested: Sequence[str]) -> tuple[str, ...]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=("Run the manual Jellyfin movie steps in the correct order: "
-                     "subtitle extraction, then track cleaning, then bit depth, then subtitle sync, then audit."),
+                     "subtitle extraction, then track cleaning, then bit depth, then audit."),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=("movie_standardizer.py is the qBittorrent completion hook and is not part of\n"
                 "this sweep. Subtitles are extracted before the cleaner because the cleaner\n"
                 "strips every embedded subtitle track from every movie.\n"
-                "Subtitle sync (ffsubsync) runs just before the audit: it only rewrites\n"
-                "subtitle bytes, so the audit sees the finished sidecars."),
+                "The audit runs last: it is read-only, and it must see the sidecars the\n"
+                "extractor finished writing."),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--source", type=Path, default=None,
@@ -441,9 +433,8 @@ def run_self_tests() -> int:
     def extraction_precedes_remux() -> bool:
         return STEP_ORDER.index("extractor") < STEP_ORDER.index("cleaner")
 
-    def sync_precedes_audit() -> bool:
-        return (STEP_ORDER.index("cleaner") < STEP_ORDER.index("sync")
-                < STEP_ORDER.index("auditor"))
+    def audit_runs_last() -> bool:
+        return STEP_ORDER.index("auditor") == len(STEP_ORDER) - 1
 
     def every_step_is_defined() -> bool:
         return set(STEPS) == set(STEP_ORDER)
@@ -453,7 +444,7 @@ def run_self_tests() -> int:
 
     return run_field_smoke_test("pipeline.py", [
         ("subtitles are extracted before the remux", extraction_precedes_remux),
-        ("sync runs after the remux, before the audit", sync_precedes_audit),
+        ("the audit is the last step", audit_runs_last),
         ("every ordered step has a definition", every_step_is_defined),
         ("every tool script is present", the_tools_are_present),
     ])

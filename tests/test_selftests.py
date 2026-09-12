@@ -32,7 +32,6 @@ from tests.selftests import (
     movie_standardizer_selftests,
     pipeline_selftests,
     subtitle_extractor_selftests,
-    sync_subtitles_selftests,
 )
 
 SUITES = (
@@ -42,7 +41,6 @@ SUITES = (
     ("movie_standardizer", movie_standardizer_selftests.run_canonical_self_tests),
     ("pipeline", pipeline_selftests.run_self_tests),
     ("subtitle_extractor", subtitle_extractor_selftests.run_self_tests),
-    ("sync_subtitles", sync_subtitles_selftests.run_self_tests),
 )
 
 
@@ -56,7 +54,6 @@ SHIPPED_SMOKE_TESTS = (
     ("mkv_track_cleaner", "run_self_tests"),
     ("movie_standardizer", "run_canonical_self_tests"),
     ("subtitle_extractor", "run_self_tests"),
-    ("sync_subtitles", "run_self_tests"),
 )
 
 

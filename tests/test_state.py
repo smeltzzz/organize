@@ -19,8 +19,8 @@ from unittest import mock
 from organizekit.core import (
     KIND_BITDEPTH,
     KIND_LAYOUT,
+    KIND_REMUX,
     KIND_SUBTITLE,
-    KIND_SYNC,
     NullStateStore,
     StateStore,
     Verdict,
@@ -73,16 +73,16 @@ class StateStoreTests(unittest.TestCase):
     def test_unknown_stamp_is_never_reported_as_current(self) -> None:
         # "Cannot tell" must read as stale on either side of the comparison:
         # an optimistic guess is how a cache starts lying about a library.
-        verdict = Verdict(path_key="k", kind=KIND_SYNC, verdict="synced")
+        verdict = Verdict(path_key="k", kind=KIND_REMUX, verdict="cleaned")
         self.assertFalse(verdict.is_current_for(10, 20))
-        stamped = Verdict(path_key="k", kind=KIND_SYNC, verdict="synced", size=10, mtime_ns=20)
+        stamped = Verdict(path_key="k", kind=KIND_REMUX, verdict="cleaned", size=10, mtime_ns=20)
         self.assertFalse(stamped.is_current_for(None, None))
         self.assertTrue(stamped.is_current_for(10, 20))
 
     def test_record_prefers_the_callers_stamp(self) -> None:
         store = self._store()
-        store.record(self.movie, KIND_SYNC, "synced", size=11, mtime_ns=22)
-        stored = store.verdicts()[(path_norm(self.movie), KIND_SYNC)]
+        store.record(self.movie, KIND_REMUX, "cleaned", size=11, mtime_ns=22)
+        stored = store.verdicts()[(path_norm(self.movie), KIND_REMUX)]
         self.assertEqual((stored.size, stored.mtime_ns), (11, 22))
 
     def test_second_record_replaces_the_first_for_the_same_kind(self) -> None:
@@ -95,16 +95,16 @@ class StateStoreTests(unittest.TestCase):
 
     def test_kinds_are_independent(self) -> None:
         # The reason verdicts are one row per kind: a current bit-depth answer
-        # must not make a stale sync answer look fresh.
+        # must not make a stale remux answer look fresh.
         store = self._store()
-        store.record(self.movie, KIND_SYNC, "synced")
+        store.record(self.movie, KIND_REMUX, "cleaned")
         self.movie.write_bytes(b"z" * 8192)
         store.record(self.movie, KIND_BITDEPTH, "SKIP_HDR")
         info = self.movie.stat()
         rows = store.verdicts()
         self.assertTrue(rows[(path_norm(self.movie), KIND_BITDEPTH)]
                         .is_current_for(info.st_size, info.st_mtime_ns))
-        self.assertFalse(rows[(path_norm(self.movie), KIND_SYNC)]
+        self.assertFalse(rows[(path_norm(self.movie), KIND_REMUX)]
                          .is_current_for(info.st_size, info.st_mtime_ns))
 
     def test_verdicts_can_be_filtered_by_kind(self) -> None:
@@ -189,19 +189,19 @@ class StateStoreTests(unittest.TestCase):
 
     def test_state_survives_reopening(self) -> None:
         store = self._store()
-        store.record(self.movie, KIND_SYNC, "synced")
+        store.record(self.movie, KIND_REMUX, "cleaned")
         store.close()
         reopened = self._store()
-        self.assertIn((path_norm(self.movie), KIND_SYNC), reopened.verdicts())
+        self.assertIn((path_norm(self.movie), KIND_REMUX), reopened.verdicts())
 
     def test_deleting_the_database_costs_data_not_correctness(self) -> None:
         store = self._store()
-        store.record(self.movie, KIND_SYNC, "synced")
+        store.record(self.movie, KIND_REMUX, "cleaned")
         store.close()
         self.db.unlink()
         rebuilt = self._store()
         self.assertEqual(rebuilt.verdicts(), {})
-        rebuilt.record(self.movie, KIND_SYNC, "synced")
+        rebuilt.record(self.movie, KIND_REMUX, "cleaned")
         self.assertEqual(len(rebuilt.verdicts()), 1)
 
     def test_open_state_downgrades_instead_of_raising(self) -> None:
@@ -239,8 +239,8 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(store.see_movie(self.movie), path_norm(self.movie))
             self.assertEqual(store.movies(), {})
             self.assertEqual(store.forget_missing(["a"]), 0)
-            store.record(self.movie, KIND_SYNC, "synced")
-            self.assertEqual(store.record_many([(self.movie, KIND_SYNC, "synced", "")]), 0)
+            store.record(self.movie, KIND_REMUX, "cleaned")
+            self.assertEqual(store.record_many([(self.movie, KIND_REMUX, "cleaned", "")]), 0)
             self.assertEqual(store.verdicts(), {})
             self.assertEqual(store.quota_used("subdl", "2026-01-01"), 0)
             # No ledger to reserve against, so the caller's own accounting rules.
@@ -251,9 +251,9 @@ class StateStoreTests(unittest.TestCase):
 
     def test_a_broken_connection_never_raises_through_the_api(self) -> None:
         store = self._store()
-        store.record(self.movie, KIND_SYNC, "synced")
+        store.record(self.movie, KIND_REMUX, "cleaned")
         store._db.close()  # simulate the database vanishing mid-run
-        store.record(self.movie, KIND_SYNC, "review")  # must not raise
+        store.record(self.movie, KIND_REMUX, "deferred")  # must not raise
         self.assertEqual(store.verdicts(), {})
         self.assertEqual(store.movies(), {})
         self.assertEqual(store.quota_used("subdl", "2026-01-01"), 0)
@@ -261,7 +261,7 @@ class StateStoreTests(unittest.TestCase):
 
     def test_schema_is_versioned_and_in_wal_mode(self) -> None:
         store = self._store()
-        store.record(self.movie, KIND_SYNC, "synced")
+        store.record(self.movie, KIND_REMUX, "cleaned")
         with contextlib.closing(sqlite3.connect(self.db)) as db:
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],
                              state.SCHEMA_VERSION)

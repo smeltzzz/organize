@@ -8,12 +8,11 @@ Python 3.11+ Jellyfin movie library toolkit.
 Commands:
     doctor       Diagnose environment, external binaries, paths, and hardlink capability
     status       Summarise what is done and what the next pass will touch (read-only)
-    run          Run the automated maintenance pipeline (extract -> remux -> 10-bit -> sync -> audit)
+    run          Run the automated maintenance pipeline (extract -> remux -> 10-bit -> audit)
     standardize  Rename and hardlink completed downloads into Title (Year)/Title (Year).mkv
     extract      Extract embedded English tracks into validated <movie>.eng.srt sidecars
     clean        Lossless remux: keep 1 best audio (the movie's own language), strip subs, MP4 -> MKV
     10bit        ffprobe inspection: queue 8-bit SDR for HandBrake; protect HDR & 10-bit
-    sync         ffsubsync timing sync of freshly extracted sidecars against their movie
     audit        Read-only health check of library layout, MKV naming, and subtitle sidecars
     test         Run the test suite across all tools
 
@@ -31,7 +30,6 @@ from __future__ import annotations
 import argparse
 import os
 import platform
-import shutil
 import subprocess
 import sys
 import time
@@ -162,14 +160,13 @@ def print_dashboard() -> None:
     print(f"    {cyan('2. extract')}     {SYM_ARROW} subtitle_extractor: embedded English track -> <movie>.eng.srt (no downloads, ever)")
     print(f"    {cyan('3. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps 1 audio, strips subs (MP4 -> MKV)")
     print(f"    {cyan('4. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect native HDR")
-    print(f"    {cyan('5. sync')}        {SYM_ARROW} ffsubsync subtitle-timing sync: trust window applies, bad syncs held for review")
-    print(f"    {cyan('6. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
+    print(f"    {cyan('5. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
     print()
 
     print(bold("  QUICK COMMANDS:"))
     print(f"    {green('python organize.py doctor')}             Run comprehensive environment & prerequisite diagnostics")
     print(f"    {green('python organize.py status')}             Summarise progress: what is done, what the next pass touches")
-    print(f"    {green('python organize.py run')}                Run manual maintenance pipeline (steps 2 -> 3 -> 4 -> 5 -> 6)")
+    print(f"    {green('python organize.py run')}                Run manual maintenance pipeline (steps 2 -> 3 -> 4 -> 5)")
     print(f"    {green('python organize.py run --dry-run')}      Preview pipeline commands without executing")
     print(f"    {green('python organize.py standardize [PATH]')} Standardize a specific torrent download or batch scan")
     print(f"    {green('python organize.py audit')}              Audit current library layout and subtitle coverage")
@@ -401,56 +398,6 @@ def check_ffprobe(_ctx: DoctorContext) -> DiagnosticCheck:
     )
 
 
-def check_ffmpeg(_ctx: DoctorContext) -> DiagnosticCheck:
-    """ffmpeg - needed by sync_subtitles.py, because ffsubsync shells out to it."""
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if ffmpeg_bin:
-        return DiagnosticCheck(
-            name="FFmpeg (ffmpeg)",
-            status="ok",
-            message=f"Found: {get_binary_version(ffmpeg_bin, '-version') or 'ffmpeg'}",
-            detail=ffmpeg_bin,
-        )
-    return DiagnosticCheck(
-        name="FFmpeg (ffmpeg)",
-        status="warn",
-        message="Not found on PATH",
-        detail="ffsubsync needs ffmpeg to extract audio; the subtitle-sync step will be skipped",
-        remedy=(
-            "Windows: winget install Gyan.FFmpeg\n"
-            "Debian/Ubuntu: sudo apt install -y ffmpeg\n"
-            "macOS: brew install ffmpeg"
-        ),
-    )
-
-
-def check_ffsubsync(_ctx: DoctorContext) -> DiagnosticCheck:
-    """ffsubsync - the pip-installed program sync_subtitles.py drives."""
-
-    def probe() -> str | None:
-        import sync_subtitles as ss_sync
-        return ss_sync.find_ffsubsync()
-
-    ffsubsync_bin = probe_quietly(probe)
-    if ffsubsync_bin:
-        return DiagnosticCheck(
-            name="ffsubsync",
-            status="ok",
-            message=f"Found: {get_binary_version(ffsubsync_bin, '--version') or 'ffsubsync'}",
-            detail=ffsubsync_bin,
-        )
-    return DiagnosticCheck(
-        name="ffsubsync",
-        status="warn",
-        message="Not found on PATH",
-        detail="The subtitle-sync step is skipped until ffsubsync is installed",
-        remedy=(
-            "Install once:  pip install ffsubsync   (needs ffmpeg on the PATH)\n"
-            "Alternative:   pipx install ffsubsync"
-        ),
-    )
-
-
 def check_mkvextract(_ctx: DoctorContext) -> DiagnosticCheck:
     """mkvextract - reads a movie's own embedded subtitle tracks.
 
@@ -602,8 +549,6 @@ DOCTOR_CHECKS: tuple[tuple[str, DoctorProbe], ...] = (
     ("os", check_operating_system),
     ("mkvmerge", check_mkvtoolnix),
     ("ffprobe", check_ffprobe),
-    ("ffmpeg", check_ffmpeg),
-    ("ffsubsync", check_ffsubsync),
     ("mkvextract", check_mkvextract),
     ("ocr", check_ocr_backend),
     ("library-dir", check_library_directory),
@@ -822,8 +767,8 @@ def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
 
     ``audit`` is authoritative and fresh - it was just measured from the
     filesystem - so layout and subtitles are read straight from it. Bit depth
-    and sync cost an ffprobe and an ffsubsync run respectively, so those come
-    from the cache, and each stored answer is checked against the movie's
+    and the remux each cost a subprocess run, so those come from the cache,
+    and each stored answer is checked against the movie's
     current ``(size, mtime_ns)``: an answer about bytes that have since changed
     is reported as unknown, never as a verdict.
 
@@ -837,8 +782,7 @@ def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
     """
     import bitdepth as probe_mod
     import mkv_track_cleaner as remux_mod
-    import sync_subtitles as sync_mod
-    from organizekit.core import KIND_BITDEPTH, KIND_REMUX, KIND_SYNC, path_norm
+    from organizekit.core import KIND_BITDEPTH, KIND_REMUX, path_norm
 
     # Each step's own module says which of its verdicts mean "nothing further
     # to do", so this command cannot drift from the tool that wrote the answer.
@@ -847,7 +791,6 @@ def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
     settled_verdicts: dict[str, frozenset[str] | None] = {
         KIND_REMUX: remux_mod.SETTLED_REMUX,
         KIND_BITDEPTH: frozenset({probe_mod.STATUS_SKIP_SDR, probe_mod.STATUS_SKIP_HDR}),
-        KIND_SYNC: frozenset({sync_mod.STATUS_SYNCED, sync_mod.STATUS_IN_SYNC}),
     }
     cached_kinds = tuple(settled_verdicts)
 
@@ -912,8 +855,7 @@ def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
         StepStatus("Subtitles", subtitle, settled["subtitle"]),
         *(
             StepStatus(label, cached[kind], settled[kind], stale[kind], unmeasured[kind])
-            for label, kind in (("Remux", KIND_REMUX), ("Bit depth", KIND_BITDEPTH),
-                                ("Sync", KIND_SYNC))
+            for label, kind in (("Remux", KIND_REMUX), ("Bit depth", KIND_BITDEPTH))
         ),
     )
     return LibraryStatus(
@@ -1051,8 +993,8 @@ def run_status(
     Layout and subtitles are re-measured here rather than read back from the
     cache: they are cheap (a stat per file) and they are the two things a user
     can change behind the toolkit's back by moving a file. The expensive
-    verdicts - bit depth, sync, remux - are read from the cache and shown only
-    while they still describe the bytes on disk.
+    verdicts - bit depth and the remux - are read from the cache and shown
+    only while they still describe the bytes on disk.
 
     This runs the auditor itself rather than a second, subtly different scan,
     so it inherits exactly one side effect: a validated legacy ``Title.en.srt``
@@ -1135,8 +1077,8 @@ def run_status(
     if not store.enabled:
         print(f"\n  {SYM_WARN} {yellow('State cache disabled')} - only layout and subtitles are live.")
     elif not measured:
-        print(f"\n  {SYM_BULLET} No cached verdicts yet: run {cyan('organize 10bit')} and "
-              f"{cyan('organize sync')} to fill in the remaining rows.")
+        print(f"\n  {SYM_BULLET} No cached verdicts yet: run {cyan('organize run')} "
+              f"to fill in the remaining rows.")
     print(f"  {dim(f'Scanned in {status.elapsed_sec:.2f}s. No movie file was modified.')}")
     return 0
 
@@ -1185,7 +1127,6 @@ def run_all_self_tests() -> int:
         ("movie_standardizer.py", ["--self-test"]),
         ("subtitle_extractor.py", ["--self-test"]),
         ("mkv_track_cleaner.py", ["--self-test"]),
-        ("sync_subtitles.py", ["--self-test"]),
         ("pipeline.py", ["--self-test"]),
     ]
 
@@ -1298,9 +1239,6 @@ def build_parser() -> argparse.ArgumentParser:
     # 10bit
     subparsers.add_parser("10bit", aliases=["probe"], help="FFprobe 8-bit vs 10-bit & native HDR compliance check", add_help=False)
 
-    # sync
-    subparsers.add_parser("sync", aliases=["sync-subtitles"], help="ffsubsync timing sync of freshly extracted .srt sidecars (pre-audit)", add_help=False)
-
     # audit
     subparsers.add_parser("audit", help="Read-only audit of library layout, naming, and SRT sidecars", add_help=False)
 
@@ -1399,9 +1337,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if command in {"10bit", "probe"}:
         return delegate_to_script("bitdepth.py", sub_args)
-
-    if command in {"sync", "sync-subtitles"}:
-        return delegate_to_script("sync_subtitles.py", sub_args)
 
     if command in {"audit"}:
         return delegate_to_script("library_auditor.py", sub_args)

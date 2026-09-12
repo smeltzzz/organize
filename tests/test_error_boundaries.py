@@ -31,7 +31,6 @@ if str(REPO) not in sys.path:
 
 import mkv_track_cleaner as tc  # noqa: E402
 import organize as cli  # noqa: E402
-import sync_subtitles as ss  # noqa: E402
 
 
 class HostAndVolumeTests(unittest.TestCase):
@@ -225,19 +224,6 @@ class CliBoundaryTests(unittest.TestCase):
     def test_a_missing_binary_has_no_version(self) -> None:
         with mock.patch.object(cli.subprocess, "run", side_effect=FileNotFoundError("ffprobe")):
             self.assertEqual(cli.get_binary_version("ffprobe"), "")
-
-    def test_a_damaged_extraction_ledger_reads_as_no_sync(self) -> None:
-        with mock.patch("subtitle_extractor.find_extracted_record",
-                        side_effect=RuntimeError("ledger is corrupt")):
-            needs, reason = ss._sidecar_needs_sync(Path("x.eng.srt"), "0" * 64)
-        self.assertFalse(needs)
-        self.assertIn("could not be read", reason)
-
-    def test_a_record_that_is_not_a_mapping_is_ignored(self) -> None:
-        with mock.patch("subtitle_extractor.find_extracted_record", return_value=["not", "a", "dict"]):
-            needs, reason = ss._sidecar_needs_sync(Path("x.eng.srt"), "0" * 64)
-        self.assertFalse(needs)
-        self.assertIn("could not be read", reason)
 
 
 if __name__ == "__main__":

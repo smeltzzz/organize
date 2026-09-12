@@ -1,4 +1,4 @@
-"""Tests for the shared live status line and the four tools that adopted it.
+"""Tests for the shared live status line and the tools that adopted it.
 
 The contract this file exists to hold is one sentence: **a live line is a
 terminal effect and nothing else.** Every sweep in the toolkit writes its
@@ -25,7 +25,6 @@ import bitdepth as bd
 import library_auditor as la
 import mkv_track_cleaner as tc
 import movie_standardizer as ms
-import sync_subtitles as ss
 from organizekit.core import RunLog
 from organizekit.core.live import LiveLine, ellipsize, format_left, strip_ansi
 
@@ -198,14 +197,14 @@ class ProgressTests(unittest.TestCase):
 
     def test_an_estimate_appears_once_there_is_something_to_extrapolate(self) -> None:
         with mock.patch("organizekit.core.live.time.monotonic", return_value=100.0):
-            self.line.progress(10, 20, label="syncing", started=90.0)
+            self.line.progress(10, 20, label="probing", started=90.0)
         # 10 items in 10 s, 10 to go.
         self.assertIn("~10s left", self._drawn())
 
     def test_no_estimate_before_the_first_item_or_at_the_end(self) -> None:
         with mock.patch("organizekit.core.live.time.monotonic", return_value=100.0):
-            self.line.progress(0, 20, label="syncing", started=90.0)
-            self.line.progress(20, 20, label="syncing", started=90.0)
+            self.line.progress(0, 20, label="probing", started=90.0)
+            self.line.progress(20, 20, label="probing", started=90.0)
         self.assertNotIn("left", self._drawn())
 
     def test_a_long_name_is_shortened_from_the_front(self) -> None:
@@ -374,7 +373,7 @@ class NonTerminalRunsAreUnchangedTests(unittest.TestCase):
 
     def test_the_live_line_of_each_tool_is_inert_off_a_terminal(self) -> None:
         non_tty = io.StringIO()
-        for module in (la, bd, ss):
+        for module in (la, bd):
             with self.subTest(tool=module.__name__):
                 saved = module.log.stream
                 try:

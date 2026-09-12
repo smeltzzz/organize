@@ -12,8 +12,8 @@ track; that machinery is gone because it was not reliable enough. The
 contract is now exactly this:
 
 * a movie that already has an ``.eng.srt`` beside it is left completely
-  alone - no extraction, no sync, no provider anything. An existing sidecar
-  is authoritative;
+  alone - no extraction, no rewriting, no provider anything. An existing
+  sidecar is authoritative;
 * a movie without one gets its embedded English subtitle track extracted
   into ``Title (Year).eng.srt``. Text tracks (SRT/SSA/ASS/WebVTT/USF) are
   converted in-process; image tracks (PGS/VobSub/DVB) are OCR'd by an
@@ -27,9 +27,9 @@ contract is now exactly this:
   container itself, so no embedded track is lost to the MP4 -> MKV
   conversion;
 * every sidecar this tool writes is recorded in a provenance ledger outside
-  the library. ``sync_subtitles.py`` reads that ledger and syncs exactly
-  those freshly extracted sidecars - once - against the movie's real audio,
-  then marks them done. Nothing else is ever synced;
+  the library: which movie it came from, which embedded track, by which
+  method, its SHA-256 and when. The ledger is the durable answer to "did
+  this tool write this sidecar?", and it is what makes a re-run cheap;
 * a movie with no usable embedded English track and no sidecar is listed in
   the report as needing attention. That is a human's decision now, not a
   download.
@@ -369,9 +369,8 @@ def dest_for(video: Path, cfg: Any = None) -> Path:
 # wrong cut. The sidecar is built from it:
 #
 #   * the cues carry the container's own timestamps, so the sidecar is
-#     frame-accurate for this exact file. sync_subtitles.py still measures
-#     each freshly extracted sidecar once (containers are not always honest)
-#     and then marks it done in the provenance ledger;
+#     frame-accurate for this exact file and needs no offline timing
+#     correction - anything left over is handled at playback time;
 #   * mkv_track_cleaner.py strips every embedded subtitle afterwards, so the
 #     external sidecar becomes the sole subtitle option - which is why this
 #     tool runs first;
@@ -442,9 +441,9 @@ DEFAULT_MKVEXTRACT_TIMEOUT_SEC = 900.0
 DEFAULT_OCR_TIMEOUT_SEC = 1_800.0
 
 # Durable, outside-the-library record of which sidecars this tool created from
-# the movie's own tracks. sync_subtitles.py reads it so it never spends an
-# ffsubsync run "correcting" a subtitle that is frame-accurate by
-# construction. It lives beside the other ReportsAndLogs artefacts.
+# the movie's own tracks: the provenance that says "this .eng.srt came out of
+# this movie, by this method, at this time". It lives beside the other
+# ReportsAndLogs artefacts.
 EXTRACTED_LEDGER_NAME = "subtitle_extractor_extracted.json"
 # Libraries cut over from the fetching era still hold provenance records
 # written by subtitle_fetcher.py under this name; they are read (never
@@ -1268,7 +1267,7 @@ def run_ocr(
 
 
 # ---------------------------------------------------------------------------
-# Durable record of extracted sidecars (read by sync_subtitles.py)
+# Durable record of extracted sidecars (the provenance ledger)
 # ---------------------------------------------------------------------------
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
@@ -1287,11 +1286,10 @@ def extracted_ledger_path() -> Path:
     return tools_home() / "ReportsAndLogs" / EXTRACTED_LEDGER_NAME
 
 
-# Extraction and syncing both run worker threads, and every one of them
-# load-mutate-writes this one JSON file. The lock serialises the write path
-# only (reads stay lock-free): a lost update would cost a redundant sync, but
-# the ledger is supposed to be the durable answer to "was this sidecar
-# extracted?", so it must not lose records to interleaving.
+# Extraction runs worker threads, and every one of them load-mutate-writes
+# this one JSON file. The lock serialises the write path only (reads stay
+# lock-free): the ledger is supposed to be the durable answer to "was this
+# sidecar extracted?", so it must not lose records to interleaving.
 _LEDGER_WRITE_LOCK = threading.Lock()
 
 
@@ -1301,8 +1299,7 @@ def load_extracted_ledger(path: Path | None = None) -> dict[str, Any]:
     When the current ledger does not exist yet, the legacy
     ``subtitle_fetcher_extracted.json`` is read instead: those provenance
     records are still true, and honoring them means a library cut over from
-    the fetching era does not have its already-extracted sidecars re-synced
-    from scratch.
+    the fetching era keeps the provenance it already had.
     """
     target = path or extracted_ledger_path()
     payload: Any = None
@@ -1335,10 +1332,9 @@ def record_extracted_sidecar(
 ) -> bool:
     """Remember that ``sidecar`` came from the movie's own embedded track.
 
-    sync_subtitles.py reads this record to know which sidecars it may sync:
-    exactly the ones extracted from the movie, and only until they are marked
-    synced. Best effort by design: a read-only installation loses only that
-    handshake, never the subtitle itself.
+    This is the provenance record: which movie, which track, which method,
+    which bytes and when. Best effort by design - a read-only installation
+    loses only the record, never the subtitle itself.
     """
     target = path or extracted_ledger_path()
     with _LEDGER_WRITE_LOCK:
@@ -1378,7 +1374,7 @@ def find_extracted_record(
 
     ``sha256`` is compared when given: a sidecar whose bytes were replaced by
     a hand edit or an outside tool is no longer the extracted copy, so it has
-    no provenance and the sync step leaves it untouched.
+    no provenance and is reported as such.
     """
     payload = load_extracted_ledger(path)
     record = payload.get("sidecars", {}).get(path_norm(sidecar))
@@ -1809,51 +1805,6 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 
-def mark_extracted_sidecar_synced(
-    sidecar: Path, sha256: str | None = None, *, path: Path | None = None,
-    new_sha256: str | None = None,
-) -> bool:
-    """Record that the sync step has finished with this extracted sidecar.
-
-    ``sha256`` is the provenance that authorised the mark: it must match the
-    sha the record already holds. ``new_sha256`` re-points the record at the
-    bytes that replaced the sidecar (ffsubsync's corrected output), so the
-    record keeps describing the file that is actually on disk; without it the
-    mark applies to the unchanged bytes (the "already in sync" outcome).
-
-    Best effort, like the ledger itself: a record that cannot be updated
-    costs the next sync run one redundant measurement, never a wrong sync.
-    """
-    target = path or extracted_ledger_path()
-    with _LEDGER_WRITE_LOCK:
-        payload = load_extracted_ledger(target)
-        record = payload.get("sidecars", {}).get(path_norm(sidecar))
-        if not isinstance(record, dict):
-            return False
-        if sha256 and str(record.get("sha256") or "") != sha256:
-            return False
-        if new_sha256:
-            record["sha256"] = new_sha256
-        record["synced_utc"] = utc_timestamp()
-        try:
-            atomic_write_json(target, payload)
-        except OSError:
-            return False
-        return True
-
-
-def extracted_sidecar_needs_sync(
-    sidecar: Path, sha256: str, *, path: Path | None = None
-) -> bool:
-    """True when ``sidecar`` is an extracted copy the sync step has not processed.
-
-    The provenance record is matched on the sidecar's current SHA-256, so a
-    hand-edited or replaced file no longer counts as the extracted copy - it
-    is left alone rather than "corrected" back.
-    """
-    record = find_extracted_record(sidecar, sha256, path=path)
-    return record is not None and not str(record.get("synced_utc") or "")
-
 def inspect_existing_sidecars(video: Path) -> tuple[str, Path | None, str, str]:
     """Classify existing English sidecars without trusting filename alone.
 
@@ -2108,8 +2059,8 @@ def extraction_run(cfg: ExtractorConfig) -> tuple[list[JobResult], dict[str, Any
     The order of questions per movie is the whole policy:
 
     1. an existing validated ``.eng.srt`` beside the movie settles it - the
-       movie is reported as covered and nothing is extracted, synced or
-       rewritten. An existing sidecar is authoritative;
+       movie is reported as covered and nothing is extracted or rewritten.
+       An existing sidecar is authoritative;
     2. otherwise the movie's own embedded English track is extracted into
        the canonical sidecar (text via mkvextract, image via OCR, MP4
        through the temporary bridge);
@@ -2155,8 +2106,8 @@ def extraction_run(cfg: ExtractorConfig) -> tuple[list[JobResult], dict[str, Any
             continue
         if triage.sidecar_status == "covered" and triage.existing is not None:
             # The one rule that never bends: a movie that already has a
-            # validated .eng.srt is not touched. No extraction attempt, no
-            # sync trigger, nothing.
+            # validated .eng.srt is not touched. No extraction attempt,
+            # nothing.
             result = JobResult(video, "have", triage.sidecar_detail, triage.existing,
                                reason=REASON_COVERED)
             results.append(result)
@@ -2338,7 +2289,7 @@ def build_report(results: Sequence[JobResult], cfg: ExtractorConfig, summary: di
         (f"{covered_count}/{total} ({coverage_pct:.1f}%)",
          "COVERAGE: movies with a validated English SRT" + (" (would be covered)" if cfg.dry_run else ""),
          "the goal: 100% - every uncovered movie is named below"),
-        (len(covered), "Already have .eng.srt", "authoritative; never re-extracted or synced"),
+        (len(covered), "Already have .eng.srt", "authoritative; never re-extracted"),
         (len(extracted), "Extracted this run", f"written as <movie>{EXTERNAL_SRT_SUFFIX}"),
     ]
     if dry_run or cfg.dry_run:
@@ -2397,9 +2348,8 @@ def build_report(results: Sequence[JobResult], cfg: ExtractorConfig, summary: di
             intro=(
                 "These movies carried an English subtitle track. It was extracted to the "
                 f"canonical <movie>{EXTERNAL_SRT_SUFFIX}: exact for this release, and its cues "
-                "come from the container's own timeline. sync_subtitles.py measures each "
-                "one once and corrects the timing only when the drift is real and "
-                "trustworthy; mkv_track_cleaner.py then strips every embedded subtitle, "
+                "come from the container's own timeline, so no offline timing correction "
+                "is needed. mkv_track_cleaner.py then strips every embedded subtitle, "
                 "leaving this sidecar as the sole subtitle option."
             ),
         )
@@ -2428,7 +2378,7 @@ def build_report(results: Sequence[JobResult], cfg: ExtractorConfig, summary: di
         intro=(
             "Every movie here has a validated sidecar with the exact canonical name. "
             "This tool left it - and the movie - completely untouched: an existing "
-            "sidecar is authoritative and is never re-extracted or re-synced."
+            "sidecar is authoritative and is never re-extracted or rewritten."
         ),
     )
     if not covered:
@@ -2486,7 +2436,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Extract one validated external English SRT per movie from its own "
             "embedded subtitle track. An existing .eng.srt beside a movie is "
-            "authoritative and is never re-extracted or synced. There is no "
+            "authoritative and is never re-extracted or rewritten. There is no "
             "subtitle downloading: a movie with no usable embedded track and no "
             "sidecar is reported for manual attention."
         ),
@@ -2618,8 +2568,8 @@ def run_self_tests() -> int:
     The extraction paths (probe, classify, convert, OCR, the MP4 bridge and
     the provenance ledger) are covered exhaustively in ``tests/``. The two
     things worth re-checking on an unfamiliar machine are the sidecar
-    contract and the sync handshake, because a wrong one silently breaks the
-    rest of the pipeline.
+    contract and the provenance ledger, because a wrong one silently breaks
+    the rest of the pipeline.
     """
     def a_real_srt_validates() -> bool:
         with tempfile.TemporaryDirectory(prefix="extractor_smoke_") as td:
@@ -2637,7 +2587,7 @@ def run_self_tests() -> int:
         movie = Path("/library/Movie (2020)/Movie (2020).mkv")
         return exact_external_english_srt_path(movie).name == "Movie (2020).eng.srt"
 
-    def the_sync_handshake_round_trips() -> bool:
+    def the_provenance_ledger_round_trips() -> bool:
         with tempfile.TemporaryDirectory(prefix="extractor_smoke_") as td:
             sidecar = Path(td) / "Movie (2020).eng.srt"
             sidecar.write_text("1\n00:00:01,000 --> 00:00:02,500\nHello\n", encoding="utf-8")
@@ -2651,17 +2601,19 @@ def run_self_tests() -> int:
                 ),
                 method="text", cue_count=1, sha256=sha, path=ledger,
             )
-            return (
-                extracted_sidecar_needs_sync(sidecar, sha, path=ledger)
-                and mark_extracted_sidecar_synced(sidecar, sha, path=ledger)
-                and not extracted_sidecar_needs_sync(sidecar, sha, path=ledger)
-            )
+            record = find_extracted_record(sidecar, sha, path=ledger)
+            # The record must come back for the bytes that were written, and
+            # must NOT come back for bytes somebody else replaced them with.
+            return (isinstance(record, dict)
+                    and record.get("sha256") == sha
+                    and find_extracted_record(sidecar, sha256_text("edited"),
+                                              path=ledger) is None)
 
     return run_field_smoke_test("subtitle_extractor.py", [
         ("a valid .eng.srt is accepted", a_real_srt_validates),
         ("an HTML error page is rejected", html_is_rejected),
         ("the sidecar path is canonical", the_sidecar_path_is_canonical),
-        ("the extraction/sync handshake round-trips", the_sync_handshake_round_trips),
+        ("the provenance ledger round-trips", the_provenance_ledger_round_trips),
     ])
 
 if __name__ == "__main__":

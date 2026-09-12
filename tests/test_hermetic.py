@@ -32,7 +32,6 @@ import bitdepth
 import mkv_track_cleaner
 import movie_standardizer
 import subtitle_extractor
-import sync_subtitles
 
 
 def _program(directory: Path, name: str) -> Path:
@@ -75,7 +74,6 @@ class ThePinHoldsTests(unittest.TestCase):
                 mkv_track_cleaner.resolve_mkvmerge_path()
             self.assertIsNone(subtitle_extractor.find_mkvtoolnix_binary("mkvextract"))
             self.assertIsNone(subtitle_extractor.find_mkvtoolnix_binary("mkvmerge"))
-            self.assertIsNone(sync_subtitles.find_ffsubsync())
             self.assertIsNone(bitdepth.find_ffprobe())
             self.assertFalse(bitdepth.ffprobe_works("/nonexistent/ffprobe"))
             self.assertIsNone(movie_standardizer.find_ffprobe())

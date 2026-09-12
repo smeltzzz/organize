@@ -1,4 +1,4 @@
-"""The toolchain: what the five steps are, and how to call them.
+"""The toolchain: what the four steps are, and how to call them.
 
 Everything about a step that the pipeline needs lives here exactly once: the
 order, the script, the flag each tool spells differently, the flags it
@@ -44,7 +44,7 @@ RUN_TOOL_VERB = "run-tool"
 # The canonical order. Index order is the execution order; do not reorder
 # without re-reading the pipeline notes in the module docstring and each
 # tool's own documentation.
-STEP_ORDER = ("extractor", "cleaner", "10bit", "sync", "auditor")
+STEP_ORDER = ("extractor", "cleaner", "10bit", "auditor")
 
 @dataclass(frozen=True)
 class Step:
@@ -81,10 +81,6 @@ STEPS: dict[str, Step] = {
     ),
     "10bit": Step(
         key="10bit", script="bitdepth.py", title="Check 8-bit vs 10-bit / HDR",
-        root_flag="--source",
-    ),
-    "sync": Step(
-        key="sync", script="sync_subtitles.py", title="Sync subtitle timing (ffsubsync)",
         root_flag="--source",
     ),
     "auditor": Step(
@@ -146,29 +142,6 @@ def ffprobe_installed() -> bool:
         return shutil.which("ffprobe") is not None
 
 
-def ffsubsync_installed() -> bool:
-    """ffsubsync under any of its three interchangeable entry points.
-
-    Checking only ``ffsubsync`` reports a working install (``ffs``, ``subsync``)
-    as missing.
-    """
-    try:
-        import sync_subtitles as ss
-        return ss.find_ffsubsync() is not None
-    except Exception:  # noqa: BLE001 - a sibling tool that will not import
-        # must degrade to the plain PATH lookup, not take the caller down.
-        return any(shutil.which(name) for name in ("ffsubsync", "ffs", "subsync"))
-
-
-def ffmpeg_installed() -> bool:
-    return shutil.which("ffmpeg") is not None
-
-
-def ffsubsync_ready() -> bool:
-    """ffsubsync *and* the ffmpeg it shells out to: syncing needs both."""
-    return ffsubsync_installed() and ffmpeg_installed()
-
-
 PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
     "extractor": (
         mkvtoolnix_installed,
@@ -182,11 +155,6 @@ PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
     "10bit": (
         ffprobe_installed,
         "ffprobe (FFmpeg) not found on PATH or in the standard install locations",
-    ),
-    "sync": (
-        ffsubsync_ready,
-        "ffsubsync not found on PATH (install it with `pip install ffsubsync`) or ffmpeg "
-        "missing; ffsubsync needs both to sync subtitles",
     ),
 }
 

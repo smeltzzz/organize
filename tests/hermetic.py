@@ -42,14 +42,12 @@ from unittest import mock
 #: Every external program the toolkit looks for. A lookup for any of these
 #: answers "not installed" while the pin is held, whatever the host has.
 #:
-#: ``ffs`` and ``subsync`` are ffsubsync's two alternative entry points; the
-#: OCR backends and their runtimes are here because ``doctor`` probes them too,
-#: so a machine with Tesseract installed would otherwise read differently from
-#: one without.
+#: The OCR backends and their runtimes are here because ``doctor`` probes them
+#: too, so a machine with Tesseract installed would otherwise read differently
+#: from one without.
 EXTERNAL_PROGRAMS = frozenset({
     "mkvmerge", "mkvextract", "mkvpropedit", "mkvinfo",
     "ffmpeg", "ffprobe",
-    "ffsubsync", "ffs", "subsync",
     "tesseract", "pgsrip", "pgstosrt", "subtitleedit", "mono", "dotnet",
 })
 
@@ -91,7 +89,6 @@ def no_media_tools() -> Iterator[None]:
     import mkv_track_cleaner
     import movie_standardizer
     import subtitle_extractor
-    import sync_subtitles
 
     with mock.patch("shutil.which", side_effect=_which_without_media_tools), \
             mock.patch.object(mkv_track_cleaner, "resolve_mkvmerge_path", _mkvmerge_absent), \
@@ -99,7 +96,6 @@ def no_media_tools() -> Iterator[None]:
                               lambda path: "unknown version"), \
             mock.patch.object(subtitle_extractor, "find_mkvtoolnix_binary",
                               lambda name, explicit=None: None), \
-            mock.patch.object(sync_subtitles, "find_ffsubsync", lambda explicit=None: None), \
             mock.patch.object(bitdepth, "find_ffprobe", lambda explicit=None: None), \
             mock.patch.object(bitdepth, "ffprobe_works", lambda binary: False), \
             mock.patch.object(movie_standardizer, "find_ffprobe", lambda explicit="ffprobe": None), \

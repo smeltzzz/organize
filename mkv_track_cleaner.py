@@ -1964,16 +1964,16 @@ def _log_live_totals(
 # WHAT THIS RUN DECIDED, FOR `organize status`
 # =============================================================================
 #
-# Every other expensive step publishes its verdicts to the shared state cache
-# (``bitdepth`` its queue decision, ``sync_subtitles`` its timing verdict), so
-# `organize status` can answer "what is left to do?" without touching a media
-# byte. The remux step did not, which is why that command printed
+# The other expensive step publishes its verdicts to the shared state cache
+# (``bitdepth`` its queue decision), so `organize status` can answer "what is
+# left to do?" without touching a media byte. The remux step did not, which
+# is why that command printed
 # ``Remux  not recorded yet`` and left the step out of the settled tally
 # entirely - a library could be fully remuxed and the summary would never say
 # so.
 #
-# Two things make this tool different from the other two publishers, and both
-# shape what is below.
+# Two things make this tool different from the other publisher, and both shape
+# what is below.
 #
 # First, it *rewrites* movies and takes hours doing it. A publish-at-the-end
 # pass would throw away every verdict of an interrupted run, so a verdict is
@@ -3142,7 +3142,7 @@ def main(argv: list[str] | None = None) -> int:
         log(f"Metadata cache: {probe_cache.path} ({len(probe_cache)} entries loaded{imported})",
             log_file_path=args.log)
     # A dry run decides nothing about the bytes on disk, so it publishes
-    # nothing - the same rule sync_subtitles follows.
+    # nothing - the same rule bitdepth follows.
     state_store = open_state(args.state_db, enabled=not (args.no_state or args.dry_run),
                              tool="mkv_track_cleaner")
     published = 0

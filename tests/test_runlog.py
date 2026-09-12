@@ -199,9 +199,8 @@ class ToolAdoptionTests(unittest.TestCase):
         import bitdepth
         import library_auditor
         import subtitle_extractor
-        import sync_subtitles
 
-        for module in (bitdepth, library_auditor, sync_subtitles, subtitle_extractor):
+        for module in (bitdepth, library_auditor, subtitle_extractor):
             with self.subTest(module=module.__name__):
                 self.assertIsInstance(module.log, RunLog)
 
