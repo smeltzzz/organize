@@ -16,9 +16,9 @@ Everything is overridable per run with CLI flags (see each tool's
 | `MOVIE_STD_TARGET` | every tool (legacy) | Older name for `ORGANIZE_LIBRARY`; still honoured, lower precedence |
 | `MOVIE_STD_LOCK_TIMEOUT` | movie_standardizer | Coordination-lock wait (default 60 s) |
 | `MOVIE_STD_MAINTENANCE_MODE` | movie_standardizer | `REPORT` (default) / `QUARANTINE` / `DELETE` for duplicates |
-| `ORGANIZE_STATE_DB` | auditor / cleaner / 10-bit / sync / `status` | Where the shared state cache lives (default: beside the logs and reports, never inside the library) |
+| `ORGANIZE_STATE_DB` | auditor / cleaner / 10-bit / `status` | Where the shared state cache lives (default: beside the logs and reports, never inside the library) |
 | `ORGANIZE_NO_STATE` | the same tools | Set to `1` to turn the cache off everywhere at once (equivalent to passing `--no-state`) |
-| `SUBTITLE_EXTRACTED_LEDGER` | subtitle_extractor / sync | Where the extraction provenance ledger lives (default: `ReportsAndLogs/subtitle_extractor_extracted.json`, outside the library). `sync_subtitles.py` reads it to know which sidecars it may measure |
+| `SUBTITLE_EXTRACTED_LEDGER` | subtitle_extractor | Where the extraction provenance ledger lives (default: `ReportsAndLogs/subtitle_extractor_extracted.json`, outside the library). It records which sidecars the extractor wrote, from which movie and track, with their SHA-256 |
 | `PGSTOSRT_DLL` | subtitle_extractor | Path to the PgsToSrt `.dll` (it runs as `dotnet <dll>`), when that OCR backend is wanted |
 
 A `.env` file next to the scripts is read automatically at startup by every

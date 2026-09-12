@@ -19,7 +19,7 @@ To maintain its bulletproof stability, all contributions must respect the projec
 
    The tools remain ordinary scripts — `python3 bitdepth.py` works straight out of a clone with no install and no `PYTHONPATH`, because `organizekit/` sits beside them at the repository root.
 
-   The toolchain itself is one of those shared things. What the five steps are, in what order, with which flag each tool spells the library root and which binary each needs is the table in `organizekit/core/toolchain.py`. The one runner (`pipeline.py`) binds that table, and `tests/test_shared_core.py` asserts identity, not equality — a second step table cannot be written. Add a flag to a step there and the runner gets it.
+   The toolchain itself is one of those shared things. What the four steps are, in what order, with which flag each tool spells the library root and which binary each needs is the table in `organizekit/core/toolchain.py`. The one runner (`pipeline.py`) binds that table, and `tests/test_shared_core.py` asserts identity, not equality — a second step table cannot be written. Add a flag to a step there and the runner gets it.
 
    This replaces an older rule that said the opposite: every tool used to carry its own copy of all of it, and contributors were asked to keep the copies byte-identical by hand. That failed exactly as you would expect. `atomic_write_text` drifted into two versions and the safer one (which `fsync`s before publishing, so a report survives a power cut and not merely a process crash) existed only in `subtitle_fetcher.py` — the tool that rewrites your movie files had the weakest writer in the repo. 4,325 lines of duplication bought that bug. A helper that must behave identically everywhere should exist in one place.
 
@@ -36,7 +36,7 @@ To maintain its bulletproof stability, all contributions must respect the projec
    Reports, journals, manifests, and remuxed MKVs are written to sibling temporary files and atomically swapped (`os.replace` / `os.link`). Mid-operation crashes or power outages never corrupt existing media.
 
 8. **Parallelism Must Have an Off Switch, and Must Not Change the Answer**
-   The tools that read the library in parallel (`sync_subtitles.py`, `library_auditor.py`, `bitdepth.py`) all go through `organizekit.core.parallel`. Two rules come with it: `--workers 1` runs the work inline in the calling thread, so it is a real escape hatch rather than a one-worker pool; and anything whose output is a numbered list or an official verdict uses `map_ordered`, which returns results in input order, so the worker count cannot change a character of the report. Shared mutable state (the sync ledger) is mutated in exactly one locked function.
+   The tools that read the library in parallel (`subtitle_extractor.py`, `library_auditor.py`, `bitdepth.py`) all go through `organizekit.core.parallel`. Two rules come with it: `--workers 1` runs the work inline in the calling thread, so it is a real escape hatch rather than a one-worker pool; and anything whose output is a numbered list or an official verdict uses `map_ordered`, which returns results in input order, so the worker count cannot change a character of the report. Shared mutable state (the extraction provenance ledger) is mutated in exactly one locked function.
 
 9. **100% Offline Testability**
    The test suite must run completely offline without internet connectivity, without OpenSubtitles or SubDL API keys, and without requiring external binaries (`mkvmerge` or `ffprobe`).

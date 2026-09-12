@@ -19,7 +19,7 @@ patches the lookup itself, inside the test body.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,229 unit tests, ~25 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,136 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -69,7 +69,7 @@ cd /tmp/sdist && python3 -m unittest discover -s tests -p "test_*.py"
 git tag -a v3.6.0 -m "3.6.0" && git push origin v3.6.0
 ```
 
-Steps 4 and 5 are not ceremony. The wheel ships nine top-level modules and a
+Steps 4 and 5 are not ceremony. The wheel ships eight top-level modules and a
 package, and a tool added at the repository root without a line in
 `py-modules` is missing from it while working perfectly in the checkout;
 `tests/test_packaging.py` catches that one offline, but only running the thing
@@ -89,14 +89,14 @@ Python and nothing else — build the whole thing into one file and copy it
 across:
 
 ```bash
-python3 scripts/build_pyz.py          # writes dist/organize.pyz (~270 KiB)
+python3 scripts/build_pyz.py          # writes dist/organize.pyz (~210 KiB)
 scp dist/organize.pyz nas:/volume1/
 ssh nas 'cd /volume1 && python3 organize.pyz doctor'
 ```
 
-It is the same toolkit, not a cut-down one: `organize.pyz test` runs all nine
-field smoke tests, `organize.pyz run-tool pipeline.py --source …` runs the full
-five-step pass, and each step is still its own process with its own locks, log,
+It is the same toolkit, not a cut-down one: `organize.pyz test` runs every
+field smoke test, `organize.pyz run-tool pipeline.py --source …` runs the full
+four-step pass, and each step is still its own process with its own locks, log,
 report and exit code. Logs and reports land *beside* the archive, never inside
 it. The module list comes from `pyproject.toml`, so the archive and the wheel
 cannot drift apart, and the build is reproducible — the same source always
@@ -159,9 +159,9 @@ is written, after mkvmerge finishes, after verification, between the staging
 file and `os.replace` — and then checks the filesystem. The original must be
 byte-identical or already fully replaced, with no third state, and the *next*
 run must clean up whatever debris was left, without ever promoting a file that
-was not verified. The same treatment is applied to the subtitle sync, to the
-durable writers themselves, and to a hand-planted hostile recovery journal
-pointing at `../precious.mkv`.
+was not verified. The same treatment is applied to the durable writers
+themselves, and to a hand-planted hostile recovery journal pointing at
+`../precious.mkv`.
 
 `tests/test_track_cleaner_e2e.py` runs the cleaner end to end against
 `tests/fake_mkvmerge.py` — a real executable that speaks enough of the
