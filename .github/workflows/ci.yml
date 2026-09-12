@@ -47,7 +47,7 @@ jobs:
           python -m compileall -q organizekit
           organize.py pipeline.py bitdepth.py
           library_auditor.py mkv_track_cleaner.py movie_standardizer.py
-          subtitle_extractor.py sync_subtitles.py
+          subtitle_extractor.py
 
       - name: A clone must run with no install and no PYTHONPATH
         run: python -c "import bitdepth, organizekit.core; assert bitdepth.Report is organizekit.core.Report"
@@ -202,7 +202,7 @@ jobs:
 
   provisioned:
     # The one machine shape the matrix above never tests: a real workstation,
-    # where MKVToolNix, FFmpeg and ffsubsync are actually installed. Every
+    # where MKVToolNix and FFmpeg are actually installed. Every
     # other job runs on a runner that has none of them, so a test that quietly
     # takes a different code path when a binary is present - resolving a real
     # mkvmerge instead of bailing out, launching a real ffprobe instead of the
@@ -224,12 +224,8 @@ jobs:
         run: choco install mkvtoolnix ffmpeg -y --no-progress
         shell: bash
 
-      - name: Install ffsubsync
-        run: python -m pip install ffsubsync
-        shell: bash
-
       - name: Every tool must be discoverable the way the tools discover it
-        # Not a bare `shutil.which` for all five: MKVToolNix's Windows installer
+        # Not a bare `shutil.which` for all four: MKVToolNix's Windows installer
         # does not put itself on PATH, and the tools do not ask PATH either -
         # they ask their own resolvers, which also search the standard install
         # locations. Asking PATH here would fail on a correctly provisioned
@@ -238,7 +234,7 @@ jobs:
           python -c "
           import shutil, sys
           import bitdepth, mkv_track_cleaner as tc
-          import subtitle_extractor as sx, sync_subtitles as ss
+          import subtitle_extractor as sx
           try:
               mkvmerge = tc.resolve_mkvmerge_path()
           except OSError as exc:
@@ -249,7 +245,6 @@ jobs:
               'mkvextract': sx.find_mkvtoolnix_binary('mkvextract'),
               'ffmpeg': shutil.which('ffmpeg'),
               'ffprobe': bitdepth.find_ffprobe(),
-              'ffsubsync': ss.find_ffsubsync(),
           }
           for name, path in found.items():
               print(f'{name:11} {path or \"NOT FOUND\"}')
