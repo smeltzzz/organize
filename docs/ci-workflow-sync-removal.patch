@@ -1,0 +1,83 @@
+# Unapplied CI changes for .github/workflows/ci.yml — removing the sync stage
+#
+# The Arena GitHub App that pushes this branch has no `workflows` permission,
+# so a commit that edits .github/workflows/ci.yml is rejected outright
+# ("refusing to allow a GitHub App to create or update workflow ... without
+# `workflows` permission"). The changes therefore live here until someone with
+# the right token applies them:
+#
+#     git apply docs/ci-workflow-sync-removal.patch \
+#       && git add .github/workflows/ci.yml \
+#       && git commit -m "CI: drop the subtitle-sync stage from the workflow"
+#
+# What they change, in the order they appear:
+#
+#   * the syntax gate's byte-compile list drops `sync_subtitles.py`, which the
+#     branch deletes. Until this is applied the gate fails on a file that no
+#     longer exists — this is the one red check to expect on the merge;
+#   * the `provisioned` job stops installing ffsubsync, stops importing
+#     `sync_subtitles`, and stops requiring an `ffsubsync` binary. That job
+#     exists to prove the suite is hermetic on a fully-provisioned workstation;
+#     with the sync stage gone, ffsubsync is no longer part of the toolchain it
+#     provisions (ffmpeg stays — ffprobe ships in the same distribution and the
+#     10-bit step needs it);
+#   * two comments follow the tool count down from five steps to four.
+#
+# This patch is independent of docs/ci-workflow.patch, which is already
+# applied and committed; apply this one on top of the current ci.yml.
+#
+# Verified with `git apply --check` against the ci.yml at the tip of this
+# branch.
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index ca1cca0..f0728f5 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -47,7 +47,7 @@ jobs:
+           python -m compileall -q organizekit
+           organize.py pipeline.py bitdepth.py
+           library_auditor.py mkv_track_cleaner.py movie_standardizer.py
+-          subtitle_extractor.py sync_subtitles.py
++          subtitle_extractor.py
+ 
+       - name: A clone must run with no install and no PYTHONPATH
+         run: python -c "import bitdepth, organizekit.core; assert bitdepth.Report is organizekit.core.Report"
+@@ -202,7 +202,7 @@ jobs:
+ 
+   provisioned:
+     # The one machine shape the matrix above never tests: a real workstation,
+-    # where MKVToolNix, FFmpeg and ffsubsync are actually installed. Every
++    # where MKVToolNix and FFmpeg are actually installed. Every
+     # other job runs on a runner that has none of them, so a test that quietly
+     # takes a different code path when a binary is present - resolving a real
+     # mkvmerge instead of bailing out, launching a real ffprobe instead of the
+@@ -224,12 +224,8 @@ jobs:
+         run: choco install mkvtoolnix ffmpeg -y --no-progress
+         shell: bash
+ 
+-      - name: Install ffsubsync
+-        run: python -m pip install ffsubsync
+-        shell: bash
+-
+       - name: Every tool must be discoverable the way the tools discover it
+-        # Not a bare `shutil.which` for all five: MKVToolNix's Windows installer
++        # Not a bare `shutil.which` for all four: MKVToolNix's Windows installer
+         # does not put itself on PATH, and the tools do not ask PATH either -
+         # they ask their own resolvers, which also search the standard install
+         # locations. Asking PATH here would fail on a correctly provisioned
+@@ -238,7 +234,7 @@ jobs:
+           python -c "
+           import shutil, sys
+           import bitdepth, mkv_track_cleaner as tc
+-          import subtitle_extractor as sx, sync_subtitles as ss
++          import subtitle_extractor as sx
+           try:
+               mkvmerge = tc.resolve_mkvmerge_path()
+           except OSError as exc:
+@@ -249,7 +245,6 @@ jobs:
+               'mkvextract': sx.find_mkvtoolnix_binary('mkvextract'),
+               'ffmpeg': shutil.which('ffmpeg'),
+               'ffprobe': bitdepth.find_ffprobe(),
+-              'ffsubsync': ss.find_ffsubsync(),
+           }
+           for name, path in found.items():
+               print(f'{name:11} {path or \"NOT FOUND\"}')
