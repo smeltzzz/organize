@@ -6,7 +6,10 @@ claims instead of restating them.
 ---
 
 The whole suite is **offline**: no media files, no `mkvmerge`, no `ffprobe`,
-no API keys, no network.
+no API keys, no network. The extractor's one networked tier (the exact-hash
+OpenSubtitles fallback) is driven through a fake `urlopen` that records
+requests and serves canned answers, and `tests/hermetic.py` pins the real
+`urlopen` out so no test can reach the network by accident.
 
 Offline means the suite does not *need* those things — not that it ignores
 them. `organize.py doctor` answers by probing the machine, and `--ffprobe` is a
@@ -19,7 +22,7 @@ patches the lookup itself, inside the test body.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,136 unit tests, ~25 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,173 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -167,8 +170,14 @@ themselves, and to a hand-planted hostile recovery journal pointing at
 `tests/fake_mkvmerge.py` — a real executable that speaks enough of the
 mkvmerge command line to be driven by the unmodified tool, so the subprocess
 launch, progress parsing, verification, atomic swap, locking and report are
-all the real ones. `tests/test_standardizer_destructive.py` does the same for
-the only tool that deletes folders, in all three maintenance modes.
+all the real ones. The same stand-in answers `mkvextract tracks`, which is what
+lets `tests/test_subtitle_extract_e2e.py` drive a real extraction: a real child
+process writing a real track file that the tool then has to convert, validate
+and publish beside the movie. `tests/test_subtitle_extract.py` is the
+decision-level half of that pair, with `tests/fakeprovider.py` serving the
+canned OpenSubtitles answers both suites use. `tests/test_standardizer_destructive.py`
+does the same for the only tool that deletes folders, in all three maintenance
+modes.
 
 Contributions: see [CONTRIBUTING.md](../CONTRIBUTING.md). Security reports: see
 [SECURITY.md](../SECURITY.md).

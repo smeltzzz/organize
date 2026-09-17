@@ -47,6 +47,17 @@
 > is about the **ceiling**: what "as good as it can possibly be" actually means
 > here, and the order to get there.
 
+> **After this plan: two stages were deleted, and the numbers below are the
+> plan's.** Subtitle synchronisation (`sync_subtitles.py`, and with it
+> `ffsubsync`) and OCR-based subtitle extraction are both gone — the first
+> because a mis-timed subtitle is worse than a re-download, the second because a
+> garbled transcription looks like success while leaving the dialogue wrong. The
+> fetcher in the tables is now `subtitle_extractor.py`, whose text-first design
+> and exact-moviehash OpenSubtitles tier are described in `docs/tools.md`; the
+> suite count has moved with the code, and the current one is asserted in
+> `tests/test_docs.py`. The phase statuses and the reasoning above them are
+> still the record of this work.
+
 **Baseline, measured today** (`arena/01a07259-organize`, Python 3.11.2):
 
 | Metric | Value |

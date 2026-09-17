@@ -5,9 +5,12 @@ FFmpeg and no network. Hermetic means the tests do not *require* those things.
 It does not, on its own, mean they ignore them - and a handful did not.
 
 ``organize.py doctor`` answers by probing the machine it runs on, and the CLI
-tests run the real doctor. So does ``movie_standardizer``: ``--ffprobe`` is a
-*hint*, and when the hinted path does not exist ``find_ffprobe`` falls through
-to ``shutil.which("ffprobe")`` and finds whatever the machine actually has. On
+tests run the real doctor. ``movie_standardizer`` probes too: ``--ffprobe`` is
+a *hint*, and when the hinted path does not exist ``find_ffprobe`` falls
+through to ``shutil.which("ffprobe")`` and finds whatever the machine actually
+has. This module also pins outbound HTTP, because the extractor's OpenSubtitles
+tier is the toolkit's only networked path and a test that reached it would
+depend on the network just as badly. On
 a CI runner - which has none of these installed - every one of those probes
 came back empty, and the tests passed. On a workstation that has the tools, the
 same tests took the other branch: a real ``mkvmerge --version`` here, a real
@@ -41,15 +44,20 @@ from unittest import mock
 
 #: Every external program the toolkit looks for. A lookup for any of these
 #: answers "not installed" while the pin is held, whatever the host has.
-#:
-#: The OCR backends and their runtimes are here because ``doctor`` probes them
-#: too, so a machine with Tesseract installed would otherwise read differently
-#: from one without.
 EXTERNAL_PROGRAMS = frozenset({
     "mkvmerge", "mkvextract", "mkvpropedit", "mkvinfo",
     "ffmpeg", "ffprobe",
-    "tesseract", "pgsrip", "pgstosrt", "subtitleedit", "mono", "dotnet",
 })
+
+def _no_network(*args: object, **kwargs: object) -> None:
+    """Anything that tries to leave the machine during a test is a bug.
+
+    The suite's one networked feature (the image-only OpenSubtitles tier) is
+    only reachable with an API key set *and* an image-only movie, so no test
+    should ever get here - and if one does, it must fail loudly rather than
+    depend on the machine's network.
+    """
+    raise AssertionError("the test suite must not touch the network")
 
 _real_which = shutil.which
 
@@ -99,20 +107,7 @@ def no_media_tools() -> Iterator[None]:
             mock.patch.object(bitdepth, "find_ffprobe", lambda explicit=None: None), \
             mock.patch.object(bitdepth, "ffprobe_works", lambda binary: False), \
             mock.patch.object(movie_standardizer, "find_ffprobe", lambda explicit="ffprobe": None), \
-            mock.patch.object(subtitle_extractor, "_resolve_program",
-                              lambda explicit, name, *search_paths: None), \
-            mock.patch.object(subtitle_extractor, "_subtitleedit_program", lambda explicit="": None), \
-            mock.patch.object(subtitle_extractor, "_pgstosrt_program", lambda explicit="": None), \
-            mock.patch.object(subtitle_extractor, "build_ocr_backend", lambda key, explicit_bin="": None), \
-            mock.patch.object(subtitle_extractor, "detect_ocr_backend",
-                              lambda preferred="auto", explicit_bin="", arg_template="":
-                              (None, "no image-subtitle OCR backend found; install one image-subtitle "
-                                     "OCR backend to extract PGS/VobSub tracks: pgsrip "
-                                     "(pip install pgsrip, needs MKVToolNix + tesseract + tessdata), "
-                                     "sup2srt + Tesseract (https://github.com/retrontology/sup2srt), "
-                                     "Subtitle Edit (https://www.nikse.dk/subtitleedit), or PgsToSrt "
-                                     "with PGSTOSRT_DLL set; text subtitle tracks are extracted without "
-                                     "any of them")):
+            mock.patch.object(subtitle_extractor, "urlopen", _no_network):
         yield
 
 

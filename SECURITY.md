@@ -14,16 +14,30 @@ enforced in code and covered by the offline test suite:
   or rewritten.
 - **Fail-closed concurrency.** Every tool coordinates through advisory locks;
   a lock that cannot be acquired halts the tool instead of racing.
-- **Provider hardening.** The subtitle fetcher only dereferences absolute
-  HTTPS download links from OpenSubtitles; SubDL raw URLs are restricted to
-  `https://dl.subdl.com/subtitle/...` and opaque v2 IDs use a locally-built
-  `format=file` API path. Both providers are byte-capped, archive/gzip-aware,
-  cue-validated, snapshot-checked, and atomically published only after
-  validation. A SubDL archive with more than one usable `.srt` is rejected for
-  manual review rather than guessed.
-- **Credentials stay out of the command line.** OpenSubtitles and SubDL keys,
-  plus optional OpenSubtitles user credentials, are read only from environment
-  variables.
+- **Off by default, identity-based, and hardened when on.** The toolkit makes no
+  network request at all unless `OPENSUBTITLES_API_KEY` is set. The one tier
+  that uses it runs only for a movie whose own tracks prove it carries English
+  subtitles and whose English subtitles exist *only* as bitmaps, and it asks for
+  `moviehash_match=only` — subtitles the provider itself matched to the hash of
+  the exact file on disk. There is no title, year or release-name search
+  anywhere, so a wrong-cut subtitle cannot be installed.
+- **Untrusted provider answers are treated as untrusted.** A download link is
+  dereferenced only over HTTPS and only on `opensubtitles.com` /
+  `opensubtitles.org` (a lookalike host such as
+  `opensubtitles.com.evil.example` is refused); the payload is byte-capped and
+  gzip-aware, must decode as subtitle text, must parse into well-formed cues
+  with a plausible cue floor, and must read as English. The movie is re-checked
+  between the search and the write, so a file that changed under the hash is
+  never given a subtitle for the bytes it used to be, and the sidecar is
+  published create-only — a hand-placed subtitle is never overwritten.
+  Credentials are sent only to the provider's own `/login` endpoint, and a
+  failed attempt is reported without echoing them.
+- **Credentials stay out of the command line.** The OpenSubtitles API key and
+  the optional account name and password are read only from the environment or
+  from a `.env` file beside the scripts — never from a flag, where they would
+  land in shell history and process lists. They are never printed, logged, or
+  written to a report or the provenance ledger, and `organize.py doctor` reports
+  whether the key works, not what it is.
 
 ## Reporting a vulnerability
 

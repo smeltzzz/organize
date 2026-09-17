@@ -4,6 +4,194 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**OCR is gone from `subtitle_extractor.py` (5.0.0): image-based subtitles are
+never transcribed any more.** A garbled OCR pass looks like success while
+leaving the dialogue wrong, and nothing about it is verifiable. The new
+fallback is the opposite kind of evidence: a movie whose English subtitles
+exist *only* as bitmaps is looked up on OpenSubtitles by the movie file's
+**exact moviehash** - not by title, not by release name - and a matching
+English `.srt` is downloaded and written beside the `.mkv`.
+
+### Added
+- **The exact-hash OpenSubtitles fallback.** `moviehash_of_file()` computes the
+  provider's documented hash locally (file size plus the wrapping little-endian
+  64-bit sums of the first and last 64 KiB; files under 128 KiB are refused, as
+  the provider refuses them). One `GET /subtitles` sends `languages=en`, the
+  16-hex `moviehash`, the movie's filename as `query` and
+  `moviehash_match=only`; a result is installable only if the provider itself
+  flags it as a hash match, tags it English, and it is not
+  forced/foreign-parts-only/machine-translated/AI-translated. One `POST
+  /download` then fetches the best match's bytes, which are decoded as UTF-8
+  text and passed through the same cue-count/English-content gate an extracted
+  track passes. The sidecar is written create-only (a file that appears
+  mid-run wins), and the provenance ledger records `method: "download"` with
+  the moviehash, file_id and release. New flags: `--no-download`,
+  `--download-limit`, `--download-min-cues`, `--download-timeout`. New
+  environment variables: `OPENSUBTITLES_API_KEY`, and optionally
+  `OPENSUBTITLES_USERNAME` / `OPENSUBTITLES_PASSWORD` (an account raises the
+  provider's daily allowance from 5 downloads/day per IP to 20). Without a key
+  the tool is exactly as offline as it was in 4.0.0.
+
+- **A flag reference for that tier, and one for the flags every tool shares**, in
+  `docs/tools.md`: `--download-limit`, `--download-min-cues`,
+  `--download-timeout` and `--no-download` in a table with their defaults, plus
+  a shared table for `--source`, `--log`/`--report`, `--dry-run`, `--min-size`,
+  `--lock-timeout`, `--workers`, `--state-db`/`--no-state`, `--verbose` and
+  `--self-test`/`--version`. The page's contract is "the flags worth knowing",
+  which is worth nothing if a reader has to run `--help` to find out what a
+  documented command's flag does.
+- **Two contracts that make the docs fail the build when they stop being true**
+  (`tests/test_docs.py`). Every `--flag` named in a live document must exist in
+  some tool's `argparse`; the historical documents (`CHANGELOG.md`,
+  `OVERHAUL.md`, `REVIEW.md`) are exempt, because quoting the flags of deleted
+  tools is exactly what they are for. And the test count quoted in the README
+  badge, the repository table, `docs/development.md` and
+  `docs/merge-and-release.md` must equal what discovery finds - the number this
+  entry moved from 1,146 to 1,153.
+- **`tests/test_benchmarks.py`**, which runs both benchmarks in `benchmarks/` at
+  a toy size and asserts the invariant each states about itself: the audit and
+  the triage verdicts must not change with the worker count. Until now nothing
+  in the suite imported those scripts, which is how the first entry under
+  **Fixed** survived a release.
+
+- **`tests/test_subtitle_extract_e2e.py` and a real `mkvextract` in the fake
+  toolchain.** `tests/fake_mkvmerge.py` now answers the `mkvextract tracks
+  SRC ID:OUT` command line too, writing the payload that track's codec would
+  really produce (SRT, ASS, WebVTT, or undecodable bytes for a bitmap codec).
+  That makes the extractor's local chain testable the way the remux and the
+  8-bit/10-bit inspect already were: a real child process, real argument
+  quoting, real temp file, real conversion, real atomic publish. Thirteen tests
+  cover the extraction, the provenance ledger, idempotency, a failing
+  `mkvextract`, the MP4 bridge, the report's scorecard and the provider route
+  (whose three HTTP answers come from `tests/fakeprovider.py`, the shared
+  canned provider extracted out of the decision-level suite).
+- **`tests/fakeprovider.py`**, the canned OpenSubtitles search/download/CDN
+  answers, now shared by both provider-touching suites instead of living inside
+  one of them - the same treatment `fake_mkvmerge.py` and `fake_ffprobe.py`
+  already got.
+
+### Changed### Changed
+- **Text extraction still comes first, unchanged.** An existing `.eng.srt` is
+  still authoritative and never rewritten; a text-based embedded English track
+  (SRT/SSA/ASS/WebVTT/USF, MP4 via the temporary MKV bridge) is still
+  extracted with `mkvextract` and converted in-process before anything else is
+  considered. Only a movie with no text track *and* at least one image track
+  reaches the provider - and only if there was no keyless reason to skip it.
+  Refusals keep their own report buckets: no API key, no hash match, the
+  daily allowance spent, a payload that failed the gate. `organize doctor`
+  reports the new tier as "OpenSubtitles (image-only subs)".
+
+### Removed
+- **Every OCR code path from the extractor.** The `--ocr-backend`, `--ocr-bin`,
+  `--ocr-args`, `--ocr-timeout` and `--ocr-limit` flags; backend
+  auto-detection (pgsrip, sup2srt + Tesseract, Subtitle Edit, PgsToSrt); the
+  `OCR_BACKEND_*` constants, `detect_ocr_backend()`, `build_ocr_backend()`,
+  `OcrBackend`, `run_ocr()`, `_resolve_program()`, the Subtitle Edit `mono`
+  wrapper, the `PGSTOSRT_DLL` environment variable and the `ocr_jobs` summary
+  field. PGS/VobSub/DVB tracks are still *detected* - that detection is what
+  earns a movie a hash lookup - but they are never extracted. `organize
+  doctor`'s OCR row became an OpenSubtitles row, and the README, the tool
+  reference, the pipeline page, the configuration table, `.env.example` and
+  the CI header no longer describe the toolkit as offline-always (that one is
+  a comment-only workflow edit, which the branch bot cannot push - it is held
+  as `docs/ci-workflow-comment.patch`, with the one-line command to apply it).
+
+### Fixed
+- **A rate-limited request now reports the rate limit.** Three `429`s in a row
+  ended the retry loop but the message the operator saw was the *last* answer's
+  (`OpenSubtitles answered HTTP 429`), while the sentence written for this
+  case - "kept answering HTTP 429 (rate limited)" - was unreachable. The loop
+  was rewritten: the retry count is still three, `Retry-After` /
+  `X-RateLimit-Reset` is still obeyed, and the refused attempt now says what
+  happened.
+- **A rejected request counts against the throttle.** The 0.25 s floor between
+  requests was stamped only after an answer arrived, so a request the provider
+  declined (a `429`, a `5xx`) left the clock where it was and the retry went out
+  immediately - the one moment the floor exists for. The stamp now happens when
+  the request is sent.
+- **A spent allowance is recognized wherever it arrives.** Both `/subtitles`
+  and `/download` can answer `406` for the same reason; only the download path
+  mapped it, so a search-time refusal was reported as a generic lookup failure
+  and the run kept asking for every later movie. Both paths now land in the
+  "allowance is spent" bucket and stop the tier for the rest of the run.
+- **A dry run forecasts the real run.** `--download-limit` was ignored by a
+  preview, so a `--dry-run` with a cap previewed more downloads than the live
+  run with the same arguments would install. The preview now spends the run's
+  budget the same way the live run does, and its log line names OpenSubtitles
+  as the source.
+- **`image_only_movies` counts movies.** The summary key was derived from
+  reasons a movie *ended* with - so exactly the image-only movies that failed
+  (a spent allowance, a failed lookup) were missing from it. It is now counted
+  where the fact is established.
+- **A download whose movie cannot be re-checked is refused, on the record.**
+  The "did the movie change while we were fetching?" guard already refused
+  when the movie could no longer be stat'ed, but it did so silently (the
+  failed re-stat and the changed file returned the same outcome). It now names
+  which of the two happened.
+- **An unwritable movie folder no longer costs a download.** A read-only
+  mount or a permissions mistake used to be discovered by failing to write the
+  sidecar - *after* the run had already spent one of the day's few provider
+  downloads. The folder is now checked before the search (with a real write
+  probe when the cheap answer is "no", because `os.access` is unreliable for
+  directories on some platforms) and the movie is reported with "the movie
+  folder is not writable" without asking the provider anything.
+- **Out-of-range numbers are refused instead of silently clamped.** Every
+  numeric flag was normalised on the way in (`max(0, ...)`), which made the
+  matching `validate_config` checks unreachable - so `--download-limit -5`
+  became *no cap at all*, the opposite of the bound the operator typed, and the
+  only way to notice was the report. The values are now taken as typed and the
+  existing checks name the offending flag (`Configuration error: --download-limit
+  must be zero (no run cap) or greater`, exit code 2).
+- **Dead code and a stale import removed** from the request loop and
+  `organize.py` (`Any`, unused since the doctor's OCR check was replaced - which
+  the repo's own lint gate would have caught in CI).
+- **`benchmarks/bench_audit_workers.py` could not run at all** - pre-existing,
+  and unrelated to this change. The script silenced the audit by assigning a
+  lambda over `library_auditor.log`, but the audit *reads* that object
+  (`log.live`, its overwritable status line) as well as calling it, so the
+  benchmark died with `AttributeError: 'function' object has no attribute
+  'live'` before printing a single number - while the numbers it is quoted for
+  in `README.md`, `CHANGELOG.md` and `OVERHAUL.md` are the ones it produced
+  before the live line existed, so nothing noticed. It now points the real
+  `RunLog`'s console stream at a buffer: silent in the same way, and it
+  survives the object it borrows.
+- **The safety policy and the contributor guide described a toolkit that no
+  longer exists.** `SECURITY.md`'s "Provider hardening" paragraph was a
+  SubDL-era list (raw-URL allowlist, archives, opaque v2 IDs) for a component
+  that is gone, and it never mentioned the guarantees the current tier actually
+  has; `CONTRIBUTING.md`'s 100%-offline rule still named "OpenSubtitles or SubDL
+  API keys" and a `sync_subtitles.py` step; the PR checklist still asked for the
+  fetcher-era hashes-before-remux behaviour. All three now describe what the
+  code does: off by default without a key, exact-moviehash only, host-allowlisted
+  link, byte-capped and gzip-aware, English-validated, create-only, one re-check
+  between search and write, credentials never on the command line.
+- **The two historical documents now say that they are historical.**
+  `REVIEW.md` and `OVERHAUL.md` are kept for their reasoning rather than their
+  numbers, but neither said so: 5.0.0 deleted the sync stage and the OCR path,
+  the `subtitle_fetcher.py` their tables measure is now `subtitle_extractor.py`
+  with a different job, and their test counts (503, 2,123) are the tree as it
+  stood when each was written. Each now opens with that note and points at the
+  places that hold today's numbers, so a reader cannot mistake an audit for a
+  description.
+- **"0 movies, 100% coverage" was a green report about a library nothing had
+  looked at.** `--min-size` (300 MB by default) and the sample-name rule are
+  both silent filters, and when they removed every file the run reported
+  `0/0 (100.0%)   COVERAGE: movies with a validated English SRT` followed by
+  *"Nothing to do: every one of the 0 movie(s) in the library has a validated
+  external English .eng.srt"*. An operator with a library of short films, a
+  mis-set `--min-size`, or a folder of `*.sample.mkv` files read that as
+  "everything is covered". The walk now counts what it dropped
+  (`LibraryScan.below_min_size` / `.sample_named`), logs a `WARNING` naming the
+  filter and its value, and the report says what actually happened:
+  `Movies inspected  none eligible: 1 smaller than --min-size (5000 MB)`,
+  *"Nothing was inspected: ... This is a filtering result, not coverage"*, and
+  a coverage cell of `n/a` instead of `0/0 (100.0%)`. An empty library is told
+  apart from a filtered one ("No movie files were found"), and a library that
+  really is covered still gets the original success sentence.
+
+## [5.0.0]
 ## [5.0.0] - 2026-09-12
 
 **The subtitle-sync stage is gone: `organize run` is now four steps —

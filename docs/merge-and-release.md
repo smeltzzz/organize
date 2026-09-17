@@ -1,5 +1,34 @@
 # Merging the subtitle-sync removal, and cutting 5.0.0
 
+> **This runbook has been carried out.** v5.0.0 was tagged and published on
+> 2026-09-12, and the CI patches it held were applied and committed afterwards
+> ([PR #40](https://github.com/smeltzzz/organize/pull/40)). It is kept as the
+> record of how that release was made, because the next one follows the same
+> shape - and because two of its steps needed a permission the bot does not
+> have, which is worth knowing before the next tag.
+>
+> Two things in the steps below were true at the time and are **no longer**:
+> the merge is done, and `docs/ci-workflow-sync-removal.patch` no longer exists
+> because it was applied. Both are marked inline.
+>
+> ### The one thing held right now
+>
+> `docs/ci-workflow-comment.patch` - a comment-only change to the header of
+> `.github/workflows/ci.yml`, held because the branch bot has no `workflows`
+> permission. CI behaves identically before and after it. Apply it whenever
+> convenient:
+>
+> ```bash
+> git checkout main && git pull
+> git apply docs/ci-workflow-comment.patch
+> git add .github/workflows/ci.yml
+> git commit -m "CI: the hermeticity header names the fake transport"
+> git push
+> ```
+>
+> Nothing else is outstanding: no other patch is held, and no other step here
+> is waiting on you.
+
 Everything in this file needs a permission the bot that wrote the branch does
 not have: pushing to `main`, pushing a file under `.github/workflows/`, and
 moving a tag. That is the only reason these steps are yours rather than
@@ -25,20 +54,25 @@ git merge --no-ff arena/01a093c2-organize \
 git push origin main
 ```
 
-**Expect the `Byte-compile` job on that merge to be red, and push anyway.**
-The workflow file as it exists on the branch still names `sync_subtitles.py` in
-the syntax gate — a file the merge deletes — and the bot cannot fix a workflow
-file; the fix is the patch you apply in step 2. The `provisioned` job is red for
-the same reason (it still does `pip install ffsubsync` and then
-`import sync_subtitles`). Every other check is green: the whole suite (1,136
-tests) on Linux, macOS and Windows across Python 3.11–3.13, packaging, the
-single-file build, the lint job, the coverage floor and the doctor smoke test.
+**At the time, the `Byte-compile` job on that merge was red, and the merge was
+pushed anyway** — the workflow file still named `sync_subtitles.py` in the
+syntax gate, a file the merge deleted, and the `provisioned` job still did
+`pip install ffsubsync` then `import sync_subtitles`. The bot cannot fix a
+workflow file, so that was step 2's patch. **This is history: PR #40 applied
+the patch, and CI on `main` has been green since.** Everything else in that
+run was green on the same merge: the whole suite (1,173 tests) on Linux, macOS
+and Windows across Python 3.11–3.13, packaging, the single-file build, the lint
+job, the coverage floor and the doctor smoke test.
 
-(If you would rather the merge commit be born green, apply step 2's patch to
-the branch and push it first — your push carries the permission the bot's does
-not — then merge.)
+(For a future release that hits the same wall: apply step 2's patch to the
+branch and push it first — your push carries the permission the bot's does not
+— then merge, and the merge is born green.)
 
-## 2. Apply the held workflow patch
+## 2. Apply the held workflow patch — **done**
+
+Applied and committed in [PR #40](https://github.com/smeltzzz/organize/pull/40);
+`docs/ci-workflow-sync-removal.patch` is gone because there was nothing left to
+hold. The command was:
 
 ```bash
 git checkout main && git pull
@@ -62,11 +96,12 @@ The push needs a credential with `workflows` scope (your normal PAT or
 too). The suite stays green after this: the test that guards held patches
 accepts "already applied" as a pass.
 
-The older `docs/ci-workflow.patch` beside it is **already applied and
-committed** — `git apply` fails on it and `git apply --reverse` succeeds, which
-is how `tests/test_docs.py` knows it is done rather than rotted. Once you no
-longer want either patch around, delete it and its entry in `docs/README.md`;
-the test skips itself when there are none.
+The older `docs/ci-workflow.patch` was applied in the same way. Both are gone;
+should a future branch need a `workflows` change the bot cannot push, hold it in
+`docs/` as a patch, list it in `docs/README.md`, and `tests/test_docs.py` picks
+it up automatically - a held patch is a failing test if it has rotted, and no
+test at all when there are none. `docs/ci-workflow-comment.patch` (see the top
+of this file) is the one being held today.
 
 ## 3. PyPI publisher — already done
 
@@ -139,11 +174,12 @@ git push --delete origin v5.0.0 && git tag -d v5.0.0
 registration in step 3 was undone; the environment name `pypi` is the field
 most often wrong.
 
-**A patch will not apply in step 2.** Something changed under
-`.github/workflows/` since it was written. `git apply --3way
-docs/ci-workflow-sync-removal.patch` resolves the common cases; otherwise the
-patch header says what the change is meant to achieve, and it is three small
-edits to redo by hand.
+**A held patch will not apply.** Something changed under `.github/workflows/`
+since it was written. `git apply --3way <the patch>` resolves the common cases;
+otherwise the patch header says what the change is meant to achieve, and the
+change is small enough to redo by hand - a comment, for the patch held today,
+and three edits for the 5.0.0 one. `tests/test_docs.py` fails while a patch
+neither applies nor is already committed, so this cannot rot unnoticed.
 
 **`organize run` still prints a `sync` step.** You are running an installed
 copy, not the checkout. `pip show -f organizekit | grep sync_subtitles` should

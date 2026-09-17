@@ -177,14 +177,19 @@ class SubtitlePipelineIntegrationTests(unittest.TestCase):
         self.assertFalse(any(n.startswith(".track_cleaner.") for n in names))
 
     def _record_extraction(self, ledger: Path) -> None:
+        """Write the provenance record the extractor would have written.
+
+        The remux must not disturb it: the ledger is keyed on sidecar bytes,
+        and the cleaner only ever reads the sidecar.
+        """
         os.environ[sx.EXTRACTED_LEDGER_ENV] = str(ledger)
         track = sx.EmbeddedSubtitleTrack(
-            track_id=3, codec_id="S_HDMV/PGS", language="eng", name="",
-            kind="image", extension=".sup", default=False, forced=False, sdh=False, rank=0,
+            track_id=3, codec_id="S_TEXT/ASS", language="eng", name="English",
+            kind="text", extension=".ass", default=False, forced=False, sdh=False, rank=0,
         )
         self.assertTrue(sx.record_extracted_sidecar(
-            self.movie, self.srt, track=track, method="ocr", cue_count=1,
-            sha256=self.srt_sha, ocr_backend="tesseract", path=ledger,
+            self.movie, self.srt, track=track, method="text", cue_count=1,
+            sha256=self.srt_sha, path=ledger,
         ))
 
     def test_the_extraction_record_survives_the_remux(self) -> None:
@@ -207,9 +212,9 @@ class SubtitlePipelineIntegrationTests(unittest.TestCase):
 
         record = sx.find_extracted_record(self.srt, self.srt_sha)
         self.assertIsNotNone(record, "the record must still describe the sidecar")
-        self.assertEqual(record["method"], "ocr")
-        self.assertEqual(record["ocr_backend"], "tesseract")
-        self.assertEqual(record["codec_id"], "S_HDMV/PGS")
+        self.assertEqual(record["method"], "text")
+        self.assertEqual(record["source"], "embedded-track")
+        self.assertEqual(record["codec_id"], "S_TEXT/ASS")
 
     def test_a_sidecar_with_no_record_has_no_provenance(self) -> None:
         """No extraction record: the sidecar is somebody else's file."""

@@ -30,17 +30,15 @@ Thumbs.db
 *_probe_cache.json
 *probe_cache*.json
 transcript_*.err
-# jellyfin_one_shot.py's default log dir (per-run logs + per-pass auditor reports)
+# A stray per-run log directory (some deployments point --log / --report at one)
 logs/
-# subtitle_fetcher.py's extraction record defaults to
-# <dir holding the scripts>/ReportsAndLogs/subtitle_fetcher_extracted.json
+# subtitle_extractor.py's provenance ledger defaults to
+# <dir holding the scripts>/ReportsAndLogs/subtitle_extractor_extracted.json
 ReportsAndLogs/
 # the shared state cache (a rebuildable derived cache, never authority)
 state.db
 state.db-wal
 state.db-shm
-# ffsubsync remembered-verdict ledger (also rebuildable; lives beside the logs)
-sync_state.json
 
 # Accidental desktop / OS dumps
 Screenshot*.png

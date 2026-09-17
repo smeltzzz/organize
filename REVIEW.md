@@ -28,13 +28,27 @@
 An outside read of all ~25,000 lines of Python (plus tests, CI, packaging, docs),
 looking at the repo as a *workflow* rather than as nine separate scripts.
 
+> **Read this as a snapshot, kept for the reasoning rather than the numbers.**
+> It was written against the tree as it stood at the time named above, and much
+> of what it asks for has since landed. Concretely, the tools it calls
+> `subtitle_fetcher.py`, `sync_subtitles.py` and `10bit.py` are now
+> `subtitle_extractor.py`, nothing, and `bitdepth.py`; the subtitle-sync stage
+> was deleted in 5.0.0; the duplicated helpers it found were folded into
+> `organizekit/core/`; and the self-tests still live inside the shipped tools on
+> purpose (they are what `organize.py test` runs on a machine with no checkout).
+> Its test counts, line counts and per-file tables are the snapshot's, not
+> today's — the current counts are asserted in `tests/test_docs.py` and stated
+> in `README.md` and `docs/development.md`. §5 is the part still worth reading
+> end to end: the items left open there are the ones `docs/development.md`
+> tracks.
+
 ---
 
 ## 0. Verdict up front
 
 This is genuinely good work, and unusually so in the places that normally rot:
 
-- **503 tests, green, in 6 seconds**, fully offline. No media, no binaries, no network.
+- **503 tests, green, in 6 seconds**, fully offline. No media, no binaries, and no network from the tests themselves. (Today's suite is larger — see the note at the top — and still hermetic.)
 - **`ruff check .` passes clean** on 25k lines.
 - **67% line coverage** without a single mock library.
 - The **safety engineering is real**: atomic writes via `os.replace`, transaction

@@ -20,12 +20,19 @@ Supported surface (everything the cleaner actually sends):
   ``--subtitle-tracks``, ``--no-subtitles``, ``--default-track-flag`` and
   ``--forced-display-flag``
 * ``--gui-mode``                    -> ``#GUI#progress N%`` lines on stdout
+* ``tracks SRC ID:OUT`` (the ``mkvextract`` command line) -> writes that
+  track's payload to OUT, in the format its codec would really produce
+  (SRT for ``S_TEXT/UTF8``, ASS for ASS/SSA, WebVTT, or bitmap bytes for an
+  image codec). This is what makes a real end-to-end extraction possible:
+  the extractor is driven unmodified, through a real subprocess, against a
+  payload it then has to convert, validate and publish.
 
 Environment switches let a test make it misbehave:
 
 * ``FAKE_MKVMERGE_RC``      -> exit with this code after printing an error
 * ``FAKE_MKVMERGE_TRUNCATE``-> write a believable but tiny output file
 * ``FAKE_MKVMERGE_SLEEP``   -> seconds to linger mid-remux
+* ``FAKE_MKVEXTRACT_RC``    -> fail an extraction with this exit code
 """
 
 from __future__ import annotations
@@ -79,6 +86,95 @@ def subtitle_track(*, language: str = "eng", name: str = "English",
     if forced:
         properties["flag_forced"] = True
     return {"type": "subtitles", "codec": codec, "properties": properties}
+
+
+SRT_PAYLOAD = (
+    "1\n"
+    "00:00:01,000 --> 00:00:03,000\n"
+    "I know kung fu.\n"
+    "\n"
+    "2\n"
+    "00:00:04,500 --> 00:00:06,000\n"
+    "Show me.\n"
+    "\n"
+)
+
+ASS_PAYLOAD = (
+    "[Script Info]\n"
+    "Title: Fake\n"
+    "ScriptType: v4.00+\n"
+    "\n"
+    "[V4+ Styles]\n"
+    "Format: Name, Fontname, Fontsize, PrimaryColour, Bold, Italic, Underline, Alignment\n"
+    "Style: Default,Arial,20,&H00FFFFFF,0,0,0,2\n"
+    "\n"
+    "[Events]\n"
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    "Dialogue: 0,0:00:01.50,0:00:03.00,Default,,0,0,0,,There is no spoon.\n"
+    "Dialogue: 0,0:00:04.00,0:00:05.50,Default,,0,0,0,,Not this time.\n"
+)
+
+VTT_PAYLOAD = (
+    "WEBVTT\n"
+    "\n"
+    "00:00:01.000 --> 00:00:03.000\n"
+    "First cue.\n"
+    "\n"
+    "00:00:04.000 --> 00:00:06.000\n"
+    "Second cue.\n"
+)
+
+#: What each subtitle codec's payload looks like. An image codec gets bytes no
+#: text decoder will accept, which is the point: it stands in for PGS/VobSub.
+EXTRACTABLE = {
+    "S_TEXT/UTF8": SRT_PAYLOAD,
+    "S_TEXT/ASS": ASS_PAYLOAD,
+    "S_TEXT/SSA": ASS_PAYLOAD,
+    "S_TEXT/WEBVTT": VTT_PAYLOAD,
+}
+IMAGE_CODECS = {"S_HDMV/PGS", "S_VOBSUB", "S_DVBSUB", "S_HDMV/TEXTST"}
+
+
+def track_payload(codec_id: str) -> bytes:
+    """The bytes ``mkvextract`` would write for a track of this codec."""
+    if codec_id in EXTRACTABLE:
+        return EXTRACTABLE[codec_id].encode("utf-8")
+    if codec_id in IMAGE_CODECS:
+        return b"\x00PGS\x00" + bytes(range(256))  # not decodable as text
+    return b""
+
+
+def extract_tracks(argv: list[str]) -> int:
+    """``mkvextract tracks SRC ID:OUT`` with the arguments the tool really sends."""
+    if len(argv) < 3:
+        print("Error: no source file given", file=sys.stderr)
+        return 2
+    source = Path(argv[1])
+    if not source.is_file():
+        print(f"Error: The file '{source}' could not be opened for reading.",
+              file=sys.stderr)
+        return 2
+    try:
+        spec = read_spec(source)
+    except (OSError, ValueError):
+        print("Error: the source file is not a Matroska file.", file=sys.stderr)
+        return 2
+    by_id = {int(track["id"]): track for track in spec.get("tracks", [])}
+    for request in argv[2:]:
+        if ":" not in request:
+            print(f"Error: invalid extraction request '{request}'", file=sys.stderr)
+            return 2
+        track_id, _, target = request.partition(":")
+        track = by_id.get(int(track_id))
+        if track is None or track["type"] != "subtitles":
+            print(f"Error: no subtitles track with ID {track_id} in the file.",
+                  file=sys.stderr)
+            return 2
+        if os.environ.get("FAKE_MKVEXTRACT_RC"):
+            print("Error: extraction failed.", file=sys.stderr)
+            return int(os.environ["FAKE_MKVEXTRACT_RC"])
+        Path(target).write_bytes(track_payload(str(track["properties"].get("codec_id", ""))))
+    return 0
 
 
 def write_movie(path: Path, spec: dict, size: int = 8192) -> None:
@@ -180,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
     if "--version" in argv:
         print(VERSION_BANNER)
         return 0
+    if argv[:1] == ["tracks"]:
+        return extract_tracks(argv)
     if "-J" in argv:
         target = Path(argv[argv.index("-J") + 1])
         if not target.is_file():
