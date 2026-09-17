@@ -19,7 +19,9 @@ Everything is overridable per run with CLI flags (see each tool's
 | `ORGANIZE_STATE_DB` | auditor / cleaner / 10-bit / `status` | Where the shared state cache lives (default: beside the logs and reports, never inside the library) |
 | `ORGANIZE_NO_STATE` | the same tools | Set to `1` to turn the cache off everywhere at once (equivalent to passing `--no-state`) |
 | `SUBTITLE_EXTRACTED_LEDGER` | subtitle_extractor | Where the extraction provenance ledger lives (default: `ReportsAndLogs/subtitle_extractor_extracted.json`, outside the library). It records which sidecars the extractor wrote, from which movie and track, with their SHA-256 |
-| `PGSTOSRT_DLL` | subtitle_extractor | Path to the PgsToSrt `.dll` (it runs as `dotnet <dll>`), when that OCR backend is wanted |
+| `OPENSUBTITLES_API_KEY` | subtitle_extractor | OpenSubtitles API key (from your profile page); needed to search the exact-hash download for image-only movies |
+| `OPENSUBTITLES_USERNAME` | subtitle_extractor | OpenSubtitles account username; together with the password it authorises the download |
+| `OPENSUBTITLES_PASSWORD` | subtitle_extractor | OpenSubtitles account password; together with the username it authorises the download |
 
 A `.env` file next to the scripts is read automatically at startup by every
 tool; anything already exported in the environment wins over the file.

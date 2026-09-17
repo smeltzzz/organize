@@ -219,41 +219,54 @@ class BinaryCheckTests(unittest.TestCase):
                 self.assertEqual(check_fn(context()).status, "warn")
 
 
-class OcrCheckTests(unittest.TestCase):
-    def test_backend_found_reports_its_label(self) -> None:
-        backend = types.SimpleNamespace(label="pgsrip")
+class OpenSubtitlesCheckTests(unittest.TestCase):
+    def test_configured_account_reports_ok(self) -> None:
         extractor = fake_module(
             "subtitle_extractor",
-            OCR_BACKEND_AUTO="auto",
-            detect_ocr_backend=lambda mode: (backend, ""),
+            open_subtitles_config_status=lambda: (True, ""),
         )
         with with_modules(subtitle_extractor=extractor):
-            check = organize.check_ocr_backend(context())
+            check = organize.check_open_subtitles(context())
         self.assertEqual(check.status, "ok")
-        self.assertEqual(check.message, "Found: pgsrip")
+        self.assertEqual(check.message, "Configured: API key + account")
+        self.assertIn("exact", check.detail)
 
-    def test_no_backend_keeps_the_reason_from_the_detector(self) -> None:
+    def test_unconfigured_keeps_the_reason_from_the_status(self) -> None:
         extractor = fake_module(
             "subtitle_extractor",
-            OCR_BACKEND_AUTO="auto",
-            detect_ocr_backend=lambda mode: (None, "tesseract not installed"),
+            open_subtitles_config_status=lambda: (
+                False, "no OpenSubtitles API key is configured (OPENSUBTITLES_API_KEY or --osdb-api-key)"),
         )
         with with_modules(subtitle_extractor=extractor):
-            check = organize.check_ocr_backend(context())
+            check = organize.check_open_subtitles(context())
         self.assertEqual(check.status, "warn")
-        self.assertTrue(check.detail.startswith("tesseract not installed. "))
+        self.assertTrue(check.detail.startswith("no OpenSubtitles API key is configured"))
         self.assertIn("Text tracks (SRT/SSA/ASS) are still extracted", check.detail)
+        self.assertIn("OPENSUBTITLES_API_KEY", check.remedy)
+        self.assertIn("OPENSUBTITLES_USERNAME", check.remedy)
+        self.assertIn("OPENSUBTITLES_PASSWORD", check.remedy)
 
-    def test_a_broken_detector_names_the_exception_in_the_detail(self) -> None:
-        """The one check that reports *why* the probe failed, so keep it doing so."""
-        def explode(mode: str) -> tuple[object, str]:
-            raise ValueError("bad OCR config")
-
-        extractor = fake_module("subtitle_extractor", OCR_BACKEND_AUTO="auto", detect_ocr_backend=explode)
+    def test_incomplete_credentials_name_what_is_missing(self) -> None:
+        extractor = fake_module(
+            "subtitle_extractor",
+            open_subtitles_config_status=lambda: (
+                False, "OpenSubtitles credentials are incomplete (missing: OPENSUBTITLES_PASSWORD)"),
+        )
         with with_modules(subtitle_extractor=extractor):
-            check = organize.check_ocr_backend(context())
+            check = organize.check_open_subtitles(context())
         self.assertEqual(check.status, "warn")
-        self.assertIn("subtitle_extractor is unavailable (bad OCR config)", check.detail)
+        self.assertIn("OPENSUBTITLES_PASSWORD", check.detail)
+
+    def test_a_broken_probe_names_the_exception_in_the_detail(self) -> None:
+        """The one check that reports *why* the probe failed, so keep it doing so."""
+        def explode() -> tuple[object, str]:
+            raise ValueError("bad OSDB config")
+
+        extractor = fake_module("subtitle_extractor", open_subtitles_config_status=explode)
+        with with_modules(subtitle_extractor=extractor):
+            check = organize.check_open_subtitles(context())
+        self.assertEqual(check.status, "warn")
+        self.assertIn("subtitle_extractor is unavailable (bad OSDB config)", check.detail)
 
 
 class DirectoryCheckTests(unittest.TestCase):

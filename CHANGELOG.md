@@ -4,6 +4,100 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-09-17
+
+**OCR is gone from the subtitle extractor, replaced by one deliberate
+network call: an image-only movie now gets the OpenSubtitles English SRT
+whose movie hash matches exactly.** The four OCR backends (pgsrip, sup2srt
++ Tesseract, Subtitle Edit, PgsToSrt) were unreliable in the field —
+garbled cues, dropped dialogue, half-transcribed songs — and a bad sidecar
+is worse than none. Text tracks are still extracted first and are the
+tool's whole preference; the download is the fallback for the one case
+extraction cannot serve, and it is exact-match only: no title, no year, no
+fuzzy search. Major version because the documented OCR flags
+(``--ocr-backend``, ``--ocr-bin``, ``--ocr-args``, ``--ocr-timeout``,
+``--ocr-limit``) and the whole backend-machinery no longer exist.
+
+### Removed
+- **The OCR backends, outright.** `OcrBackend`, `build_ocr_backend`,
+  `detect_ocr_backend`, `run_ocr`, `find_sibling_srt`, the `pgsrip` /
+  `sup2srt` / Subtitle Edit / PgsToSrt program lookups (including the
+  `mono` wrapper), the custom-OCR command template, and the
+  `PGSTOSRT_DLL` environment variable. Image tracks (PGS/SUP, VobSub,
+  DVB) are still *recognised* — the `image_only` verdict is what routes a
+  movie to the download — but they are never extracted or OCR'd any more.
+- **The OCR CLI flags**: `--ocr-backend`, `--ocr-bin`, `--ocr-args`,
+  `--ocr-timeout`, `--ocr-limit`. `organize doctor` no longer probes for
+  OCR programs; the suite's hermetic pin no longer pins their lookups.
+- **The OCR-only quality check.** `extracted_subtitle_quality()` is now
+  `english_subtitle_quality()` and no longer takes a `method` argument:
+  the cue-count, Latin-script, English-stopword, size and SRT-shape gates
+  apply identically to an extraction and to a download, and the OCR-noise
+  character ratio has nothing left to gate.
+
+### Added
+- **The OpenSubtitles exact-hash download.** A movie whose only English
+  subtitle tracks are image-based is hashed the way OpenSubtitles keys its
+  uploads (MD5 over the file's leading bytes — whole body up to 64 MiB,
+  first 64 KiB plus size above — in the service's exact form), searched at
+  `api.opensubtitles.com` for an English SRT on that hash, ranked
+  (non-SDH first, then downloads, then id — at most three candidates
+  tried), downloaded from the temporary URL the API issues, re-rendered
+  into canonical SRT, and pushed through the same quality gate an
+  extraction passes. Only a survivor is written, create-only, beside the
+  movie.
+- **OpenSubtitles configuration**: `OPENSUBTITLES_API_KEY`,
+  `OPENSUBTITLES_USERNAME`, `OPENSUBTITLES_PASSWORD` (or `--osdb-api-key`
+  / `--osdb-username` / `--osdb-password`), `--osdb-timeout`, and
+  `--no-open-subtitles` to disable the fallback entirely. With any of the
+  three credentials missing the fallback does not run and the report says
+  so; a dry run performs the search — so it can tell you whether a match
+  exists — but never downloads, logs in, or writes.
+- **Run-scoped service state.** One login serves the whole run; the run
+  stops asking when the service rejects the credentials, rate-limits
+  (HTTP 429), or fails to connect three times in a row, so a 900-movie
+  library cannot burn an afternoon on a dead network or a bad key.
+- **`downloaded` as a first-class outcome.** `REASON_DOWNLOADED`, a
+  "downloaded" job status, the report's "Downloaded this run (exact hash
+  match)" scorecard row and section, coverage counting, and the run
+  summary's `downloaded_from_opensubtitles` key (replacing `ocr_jobs`).
+- **Download provenance.** `record_extracted_sidecar()` accepts
+  `track=None` plus a `download` metadata block (provider, movie hash,
+  subtitle id, file id), so the provenance ledger answers "did this tool
+  write this sidecar?" for a download exactly as it does for an
+  extraction — with the same SHA-256 invalidation when the bytes change.
+- **The `open-subtitles` doctor check.** Replaces the `ocr` check:
+  reports configured / not configured / incomplete credentials, names the
+  exact variables in the remedy, and — like its predecessor — reports
+  *why* when the probe itself fails.
+- **Tests**: the OCR suites (three classes, ~40 tests) are gone; new
+  coverage pins the hash against the spec (small-file whole body,
+  large-file head-plus-full-size, size sensitivity), the client's request
+  shapes (exact-hash query, language/format filters, Api-Key and
+  User-Agent headers), its failure vocabulary (network / auth / rate /
+  http), token caching across downloads and the one re-login after a
+  stale-token 401, candidate ranking and its cap, and the whole download
+  pipeline (happy path with ledger record, dry-run search-only, no-match,
+  gate refusal, error page, bad-file-then-next-candidate, sidecar-appears-
+  mid-download, credential rejection stopping the run, three dead networks
+  stopping the run, per-movie failure not stopping the run).
+
+### Changed
+- **The extractor's stated contract.** The module docstring, the CLI
+  description, the report banner, the "needs attention" bucket ("no
+  embedded text track (and no exact-hash match)"), and the README/docs
+  now say the same thing: text track first, exact-hash OpenSubtitles
+  download for image-only movies, a human decision for the rest.
+  `subtitle_extractor.py` moves to version 4.0.0.
+- **The provenance ledger record** no longer carries `ocr_backend`;
+  existing ledgers keep reading (old records still hold that key), and the
+  legacy `subtitle_fetcher_extracted.json` read-compatibility is
+  untouched.
+- **`extraction_run`** builds one `OpenSubtitlesClient` and one
+  `OpenSubtitlesRunState` per run; the download is the only code path that
+  touches the network, and it runs on the main thread exactly like the
+  extraction does.
+
 ## [5.0.0] - 2026-09-12
 
 **The subtitle-sync stage is gone: `organize run` is now four steps —

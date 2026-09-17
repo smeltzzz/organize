@@ -6,7 +6,7 @@ local questions about it: is the folder canonical, is there already a usable
 English sidecar, what is the file's identity. On a library that is mostly
 covered - the steady state this toolkit is aimed at - that pre-flight *is* the
 run: a directory listing and a couple of small reads per movie, thousands of
-round trips, none of which needs mkvextract or an OCR backend.
+round trips, none of which needs mkvextract or the network.
 
 On a local SSD those reads cost microseconds and threads cost more than they
 save. The case the pool exists for is a library on a NAS, where every listing

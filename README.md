@@ -38,16 +38,18 @@ Title (Year)/
 ```
 
 Every tool is **100% standard-library Python**: no pip installs, no venv, no
-containers, no daemons, and no network — subtitles come from the movie's own
-embedded tracks, never from a download site. The only things some tools need
-are the usual media binaries (`mkvmerge` + `mkvextract`, `ffprobe`, and an
-OCR backend for image-based subtitle tracks).
+containers, no daemons. Subtitles come from the movie's own embedded text
+tracks first; a movie whose only English subtitle tracks are image-based
+(PGS/VobSub) gets the OpenSubtitles English SRT that matches the movie's hash
+*exactly* — no title searches, no scraping, and only when you configure a
+free OpenSubtitles account. The only things some tools need are the usual
+media binaries (`mkvmerge` + `mkvextract`, `ffprobe`).
 
 | | |
 | :--- | :--- |
 | 🫧 **Zero pip installs** | A tool is a single file. Copy it, run it, done. |
 | 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
-| 💬 **Subtitles from the movie itself** | Each movie's own embedded English track is extracted to a validated `.eng.srt` — text tracks via `mkvextract`, image tracks via OCR, MP4s through a temporary MKV bridge. Nothing is ever downloaded, and an existing sidecar is never re-extracted or rewritten. Its cues come from the container's own timeline, so they are already frame-accurate for that exact file. |
+| 💬 **Subtitles from the movie itself** | Each movie's own embedded English *text* track is extracted to a validated `.eng.srt` via `mkvextract` (MP4s through a temporary MKV bridge); image-only movies (PGS/VobSub) get the OpenSubtitles English SRT whose movie hash matches exactly, instead of unreliable OCR. An existing sidecar is never re-extracted or rewritten, and an extracted cue timeline comes from the container itself, so it is already frame-accurate for that exact file. |
 | ✂ **Lossless track cleanup** | `mkvmerge` remux keeps exactly one audio track — the best one in the movie's own (native) language — drops every dub and commentary track, and removes every embedded subtitle (the `.eng.srt` beside the movie is the only subtitle). Video untouched. |
 | 🎨 **Bit-depth intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision. |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
@@ -89,7 +91,7 @@ One file, one purpose. Nothing else.
 | File | What it is |
 | :--- | :--- |
 | `organize.py` | **The front door.** Unified CLI, system doctor, progress summary, and test runner: `organize.py doctor`, `organize.py status`, `organize.py run`, `organize.py test`, plus one subcommand per tool. |
-| `subtitle_extractor.py` | Tool 1 — one validated English `.eng.srt` per movie, extracted from the movie's own embedded track (text via `mkvextract`, image via OCR, MP4 through a temporary MKV bridge). An existing sidecar is authoritative. |
+| `subtitle_extractor.py` | Tool 1 — one validated English `.eng.srt` per movie: the movie's own embedded text track via `mkvextract` (MP4 through a temporary MKV bridge), or, for image-only movies, the OpenSubtitles SRT that matches the movie's hash exactly. An existing sidecar is authoritative. |
 | `mkv_track_cleaner.py` | Tool 2 — lossless remux: keep one best audio, strip commentary/dubs/embedded subs. |
 | `bitdepth.py` | Tool 3 — ffprobe sweep: queue 8-bit SDR for HandBrake, protect HDR. |
 | `library_auditor.py` | Tool 4 — read-only health check of layout, naming, and subtitles. |
@@ -145,9 +147,9 @@ python3 organize.py doctor
 ```
 
 `doctor` verifies Python, the MKVToolNix pair (`mkvmerge` + `mkvextract`),
-`ffprobe` (FFmpeg), an OCR backend for image subtitles, and — crucially —
-that your download folder and library sit on the **same filesystem** so
-hardlinks work. Missing pieces are reported with the exact
+`ffprobe` (FFmpeg), the OpenSubtitles configuration for image-only subtitle
+movies, and — crucially — that your download folder and library sit on the
+**same filesystem** so hardlinks work. Missing pieces are reported with the exact
 fix, never a crash. It exits `1` only if something
 is actually broken; a missing optional tool is a warning, because that step
 simply skips.
@@ -197,10 +199,13 @@ pipeline on a schedule), see [The pipeline](docs/pipeline.md) — the
 qBittorrent hook, the step order, and how to read the reports.
 
 > [!TIP]
-> Subtitle extraction needs MKVToolNix (`mkvmerge` + `mkvextract`); image
-> tracks (PGS/VobSub) additionally need an OCR backend —
-> `pip install pgsrip` is the usual choice. No API keys, no accounts, no
-> network, ever. See `.env.example` for every supported variable.
+> Subtitle extraction needs MKVToolNix (`mkvmerge` + `mkvextract`). A movie
+> whose only English subtitle tracks are image-based (PGS/VobSub) is served
+> by an OpenSubtitles download that matches the movie's hash exactly — that
+> fallback needs a free OpenSubtitles account
+> (`OPENSUBTITLES_API_KEY`/`OPENSUBTITLES_USERNAME`/`OPENSUBTITLES_PASSWORD`
+> or the `--osdb-*` flags) and can be turned off with `--no-open-subtitles`.
+> See `.env.example` for every supported variable.
 
 ---
 
@@ -222,7 +227,7 @@ Prerequisites per tool:
 
 | Tool | External binary | Notes |
 | :--- | :--- | :--- |
-| `subtitle_extractor.py` | `mkvmerge` + `mkvextract` (MKVToolNix) | image tracks (PGS/VobSub) additionally need an OCR backend |
+| `subtitle_extractor.py` | `mkvmerge` + `mkvextract` (MKVToolNix) | image-only movies use the OpenSubtitles exact-hash download (needs a free account); `--no-open-subtitles` disables it |
 | `mkv_track_cleaner.py` | `mkvmerge` (MKVToolNix) | — |
 | `bitdepth.py` | `ffprobe` (FFmpeg) | — |
 | `library_auditor.py` | — | — |
@@ -245,7 +250,7 @@ one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
 
 | Tool | What it does | Needs |
 | :--- | :--- | :--- |
-| [`subtitle_extractor.py`](docs/tools.md#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie, extracted from the movie's **own embedded track** — text via `mkvextract`, image via OCR, MP4s through a temporary MKV bridge. An existing sidecar is authoritative and never touched. | `mkvmerge` + `mkvextract` |
+| [`subtitle_extractor.py`](docs/tools.md#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: the movie's **own embedded text track** via `mkvextract` (MP4 through a temporary MKV bridge), or, for image-only movies, the OpenSubtitles SRT matching the movie's hash exactly. An existing sidecar is authoritative and never touched. | `mkvmerge` + `mkvextract` |
 | [`mkv_track_cleaner.py`](docs/tools.md#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best audio track (the movie's own language), strip every dub, commentary track and embedded subtitle. Video untouched; seeding movies deferred; a broken `.eng.srt` skips the movie. | `mkvmerge` |
 | [`bitdepth.py`](docs/tools.md#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect native HDR10 / HDR10+ / Dolby Vision fail-closed, flag anything ambiguous for review. | `ffprobe` |
 | [`library_auditor.py`](docs/tools.md#4--library_auditorpy--read-only-health-check) | Strictly read-only health check of layout, naming and subtitles, with gating exit codes for cron. | nothing |

@@ -36,7 +36,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TypeVar
 
 HERE = Path(__file__).resolve().parent
 
@@ -157,7 +157,7 @@ def print_dashboard() -> None:
 
     print(bold("  WORKFLOW PIPELINE:"))
     print(f"    {cyan('1. standardize')} {SYM_ARROW} qBittorrent completion hook: hardlinks & names into Title (Year)")
-    print(f"    {cyan('2. extract')}     {SYM_ARROW} subtitle_extractor: embedded English track -> <movie>.eng.srt (no downloads, ever)")
+    print(f"    {cyan('2. extract')}     {SYM_ARROW} subtitle_extractor: embedded English text track -> <movie>.eng.srt (image-only: OpenSubtitles hash match)")
     print(f"    {cyan('3. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps 1 audio, strips subs (MP4 -> MKV)")
     print(f"    {cyan('4. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect native HDR")
     print(f"    {cyan('5. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
@@ -434,41 +434,41 @@ def check_mkvextract(_ctx: DoctorContext) -> DiagnosticCheck:
     )
 
 
-def check_ocr_backend(_ctx: DoctorContext) -> DiagnosticCheck:
-    """Image-subtitle OCR - optional, and only for PGS/VobSub embedded tracks."""
+def check_open_subtitles(_ctx: DoctorContext) -> DiagnosticCheck:
+    """The exact-hash download for image-only subtitle movies - optional."""
 
-    def probe() -> tuple[Any, str]:
-        import subtitle_extractor as sx_ocr
-        return sx_ocr.detect_ocr_backend(sx_ocr.OCR_BACKEND_AUTO)
+    def probe() -> tuple[bool, str]:
+        import subtitle_extractor as sx_osdb
+        return sx_osdb.open_subtitles_config_status()
 
     detected, exc = probe_outcome(probe)
     if detected is None:
-        ocr_backend, ocr_note = None, f"subtitle_extractor is unavailable ({exc})"
+        configured, note = False, f"subtitle_extractor is unavailable ({exc})"
     else:
-        ocr_backend, ocr_note = detected
-    if ocr_backend is not None:
+        configured, note = detected
+    if configured:
         return DiagnosticCheck(
-            name="OCR (image subtitles)",
+            name="OpenSubtitles (image-only subs)",
             status="ok",
-            message=f"Found: {ocr_backend.label}",
-            detail="Embedded PGS/VobSub image tracks can be converted to SRT",
+            message="Configured: API key + account",
+            detail="Movies whose only English subtitle tracks are image-based "
+                   "(PGS/VobSub) are served by an OpenSubtitles download whose "
+                   "movie hash matches exactly",
         )
     return DiagnosticCheck(
-        name="OCR (image subtitles)",
+        name="OpenSubtitles (image-only subs)",
         status="warn",
-        message="No OCR backend found",
+        message="Not configured",
         detail=(
-            (f"{ocr_note}. " if ocr_note else "")
+            (f"{note}. " if note else "")
             + "Text tracks (SRT/SSA/ASS) are still extracted; image-only movies stay "
-              "uncovered until one is installed"
+              "uncovered until an OpenSubtitles account is configured"
         ),
         remedy=(
-            "pgsrip: pip install pgsrip  (needs MKVToolNix, tesseract and tessdata)\n"
-            "sup2srt + Tesseract: https://github.com/retrontology/sup2srt\n"
-            "Subtitle Edit: https://www.nikse.dk/subtitleedit\n"
-            "PgsToSrt: set PGSTOSRT_DLL to the dll path (needs dotnet)\n"
-            "Or point subtitle_extractor.py at your own tool: --ocr-backend custom "
-            "--ocr-bin <program> --ocr-args \"{input}\" \"{output}\""
+            "Create a free account at https://www.opensubtitles.com, copy the API key "
+            "from your profile page, then set OPENSUBTITLES_API_KEY, "
+            "OPENSUBTITLES_USERNAME and OPENSUBTITLES_PASSWORD (or pass "
+            "--osdb-api-key / --osdb-username / --osdb-password)"
         ),
     )
 
@@ -550,7 +550,7 @@ DOCTOR_CHECKS: tuple[tuple[str, DoctorProbe], ...] = (
     ("mkvmerge", check_mkvtoolnix),
     ("ffprobe", check_ffprobe),
     ("mkvextract", check_mkvextract),
-    ("ocr", check_ocr_backend),
+    ("open-subtitles", check_open_subtitles),
     ("library-dir", check_library_directory),
     ("source-dir", check_source_directory),
     ("hardlinks", check_hardlink_compatibility),

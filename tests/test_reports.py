@@ -50,7 +50,7 @@ class _SampleReports(unittest.TestCase):
         cfg = sx.ExtractorConfig(library=library, log_file=self.tmp / "extract.log",
                                  report_file=self.tmp / "extract_report.txt")
         summary = {"movies_discovered": 2, "coverage_covered": 1, "coverage_total": 2,
-                   "extracted_from_embedded": 0, "ocr_jobs": 0,
+                   "extracted_from_embedded": 0, "downloaded_from_opensubtitles": 0,
                    "ledger_log": str(self.tmp / "extract.log")}
         return sx.build_report(results, cfg, summary)
 

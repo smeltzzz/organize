@@ -11,7 +11,7 @@ For the order they run in and why that order is load-bearing, see
 
 | Tool | One line | Needs |
 | :--- | :--- | :--- |
-| [`subtitle_extractor.py`](#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie, extracted from the movie's own embedded track | `mkvmerge` + `mkvextract` (an OCR backend for image tracks) |
+| [`subtitle_extractor.py`](#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: the movie's own embedded text track, or the OpenSubtitles SRT matching the movie's hash exactly (image-only movies) | `mkvmerge` + `mkvextract` (OpenSubtitles account for image-only movies) |
 | [`mkv_track_cleaner.py`](#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep one best audio, strip commentary, dubs and embedded subtitles | `mkvmerge` |
 | [`bitdepth.py`](#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed | `ffprobe` |
 | [`library_auditor.py`](#4--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
@@ -21,27 +21,33 @@ For the order they run in and why that order is load-bearing, see
 
 ## 1 · `subtitle_extractor.py` — validated English subtitles
 
-Extracts one external `.eng.srt` per movie **from the movie's own embedded
-English subtitle track**, and the goal is a subtitle beside every movie.
-There is nothing else to consult: no providers, no API keys, no scraping,
-no network at all. (Subtitle downloading used to be this tool's other half;
-it was removed outright — an answer from a stranger's website could never be
-made as reliable as the track the release itself carries, and a movie with
-no usable embedded track is now reported for a human decision instead of
-guessed at.)
+Creates one external `.eng.srt` per movie, and the goal is a subtitle beside
+every movie. The preference order is the whole policy:
 
-The movie's own track is the best source there is: it is exact for this
-release (it cannot be the wrong cut), it costs nothing, and its cues come
-from the container's own timeline. Text tracks (SRT/SSA/ASS/WebVTT) are
-extracted with `mkvextract` and converted in-process; image tracks
-(PGS/SUP, VobSub, DVB) are OCR'd by an external backend when one is
-installed. A track that is forced/signs-only, commentary, non-English, or
-too short to be the whole film is refused — the movie lands in the report's
-"needs attention" section with the reason, not with a half-subtitle beside
-it. **MP4s are read through a temporary MKV bridge** (`mkvmerge` wraps the
-MP4, `mkvextract` reads the bridge, the bridge is discarded): mkvextract
-cannot read an MP4's `mov_text` tracks directly, and the bridge means the
-same validation path covers both containers.
+1. **The movie's own embedded English text track** (SRT/ASCII/SSA/ASS/
+   WebVTT/USF). The movie's own track is the best source there is: it is
+   exact for this release (it cannot be the wrong cut), it costs nothing,
+   and its cues come from the container's own timeline. It is extracted
+   with `mkvextract` and converted to canonical SRT in-process.
+2. **The OpenSubtitles exact-hash download, for image-only movies.** A
+   movie whose only English subtitle tracks are image-based (PGS/SUP,
+   VobSub, DVB) is not OCR'd — OCR was unreliable in the field, and a bad
+   sidecar is worse than none. Instead the tool hashes the movie the way
+   OpenSubtitles keys its uploads and downloads the English SRT whose hash
+   matches *exactly*: a hit is a subtitle for this exact release, with no
+   title, no year and no guesswork. It passes the same quality gate as an
+   extraction before it is written.
+3. **A human decision.** A movie with no usable text track and no
+   exact-hash match (or no account configured) lands in the report's
+   "needs attention" section with the reason, not with a half-subtitle
+   beside it.
+
+A track that is forced/signs-only, commentary, non-English, or too short to
+be the whole film is refused at every stage. **MP4s are read through a
+temporary MKV bridge** (`mkvmerge` wraps the MP4, `mkvextract` reads the
+bridge, the bridge is discarded): mkvextract cannot read an MP4's
+`mov_text` tracks directly, and the bridge means the same validation path
+covers both containers.
 
 **The one rule that never bends: an existing `.eng.srt` is authoritative.**
 If a movie already has a validated sidecar — placed by hand, carried over,
@@ -63,20 +69,21 @@ the container's own timeline had not already given.)
 
 **Every sidecar this tool writes is recorded.** The provenance ledger
 outside the library (`ReportsAndLogs/subtitle_extractor_extracted.json`)
-holds the movie, the track, the method, the OCR backend, the cue count,
+holds the movie, the track (or, for a download, the OpenSubtitles file
+and the movie hash), the method (`text` or `download`), the cue count,
 the SHA-256 of the bytes written and the timestamp — the durable answer
 to "did this tool write this sidecar?", and what makes a re-run cheap.
 Replace the bytes by hand and the record no longer matches, so the file
-is not "ours" any more. Extraction failures (no track, OCR unavailable,
-unreadable container) are not errors — the movie is simply reported as
-uncovered; exit code is `1` only when a movie genuinely errored, `2` for
-configuration problems.
+is not "ours" any more. Coverage failures (no track, no exact match, no
+credentials, unreadable container) are not errors — the movie is simply
+reported as uncovered; exit code is `1` only when a movie genuinely
+errored, `2` for configuration problems.
 
 ```bash
 python3 subtitle_extractor.py --source /path/to/movies --dry-run   # preview
 python3 subtitle_extractor.py --source /path/to/movies --limit 10  # first 10
-python3 subtitle_extractor.py --source /path/to/movies --ocr-limit 5  # OCR at most 5 movies per run
-python3 subtitle_extractor.py --source /path/to/movies --workers 8    # library on a NAS
+python3 subtitle_extractor.py --source /path/to/movies --no-open-subtitles  # text tracks only
+python3 subtitle_extractor.py --source /path/to/movies --workers 8           # library on a NAS
 ```
 
 **Parallel triage.** Before a movie can cost an extraction attempt the tool
@@ -102,26 +109,37 @@ line, the same renderer the track cleaner has always used for its remux bar
 TTY — redirected, piped, under cron, or with `--json` — nothing is drawn at
 all, so log files and captured output are byte-for-byte what they were.
 
-**OCR backends.** Image tracks need
-[MKVToolNix](https://mkvtoolnix.download/) (`mkvmerge` + `mkvextract`) plus
-one OCR backend — `pgsrip`, `sup2srt` + Tesseract, Subtitle Edit, or
-PgsToSrt, auto-detected in that order:
+**OpenSubtitles exact-hash download.** Image-only movies (the common case:
+a Blu-ray release whose English subtitle is PGS) are served by an
+[OpenSubtitles](https://www.opensubtitles.com) download, configured with a
+free account. The API key authorises the search; the username and password
+are exchanged for a bearer token that authorises the download:
 
 ```bash
-python3 subtitle_extractor.py --source /path/to/movies --ocr-backend auto     # default (pgsrip first)
-python3 subtitle_extractor.py --source /path/to/movies --ocr-backend pgsrip   # pip install pgsrip
-python3 subtitle_extractor.py --source /path/to/movies --ocr-backend none     # text tracks only
-python3 subtitle_extractor.py --source /path/to/movies --ocr-backend custom \\
-        --ocr-bin /opt/my-ocr --ocr-args "{input}" "{output}"                # your own tool
+# credentials from the environment (a .env beside the scripts works)
+export OPENSUBTITLES_API_KEY=... OPENSUBTITLES_USERNAME=... OPENSUBTITLES_PASSWORD=...
+python3 subtitle_extractor.py --source /path/to/movies
+
+# or per run
+python3 subtitle_extractor.py --source /path/to/movies \
+        --osdb-api-key ... --osdb-username ... --osdb-password ...
+
+# image-only movies stay reported, never downloaded
+python3 subtitle_extractor.py --source /path/to/movies --no-open-subtitles
 ```
 
-`--ocr-args` must name **both** `{input}` and `{output}` (also available:
-`{track}`, `{lang}`); a template missing either is refused up front rather
-than failing one movie at a time. Subtitle Edit ships as a Windows `.exe`,
-so off Windows it is run through `mono` — without `mono` on `PATH` it counts
-as not installed and the run says so. OCR is minutes of local CPU per movie,
-so `--ocr-limit` can cap the number of OCR jobs per run independently of
-everything else.
+The identification is deliberately an **exact match on the movie's hash** —
+the same MD5 (leading bytes plus file size) OpenSubtitles computes over
+uploaded subtitle files. There is no title or year search: a fuzzy match is
+how the wrong cut, the wrong language or a trailer ends up on a movie. The
+downloaded file is re-rendered and passes the same quality gate an
+extraction does (valid SRT cues, at least `--extract-min-cues` of them,
+Latin script, English) before it is written create-only beside the movie.
+One login serves the whole run, a dry run performs the search (so it can
+say whether a match exists) but never downloads, and the run stops asking
+when the service rejects the credentials, rate-limits it, or stops
+answering three times in a row. Without credentials the fallback simply
+does not run, and the report and `organize.py doctor` say so.
 
 ## 2 · `mkv_track_cleaner.py` — lossless remux
 

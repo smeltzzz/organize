@@ -35,21 +35,26 @@ test body. That patch is applied on top of this one and wins, which is what
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 from collections.abc import Iterator
 from unittest import mock
 
 #: Every external program the toolkit looks for. A lookup for any of these
 #: answers "not installed" while the pin is held, whatever the host has.
-#:
-#: The OCR backends and their runtimes are here because ``doctor`` probes them
-#: too, so a machine with Tesseract installed would otherwise read differently
-#: from one without.
 EXTERNAL_PROGRAMS = frozenset({
     "mkvmerge", "mkvextract", "mkvpropedit", "mkvinfo",
     "ffmpeg", "ffprobe",
-    "tesseract", "pgsrip", "pgstosrt", "subtitleedit", "mono", "dotnet",
 })
+
+#: The OpenSubtitles credentials environment variables. A developer's export
+#: would otherwise let a test on their machine take the "account configured"
+#: branch (and touch the network) that a bare runner never reaches.
+OSDB_ENV_VARS = (
+    "OPENSUBTITLES_API_KEY",
+    "OPENSUBTITLES_USERNAME",
+    "OPENSUBTITLES_PASSWORD",
+)
 
 _real_which = shutil.which
 
@@ -84,36 +89,44 @@ def no_media_tools() -> Iterator[None]:
     ``shutil.which``: MKVToolNix's Windows installer does not put itself on
     PATH, and the tools search their own standard install locations as well, so
     a PATH-only pin would still find a real install in ``Program Files``.
+
+    The OpenSubtitles credential variables are cleared (and restored after)
+    for the same reason the suite must not reach the network: a host with
+    them exported would take the "account configured" branch that a bare
+    runner never reaches.
     """
     import bitdepth
     import mkv_track_cleaner
     import movie_standardizer
     import subtitle_extractor
 
-    with mock.patch("shutil.which", side_effect=_which_without_media_tools), \
-            mock.patch.object(mkv_track_cleaner, "resolve_mkvmerge_path", _mkvmerge_absent), \
-            mock.patch.object(mkv_track_cleaner, "get_mkvmerge_version",
-                              lambda path: "unknown version"), \
-            mock.patch.object(subtitle_extractor, "find_mkvtoolnix_binary",
-                              lambda name, explicit=None: None), \
-            mock.patch.object(bitdepth, "find_ffprobe", lambda explicit=None: None), \
-            mock.patch.object(bitdepth, "ffprobe_works", lambda binary: False), \
-            mock.patch.object(movie_standardizer, "find_ffprobe", lambda explicit="ffprobe": None), \
-            mock.patch.object(subtitle_extractor, "_resolve_program",
-                              lambda explicit, name, *search_paths: None), \
-            mock.patch.object(subtitle_extractor, "_subtitleedit_program", lambda explicit="": None), \
-            mock.patch.object(subtitle_extractor, "_pgstosrt_program", lambda explicit="": None), \
-            mock.patch.object(subtitle_extractor, "build_ocr_backend", lambda key, explicit_bin="": None), \
-            mock.patch.object(subtitle_extractor, "detect_ocr_backend",
-                              lambda preferred="auto", explicit_bin="", arg_template="":
-                              (None, "no image-subtitle OCR backend found; install one image-subtitle "
-                                     "OCR backend to extract PGS/VobSub tracks: pgsrip "
-                                     "(pip install pgsrip, needs MKVToolNix + tesseract + tessdata), "
-                                     "sup2srt + Tesseract (https://github.com/retrontology/sup2srt), "
-                                     "Subtitle Edit (https://www.nikse.dk/subtitleedit), or PgsToSrt "
-                                     "with PGSTOSRT_DLL set; text subtitle tracks are extracted without "
-                                     "any of them")):
-        yield
+    saved_osdb = {name: os.environ.get(name) for name in OSDB_ENV_VARS}
+
+    def _clear_osdb() -> None:
+        for name in OSDB_ENV_VARS:
+            os.environ.pop(name, None)
+
+    _clear_osdb()
+    try:
+        with mock.patch("shutil.which", side_effect=_which_without_media_tools), \
+                mock.patch.object(mkv_track_cleaner, "resolve_mkvmerge_path", _mkvmerge_absent), \
+                mock.patch.object(mkv_track_cleaner, "get_mkvmerge_version",
+                                  lambda path: "unknown version"), \
+                mock.patch.object(subtitle_extractor, "find_mkvtoolnix_binary",
+                                  lambda name, explicit=None: None), \
+                mock.patch.object(bitdepth, "find_ffprobe", lambda explicit=None: None), \
+                mock.patch.object(bitdepth, "ffprobe_works", lambda binary: False), \
+                mock.patch.object(movie_standardizer, "find_ffprobe", lambda explicit="ffprobe": None), \
+                mock.patch.object(subtitle_extractor, "osdb_http",
+                                  side_effect=AssertionError(
+                                      "the suite is offline: a test reached the OpenSubtitles API")):
+            yield
+    finally:
+        for name, value in saved_osdb.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 class HermeticToolsMixin:
