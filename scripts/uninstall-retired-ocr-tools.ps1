@@ -11,8 +11,9 @@
 
     This script is deliberately an inventory first. With no -Apply switch it
     makes no changes. It checks Windows uninstall records, winget, PATH, Python
-    packages, and the old OCR environment variables. Portable programs that do
-    not have an uninstaller are reported but never deleted automatically.
+    packages, and the old OCR environment variables. Portable Subtitle Edit
+    copies are searched for separately; they are reported by default and are
+    removed only with the explicit -RemovePortable switch.
 
     It intentionally does NOT remove FFmpeg/ffprobe, MKVToolNix, Python,
     organizekit, OpenSubtitles credentials, or your media files. v6 still uses
@@ -24,8 +25,9 @@
     Inventory only. Safe to run first.
 
 .EXAMPLE
-    .\uninstall-retired-ocr-tools.ps1 -Apply -RemovePythonPackages -RemoveLegacySync
-    Remove detected OCR applications, old OCR Python packages, and ffsubsync.
+    .\uninstall-retired-ocr-tools.ps1 -Apply -RemovePythonPackages -RemoveLegacySync -RemovePortable
+    Remove detected OCR applications, old OCR Python packages, ffsubsync, and
+    portable Subtitle Edit folders with the exact expected folder name.
     Add -RemoveMono only if Mono is not used by anything else on this PC.
 
 .EXAMPLE
@@ -43,6 +45,7 @@ param(
     [switch]$RemovePythonPackages,
     [switch]$RemoveLegacySync,
     [switch]$RemoveMono,
+    [switch]$RemovePortable,
     [switch]$RemoveMachineEnvironment
 )
 
@@ -252,6 +255,37 @@ function Get-PathMatches {
     return $matches
 }
 
+function Get-PortableSubtitleEditMatches {
+    $roots = @(
+        (Join-Path $env:USERPROFILE 'Downloads'),
+        (Join-Path $env:USERPROFILE 'Desktop'),
+        (Join-Path $env:USERPROFILE 'Documents'),
+        (Join-Path $env:USERPROFILE 'Subtitle Edit'),
+        (Join-Path $env:USERPROFILE 'SubtitleEdit'),
+        (Join-Path $env:LOCALAPPDATA 'Subtitle Edit'),
+        (Join-Path $env:LOCALAPPDATA 'SubtitleEdit'),
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        $env:SystemDrive
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+
+    $seen = @{}
+    foreach ($root in $roots) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $root -Filter 'SubtitleEdit.exe' -File -Recurse -Force -ErrorAction SilentlyContinue)) {
+            $path = [string]$file.FullName
+            if ($seen.ContainsKey($path)) {
+                continue
+            }
+            $seen[$path] = $true
+            [pscustomobject]@{
+                Path   = $path
+                Folder = [string]$file.DirectoryName
+                Source = 'portable/file search'
+            }
+        }
+    }
+}
+
 function Get-PythonCommands {
     $seen = @{}
     foreach ($name in @('py.exe', 'python.exe', 'python3.exe')) {
@@ -321,12 +355,16 @@ function Invoke-WingetRemoval {
     param([Parameter(Mandatory)][object]$Item)
 
     if ($PSCmdlet.ShouldProcess("winget package $($Item.Id)", 'Uninstall')) {
-        & $Item.Command uninstall --id $Item.Id --exact --silent `
-            --accept-source-agreements --disable-interactivity
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "winget returned exit code $LASTEXITCODE for $($Item.Id)."
+        $wingetOutput = @(& $Item.Command uninstall --id $Item.Id --exact --source winget --silent `
+            --accept-source-agreements --disable-interactivity 2>&1)
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            Write-Warning "winget returned exit code $exitCode for $($Item.Id): $($wingetOutput -join ' ')"
+            return $false
         }
+        return $true
     }
+    return $false
 }
 
 function Invoke-RegistryRemoval {
@@ -390,6 +428,22 @@ function Remove-ObsoleteEnvironmentVariable {
     }
 }
 
+function Remove-PortableSubtitleEdit {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([Parameter(Mandatory)][object]$Item)
+
+    $folderName = Split-Path -Leaf $Item.Folder
+    if ($folderName -notmatch '(?i)^Subtitle\s*Edit(?:[ ._-]|$)') {
+        Write-Warning "Found SubtitleEdit.exe in '$($Item.Folder)', but will not delete a folder with an unrelated name. Remove that portable copy manually if it is yours."
+        return
+    }
+
+    if ($PSCmdlet.ShouldProcess($Item.Folder, 'Delete portable Subtitle Edit folder')) {
+        Get-Process -Name 'SubtitleEdit' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $Item.Folder -Recurse -Force
+    }
+}
+
 $specs = @(Get-TargetSpecs)
 $pythonPackages = @('pgsrip', 'sup2srt')
 if ($RemoveLegacySync) {
@@ -443,7 +497,20 @@ else {
     foreach ($item in $pathMatches) {
         Write-Host ("{0}: {1}" -f $item.Target, $item.Path)
     }
-    Write-Warning 'PATH/portable files are not deleted automatically. Use the displayed path to remove an unregistered portable copy manually.'
+    Write-Warning 'PATH executables are not deleted automatically.'
+}
+
+$portableMatches = @(Get-PortableSubtitleEditMatches)
+if ($portableMatches.Count -eq 0) {
+    Write-Host 'No SubtitleEdit.exe portable copies were found in the common folders.'
+}
+else {
+    foreach ($item in $portableMatches) {
+        Write-Host ("Subtitle Edit portable: {0}" -f $item.Path)
+    }
+    if (-not $RemovePortable) {
+        Write-Warning 'Portable copies are inventory-only. Add -RemovePortable to delete folders named Subtitle Edit or SubtitleEdit.'
+    }
 }
 
 Write-Section 'Obsolete environment variables'
@@ -461,26 +528,34 @@ if (-not $Apply) {
     Write-Section 'No changes made'
     Write-Host 'Review the inventory above, then rerun with -Apply.'
     Write-Host 'Recommended full cleanup:'
-    Write-Host '.\uninstall-retired-ocr-tools.ps1 -Apply -RemovePythonPackages -RemoveLegacySync -RemoveMachineEnvironment'
+    Write-Host '.\uninstall-retired-ocr-tools.ps1 -Apply -RemovePythonPackages -RemoveLegacySync -RemovePortable -RemoveMachineEnvironment'
     Write-Host 'Add -RemoveMono only when you are certain Mono is not used elsewhere.'
     exit 0
 }
 
 Write-Section 'Applying cleanup'
 
-$wingetTargets = @($wingetMatches | ForEach-Object { $_.Target })
+$wingetSucceeded = @{}
 foreach ($item in $wingetMatches) {
-    Invoke-WingetRemoval -Item $item
+    if (Invoke-WingetRemoval -Item $item) {
+        $wingetSucceeded[$item.Target] = $true
+    }
 }
 
 # If winget removed a known application, do not immediately run its registry
-# uninstaller a second time. Registry entries without a matching winget hit are
-# handled as the fallback path.
+# uninstaller a second time. If winget failed, the registry uninstaller is the
+# fallback path.
 foreach ($item in $registryMatches) {
-    if ($wingetTargets -contains $item.Target) {
+    if ($wingetSucceeded.ContainsKey($item.Target)) {
         continue
     }
     Invoke-RegistryRemoval -Item $item
+}
+
+if ($RemovePortable) {
+    foreach ($item in $portableMatches) {
+        Remove-PortableSubtitleEdit -Item $item
+    }
 }
 
 if ($RemovePythonPackages) {
