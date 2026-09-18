@@ -178,7 +178,7 @@ LIBRARY_DIR = str(resolve_library())
 LOG_FILE = str(default_tool_dir("subtitle_extractor") / "subtitle_extractor.log")  # Appended every run.
 REPORT_FILE = str(default_tool_dir("subtitle_extractor") / "subtitle_extractor_report.txt")
 
-__version__ = "5.0.0"
+__version__ = "6.0.0"
 
 # The preceding standardizer emits canonical movie folders. MKV is the
 # canonical container; MP4 releases are accepted and read here (through a

@@ -15,6 +15,7 @@ suite) is the release checklist in `docs/development.md`.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tomllib
@@ -82,6 +83,31 @@ class OneVersionTests(unittest.TestCase):
         proc = subprocess.run([sys.executable, str(ROOT / "organize.py"), "--version"],
                               capture_output=True, encoding="utf-8", check=False)
         self.assertEqual(proc.stdout.strip(), f"organize {VERSION}")
+
+    def test_the_changelog_says_this_is_the_version_being_released(self) -> None:
+        """A tag whose changelog still says `[Unreleased]` publishes a mystery.
+
+        Three places have to agree before a release is real: `organizekit.VERSION`
+        (what the package installs as), the newest released heading in
+        `CHANGELOG.md` (what the store page and the release notes say), and the
+        git tag (which the release workflow already refuses to accept if it
+        disagrees). This is the first of the three to go wrong, because bumping
+        the version is one line and remembering the changelog is not.
+        """
+        body = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        headings = re.findall(r"^## \[([^\]]+)\]", body, re.MULTILINE)
+        released = [name for name in headings if name.lower() != "unreleased"]
+        self.assertTrue(released, "the changelog has no released version heading")
+        self.assertEqual(
+            released[0], VERSION,
+            f"CHANGELOG.md's newest release is {released[0]}, but the package is "
+            f"{VERSION}. Move [Unreleased] to [{VERSION}] - or bump organizekit.VERSION.",
+        )
+        self.assertEqual(
+            len(headings), len(set(headings)),
+            "a version heading appears twice; an empty duplicate reads as a section "
+            "with no content",
+        )
 
     def test_the_python_floor_matches_the_one_the_doctor_enforces(self) -> None:
         """A wheel that installs on a Python `doctor` then fails is a trap."""

@@ -4,10 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [6.0.0] - 2026-09-17
 
-**OCR is gone from `subtitle_extractor.py` (5.0.0): image-based subtitles are
-never transcribed any more.** A garbled OCR pass looks like success while
+**OCR is gone from `subtitle_extractor.py`: image-based subtitles are never
+transcribed any more.** A garbled OCR pass looks like success while
 leaving the dialogue wrong, and nothing about it is verifiable. The new
 fallback is the opposite kind of evidence: a movie whose English subtitles
 exist *only* as bitmaps is looked up on OpenSubtitles by the movie file's
@@ -191,7 +191,6 @@ English `.srt` is downloaded and written beside the `.mkv`.
   apart from a filtered one ("No movie files were found"), and a library that
   really is covered still gets the original success sentence.
 
-## [5.0.0]
 ## [5.0.0] - 2026-09-12
 
 **The subtitle-sync stage is gone: `organize run` is now four steps —

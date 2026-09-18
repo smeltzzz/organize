@@ -1,6 +1,32 @@
-# Merging the subtitle-sync removal, and cutting 5.0.0
+# Cutting a release, and the recorded 5.0.0 run
 
-> **This runbook has been carried out.** v5.0.0 was tagged and published on
+> **6.0.0 is prepared and waiting on a tag.** The version bump, the changelog
+> entry and the release guard are committed with the OCR-removal work in
+> [PR #41](https://github.com/smeltzzz/organize/pull/41). Once that is merged:
+>
+> ```bash
+> git checkout main && git pull
+> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 6.0.0
+> git tag -a v6.0.0 -m "6.0.0" && git push origin v6.0.0
+> ```
+>
+> `release.yml` then re-runs the whole offline suite, refuses the tag if it
+> disagrees with `organizekit.VERSION`, builds the wheel, the sdist and the
+> zipapp, publishes to PyPI, and attaches `organize.pyz` to the GitHub release.
+> Afterwards, an installed copy updates with
+> `python3 -m pip install --upgrade organizekit`
+> ([Testing & development](development.md#cutting-a-release)).
+>
+> **6.0.0, not 5.1.0**, for the same reason 4.0.0 and 5.0.0 were majors: the
+> five OCR flags no longer exist (all five are listed in the changelog's
+> `[6.0.0]` section), so a script that passed one now fails loudly instead of
+> quietly doing something else. This page is a live document, so it deliberately
+> does not quote flags that no tool accepts any more - `tests/test_docs.py`
+> fails when a live page names a flag that was deleted, which is how this
+> sentence came to be reworded. What the release contains is
+> [`CHANGELOG.md`](../CHANGELOG.md)'s `[6.0.0]` section.
+
+> **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
 > ([PR #40](https://github.com/smeltzzz/organize/pull/40)). It is kept as the
 > record of how that release was made, because the next one follows the same
@@ -60,7 +86,7 @@ syntax gate, a file the merge deleted, and the `provisioned` job still did
 `pip install ffsubsync` then `import sync_subtitles`. The bot cannot fix a
 workflow file, so that was step 2's patch. **This is history: PR #40 applied
 the patch, and CI on `main` has been green since.** Everything else in that
-run was green on the same merge: the whole suite (1,173 tests) on Linux, macOS
+run was green on the same merge: the whole suite (1,174 tests) on Linux, macOS
 and Windows across Python 3.11–3.13, packaging, the single-file build, the lint
 job, the coverage floor and the doctor smoke test.
 

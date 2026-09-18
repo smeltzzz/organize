@@ -22,7 +22,7 @@ patches the lookup itself, inside the test body.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,173 unit tests, ~25 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,174 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -40,6 +40,22 @@ The distribution is called **`organizekit`** — the name the shared package
 already has on disk — because `organize` on PyPI has belonged to an unrelated
 tabular-data parser since 2011, and `organize-media` to a media copier. The
 command you type is unaffected: `pip install organizekit` gives you `organize`.
+
+**Updating an installed copy** is one command; pip fetches the newest published
+version, which is whatever the latest git tag released:
+
+```bash
+python3 -m pip install --upgrade organizekit      # Windows: py -m pip install --upgrade organizekit
+organize --version                                # confirm the version you now have
+```
+
+Two things that look like failures and are not. If `organize` is not recognised
+afterwards, pip put it somewhere not on your `PATH` — the install worked. And if
+you have more than one Python, `pip -V` names the one an upgrade just changed;
+installing with a different interpreter leaves the old copy where it was (which
+is why the commands above spell out `python3 -m pip` rather than bare `pip`).
+A version is never replaced on PyPI — `--upgrade` moves forward to a higher one,
+never onto a different build of the same number.
 
 ## Cutting a release
 
