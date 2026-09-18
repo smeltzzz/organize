@@ -41,7 +41,7 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 # A ceiling that applies whatever the machine claims. These pools drive
-# subprocesses (ffprobe, mkvextract, an OCR backend) that are themselves
+# subprocesses (ffprobe, mkvextract) that are themselves
 # multi-threaded, so "one worker per core" oversubscribes badly on a big box
 # and thrashes a small one.
 DEFAULT_WORKER_CAP = 8

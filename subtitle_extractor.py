@@ -4,39 +4,41 @@ Embedded-Subtitle Extractor for Jellyfin Movies
 ===============================================
 After ``movie_standardizer.py`` and before ``mkv_track_cleaner.py``: walk the
 canonical movie library and create at most one validated external English SRT
-sidecar per movie, built from the movie's own embedded subtitle track.
+sidecar per movie, written as ``<Movie> (<Year>).eng.srt`` **right beside the
+movie's own ``.mkv``** in its movie folder.
 
-There is no downloading any more. This tool used to fall back to
-OpenSubtitles, SubDL and seven scraping sources when a movie had no embedded
-track; that machinery is gone because it was not reliable enough. The
-contract is now exactly this:
+The source of the subtitle depends on what the movie itself carries, and the
+order is not negotiable:
 
 * a movie that already has an ``.eng.srt`` beside it is left completely
-  alone - no extraction, no rewriting, no provider anything. An existing
-  sidecar is authoritative;
-* a movie without one gets its embedded English subtitle track extracted
-  into ``Title (Year).eng.srt``. Text tracks (SRT/SSA/ASS/WebVTT/USF) are
-  converted in-process; image tracks (PGS/VobSub/DVB) are OCR'd by an
-  external backend (pgsrip, sup2srt + Tesseract, Subtitle Edit, PgsToSrt)
-  when one is installed. Forced/signs-only, commentary, non-English and
-  too-short tracks are refused, so a movie is never left with a partial
-  "subtitle";
-* MP4 movies are read through a temporary subtitle-only MKV bridge, because
-  mkvextract reads Matroska only. The bridge lives outside the library and
-  is deleted with the run; ``mkv_track_cleaner.py`` later converts the
-  container itself, so no embedded track is lost to the MP4 -> MKV
-  conversion;
-* every sidecar this tool writes is recorded in a provenance ledger outside
-  the library: which movie it came from, which embedded track, by which
-  method, its SHA-256 and when. The ledger is the durable answer to "did
-  this tool write this sidecar?", and it is what makes a re-run cheap;
-* a movie with no usable embedded English track and no sidecar is listed in
-  the report as needing attention. That is a human's decision now, not a
-  download.
+  alone - no extraction, no download, no rewriting. An existing sidecar is
+  authoritative;
+* **text-based embedded English tracks come first.** An SRT/SSA/ASS/WebVTT/USF
+  track is extracted with ``mkvextract`` (through a temporary subtitle-only MKV
+  bridge for MP4 movies) and converted in-process. It is exact for this release,
+  it costs nothing, and its cues carry the container's own timeline;
+* **image-based subtitles are not OCR'd any more.** OCR of PGS/VobSub bitmaps
+  was removed: it was slow, it needed a fourth external program, and its output
+  was frequently near-miss text that looked like success. When the *only*
+  English subtitle a movie carries is image-based, the movie is looked up on
+  OpenSubtitles **by its exact file hash** (the moviehash of the file on disk,
+  not a title guess) and a matching English ``.srt`` is downloaded and written
+  as the sidecar. An exact hash match is the provider's own guarantee that the
+  subtitle belongs to this precise release;
+* a movie with no usable embedded track, no image track to justify a hash
+  lookup, or no matching subtitle on OpenSubtitles is listed in the report as
+  needing attention - a human decision, not a guess.
+
+A movie with no subtitle track at all is *not* looked up by title: downloading
+"the most popular subtitle called Inception" is how a library ends up with the
+wrong cut's subtitle, which is the failure this toolkit exists to avoid. The
+hash lookup is offered only where the movie's own tracks prove it has English
+subtitles, just not in text form.
 
 ``mkv_track_cleaner.py`` runs after this tool and strips every embedded
-subtitle (the extracted sidecar becomes the sole subtitle option), which is
-why extraction must come first.
+subtitle (the sidecar becomes the sole subtitle option), which is why
+extraction and the hash lookup must both happen first: a remux rewrites the
+container bytes and invalidates the moviehash.
 
     py -3 subtitle_extractor.py --dry-run
     py -3 subtitle_extractor.py
@@ -47,8 +49,12 @@ most broadly direct-play-safe external subtitle choice across Jellyfin
 clients; ASS/SSA, VobSub, PGS, and other formats are never written here.
 
 Standard library only. The external programs this tool drives are
-``mkvmerge``/``mkvextract`` (MKVToolNix) and, for image tracks only, one OCR
-backend.
+``mkvmerge``/``mkvextract`` (MKVToolNix); OpenSubtitles is reached over
+``urllib`` with a free API key (``OPENSUBTITLES_API_KEY``), and an account
+(``OPENSUBTITLES_USERNAME`` / ``OPENSUBTITLES_PASSWORD``) raises the provider's
+daily download quota. Without a key the tool is completely offline: every
+movie is still covered by its own text tracks, and image-only movies are
+reported for a human.
 """
 
 from __future__ import annotations
@@ -61,19 +67,23 @@ import io
 import json
 import os
 import re
-import shlex
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import traceback
 import uuid
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import Request, urlopen
 
 # Shared implementation: everything imported here is defined exactly once,
 # in organizekit/core/. See tests/test_shared_core.py for the rule that
@@ -93,6 +103,7 @@ from organizekit.core import (
     describe_workers,
     enable_utf8_stdio,
     exact_external_english_srt_path,
+    load_dotenv,
     map_ordered,
     normalize_srt_newlines,
     path_norm,
@@ -167,7 +178,7 @@ LIBRARY_DIR = str(resolve_library())
 LOG_FILE = str(default_tool_dir("subtitle_extractor") / "subtitle_extractor.log")  # Appended every run.
 REPORT_FILE = str(default_tool_dir("subtitle_extractor") / "subtitle_extractor_report.txt")
 
-__version__ = "3.0.0"
+__version__ = "6.0.0"
 
 # The preceding standardizer emits canonical movie folders. MKV is the
 # canonical container; MP4 releases are accepted and read here (through a
@@ -191,18 +202,74 @@ SAMPLE_NAME_RE = re.compile(
 )
 ENGLISH_LANGUAGE_TOKENS = frozenset({"en", "eng", "english"})
 
+# ---------------------------------------------------------------------------
+# OpenSubtitles (the image-only tier)
+# ---------------------------------------------------------------------------
+# The one job this provider has here: given the *exact* moviehash of the file
+# on disk, hand back an English subtitle the provider itself reports as
+# matching that hash. There is no title, year, release-name or "most
+# downloaded" search anywhere in this tool - a movie whose own tracks prove it
+# carries English subtitles (just as bitmaps) is matched by file identity, and
+# anything else is a human decision.
+#
+# Facts the client below is written against (OpenSubtitles REST API v1):
+#   * every request needs ``Api-Key`` and a descriptive ``User-Agent``;
+#     ``/download`` additionally needs ``Authorization: Bearer <token>`` from
+#     ``POST /login`` (username + password);
+#   * ``GET /subtitles`` takes ``moviehash`` (exactly 16 hex chars) plus
+#     ``languages``, and ``moviehash_match=only`` returns *only* subtitles that
+#     matched the hash; a matched entry carries ``attributes.moviehash_match``;
+#   * ``POST /download {"file_id": N}`` returns a temporary ``link`` (about
+#     three hours), and *that* call - not fetching the link - consumes one
+#     download from the account's daily quota (5/day anonymously per IP, 20/day
+#     with a free account, 1000/day for VIP);
+#   * requests are limited to 5 per second per IP, and ``429`` means back off.
+# The tool makes one search and at most one download per movie, serially, so
+# the rate limit is not reachable by design.
+OPENSUBTITLES_API_URL = "https://api.opensubtitles.com/api/v1"
+OPENSUBTITLES_DOWNLOAD_HOSTS: tuple[str, ...] = ("opensubtitles.com", "opensubtitles.org")
+OPENSUBTITLES_APP_NAME = "organizekit"
+OPENSUBTITLES_API_KEY_ENV = "OPENSUBTITLES_API_KEY"
+OPENSUBTITLES_USERNAME_ENV = "OPENSUBTITLES_USERNAME"
+OPENSUBTITLES_PASSWORD_ENV = "OPENSUBTITLES_PASSWORD"
+OPENSUBTITLES_TIMEOUT_SEC = 30.0
+OPENSUBTITLES_MIN_FILE_BYTES = 2 * 65536
+OPENSUBTITLES_HASH_BYTES = 65536
+OPENSUBTITLES_HASH_RE = re.compile(r"^[0-9a-f]{16}$")
+OPENSUBTITLES_MASK64 = (1 << 64) - 1
+OPENSUBTITLES_ANSWER_MAX_BYTES = 8 * 1024 * 1024
+# The provider allows 5 requests per second per IP; a quarter-second floor
+# between requests keeps this tool at 4/s even on a fast connection, and the
+# 429 backoff below is the safety net rather than the primary plan.
+OPENSUBTITLES_MIN_INTERVAL_SEC = 0.25
+OPENSUBTITLES_MAX_ATTEMPTS = 3
+OPENSUBTITLES_MAX_BACKOFF_SEC = 30.0
+OPENSUBTITLES_KEY_HINT = (
+    "create a free API key at https://www.opensubtitles.com/en/consumers and set "
+    "OPENSUBTITLES_API_KEY; an account (OPENSUBTITLES_USERNAME / "
+    "OPENSUBTITLES_PASSWORD) raises the daily download limit"
+)
+
 
 # Every result carries a machine-readable reason alongside its human detail so
 # the report groups movies by what the user has to *do*, instead of guessing
 # that grouping back out of a prose sentence.
 REASON_COVERED = "covered"
 REASON_EXTRACTED = "extracted"
+REASON_DOWNLOADED = "downloaded"
 REASON_DRY_RUN = "dry_run"
 REASON_NO_TRACK = "no_track"
 REASON_SIDECAR_UNUSABLE = "sidecar_unusable"
 REASON_SIDECAR_NAME = "sidecar_name"
 REASON_LAYOUT = "layout"
 REASON_ERROR = "error"
+# The four ways the image-only tier can end without a sidecar. They are kept
+# apart because the fix is different in each case: configure a key, wait for a
+# quota reset, place a subtitle by hand, or read the log.
+REASON_IMAGE_ONLY = "image_only"
+REASON_NO_HASH_MATCH = "no_hash_match"
+REASON_QUOTA_SPENT = "quota_spent"
+REASON_DOWNLOAD_FAILED = "download_failed"
 
 @dataclass
 class JobResult:
@@ -304,8 +371,27 @@ def has_english_sidecar(folder: Path, video_stem: str) -> Path | None:
         return None
     return next((path for path in names if is_english_srt_sidecar(path, video_stem)), None)
 
-def discover_videos(root: Path, min_bytes: int) -> list[Path]:
+@dataclass(frozen=True)
+class LibraryScan:
+    """The movie files a walk found, and what it left behind on the way.
+
+    The counts are not decoration. `--min-size` and the sample-name rule are
+    both silent filters, and a run that filtered the whole library down to
+    nothing used to report "Nothing to do: every one of the 0 movie(s) in the
+    library has a validated external English .eng.srt" - a green report about a
+    library nothing had looked at. Carrying the counts out of the walk is what
+    lets the report say which of the two happened.
+    """
+
+    videos: list[Path]
+    below_min_size: int = 0
+    sample_named: int = 0
+
+
+def discover_videos(root: Path, min_bytes: int) -> LibraryScan:
     found: list[Path] = []
+    below_min_size = 0
+    sample_named = 0
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
             d for d in dirnames
@@ -315,22 +401,24 @@ def discover_videos(root: Path, min_bytes: int) -> list[Path]:
         ]
         current = Path(dirpath)
         for name in filenames:
-            if SAMPLE_NAME_RE.search(Path(name).stem):
-                continue
             ext = Path(name).suffix.lower()
             if ext not in VIDEO_EXTENSIONS:
                 continue
             path = current / name
             if path.is_symlink():
                 continue
+            if SAMPLE_NAME_RE.search(Path(name).stem):
+                sample_named += 1
+                continue
             try:
                 if path.stat().st_size < min_bytes:
+                    below_min_size += 1
                     continue
             except OSError:
                 continue
             found.append(path)
     found.sort(key=lambda p: str(p).casefold())
-    return found
+    return LibraryScan(found, below_min_size, sample_named)
 
 def canonical_movie_layout_issue(video: Path, library: Path) -> str | None:
     """Return a reason when a file violates the one-movie-per-folder contract."""
@@ -380,18 +468,20 @@ def dest_for(video: Path, cfg: Any = None) -> Path:
 #     outside the library and deleted with the run.
 #
 # Text tracks (SRT/SSA/ASS/WebVTT/USF) are converted to SRT in-process with
-# the standard library. Image tracks (PGS/SUP, VobSub, DVB) need OCR, which
-# a stdlib-only script cannot vendor: they are handed to an external OCR
-# backend (pgsrip, sup2srt + Tesseract, Subtitle Edit, or PgsToSrt) when one
-# is installed, and are reported as needing attention when none is.
+# the standard library. Image tracks (PGS/SUP, VobSub, DVB) are never
+# converted: OCR was removed because a garbled transcription is worse than no
+# subtitle at all. A movie whose only English subtitles are bitmaps is instead
+# offered an exact-moviehash OpenSubtitles lookup (see the provider section
+# below), and is reported for a human decision when that cannot help either.
 #
 # Extraction never rewrites or deletes the movie: mkvextract and the bridge
 # builder only read it, and every temporary file lives outside the library.
 # =============================================================================
 
 # Embedded subtitle codecs this tool can turn into an external SRT. The value
-# is the extension mkvextract must write; PGS becomes a .sup stream, VobSub
-# becomes the .idx/.sub pair Subtitle Edit reads.
+# is the extension mkvextract must write. The image codecs below are listed so
+# a movie that carries them can be recognised as image-only; nothing ever
+# extracts them.
 EXTRACT_TEXT_CODECS: dict[str, str] = {
     "S_TEXT/UTF8": ".srt",
     "S_TEXT/ASCII": ".srt",
@@ -430,15 +520,16 @@ USF_TAG_RE = re.compile(r"<[^>]+>")
 
 # A full movie track carries hundreds of cues. A handful means the track is
 # signs/songs-only or a foreign-language-forced stream, and writing it as the
-# movie's English subtitle would be a silent downgrade.
+# movie's English subtitle would be a silent downgrade. The same floor is
+# applied to a downloaded subtitle: language-tag mistakes happen on both sides.
 DEFAULT_EXTRACT_MIN_CUES = 10
-# How many candidates to try per movie before giving up and letting the
-# provider tiers run. Text extraction is cheap; OCR is not, so each class is
-# capped separately and the whole run can cap OCR jobs (--ocr-limit).
+DEFAULT_DOWNLOAD_MIN_CUES = 10
+# How many text candidates to try for one movie before giving up. Extraction is
+# cheap and local, so three is generous; a movie whose every text track is
+# refused is then treated as an image-only movie (or reported, if it has no
+# image track either).
 DEFAULT_EXTRACT_TEXT_CANDIDATE_LIMIT = 3
-DEFAULT_EXTRACT_IMAGE_CANDIDATE_LIMIT = 2
 DEFAULT_MKVEXTRACT_TIMEOUT_SEC = 900.0
-DEFAULT_OCR_TIMEOUT_SEC = 1_800.0
 
 # Durable, outside-the-library record of which sidecars this tool created from
 # the movie's own tracks: the provenance that says "this .eng.srt came out of
@@ -452,43 +543,9 @@ LEGACY_EXTRACTED_LEDGER_NAME = "subtitle_fetcher_extracted.json"
 EXTRACTED_LEDGER_ENV = "SUBTITLE_EXTRACTED_LEDGER"
 EXTRACTED_LEDGER_VERSION = 1
 
-OCR_BACKEND_AUTO = "auto"
-OCR_BACKEND_NONE = "none"
-OCR_BACKEND_CUSTOM = "custom"
-OCR_BACKEND_PGSRIP = "pgsrip"
-OCR_BACKEND_SUP2SRT = "sup2srt"
-OCR_BACKEND_SUBTITLEEDIT = "subtitleedit"
-OCR_BACKEND_PGSTOSRT = "pgstosrt"
-OCR_BACKEND_CHOICES: tuple[str, ...] = (
-    OCR_BACKEND_AUTO,
-    OCR_BACKEND_PGSRIP,
-    OCR_BACKEND_SUP2SRT,
-    OCR_BACKEND_SUBTITLEEDIT,
-    OCR_BACKEND_PGSTOSRT,
-    OCR_BACKEND_CUSTOM,
-    OCR_BACKEND_NONE,
-)
-# Auto-detection order. pgsrip comes first: it is the actively maintained
-# option, it filters by language itself, and it reads both a .sup stream and
-# an .mkv, so it needs the least help from us.
-OCR_BACKEND_AUTO_ORDER: tuple[str, ...] = (
-    OCR_BACKEND_PGSRIP,
-    OCR_BACKEND_SUP2SRT,
-    OCR_BACKEND_SUBTITLEEDIT,
-    OCR_BACKEND_PGSTOSRT,
-)
-
-# Tesseract language codes are ISO 639-2/T (``eng``), while PgsToSrt is
-# usually called with the same three-letter codes; Subtitle Edit and sup2srt
-# accept either. Keep one place that normalizes what the tools are given.
-OCR_TESSERACT_LANGUAGES: dict[str, str] = {"en": "eng", "eng": "eng", "english": "eng"}
-
-# pgsrip parses languages with babelfish, which wants ISO 639-1/2B tags
-# (``en``, ``pt-BR``); the container gives us ISO 639-2/T (``eng``).
-OCR_PGSRIP_LANGUAGES: dict[str, str] = {"eng": "en", "en": "en", "english": "en"}
-
 # Very common English function words. Their share of a real dialogue track is
-# far above this floor; OCR noise and wrong-language tracks fall below it.
+# far above this floor; a wrong-language track (or machine nonsense) falls
+# below it.
 ENGLISH_STOPWORDS = frozenset({
     "the", "a", "an", "and", "or", "but", "if", "of", "to", "in", "on", "at",
     "is", "was", "are", "were", "be", "been", "it", "its", "you", "your",
@@ -498,9 +555,6 @@ ENGLISH_STOPWORDS = frozenset({
     "how", "why", "all", "just", "get", "got", "go", "going", "know", "think",
     "will", "can", "cant", "dont", "im", "thats", "there", "here", "up", "out",
 })
-
-# Characters that dominate when an OCR pass mis-reads a bitmap subtitle.
-OCR_NOISE_CHARS = "|~^@#"
 
 
 # ---------------------------------------------------------------------------
@@ -695,9 +749,9 @@ def classify_embedded_subtitle_tracks(
     """Pick the English subtitle streams worth extracting, best first.
 
     Non-English, forced, and commentary streams are dropped outright. Text
-    streams outrank image streams (a conversion is free, OCR is minutes), and
-    inside each class the container's default track wins before codec
-    preference and track order.
+    streams outrank image streams (a conversion is free; a bitmap would need
+    OCR, which this tool no longer does), and inside each class the container's
+    default track wins before codec preference and track order.
     """
     candidates: list[EmbeddedSubtitleTrack] = []
     for track in tracks:
@@ -975,295 +1029,890 @@ def non_latin_ratio(text: str) -> float:
     return non_latin / len(letters)
 
 
-def extracted_subtitle_quality(
-    text: str, *, min_cues: int = DEFAULT_EXTRACT_MIN_CUES, method: str = "text"
+def subtitle_quality(
+    text: str, *, min_cues: int = DEFAULT_EXTRACT_MIN_CUES
 ) -> tuple[bool, str]:
-    """Decide whether extracted text may become the movie's English sidecar.
+    """Decide whether subtitle text may become the movie's English sidecar.
 
-    A subtitle taken from the movie's own track is authoritative about timing
-    but not about content: a mis-tagged foreign track or a failed OCR pass
-    would both produce a file that looks like success. Every extracted track
-    therefore passes the same conservative gate a download passes, plus two
-    checks that only matter for extraction (cue count and OCR noise).
+    One conservative gate for both sources, because both can look like success
+    while being useless: a mis-tagged foreign embedded track, and an
+    OpenSubtitles entry whose language field says ``en`` while its cues are
+    something else. A subtitle from the movie's own track is authoritative
+    about *timing* but not about *content*, and a hash-matched download is
+    authoritative about *identity* but not about *language* - so both re-check
+    the same things:
+
+    * it is non-empty and no larger than the shared safety limit;
+    * it parses into well-formed SRT cues, and there are enough of them to be
+      a whole film rather than a signs/songs stream;
+    * the cues are Latin-script and read like English dialogue.
     """
     if not text.strip():
-        return False, "the extracted track contained no subtitle text"
+        return False, "the subtitle contained no text"
     if len(text.encode("utf-8", errors="replace")) > MAX_SUBTITLE_BYTES:
-        return False, f"the extracted subtitle exceeds the {MAX_SUBTITLE_BYTES // (1024 * 1024)} MiB safety limit"
+        return False, f"the subtitle exceeds the {MAX_SUBTITLE_BYTES // (1024 * 1024)} MiB safety limit"
     if not looks_like_srt(text):
-        return False, "the extracted track did not convert to valid SRT cues"
+        return False, "the subtitle did not convert to valid SRT cues"
     cues = parse_srt_cues(text)
     if len(cues) < min_cues:
         return (
             False,
-            f"only {len(cues)} cue(s) extracted; a complete movie track needs "
-            f"at least {min_cues} (this track is probably signs/songs-only)",
+            f"only {len(cues)} cue(s); a complete movie subtitle needs "
+            f"at least {min_cues} (this looks like a signs/songs-only stream)",
         )
     sample = " ".join(cue[2] for cue in cues)
     if non_latin_ratio(sample) > 0.40:
-        return False, "the extracted text is not Latin-script (this track is not English)"
+        return False, "the text is not Latin-script (this is not an English subtitle)"
     words = re.findall(r"[A-Za-z']+", sample)
     if len(words) >= 100:
         hits = sum(1 for word in words if word.lower() in ENGLISH_STOPWORDS)
         if hits / len(words) < 0.04:
-            return False, "the extracted text does not read as English (OCR noise or a foreign track)"
-    if method == "ocr":
-        noise = sum(sample.count(char) for char in OCR_NOISE_CHARS)
-        if noise and noise / max(1, len(sample)) > 0.02:
-            return False, "the OCR output looks like noise rather than dialogue"
+            return False, "the text does not read as English (a foreign track or nonsense)"
     return True, ""
 
 
 # ---------------------------------------------------------------------------
-# OCR backends for image-based subtitles (PGS/SUP, VobSub, DVB)
+# OpenSubtitles: the exact-moviehash lookup for image-only movies
 # ---------------------------------------------------------------------------
-@dataclass(frozen=True)
-class OcrBackend:
-    """An external program that turns a bitmap subtitle stream into text."""
-
-    key: str
-    label: str
-    program: tuple[str, ...]
-    supports: frozenset[str]
-    # "output": writes the path we pass. "sibling": writes next to the input.
-    output_mode: str = "output"
-    arg_template: tuple[str, ...] = ()
-
-    def build_command(self, source: Path, output: Path, *, track_id: int, language: str) -> list[str]:
-        if self.key == OCR_BACKEND_CUSTOM:
-            mapping = {
-                "{input}": str(source),
-                "{output}": str(output),
-                "{track}": str(track_id),
-                "{lang}": OCR_TESSERACT_LANGUAGES.get(language.lower(), language),
-            }
-            return [*self.program, *(mapping.get(token, token) for token in self.arg_template)]
-        if self.key == OCR_BACKEND_PGSRIP:
-            # pgsrip writes its .srt beside the input; there is no output flag.
-            return [
-                *self.program,
-                "-l", OCR_PGSRIP_LANGUAGES.get(language.lower(), language),
-                str(source),
-            ]
-        if self.key == OCR_BACKEND_SUP2SRT:
-            return [
-                *self.program,
-                "-l", OCR_TESSERACT_LANGUAGES.get(language.lower(), language),
-                "-o", str(output),
-                str(source),
-            ]
-        if self.key == OCR_BACKEND_SUBTITLEEDIT:
-            # Subtitle Edit OCRs an image-based input and writes <input>.srt
-            # beside it; there is no output-path flag in its CLI.
-            return [*self.program, "/convert", str(source), "srt", "/encoding:utf-8"]
-        if self.key == OCR_BACKEND_PGSTOSRT:
-            return [
-                *self.program,
-                "--input", str(source),
-                "--output", str(output),
-                "--tesseractlanguage", OCR_TESSERACT_LANGUAGES.get(language.lower(), language),
-            ]
-        raise ValueError(f"unknown OCR backend: {self.key}")
-
-    def result_path(self, source: Path, output: Path) -> Path:
-        if self.output_mode == "sibling":
-            return source.with_suffix(".srt")
-        return output
-
-    def supports_track(self, track: EmbeddedSubtitleTrack) -> bool:
-        family = {
-            "S_HDMV/PGS": "PGS",
-            "S_VOBSUB": "VOBSUB",
-            "S_DVBSUB": "DVBSUB",
-        }.get(track.codec_id.upper(), "PGS")
-        return family in self.supports
+# Everything below is the one provider tier this tool has. It is reached only
+# for a movie whose own tracks prove it carries English subtitles and whose
+# only English subtitles are bitmaps; with no API key configured it is inert
+# and the movie is reported for a human instead.
+#
+# The lookup is deliberately identity-based. ``moviehash`` is calculated from
+# the bytes of the file on disk - the release, not the title - and
+# ``moviehash_match=only`` makes the provider return nothing but subtitles it
+# itself matched to that hash. There is no title search, no "most downloaded"
+# pick and no release-name guess anywhere here: those are how a library ends up
+# with the wrong cut's subtitle, which is the failure mode this toolkit exists
+# to avoid.
 
 
-def _resolve_program(explicit: str, name: str, *search_paths: str) -> str | None:
-    if explicit:
-        explicit_path = Path(explicit)
-        if explicit_path.is_file():
-            return str(explicit_path)
-        found = shutil.which(explicit)
-        if found:
-            return found
-    found = shutil.which(name)
-    if found:
-        return found
-    for search_path in search_paths:
-        if Path(search_path).is_file():
-            return search_path
-    return None
-
-
-def _subtitleedit_program(explicit: str = "") -> tuple[str, ...] | None:
-    """Subtitle Edit is a Windows GUI app; ``mono`` runs it elsewhere.
-
-    The mono wrapper has to be decided *after* the program is found, not as a
-    fallback for not finding it: the lookup already knows the Linux install
-    locations, so it always resolved the ``.exe`` first and the fallback was
-    unreachable, leaving a Linux install to be exec'd as a bare .NET binary.
-    """
-    known = (
-        r"C:\Program Files\Subtitle Edit\SubtitleEdit.exe",
-        r"C:\Program Files (x86)\Subtitle Edit\SubtitleEdit.exe",
-        "/usr/lib/subtitleedit/SubtitleEdit.exe",
-        "/opt/subtitleedit/SubtitleEdit.exe",
-    )
-    program = _resolve_program(explicit, "SubtitleEdit", *known)
-    if not program:
-        return None
-    if os.name == "nt" or not program.lower().endswith(".exe"):
-        return (program,)
-    mono = shutil.which("mono")
-    # No mono means this install cannot be run here at all, which is a backend
-    # that was not found rather than one that fails minutes into a movie.
-    return (mono, program) if mono else None
-
-
-def _pgstosrt_program(explicit: str = "") -> tuple[str, ...] | None:
-    """PgsToSrt ships as a .NET dll, so it needs dotnet plus a dll path."""
-    dll = explicit or os.environ.get("PGSTOSRT_DLL", "").strip()
-    if not dll or not Path(dll).is_file():
-        return None
-    dotnet = shutil.which("dotnet")
-    if not dotnet:
-        return None
-    return (dotnet, dll)
-
-
-OCR_BACKEND_BUILDERS: dict[str, Callable[[str], OcrBackend | None]] = {}
-
-
-def build_ocr_backend(key: str, explicit_bin: str = "") -> OcrBackend | None:
-    if key == OCR_BACKEND_PGSRIP:
-        program = _resolve_program(explicit_bin, "pgsrip")
-        if not program:
-            return None
-        # pgsrip reads a .sup stream or an .mkv/.mks and OCRs the PGS tracks
-        # of the languages named with -l; everything else is filtered out.
-        return OcrBackend(key, "pgsrip + Tesseract", (program,), frozenset({"PGS"}),
-                          output_mode="sibling")
-    if key == OCR_BACKEND_SUP2SRT:
-        program = _resolve_program(explicit_bin, "sup2srt")
-        if not program:
-            return None
-        return OcrBackend(key, "sup2srt + Tesseract", (program,), frozenset({"PGS"}))
-    if key == OCR_BACKEND_SUBTITLEEDIT:
-        se_program = _subtitleedit_program(explicit_bin)
-        if not se_program:
-            return None
-        # Subtitle Edit reads both PGS (.sup) and VobSub (.idx/.sub) inputs.
-        return OcrBackend(key, "Subtitle Edit", se_program,
-                          frozenset({"PGS", "VOBSUB", "DVBSUB"}), output_mode="sibling")
-    if key == OCR_BACKEND_PGSTOSRT:
-        pgstosrt_program = _pgstosrt_program(explicit_bin)
-        if not pgstosrt_program:
-            return None
-        return OcrBackend(key, "PgsToSrt", pgstosrt_program, frozenset({"PGS"}))
-    return None
-
-
-OCR_INSTALL_HINT = (
-    "install one image-subtitle OCR backend to extract PGS/VobSub tracks: "
-    "pgsrip (pip install pgsrip, needs MKVToolNix + tesseract + tessdata), "
-    "sup2srt + Tesseract (https://github.com/retrontology/sup2srt), Subtitle Edit "
-    "(https://www.nikse.dk/subtitleedit), or PgsToSrt with PGSTOSRT_DLL set; "
-    "text subtitle tracks are extracted without any of them"
-)
-
-
-def detect_ocr_backend(
-    preferred: str = OCR_BACKEND_AUTO, *, explicit_bin: str = "", arg_template: str = ""
-) -> tuple[OcrBackend | None, str]:
-    """Return the OCR backend to use and a note saying what was (not) found.
-
-    ``auto`` tries sup2srt, then Subtitle Edit, then PgsToSrt. Nothing here is
-    fatal: an image-only movie simply falls through to the provider tiers, and
-    the note is what the report and the log show as the reason.
-    """
-    if preferred == OCR_BACKEND_NONE:
-        return None, "image-subtitle OCR is disabled (--ocr-backend none)"
-    if preferred == OCR_BACKEND_CUSTOM or (arg_template.strip() and explicit_bin.strip()):
-        program = _resolve_program(explicit_bin, "")
-        if not program:
-            return None, f"--ocr-backend custom needs --ocr-bin (not found: {explicit_bin or '(unset)'})"
-        try:
-            tokens = tuple(shlex.split(arg_template))
-        except ValueError as exc:
-            return None, f"--ocr-args could not be parsed ({exc})"
-        # Both, not either: without {output} the tool has no idea where the
-        # OCR result landed, and the run would fail a movie at a time.
-        if any(not any(name in token for token in tokens)
-               for name in ("{input}", "{output}")):
-            return None, "--ocr-args must name both {input} and {output}"
-        return OcrBackend(OCR_BACKEND_CUSTOM, "custom OCR command", (program,),
-                          frozenset({"PGS", "VOBSUB", "DVBSUB"}), arg_template=tokens), ""
-    if preferred in {OCR_BACKEND_AUTO, ""}:
-        order = OCR_BACKEND_AUTO_ORDER
-    elif preferred in OCR_BACKEND_CHOICES:
-        order = (preferred,)
-    else:
-        return None, f"unknown --ocr-backend '{preferred}'"
-    tried: list[str] = []
-    for key in order:
-        backend = build_ocr_backend(key, explicit_bin if preferred != OCR_BACKEND_AUTO else "")
-        if backend is not None:
-            return backend, ""
-        tried.append(key)
-    if preferred == OCR_BACKEND_AUTO:
-        return None, f"no image-subtitle OCR backend found; {OCR_INSTALL_HINT}"
-    return None, f"--ocr-backend {preferred} was not found; {OCR_INSTALL_HINT}"
-
-
-def find_sibling_srt(source: Path, expected: Path) -> Path | None:
-    """Locate the .srt a "writes beside its input" backend produced.
-
-    Subtitle Edit and pgsrip both choose the output name themselves, and the
-    rule differs by version (``movie.sup`` -> ``movie.srt`` vs ``movie.srt``
-    vs a language-tagged name). Accept the documented name first, then fall
-    back to the newest .srt that appeared next to the input, so a renamer
-    change costs nothing here.
-    """
-    if expected.is_file() and expected.stat().st_size > 0:
-        return expected
+def _json_document(payload: bytes, where: str) -> dict[str, Any]:
+    """Parse an API answer that must be a JSON object, or say why it is not."""
+    text = payload.decode("utf-8", errors="replace").strip()
     try:
-        siblings = sorted(
-            (path for path in source.parent.glob("*.srt")
-             if path.is_file() and path.stat().st_size > 0),
-            key=lambda path: path.stat().st_mtime_ns,
-            reverse=True,
+        document = json.loads(text) if text else {}
+    except ValueError as exc:
+        raise OpenSubtitlesError(f"{where} did not answer with JSON ({exc})") from exc
+    if not isinstance(document, dict):
+        raise OpenSubtitlesError(
+            f"{where} answered with a JSON {type(document).__name__}, not an object"
         )
-    except OSError:
-        return None
-    return siblings[0] if siblings else None
+    return document
 
 
-def run_ocr(
-    backend: OcrBackend,
-    source: Path,
-    output: Path,
-    *,
-    track_id: int = 0,
-    language: str = "eng",
-    timeout: float = DEFAULT_OCR_TIMEOUT_SEC,
-) -> tuple[bool, str]:
-    """OCR one extracted bitmap subtitle stream into ``output``."""
-    command = backend.build_command(source, output, track_id=track_id, language=language)
-    rc, out, err = run_external_command(command, timeout=timeout)
-    produced: Path | None = (
-        find_sibling_srt(source, backend.result_path(source, output))
-        if backend.output_mode == "sibling" else backend.result_path(source, output)
+class OpenSubtitlesError(RuntimeError):
+    """Any failed provider interaction: transport, HTTP status, or a bad answer."""
+
+
+def _json_flag(value: Any) -> bool:
+    """Read a JSON boolean that a provider might spell as a word."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    return bool(value)
+
+
+def _checksum_chunk(chunk: bytes) -> int:
+    """Sum a 64 KiB chunk as little-endian unsigned 64-bit values."""
+    total = 0
+    for (value,) in struct.iter_unpack("<Q", chunk):
+        total = (total + value) & OPENSUBTITLES_MASK64
+    return total
+
+
+def moviehash_of_file(path: Path) -> tuple[str, int]:
+    """The OpenSubtitles moviehash of a local movie file, and its size.
+
+    ``hash = filesize + sum_uint64_le(first 64 KiB) + sum_uint64_le(last 64 KiB)``
+    (Media Player Classic's algorithm, wrapping at 64 bits), rendered as the 16
+    lowercase hex characters the API requires. The file is streamed, never read
+    whole: hashing a 40 GB remux costs two 64 KiB reads.
+
+    Raises ``OSError`` when the file cannot be read and ``ValueError`` when it
+    cannot carry a hash at all - OpenSubtitles' own floor is 128 KiB, and a
+    file that changed size under the reads is refused rather than hashed into a
+    number that matches nothing.
+    """
+    try:
+        size = int(path.stat().st_size)
+    except OSError as exc:
+        raise OSError(f"could not read the movie's size ({exc})") from exc
+    if size < OPENSUBTITLES_MIN_FILE_BYTES:
+        raise ValueError(
+            f"the movie is {size} bytes; OpenSubtitles hashes need at least "
+            f"{OPENSUBTITLES_MIN_FILE_BYTES}"
+        )
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(OPENSUBTITLES_HASH_BYTES)
+            handle.seek(size - OPENSUBTITLES_HASH_BYTES)
+            tail = handle.read(OPENSUBTITLES_HASH_BYTES)
+    except OSError as exc:
+        raise OSError(f"could not read the movie ({exc})") from exc
+    if len(head) != OPENSUBTITLES_HASH_BYTES or len(tail) != OPENSUBTITLES_HASH_BYTES:
+        raise ValueError("the movie changed size while it was being hashed")
+    digest = (size + _checksum_chunk(head) + _checksum_chunk(tail)) & OPENSUBTITLES_MASK64
+    return f"{digest:016x}", size
+
+
+def opensubtitles_settings_from_env() -> tuple[str, str, str]:
+    """The configured ``(api_key, username, password)`` for OpenSubtitles.
+
+    A ``.env`` beside the scripts counts - it is loaded on the way in - and a
+    real environment variable always wins over it. Never logged, never stored.
+    """
+    load_dotenv()
+    return (
+        (os.environ.get(OPENSUBTITLES_API_KEY_ENV) or "").strip(),
+        (os.environ.get(OPENSUBTITLES_USERNAME_ENV) or "").strip(),
+        os.environ.get(OPENSUBTITLES_PASSWORD_ENV) or "",
     )
-    if rc == 0 and produced is not None and produced.is_file() and produced.stat().st_size > 0:
-        if produced != output:
+
+
+def opensubtitles_user_agent() -> str:
+    """The descriptive User-Agent the API requires (``AppName vX.Y.Z``)."""
+    return f"{OPENSUBTITLES_APP_NAME} v{__version__}"
+
+
+@dataclass(frozen=True)
+class OpenSubtitlesCandidate:
+    """One English subtitle the provider says belongs to this exact file."""
+
+    file_id: int
+    file_name: str
+    subtitle_id: str = ""
+    language: str = "en"
+    release: str = ""
+    download_count: int = 0
+    hearing_impaired: bool = False
+    foreign_parts_only: bool = False
+    machine_translated: bool = False
+    ai_translated: bool = False
+    moviehash_match: bool = False
+    votes: int = 0
+    ratings: float = 0.0
+    from_trusted: bool = False
+    title: str = ""
+    year: int = 0
+
+    @property
+    def label(self) -> str:
+        """One line naming the release and why it was picked."""
+        parts = [self.release or self.file_name or f"file_id {self.file_id}"]
+        if self.hearing_impaired:
+            parts.append("SDH")
+        if self.year:
+            parts.append(str(self.year))
+        parts.append(f"{self.download_count} downloads")
+        return ", ".join(parts)
+
+    @property
+    def is_english(self) -> bool:
+        """The provider's language tag, which is a claim worth checking."""
+        tags = re.split(r"[-_,;\s]+", self.language.strip().casefold())
+        return any(tag in ENGLISH_LANGUAGE_TOKENS for tag in tags if tag)
+
+
+@dataclass(frozen=True)
+class OpenSubtitlesDownload:
+    """What ``POST /download`` answered: a temporary link and the quota left."""
+
+    link: str
+    file_name: str = ""
+    remaining: int = -1
+    requests: int = -1
+    reset_time: str = ""
+
+
+def _candidate_from_entry(entry: Any) -> OpenSubtitlesCandidate | None:
+    """Turn one ``data[]`` entry into a candidate, or ``None`` if unusable.
+
+    Anything incomplete is dropped rather than repaired: a candidate without a
+    positive ``file_id`` cannot be downloaded, and one whose entry is not a
+    subtitle is not ours to interpret.
+    """
+    if not isinstance(entry, dict):
+        return None
+    if str(entry.get("type") or "subtitle").strip().lower() != "subtitle":
+        return None
+    attributes = entry.get("attributes")
+    if not isinstance(attributes, dict):
+        return None
+    file_id = 0
+    file_name = ""
+    files = attributes.get("files")
+    if isinstance(files, list):
+        for item in files:
+            if not isinstance(item, dict):
+                continue
             try:
-                shutil.move(str(produced), str(output))
-            except OSError as exc:
-                return False, f"could not collect the OCR output ({exc})"
-        return True, ""
-    detail = _command_tail(err or out)
-    return False, f"{backend.label} could not OCR this track (exit {rc}): {detail}"
+                candidate_id = int(item.get("file_id"))
+            except (TypeError, ValueError):
+                continue
+            if candidate_id > 0:
+                # The first usable file, matching the API's own ``cd_number``
+                # order; a multi-file entry is rare and only its first part is
+                # ever written as the sidecar.
+                file_id = candidate_id
+                file_name = str(item.get("file_name") or "")
+                break
+    if file_id <= 0:
+        return None
+    feature = (
+        attributes.get("feature_details")
+        if isinstance(attributes.get("feature_details"), dict)
+        else {}
+    )
+    return OpenSubtitlesCandidate(
+        file_id=file_id,
+        file_name=file_name,
+        subtitle_id=str(attributes.get("subtitle_id") or entry.get("id") or ""),
+        language=str(attributes.get("language") or ""),
+        release=str(attributes.get("release") or ""),
+        download_count=_nonnegative_int(attributes.get("download_count")),
+        hearing_impaired=_json_flag(attributes.get("hearing_impaired")),
+        foreign_parts_only=_json_flag(attributes.get("foreign_parts_only")),
+        machine_translated=_json_flag(attributes.get("machine_translated")),
+        ai_translated=_json_flag(attributes.get("ai_translated")),
+        moviehash_match=(
+            _json_flag(attributes.get("moviehash_match"))
+            or _json_flag(attributes.get("movie_hash_match"))
+        ),
+        votes=_nonnegative_int(attributes.get("votes")),
+        ratings=_nonnegative_float(attributes.get("ratings")),
+        from_trusted=_json_flag(attributes.get("from_trusted")),
+        title=str(feature.get("title") or feature.get("movie_name") or ""),
+        year=_nonnegative_int(feature.get("year")),
+    )
+
+
+def candidates_from_search(document: dict[str, Any], where: str) -> list[OpenSubtitlesCandidate]:
+    """Every usable candidate in a ``GET /subtitles`` answer."""
+    data = document.get("data")
+    if not isinstance(data, list):
+        raise OpenSubtitlesError(f"{where} answered without a subtitle list")
+    candidates: list[OpenSubtitlesCandidate] = []
+    for entry in data:
+        candidate = _candidate_from_entry(entry)
+        if candidate is not None:
+            candidates.append(candidate)
+    return candidates
+
+
+def choose_hash_match(
+    candidates: Sequence[OpenSubtitlesCandidate],
+) -> tuple[OpenSubtitlesCandidate | None, str]:
+    """Pick the subtitle to install, or say why none qualifies.
+
+    The hash is the identity check and is not negotiable: only a candidate the
+    provider flagged as a moviehash match is eligible, so this can never
+    install a subtitle for a different release. On top of that, an English
+    subtitle that covers only the foreign-language parts (a "forced" stream) or
+    that was produced by machine/AI translation is refused rather than
+    installed as the movie's dialogue. Among the rest, a plain dialogue
+    subtitle beats a hearing-impaired one, a trusted upload beats an untrusted
+    one, and downloads break the tie.
+    """
+    if not candidates:
+        return None, "OpenSubtitles listed no subtitle for this exact file hash"
+    matched = [candidate for candidate in candidates if candidate.moviehash_match]
+    if not matched:
+        return None, "OpenSubtitles listed subtitles, but none matched this exact file hash"
+    english = [candidate for candidate in matched if candidate.is_english]
+    if not english:
+        return None, "the hash-matched subtitles were not tagged English"
+    complete = [
+        candidate
+        for candidate in english
+        if not candidate.foreign_parts_only
+        and not candidate.machine_translated
+        and not candidate.ai_translated
+    ]
+    if not complete:
+        return (
+            None,
+            "the only hash-matched English subtitles cover foreign parts only, "
+            "or are machine/AI translations",
+        )
+    complete.sort(
+        key=lambda candidate: (
+            candidate.hearing_impaired,
+            not candidate.from_trusted,
+            -candidate.download_count,
+            -candidate.votes,
+            -candidate.ratings,
+            candidate.file_id,
+        )
+    )
+    return complete[0], ""
+
+
+def _require_provider_link(link: str) -> None:
+    """Refuse to read a download link that is not HTTPS on the provider's own host.
+
+    The link comes from a third party and is about to be written to disk
+    beside a movie, so it is checked before it is dereferenced: HTTPS only, and
+    only a host under ``opensubtitles.com``/``opensubtitles.org``.
+    """
+    parts = urlsplit(link)
+    if parts.scheme.lower() != "https":
+        raise OpenSubtitlesError("OpenSubtitles offered a non-HTTPS download link; refusing to read it")
+    host = (parts.hostname or "").lower()
+    allowed = any(
+        host == suffix or host.endswith(f".{suffix}") for suffix in OPENSUBTITLES_DOWNLOAD_HOSTS
+    )
+    if not allowed:
+        raise OpenSubtitlesError(
+            f"OpenSubtitles offered a download link on an unexpected host "
+            f"({host or 'none'}); refusing to read it"
+        )
+
+
+class OpenSubtitlesClient:
+    """The two API calls this tool needs, with no state outside the run.
+
+    One search per movie, at most one download, all on the thread that already
+    owns the ledger and the library. The client never retries a search (a
+    second identical search cannot change the answer) and only re-logs-in once,
+    when a ``401`` says the session token expired mid-run.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        username: str = "",
+        password: str = "",
+        user_agent: str = "",
+        api_url: str = OPENSUBTITLES_API_URL,
+        timeout_seconds: float = OPENSUBTITLES_TIMEOUT_SEC,
+    ) -> None:
+        self.api_key = api_key.strip()
+        self.username = username.strip()
+        self.password = password
+        self.user_agent = user_agent.strip() or opensubtitles_user_agent()
+        self.api_url = api_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+        self._token = ""
+        self._last_request_at = 0.0
+
+    @property
+    def has_account(self) -> bool:
+        return bool(self.username and self.password)
+
+    def _throttle(self) -> None:
+        """Keep a polite gap between requests (the provider allows 5/s per IP)."""
+        gap = time.monotonic() - self._last_request_at
+        if 0.0 <= gap < OPENSUBTITLES_MIN_INTERVAL_SEC:
+            time.sleep(OPENSUBTITLES_MIN_INTERVAL_SEC - gap)
+
+    @staticmethod
+    def _backoff_seconds(exc: HTTPError, attempt: int) -> float:
+        """How long to wait after a 429: the provider's own hint, else doubling."""
+        for header in ("Retry-After", "X-RateLimit-Reset", "Ratelimit-Reset"):
+            value = ""
+            try:
+                value = str(exc.headers.get(header) or "").strip()
+            except AttributeError:
+                value = ""
+            if value.isdigit():
+                seconds = float(value)
+                if header == "Retry-After" or seconds > time.time():
+                    return max(1.0, min(OPENSUBTITLES_MAX_BACKOFF_SEC, seconds))
+        return min(OPENSUBTITLES_MAX_BACKOFF_SEC, 2.0 ** attempt)
+
+    # -- one place where a request leaves this process ----------------------
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+        token: str = "",
+    ) -> dict[str, Any]:
+        url = f"{self.api_url}/{path.lstrip('/')}"
+        if params:
+            # Sorted, lowercase parameter names: the API's own guidance, and it
+            # makes a request reproducible in a log without leaking anything.
+            url = f"{url}?{urlencode(sorted(params.items()))}"
+        payload = json.dumps(body).encode("utf-8") if body is not None else None
+        headers = {
+            "Api-Key": self.api_key,
+            "User-Agent": self.user_agent,
+            "Accept": "application/json",
+        }
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        where = f"{method} {path}"
+        attempt = 0
+        while True:
+            attempt += 1
+            self._throttle()
+            # Stamped when the request is *sent*, not when it answers: the
+            # floor is a gap between requests, and a request the provider
+            # rejects spends its rate budget exactly like one it serves.
+            self._last_request_at = time.monotonic()
+            try:
+                with urlopen(Request(url, data=payload, headers=headers, method=method),
+                             timeout=self.timeout_seconds) as response:
+                    answer = response.read(OPENSUBTITLES_ANSWER_MAX_BYTES + 1)
+            except HTTPError as exc:
+                # A 429 is the provider's rate limiter rather than a real
+                # failure, so the same request is retried after waiting; the
+                # credentials endpoint is not special-cased because a 429 there
+                # is also a rate limit. Everything else is reported once.
+                if exc.code != 429:
+                    raise OpenSubtitlesError(self._http_error(exc)) from exc
+                if attempt >= OPENSUBTITLES_MAX_ATTEMPTS:
+                    raise OpenSubtitlesError(
+                        f"{where} kept answering HTTP 429 (rate limited)"
+                    ) from exc
+                time.sleep(self._backoff_seconds(exc, attempt))
+                continue
+            except (URLError, OSError, ValueError) as exc:
+                raise OpenSubtitlesError(f"could not reach OpenSubtitles ({exc})") from exc
+            if len(answer) > OPENSUBTITLES_ANSWER_MAX_BYTES:
+                raise OpenSubtitlesError(f"{where} answered with an oversized document")
+            return _json_document(answer, where)
+
+    @staticmethod
+    def _http_error(exc: HTTPError) -> str:
+        """A status code plus the provider's own message, when it sent one."""
+        detail = ""
+        try:
+            document = json.loads(exc.read(4096).decode("utf-8", errors="replace") or "{}")
+            if isinstance(document, dict):
+                detail = str(document.get("message") or document.get("error") or "").strip()
+        except (OSError, ValueError):
+            detail = ""
+        if not detail:
+            detail = str(getattr(exc, "reason", "") or "").strip()
+        text = f"OpenSubtitles answered HTTP {exc.code}"
+        return f"{text}: {detail}" if detail else text
+
+    # -- login --------------------------------------------------------------
+    def login(self) -> str:
+        """Exchange the configured account for a session token (about 24 h)."""
+        if not self.has_account:
+            raise OpenSubtitlesError(
+                "no OpenSubtitles account was configured; set "
+                "OPENSUBTITLES_USERNAME and OPENSUBTITLES_PASSWORD to download subtitles"
+            )
+        document = self._request(
+            "POST", "login", body={"username": self.username, "password": self.password}
+        )
+        token = str(document.get("token") or "").strip()
+        if not token:
+            raise OpenSubtitlesError("OpenSubtitles accepted the login without a token")
+        self._token = token
+        return token
+
+    def session_token(self, *, refresh: bool = False) -> str:
+        """One login per run; ``refresh`` is for a token that just expired."""
+        if refresh or not self._token:
+            return self.login()
+        return self._token
+
+    # -- the two calls ------------------------------------------------------
+    def search_by_movie_hash(
+        self, movie_hash: str, *, file_name: str = "", languages: str = "en"
+    ) -> list[OpenSubtitlesCandidate]:
+        """Ask for subtitles that match this exact file hash, English only.
+
+        ``file_name`` is sent as the API's ``query`` parameter: the provider's
+        own search guidance recommends including the filename alongside the
+        hash for better matching, and a filename is not a title guess.
+        ``moviehash_match=only`` is what keeps the answer to hash matches;
+        ``choose_hash_match`` verifies the flag again before anything is
+        downloaded, so a name-only result can never be installed.
+        """
+        if not OPENSUBTITLES_HASH_RE.match(movie_hash):
+            raise OpenSubtitlesError(f"'{movie_hash}' is not a 16-character OpenSubtitles hash")
+        params: dict[str, str] = {
+            "languages": languages,
+            "moviehash": movie_hash,
+            "moviehash_match": "only",
+        }
+        if file_name.strip():
+            params["query"] = file_name.strip()
+        document = self._request("GET", "subtitles", params=params)
+        return candidates_from_search(document, f"GET subtitles?moviehash={movie_hash}")
+
+    def download_link(self, file_id: int) -> OpenSubtitlesDownload:
+        """Reserve one download and return the temporary file URL."""
+        body = {"file_id": int(file_id), "sub_format": "srt"}
+        token = self.session_token() if self.has_account else ""
+        try:
+            document = self._request("POST", "download", body=body, token=token)
+        except OpenSubtitlesError as exc:
+            # A token is valid for about a day; a run that outlives one gets a
+            # single fresh login, never a retry loop against the credentials
+            # endpoint (which is rate-limited precisely because of that).
+            if not (self.has_account and "HTTP 401" in str(exc)):
+                raise
+            document = self._request(
+                "POST", "download", body=body, token=self.session_token(refresh=True)
+            )
+        link = str(document.get("link") or "").strip()
+        if not link:
+            raise OpenSubtitlesError("OpenSubtitles answered the download request without a link")
+        return OpenSubtitlesDownload(
+            link=link,
+            file_name=str(document.get("file_name") or "").strip(),
+            remaining=int(document.get("remaining", -1))
+            if str(document.get("remaining", "")).strip() != ""
+            else -1,
+            requests=int(document.get("requests", -1))
+            if str(document.get("requests", "")).strip() != ""
+            else -1,
+            reset_time=str(document.get("reset_time_utc") or document.get("reset_time") or "").strip(),
+        )
+
+    def probe(self) -> str:
+        """One cheap authenticated call, for the doctor: does the key work?
+
+        ``/infos/formats`` needs no account for this, and its answer is a short
+        human note rather than parsed data - the doctor only needs to know the
+        request left the machine and came back accepted.
+        """
+        document = self._request("GET", "infos/formats")
+        formats = document.get("data")
+        count = len(formats) if isinstance(formats, list) else 0
+        return f"{count} subtitle format(s) offered" if count else "the API answered"
+
+    def fetch(self, link: str) -> bytes:
+        """Read the subtitle bytes from a temporary link, bounded and HTTPS-only."""
+        _require_provider_link(link)
+        try:
+            with urlopen(
+                Request(link, headers={"User-Agent": self.user_agent, "Accept": "*/*"}),
+                timeout=self.timeout_seconds,
+            ) as response:
+                payload = response.read(MAX_SUBTITLE_BYTES + 1)
+        except HTTPError as exc:
+            raise OpenSubtitlesError(self._http_error(exc)) from exc
+        except (URLError, OSError, ValueError) as exc:
+            raise OpenSubtitlesError(f"could not download the subtitle ({exc})") from exc
+        if len(payload) > MAX_SUBTITLE_BYTES:
+            raise OpenSubtitlesError(
+                f"the downloaded subtitle exceeds the {MAX_SUBTITLE_BYTES // (1024 * 1024)} MiB safety limit"
+            )
+        return payload
+
+
+@dataclass
+class DownloadOptions:
+    """Knobs for one OpenSubtitles lookup (all of them optional)."""
+
+    enabled: bool = True
+    api_key: str = ""
+    username: str = ""
+    password: str = ""
+    timeout_seconds: float = OPENSUBTITLES_TIMEOUT_SEC
+    min_cues: int = DEFAULT_DOWNLOAD_MIN_CUES
+    dry_run: bool = False
+
+    def client(self) -> OpenSubtitlesClient:
+        return OpenSubtitlesClient(
+            self.api_key,
+            username=self.username,
+            password=self.password,
+            timeout_seconds=self.timeout_seconds,
+        )
+
+
+@dataclass
+class DownloadOutcome:
+    """What one exact-hash lookup produced, and why if it produced nothing."""
+
+    ok: bool = False
+    detail: str = ""
+    unavailable_reason: str = ""
+    reason: str = ""
+    dest: Path | None = None
+    candidate: OpenSubtitlesCandidate | None = None
+    movie_hash: str = ""
+    cue_count: int = 0
+    remaining: int = -1
+    reset_time: str = ""
+    covered_by_other: bool = False
+
+    @property
+    def available(self) -> bool:
+        """True when the lookup could be attempted at all."""
+        return not self.unavailable_reason
+
+
+def _folder_accepts_new_files(directory: Path) -> bool:
+    """Can a sidecar still be created in ``directory``? Checked before any spend.
+
+    A library folder can be unwritable for reasons that have nothing to do with
+    the movie - a read-only mount, a permission fix gone wrong - and the daily
+    download allowance is small enough that discovering it *after* a download
+    wastes a real one. The check is deliberately a real write when the cheap
+    answer is "no": ``os.access`` is unreliable for directories on some
+    platforms, and this verdict decides whether to spend provider quota.
+    """
+    try:
+        if os.access(directory, os.W_OK):
+            return True
+    except OSError:
+        pass
+    probe = directory / f".organize-write-probe.{os.getpid()}"
+    try:
+        with probe.open("x", encoding="utf-8"):
+            pass
+    except OSError:
+        return False
+    try:
+        probe.unlink()
+    except OSError:
+        pass
+    return True
+
+
+def download_hash_matched_srt(
+    video: Path,
+    dest: Path,
+    options: DownloadOptions | None = None,
+    *,
+    snapshot: VideoSnapshot | None = None,
+    log_file: Path | None = None,
+) -> DownloadOutcome:
+    """Write ``dest`` from an OpenSubtitles subtitle matching this file's hash.
+
+    The sequence is the safety story: hash the file that is on disk now, ask
+    the provider for hash matches only, refuse anything that is not English
+    dialogue, download, re-validate the bytes with the same gate an extracted
+    track passes, re-check that the movie did not change while all that was
+    happening, and only then publish create-only. Anything that fails leaves no
+    file behind and one sentence explaining the fix.
+
+    ``unavailable_reason`` means the lookup never started (no key, disabled,
+    nothing hashable, sidecar already present); ``detail`` means it ran and did
+    not end in a sidecar, with ``reason`` naming which of the report's buckets
+    that belongs to.
+    """
+    opts = options or DownloadOptions()
+    if not opts.enabled:
+        return DownloadOutcome(
+            unavailable_reason="OpenSubtitles lookups are disabled (--no-download)"
+        )
+    if dest.exists():
+        return DownloadOutcome(
+            ok=True,
+            covered_by_other=True,
+            dest=dest,
+            detail=f"{dest.name} appeared during the run; the existing sidecar was kept",
+        )
+    if not opts.api_key:
+        return DownloadOutcome(
+            unavailable_reason=f"no OpenSubtitles API key is configured; {OPENSUBTITLES_KEY_HINT}"
+        )
+    if not _folder_accepts_new_files(dest.parent):
+        # Refused before the search, not after the download: finding out by
+        # failing to write would have spent one of the day's few downloads.
+        return DownloadOutcome(
+            unavailable_reason=(
+                f"the movie folder is not writable ({dest.parent}); nothing was "
+                "requested from OpenSubtitles"
+            ),
+            reason=REASON_DOWNLOAD_FAILED,
+        )
+    try:
+        movie_hash, file_size = moviehash_of_file(video)
+    except (OSError, ValueError) as exc:
+        return DownloadOutcome(
+            unavailable_reason=f"could not hash the movie for an OpenSubtitles lookup ({exc})"
+        )
+    if snapshot is not None and snapshot.size and snapshot.size != file_size:
+        return DownloadOutcome(
+            unavailable_reason="the movie changed size after it was inspected; re-run to hash it again"
+        )
+    client = opts.client()
+    try:
+        # The basename, not the movie's title: the provider recommends
+        # including the filename with a hash search, and a filename is not a
+        # guess about which release this is - the hash already is the identity.
+        candidates = client.search_by_movie_hash(movie_hash, file_name=video.name)
+    except OpenSubtitlesError as exc:
+        # A spent allowance is refused by the search as readily as by the
+        # download (the API answers 406 either way), and the run-wide
+        # short-circuit depends on recognizing it here too - otherwise every
+        # later image-only movie would ask again only to be refused again.
+        reason = REASON_QUOTA_SPENT if _looks_like_quota_error(str(exc)) else REASON_DOWNLOAD_FAILED
+        return DownloadOutcome(
+            detail=f"the OpenSubtitles lookup failed: {exc}",
+            reason=reason,
+            movie_hash=movie_hash,
+        )
+    candidate, refusal = choose_hash_match(candidates)
+    if candidate is None:
+        return DownloadOutcome(
+            detail=f"{refusal} (moviehash {movie_hash})",
+            reason=REASON_NO_HASH_MATCH,
+            movie_hash=movie_hash,
+        )
+    if opts.dry_run:
+        # A search spends no quota; a download request does. So a preview can
+        # say exactly which subtitle the real run would install.
+        return DownloadOutcome(
+            ok=True,
+            detail=(
+                f"would download \"{candidate.label}\" from OpenSubtitles as "
+                f"{dest.name} (moviehash {movie_hash})"
+            ),
+            dest=dest,
+            candidate=candidate,
+            movie_hash=movie_hash,
+        )
+    try:
+        download = client.download_link(candidate.file_id)
+        payload = client.fetch(download.link)
+    except OpenSubtitlesError as exc:
+        reason = REASON_QUOTA_SPENT if _looks_like_quota_error(str(exc)) else REASON_DOWNLOAD_FAILED
+        return DownloadOutcome(
+            detail=f"the OpenSubtitles download failed: {exc}",
+            reason=reason,
+            movie_hash=movie_hash,
+            candidate=candidate,
+        )
+    try:
+        text = normalize_srt_newlines(decode_subtitle_bytes(payload))
+    except (ValueError, OSError) as exc:
+        return DownloadOutcome(
+            detail=f"the downloaded subtitle is not readable text ({exc})",
+            reason=REASON_DOWNLOAD_FAILED,
+            movie_hash=movie_hash,
+            candidate=candidate,
+            remaining=download.remaining,
+            reset_time=download.reset_time,
+        )
+    if text.startswith("\ufeff"):
+        text = text[1:]
+    cues = parse_srt_cues(text)
+    good, reason_text = subtitle_quality(normalize_extracted_srt(text), min_cues=opts.min_cues)
+    if not good:
+        return DownloadOutcome(
+            detail=f"the downloaded subtitle was refused: {reason_text}",
+            reason=REASON_DOWNLOAD_FAILED,
+            movie_hash=movie_hash,
+            candidate=candidate,
+            remaining=download.remaining,
+            reset_time=download.reset_time,
+        )
+    produced_text = render_srt_cues(cues)
+    cue_count = len(cues)
+    if snapshot is not None:
+        try:
+            current: VideoSnapshot | None = video_snapshot(video)
+        except OSError as exc:
+            current = None
+            changed = f"the movie could not be re-checked while its subtitle was being downloaded ({exc})"
+        else:
+            changed = "the movie changed while its subtitle was being downloaded"
+        if current is None or current != snapshot:
+            return DownloadOutcome(
+                detail=f"{changed}; nothing was written",
+                reason=REASON_DOWNLOAD_FAILED,
+                movie_hash=movie_hash,
+                candidate=candidate,
+                remaining=download.remaining,
+                reset_time=download.reset_time,
+            )
+    try:
+        # Create-only, exactly like an extracted sidecar: a subtitle that
+        # appears while this movie is being processed is preserved, never
+        # silently overwritten.
+        atomic_write_text(dest, produced_text, replace=False)
+    except FileExistsError:
+        return DownloadOutcome(
+            ok=True,
+            covered_by_other=True,
+            dest=dest,
+            detail=f"{dest.name} appeared during the download; the existing sidecar was kept",
+            candidate=candidate,
+            movie_hash=movie_hash,
+        )
+    except OSError as exc:
+        return DownloadOutcome(
+            detail=f"could not write the downloaded sidecar ({exc})",
+            reason=REASON_DOWNLOAD_FAILED,
+            movie_hash=movie_hash,
+            candidate=candidate,
+            remaining=download.remaining,
+            reset_time=download.reset_time,
+        )
+    record_downloaded_sidecar(
+        video,
+        dest,
+        movie_hash=movie_hash,
+        candidate=candidate,
+        cue_count=cue_count,
+        sha256=sha256_text(produced_text),
+    )
+    log(
+        f"Downloaded {cue_count} cue(s) from OpenSubtitles ({candidate.label}) "
+        f"for moviehash {movie_hash} -> {dest.name}",
+        log_file=log_file,
+    )
+    return DownloadOutcome(
+        ok=True,
+        detail=(
+            f"downloaded an exact-hash match from OpenSubtitles: {candidate.label}"
+            + (f" ({download.remaining} download(s) left today)" if download.remaining >= 0 else "")
+        ),
+        dest=dest,
+        candidate=candidate,
+        movie_hash=movie_hash,
+        cue_count=cue_count,
+        remaining=download.remaining,
+        reset_time=download.reset_time,
+    )
+
+
+def opensubtitles_check(
+    api_key: str,
+    *,
+    username: str = "",
+    password: str = "",
+    timeout_seconds: float = OPENSUBTITLES_TIMEOUT_SEC,
+) -> tuple[bool, str]:
+    """Prove that the configured key is accepted, for ``organize.py doctor``.
+
+    Returns ``(ok, note)`` and never raises: the doctor runs on machines whose
+    state is unknown, so a failure here is a finding to print, not a crash.
+    """
+    client = OpenSubtitlesClient(
+        api_key,
+        username=username,
+        password=password,
+        timeout_seconds=timeout_seconds,
+    )
+    try:
+        return True, client.probe()
+    except OpenSubtitlesError as exc:
+        return False, str(exc)
+
+
+def _looks_like_quota_error(message: str) -> bool:
+    """Whether a provider refusal is about the daily download allowance.
+
+    OpenSubtitles answers a spent allowance with ``406 Not Acceptable`` and a
+    message naming the count ("You have downloaded your allowed N subtitles for
+    24h"), so both the status and the provider's own words are checked.
+    """
+    lowered = message.casefold()
+    if "http 406" in lowered:
+        return True
+    return any(
+        token in lowered
+        for token in ("quota", "download limit", "allowed", "24h", "remaining")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1319,22 +1968,21 @@ def load_extracted_ledger(path: Path | None = None) -> dict[str, Any]:
     return payload
 
 
-def record_extracted_sidecar(
+def _write_sidecar_record(
     video: Path,
     sidecar: Path,
     *,
-    track: EmbeddedSubtitleTrack,
     method: str,
     cue_count: int,
     sha256: str,
-    ocr_backend: str = "",
+    source_fields: dict[str, Any],
     path: Path | None = None,
 ) -> bool:
-    """Remember that ``sidecar`` came from the movie's own embedded track.
+    """Append one provenance record to the ledger, under the write lock.
 
-    This is the provenance record: which movie, which track, which method,
-    which bytes and when. Best effort by design - a read-only installation
-    loses only the record, never the subtitle itself.
+    Best effort by design - a read-only installation loses only the record,
+    never the subtitle itself - and always load-mutate-write so two workers
+    cannot drop each other's entries.
     """
     target = path or extracted_ledger_path()
     with _LEDGER_WRITE_LOCK:
@@ -1345,26 +1993,99 @@ def record_extracted_sidecar(
             movie_size, movie_mtime = int(stat_result.st_size), int(stat_result.st_mtime_ns)
         except OSError:
             movie_size, movie_mtime = 0, 0
-        payload["sidecars"][path_norm(sidecar)] = {
+        record: dict[str, Any] = {
             "movie": str(video),
             "sidecar": str(sidecar),
             "movie_size": movie_size,
             "movie_mtime_ns": movie_mtime,
             "sha256": sha256,
-            "track_id": track.track_id,
-            "codec_id": track.codec_id,
-            "track_name": track.name,
-            "language": track.language,
             "method": method,
-            "ocr_backend": ocr_backend,
             "cue_count": cue_count,
-            "extracted_utc": utc_timestamp(),
+            "recorded_utc": utc_timestamp(),
         }
+        record.update(source_fields)
+        payload["sidecars"][path_norm(sidecar)] = record
         try:
             atomic_write_json(target, payload)
         except OSError:
             return False
         return True
+
+
+def record_extracted_sidecar(
+    video: Path,
+    sidecar: Path,
+    *,
+    track: EmbeddedSubtitleTrack,
+    method: str,
+    cue_count: int,
+    sha256: str,
+    path: Path | None = None,
+) -> bool:
+    """Remember that ``sidecar`` came out of the movie's own embedded track.
+
+    This is the provenance record: which movie, which track, which method,
+    which bytes and when - the durable answer to "did this tool write this
+    sidecar?". A file the tool did not write has no such record, which is how a
+    hand-made sidecar stays distinguishable from an extracted one.
+    """
+    return _write_sidecar_record(
+        video,
+        sidecar,
+        method=method,
+        cue_count=cue_count,
+        sha256=sha256,
+        source_fields={
+            "source": "embedded-track",
+            "track_id": track.track_id,
+            "codec_id": track.codec_id,
+            "track_name": track.name,
+            "language": track.language,
+        },
+        path=path,
+    )
+
+
+def record_downloaded_sidecar(
+    video: Path,
+    sidecar: Path,
+    *,
+    movie_hash: str,
+    candidate: OpenSubtitlesCandidate,
+    cue_count: int,
+    sha256: str,
+    path: Path | None = None,
+) -> bool:
+    """Remember that ``sidecar`` was downloaded for this exact file hash.
+
+    The provider's own answer is part of the record: which subtitle, which
+    file, which release name, whether it was a hash match. That is what makes
+    "where did this .eng.srt come from?" answerable months later, and what
+    distinguishes it from a sidecar a human placed.
+    """
+    return _write_sidecar_record(
+        video,
+        sidecar,
+        method="download",
+        cue_count=cue_count,
+        sha256=sha256,
+        source_fields={
+            "source": "opensubtitles-hash",
+            "provider": "opensubtitles",
+            "moviehash": movie_hash,
+            "subtitle_id": candidate.subtitle_id,
+            "file_id": candidate.file_id,
+            "file_name": candidate.file_name,
+            "release": candidate.release,
+            "language": candidate.language,
+            "download_count": candidate.download_count,
+            "hearing_impaired": candidate.hearing_impaired,
+            "moviehash_match": candidate.moviehash_match,
+            "feature_title": candidate.title,
+            "feature_year": candidate.year,
+        },
+        path=path,
+    )
 
 
 def find_extracted_record(
@@ -1390,25 +2111,15 @@ def find_extracted_record(
 # ---------------------------------------------------------------------------
 @dataclass
 class ExtractOptions:
-    """Knobs for one extraction attempt (mirrors the fetcher's CLI flags)."""
+    """Knobs for one extraction attempt (all of them optional)."""
 
     enabled: bool = True
     mkvmerge_bin: str | None = None
     mkvextract_bin: str | None = None
-    ocr_backend: str = OCR_BACKEND_AUTO
-    ocr_bin: str = ""
-    ocr_args: str = ""
-    ocr_timeout_seconds: float = DEFAULT_OCR_TIMEOUT_SEC
-    ocr_allowed: bool = True
     extract_timeout_seconds: float = DEFAULT_MKVEXTRACT_TIMEOUT_SEC
     min_cues: int = DEFAULT_EXTRACT_MIN_CUES
     text_candidate_limit: int = DEFAULT_EXTRACT_TEXT_CANDIDATE_LIMIT
-    image_candidate_limit: int = DEFAULT_EXTRACT_IMAGE_CANDIDATE_LIMIT
     dry_run: bool = False
-
-    def resolved_backend(self) -> tuple[OcrBackend | None, str]:
-        return detect_ocr_backend(self.ocr_backend, explicit_bin=self.ocr_bin,
-                                  arg_template=self.ocr_args)
 
 
 @dataclass
@@ -1419,13 +2130,18 @@ class ExtractionOutcome:
     detail: str = ""
     unavailable_reason: str = ""
     track: EmbeddedSubtitleTrack | None = None
-    method: str = ""  # "text" or "ocr"
-    ocr_backend: str = ""
+    method: str = ""  # "text" for every sidecar this tool extracts
     cue_count: int = 0
     dest: Path | None = None
     text: str = ""
     attempted: int = 0
     rejected: tuple[str, ...] = ()
+    # The English tracks this movie carries, by class. Text tracks are what
+    # extraction works on; image tracks are never converted (OCR was removed),
+    # and their presence - with no usable text track - is what earns the movie
+    # an exact-hash OpenSubtitles lookup in the run loop.
+    text_tracks: tuple[EmbeddedSubtitleTrack, ...] = ()
+    image_tracks: tuple[EmbeddedSubtitleTrack, ...] = ()
 
     @property
     def available(self) -> bool:
@@ -1440,13 +2156,18 @@ def extract_embedded_english_srt(
     *,
     log_file: Path | None = None,
 ) -> ExtractionOutcome:
-    """Create ``dest`` from the movie's own English subtitle track.
+    """Create ``dest`` from the movie's own *text-based* English track.
 
     Returns an :class:`ExtractionOutcome`. ``ok`` means ``dest`` holds a
     validated external English SRT (or, in a dry run, that it would).
     ``unavailable_reason`` means extraction could not even be attempted here
-    (no MKVToolNix, no usable English track, no OCR backend for an
-    image-only movie, or an unreadable container) and names the fix.
+    (no MKVToolNix, no usable English track, or an unreadable container) and
+    names the fix.
+
+    Image-based tracks are never converted: they are reported back through
+    ``image_tracks`` so the caller can decide whether an exact-hash
+    OpenSubtitles lookup is warranted. Extraction itself never touches the
+    network and never rewrites an existing sidecar.
     """
     opts = options or ExtractOptions()
     if not opts.enabled:
@@ -1496,6 +2217,8 @@ def extract_embedded_english_srt(
                     unavailable_reason=f"could not read the movie's tracks: {probe_error}"
                 )
         candidates = classify_embedded_subtitle_tracks(tracks)
+        text_tracks = tuple(item for item in candidates if item.kind == "text")
+        image_tracks = tuple(item for item in candidates if item.kind == "image")
         if not candidates:
             has_any_english = any(
                 subtitle_track_is_english(track)
@@ -1507,22 +2230,20 @@ def extract_embedded_english_srt(
                 if has_any_english
                 else "the movie has no English subtitle track"
             )
-            return ExtractionOutcome(unavailable_reason=reason)
-
-        backend, backend_note = opts.resolved_backend() if opts.ocr_allowed else (None, "")
-        if not opts.ocr_allowed and any(item.kind == "image" for item in candidates):
-            backend_note = f"the per-run OCR limit was reached; {OCR_INSTALL_HINT}"
+            return ExtractionOutcome(unavailable_reason=reason, image_tracks=image_tracks)
 
         attempts: list[str] = []
         attempted = 0
-        text_candidates = [item for item in candidates if item.kind == "text"][: max(0, opts.text_candidate_limit)]
-        image_candidates = [item for item in candidates if item.kind == "image"][: max(0, opts.image_candidate_limit)]
+        text_candidates = list(text_tracks)[: max(0, opts.text_candidate_limit)]
+        for track in image_tracks:
+            attempts.append(
+                f"{track.label}: image-based subtitles are not OCR'd; "
+                "an exact-hash OpenSubtitles lookup is the fallback"
+            )
 
         for track in text_candidates:
             attempted += 1
-            outcome = _extract_one_track(
-                video, source, dest, track, tmp, opts, backend=None, log_file=log_file
-            )
+            outcome = _extract_one_track(video, source, dest, track, tmp, opts, log_file=log_file)
             if outcome.ok:
                 return ExtractionOutcome(
                     ok=True,
@@ -1530,58 +2251,29 @@ def extract_embedded_english_srt(
                             if opts.dry_run else outcome.detail),
                     track=outcome.track,
                     method=outcome.method,
-                    ocr_backend=outcome.ocr_backend,
                     cue_count=outcome.cue_count,
                     dest=dest,
                     text=outcome.text,
                     attempted=attempted,
-                )
-            attempts.append(f"{track.label}: {outcome.detail}")
-        for track in image_candidates:
-            if backend is None:
-                attempts.append(f"{track.label}: {backend_note or 'no OCR backend available'}")
-                continue
-            if not backend.supports_track(track):
-                attempts.append(f"{track.label}: {backend.label} cannot OCR {track.codec_id}")
-                continue
-            if opts.dry_run:
-                attempted += 1
-                # OCR takes minutes; a preview must not spend them.
-                return ExtractionOutcome(
-                    ok=True,
-                    method="ocr",
-                    track=track,
-                    ocr_backend=backend.label,
-                    dest=dest,
-                    attempted=attempted,
-                    detail=(f"would OCR the embedded {track.label} with {backend.label} "
-                            f"-> {dest.name}"),
-                )
-            attempted += 1
-            outcome = _extract_one_track(
-                video, source, dest, track, tmp, opts, backend=backend, log_file=log_file
-            )
-            if outcome.ok:
-                return ExtractionOutcome(
-                    ok=True,
-                    detail=outcome.detail,
-                    track=outcome.track,
-                    method=outcome.method,
-                    ocr_backend=outcome.ocr_backend,
-                    cue_count=outcome.cue_count,
-                    dest=outcome.dest,
-                    text=outcome.text,
-                    attempted=attempted,
+                    text_tracks=text_tracks,
+                    image_tracks=image_tracks,
                 )
             attempts.append(f"{track.label}: {outcome.detail}")
 
-    detail = "; ".join(attempts) if attempts else "no embedded English track could be converted"
+    detail = "; ".join(attempts) if attempts else "no embedded English subtitle track could be converted"
+    if not text_tracks and image_tracks:
+        detail = (
+            f"the movie's only English subtitle tracks are image-based "
+            f"({len(image_tracks)} track(s)); text tracks are what this tool extracts"
+        )
     return ExtractionOutcome(
         ok=False,
         detail=detail,
         attempted=attempted,
         rejected=tuple(attempts),
-        unavailable_reason="" if attempted else (backend_note or detail),
+        unavailable_reason="" if attempted else detail,
+        text_tracks=text_tracks,
+        image_tracks=image_tracks,
     )
 
 
@@ -1615,15 +2307,16 @@ def _extract_one_track(
     tmp: Path,
     opts: ExtractOptions,
     *,
-    backend: OcrBackend | None,
     log_file: Path | None = None,
 ) -> ExtractionOutcome:
-    """Extract one track, convert it, validate it, and publish it as ``dest``.
+    """Extract one text track, convert it, validate it, and publish it as ``dest``.
 
     ``video`` is the movie the sidecar belongs to (recorded in the provenance
     ledger); ``source`` is the file mkvextract reads - the movie itself, or
     the temporary MKV bridge built for a non-Matroska container.
     """
+    if track.kind != "text":
+        return ExtractionOutcome(detail="only text-based subtitle tracks are extracted")
     mkvextract_bin = find_mkvtoolnix_binary("mkvextract", opts.mkvextract_bin)
     if not mkvextract_bin:
         return ExtractionOutcome(detail="mkvextract is not installed")
@@ -1635,55 +2328,31 @@ def _extract_one_track(
     if rc != 0:
         return ExtractionOutcome(detail=f"mkvextract failed (exit {rc}): {_command_tail(err)}")
 
-    method = "text" if track.kind == "text" else "ocr"
-    ocr_label = backend.label if backend is not None else ""
-    produced_text = ""
-    if track.kind == "text":
-        try:
-            raw = staged.read_bytes()
-        except OSError as exc:
-            return ExtractionOutcome(detail=f"could not read the extracted track ({exc})")
-        try:
-            decoded = decode_subtitle_bytes(raw)
-        except (ValueError, OSError) as exc:
-            return ExtractionOutcome(detail=f"the extracted track is not readable text ({exc})")
-        decoded = normalize_srt_newlines(decoded)
-        if decoded.startswith("\ufeff"):
-            decoded = decoded[1:]
-        if track.extension in {".ass", ".ssa"}:
-            produced_text = ass_to_srt(decoded)
-        elif track.extension == ".vtt":
-            produced_text = vtt_to_srt(decoded)
-        elif track.extension == ".usf":
-            produced_text = usf_to_srt(decoded)
-        else:
-            produced_text = normalize_extracted_srt(decoded)
-        if not produced_text.strip():
-            return ExtractionOutcome(detail="the track converted to no subtitle cues")
+    try:
+        raw = staged.read_bytes()
+    except OSError as exc:
+        return ExtractionOutcome(detail=f"could not read the extracted track ({exc})")
+    try:
+        decoded = decode_subtitle_bytes(raw)
+    except (ValueError, OSError) as exc:
+        return ExtractionOutcome(detail=f"the extracted track is not readable text ({exc})")
+    decoded = normalize_srt_newlines(decoded)
+    while decoded.startswith("\ufeff"):
+        decoded = decoded[1:]
+    if track.extension in {".ass", ".ssa"}:
+        produced_text = ass_to_srt(decoded)
+    elif track.extension == ".vtt":
+        produced_text = vtt_to_srt(decoded)
+    elif track.extension == ".usf":
+        produced_text = usf_to_srt(decoded)
     else:
-        if backend is None:
-            return ExtractionOutcome(detail="no OCR backend is available for this image track")
-        ocr_output = tmp / f"track{track.track_id}.ocr.srt"
-        ok, ocr_error = run_ocr(
-            backend,
-            staged,
-            ocr_output,
-            track_id=track.track_id,
-            language=track.language or "eng",
-            timeout=opts.ocr_timeout_seconds,
-        )
-        if not ok:
-            return ExtractionOutcome(detail=ocr_error)
-        try:
-            produced_text = normalize_extracted_srt(
-                normalize_srt_newlines(ocr_output.read_text(encoding="utf-8", errors="replace"))
-            )
-        except OSError as exc:
-            return ExtractionOutcome(detail=f"could not read the OCR output ({exc})")
+        produced_text = normalize_extracted_srt(decoded)
+    if not produced_text.strip():
+        return ExtractionOutcome(detail="the track converted to no subtitle cues")
 
-    good, reason = extracted_subtitle_quality(produced_text, min_cues=opts.min_cues, method=method)
+    good, reason = subtitle_quality(produced_text, min_cues=opts.min_cues)
     if not good:
-        return ExtractionOutcome(detail=reason, track=track, method=method)
+        return ExtractionOutcome(detail=reason, track=track, method="text")
 
     cue_count = len(parse_srt_cues(produced_text))
     if opts.dry_run:
@@ -1691,8 +2360,7 @@ def _extract_one_track(
             ok=True,
             detail=f"embedded {track.label} converts to {cue_count} cues",
             track=track,
-            method=method,
-            ocr_backend=ocr_label,
+            method="text",
             cue_count=cue_count,
             dest=dest,
             text=produced_text,
@@ -1708,7 +2376,7 @@ def _extract_one_track(
             ok=True,
             detail=f"{dest.name} appeared during extraction; the existing sidecar was kept",
             track=track,
-            method=method,
+            method="text",
             cue_count=cue_count,
             dest=dest,
             text=produced_text,
@@ -1720,10 +2388,9 @@ def _extract_one_track(
         video,
         dest,
         track=track,
-        method=method,
+        method="text",
         cue_count=cue_count,
         sha256=sha256_text(produced_text),
-        ocr_backend=ocr_label,
     )
     log(
         f"Extracted {cue_count} cue(s) from the embedded {track.label} -> {dest.name}",
@@ -1731,11 +2398,9 @@ def _extract_one_track(
     )
     return ExtractionOutcome(
         ok=True,
-        detail=(f"extracted {cue_count} cue(s) from the embedded {track.label}"
-                + (f" via {ocr_label}" if method == "ocr" else "")),
+        detail=f"extracted {cue_count} cue(s) from the embedded {track.label}",
         track=track,
-        method=method,
-        ocr_backend=ocr_label,
+        method="text",
         cue_count=cue_count,
         dest=dest,
         text=produced_text,
@@ -1744,7 +2409,7 @@ def _extract_one_track(
 
 @dataclass
 class ExtractorConfig:
-    """Every knob of one extraction pass. No provider settings exist any more."""
+    """Every knob of one extraction pass, including the image-only tier."""
     library: Path
     log_file: Path | None
     report_file: Path
@@ -1753,26 +2418,37 @@ class ExtractorConfig:
     dry_run: bool = False
     limit: int = 0
     extract_min_cues: int = DEFAULT_EXTRACT_MIN_CUES
-    ocr_backend: str = OCR_BACKEND_AUTO
-    ocr_bin: str = ""
-    ocr_args: str = ""
-    ocr_timeout_seconds: float = DEFAULT_OCR_TIMEOUT_SEC
-    # 0 = no per-run cap on OCR jobs (they are local work, not provider quota)
-    ocr_limit: int = 0
+    # -- the image-only tier: exact-hash OpenSubtitles lookups --------------
+    download_enabled: bool = True
+    download_min_cues: int = DEFAULT_DOWNLOAD_MIN_CUES
+    # 0 = no cap on downloads this run. The provider's own daily allowance is
+    # the real limit (5 without an account, 20 with a free one), and the run
+    # stops asking the moment the API reports it is spent.
+    download_limit: int = 0
+    opensubtitles_api_key: str = ""
+    opensubtitles_username: str = ""
+    opensubtitles_password: str = ""
+    download_timeout_seconds: float = OPENSUBTITLES_TIMEOUT_SEC
     # Workers for the local pre-flight only (layout, existing sidecars,
-    # identity). 0 = decide from the CPU count. Provider requests, the quota
-    # ledger and every write stay on the single main thread whatever this says.
+    # identity). 0 = decide from the CPU count. Provider requests and every
+    # write stay on the single main thread whatever this says.
     workers: int = 0
 
-    def extract_options(self, *, ocr_allowed: bool = True, dry_run: bool = False) -> ExtractOptions:
+    def extract_options(self, *, dry_run: bool = False) -> ExtractOptions:
         return ExtractOptions(
             enabled=True,
-            ocr_backend=self.ocr_backend,
-            ocr_bin=self.ocr_bin,
-            ocr_args=self.ocr_args,
-            ocr_timeout_seconds=self.ocr_timeout_seconds,
-            ocr_allowed=ocr_allowed,
             min_cues=self.extract_min_cues,
+            dry_run=dry_run,
+        )
+
+    def download_options(self, *, dry_run: bool = False, enabled: bool = True) -> DownloadOptions:
+        return DownloadOptions(
+            enabled=enabled and self.download_enabled,
+            api_key=self.opensubtitles_api_key,
+            username=self.opensubtitles_username,
+            password=self.opensubtitles_password,
+            timeout_seconds=self.download_timeout_seconds,
+            min_cues=self.download_min_cues,
             dry_run=dry_run,
         )
 
@@ -2032,7 +2708,7 @@ def coverage_count(results: Sequence[JobResult], *, dry_run: bool) -> int:
     """
     return sum(
         1 for result in results
-        if result.reason in (REASON_COVERED, REASON_EXTRACTED)
+        if result.reason in (REASON_COVERED, REASON_EXTRACTED, REASON_DOWNLOADED)
         or (dry_run and result.reason == REASON_DRY_RUN)
     )
 
@@ -2059,25 +2735,42 @@ def extraction_run(cfg: ExtractorConfig) -> tuple[list[JobResult], dict[str, Any
     The order of questions per movie is the whole policy:
 
     1. an existing validated ``.eng.srt`` beside the movie settles it - the
-       movie is reported as covered and nothing is extracted or rewritten.
-       An existing sidecar is authoritative;
-    2. otherwise the movie's own embedded English track is extracted into
-       the canonical sidecar (text via mkvextract, image via OCR, MP4
-       through the temporary bridge);
-    3. a movie with no usable embedded track is reported as needing
-       attention - there is no download to fall back to.
+       movie is reported as covered and nothing is extracted, downloaded or
+       rewritten. An existing sidecar is authoritative;
+    2. otherwise the movie's own embedded *text-based* English track is
+       extracted into the canonical sidecar (SRT/ASS/SSA/WebVTT/USF via
+       mkvextract, MP4 through the temporary bridge). This is local work and
+       always runs first;
+    3. a movie whose English subtitles exist only as bitmaps (PGS/VobSub/DVB)
+       takes one exact-moviehash OpenSubtitles lookup, which installs a
+       subtitle only when the provider matched this precise file;
+    4. anything still without a sidecar is reported as needing attention,
+       with the reason naming the fix.
     """
     results: list[JobResult] = []
-    # OCR jobs are minutes of local CPU each, so the run can cap them
-    # (--ocr-limit) independently of everything else.
-    ocr_jobs = 0
+    # The provider's daily allowance is the real cap (5 lookups without an
+    # account, 20 with a free one). The run stops asking once the API says it
+    # is spent, and --download-limit can cap a single run below that.
+    downloads_attempted = 0
+    image_only_movies = 0
+    quota_exhausted = False
+    download_notes: set[str] = set()
     extract_notes: set[str] = set()
 
-    videos = discover_videos(cfg.library, cfg.min_bytes)
+    scan = discover_videos(cfg.library, cfg.min_bytes)
+    videos = list(scan.videos)
     if cfg.limit > 0:
         videos = videos[: cfg.limit]
     total = len(videos)
     log(f"Found {total} eligible movies.", log_file=cfg.log_file)
+    # A silent filter is only silent if nobody counts what it removed.
+    if not total and (scan.below_min_size or scan.sample_named):
+        log(
+            f"Nothing eligible: {scan.below_min_size} movie file(s) are smaller than "
+            f"--min-size ({cfg.min_movie_size_mb:g} MB) and {scan.sample_named} are named "
+            "like a sample.",
+            level="WARNING", log_file=cfg.log_file,
+        )
 
     def emit(index: int, status: str, video: Path, detail: str) -> None:
         log(
@@ -2107,7 +2800,7 @@ def extraction_run(cfg: ExtractorConfig) -> tuple[list[JobResult], dict[str, Any
         if triage.sidecar_status == "covered" and triage.existing is not None:
             # The one rule that never bends: a movie that already has a
             # validated .eng.srt is not touched. No extraction attempt,
-            # nothing.
+            # no lookup, nothing.
             result = JobResult(video, "have", triage.sidecar_detail, triage.existing,
                                reason=REASON_COVERED)
             results.append(result)
@@ -2129,15 +2822,10 @@ def extraction_run(cfg: ExtractorConfig) -> tuple[list[JobResult], dict[str, Any
         outcome = extract_embedded_english_srt(
             video,
             extract_dest,
-            cfg.extract_options(
-                ocr_allowed=cfg.ocr_limit <= 0 or ocr_jobs < cfg.ocr_limit,
-                dry_run=cfg.dry_run,
-            ),
+            cfg.extract_options(dry_run=cfg.dry_run),
             log_file=cfg.log_file,
         )
         if outcome.ok:
-            if outcome.method == "ocr":
-                ocr_jobs += 1
             if cfg.dry_run:
                 result = JobResult(video, "dry-run", outcome.detail, extract_dest,
                                    reason=REASON_DRY_RUN)
@@ -2150,27 +2838,133 @@ def extraction_run(cfg: ExtractorConfig) -> tuple[list[JobResult], dict[str, Any
             emit(index, "EXTRACT", video, outcome.detail)
             continue
 
-        # Extraction produced nothing. Distinguish "nothing to extract"
-        # (the healthy common case) from per-track failures, and surface a
-        # missing toolchain once per run rather than once per movie.
-        detail = outcome.unavailable_reason or outcome.detail or "no usable embedded English subtitle track"
-        if outcome.unavailable_reason and outcome.unavailable_reason not in extract_notes:
-            extract_notes.add(outcome.unavailable_reason)
-            if "not installed" in outcome.unavailable_reason or "OCR" in outcome.unavailable_reason:
-                log(outcome.unavailable_reason, level="WARNING", log_file=cfg.log_file)
-        result = JobResult(video, "skip", detail, reason=REASON_NO_TRACK)
+        # Nothing was extracted. Two very different situations hide here:
+        # the movie may hold English subtitles only as bitmaps (the one case
+        # that earns a provider lookup), or it may have no usable English
+        # subtitle at all.
+        image_only = bool(outcome.image_tracks) and not outcome.text_tracks
+        if image_only:
+            # Counted here, where the fact is established, rather than from the
+            # reasons below: every way this tier can end (installed, capped,
+            # refused, previewed) is still the same image-only movie.
+            image_only_movies += 1
+        # A movie that did not qualify for the lookup keeps the empty outcome:
+        # no provider reason is invented for it, so nothing is logged.
+        download = DownloadOutcome()
+        if image_only and quota_exhausted:
+            download = DownloadOutcome(
+                detail=(
+                    "the OpenSubtitles daily download allowance was already spent "
+                    "earlier in this run; this image-only movie is reported for a human"
+                ),
+                reason=REASON_QUOTA_SPENT,
+            )
+        elif image_only and cfg.download_limit > 0 and downloads_attempted >= cfg.download_limit:
+            # The provider's allowance is not spent - this run's own cap is,
+            # and the two fixes are different (a re-run vs. a new key), so the
+            # cap says so in its own words.
+            download = DownloadOutcome(
+                detail=(
+                    f"this run's --download-limit ({cfg.download_limit}) was reached "
+                    "before this movie's lookup; re-run (or raise the limit) to try it"
+                ),
+                reason=REASON_IMAGE_ONLY,
+            )
+        elif image_only:
+            download = download_hash_matched_srt(
+                video,
+                extract_dest,
+                cfg.download_options(dry_run=cfg.dry_run),
+                snapshot=triage.snapshot,
+                log_file=cfg.log_file,
+            )
+        if download.ok and download.dest is not None and not download.covered_by_other:
+            if not cfg.dry_run:
+                downloads_attempted += 1
+                if download.remaining == 0:
+                    # The provider's own answer says the allowance is gone;
+                    # every later lookup would be refused, so stop asking.
+                    quota_exhausted = True
+            detail = download.detail or "downloaded a subtitle from OpenSubtitles"
+            if cfg.dry_run:
+                # A previewed download consumes the run's budget too: the
+                # report promises a forecast, and a live run with the same
+                # arguments would have spent this one on this movie.
+                downloads_attempted += 1
+                result = JobResult(video, "dry-run", detail, download.dest,
+                                   reason=REASON_DRY_RUN)
+                results.append(result)
+                emit(index, "DRYRUN", video, detail)
+                continue
+            result = JobResult(video, "downloaded", detail, download.dest,
+                               reason=REASON_DOWNLOADED)
+            results.append(result)
+            emit(index, "SUB", video, detail)
+            continue
+        if download.ok and download.covered_by_other and download.dest is not None:
+            result = JobResult(video, "have", download.detail, download.dest,
+                               reason=REASON_COVERED)
+            results.append(result)
+            emit(index, "HAVE", video, download.detail)
+            continue
+        if download.available and download.reason:
+            if download.candidate is not None:
+                downloads_attempted += 1
+            if download.reason == REASON_QUOTA_SPENT:
+                quota_exhausted = True
+                if download.reason not in download_notes:
+                    download_notes.add(download.reason)
+                    log(
+                        "OpenSubtitles reported the daily download allowance is spent; "
+                        "the remaining image-only movies will be reported for a human.",
+                        level="WARNING", log_file=cfg.log_file,
+                    )
+            detail = download.detail or download.unavailable_reason
+            result = JobResult(video, "skip", detail, reason=download.reason)
+            results.append(result)
+            emit(index, "NO-SUBS", video, detail)
+            continue
+        if download.unavailable_reason and download.unavailable_reason not in download_notes:
+            download_notes.add(download.unavailable_reason)
+            log(download.unavailable_reason, log_file=cfg.log_file)
+
+        # No sidecar, no downloadable match: this is the human's call now.
+        if image_only:
+            # The movie *has* English subtitles - as bitmaps. The only route
+            # left is the provider lookup, so the report says why that did not
+            # run / did not help, instead of pretending there is no track.
+            reason = download.reason or REASON_IMAGE_ONLY
+            detail = download.detail or download.unavailable_reason or (
+                "the movie's only English subtitles are image-based; no exact-hash "
+                "OpenSubtitles match was installed"
+            )
+        else:
+            reason = REASON_NO_TRACK
+            detail = outcome.unavailable_reason or outcome.detail or (
+                "no usable embedded English subtitle track"
+            )
+            if outcome.unavailable_reason and outcome.unavailable_reason not in extract_notes:
+                extract_notes.add(outcome.unavailable_reason)
+                if "not installed" in outcome.unavailable_reason:
+                    log(outcome.unavailable_reason, level="WARNING", log_file=cfg.log_file)
+        result = JobResult(video, "skip", detail, reason=reason)
         results.append(result)
         emit(index, "NO-SUBS", video, detail)
 
     summary = {
         "movies_discovered": total,
+        "files_below_min_size": scan.below_min_size,
+        "files_sample_named": scan.sample_named,
         "coverage_covered": coverage_count(results, dry_run=cfg.dry_run),
         "coverage_total": total,
         "extracted_from_embedded": sum(
             1 for r in results if r.reason == REASON_EXTRACTED
         ),
-        "ocr_jobs": ocr_jobs,
-        "ledger_log": str(cfg.log_file) if cfg.log_file else "",
+        "downloaded_from_opensubtitles": sum(
+            1 for r in results if r.reason == REASON_DOWNLOADED
+        ),
+        "image_only_movies": image_only_movies,
+        "log_file": str(cfg.log_file) if cfg.log_file else "",
     }
     return results, summary
 
@@ -2218,14 +3012,54 @@ NEEDS_SUBTITLE_BUCKETS: tuple[NeedsBucket, ...] = (
         "folder by hand, and this movie will be picked up on the next run.",
     ),
     NeedsBucket(
+        REASON_QUOTA_SPENT,
+        "OPENSUBTITLES DOWNLOAD ALLOWANCE IS SPENT",
+        "re-run tomorrow, or add an account, or place the subtitle by hand",
+        "This image-only movie's lookup could not run because the daily download "
+        "allowance is used up (5 per day without an account, 20 with a free "
+        "OpenSubtitles account). Re-run after the provider's reset, set "
+        "OPENSUBTITLES_USERNAME and OPENSUBTITLES_PASSWORD for the larger allowance, "
+        "or place the .eng.srt yourself. Nothing local can recover these bitmaps.",
+    ),
+    NeedsBucket(
+        REASON_NO_HASH_MATCH,
+        "NO OPENSUBTITLES SUBTITLE MATCHES THIS EXACT FILE",
+        "place the subtitle by hand, or re-run when the provider has one",
+        "This movie's English subtitles are image-based, so a subtitle had to come "
+        "from OpenSubtitles - and no subtitle there matched this file's moviehash. "
+        "That usually means the release is rare, or the file is a remux the hash "
+        "database has never seen. This tool never guesses by title or release name, "
+        "because a wrong-cut subtitle is worse than none: find the right .eng.srt "
+        "yourself, or re-run later.",
+    ),
+    NeedsBucket(
+        REASON_DOWNLOAD_FAILED,
+        "OPENSUBTITLES LOOKUP FAILED",
+        "read the log entry, then re-run",
+        "The exact-hash lookup or the download itself failed - a network problem, a "
+        "provider error, or an answer that did not pass the subtitle quality gate. "
+        "The log carries the exact reason; fix it and re-run.",
+    ),
+    NeedsBucket(
+        REASON_IMAGE_ONLY,
+        "OPENSUBTITLES LOOKUP NOT ATTEMPTED",
+        "set OPENSUBTITLES_API_KEY (or re-enable downloads), then re-run",
+        "This movie's English subtitles are image-based, which leaves the exact-hash "
+        "OpenSubtitles lookup as the only route left - and that lookup was not run "
+        "for this movie (no API key configured, --no-download, or this run's "
+        "--download-limit was already reached). Set the key (see .env.example) and "
+        "re-run, or place the .eng.srt yourself.",
+    ),
+    NeedsBucket(
         REASON_NO_TRACK,
         "NO USABLE EMBEDDED ENGLISH TRACK",
         "add an .eng.srt yourself",
-        "This movie has no external English subtitle and no embedded track this tool "
-        "can convert (only forced/signs-only streams, image tracks with no OCR backend "
-        "installed, or nothing at all). Subtitle downloading was removed from this "
-        "toolkit, so the fix is a human one: find the subtitle and place it beside the "
-        "movie. See the log for the per-track reasons.",
+        "This movie has no external English subtitle, no extracted text track, and no "
+        "image-only subtitles that an OpenSubtitles lookup could stand in for (only "
+        "forced/signs-only streams, or nothing at all) - or it could not be inspected at "
+        "all, which the line under it says (a missing MKVToolNix is installed, not "
+        "worked around). Otherwise the fix is a human one: find the subtitle and place "
+        "it beside the movie. See the log for the per-track reasons.",
     ),
     NeedsBucket(
         REASON_ERROR,
@@ -2236,20 +3070,33 @@ NEEDS_SUBTITLE_BUCKETS: tuple[NeedsBucket, ...] = (
     ),
 )
 
+# Every reason a run can carry, in the order the report lists them.
+DOWNLOAD_REASONS: tuple[str, ...] = (
+    REASON_DOWNLOADED,
+    REASON_IMAGE_ONLY,
+    REASON_NO_HASH_MATCH,
+    REASON_QUOTA_SPENT,
+    REASON_DOWNLOAD_FAILED,
+)
+
 
 def group_results(
     results: Sequence[JobResult],
-) -> tuple[dict[str, list[tuple[Path, str]]], list[JobResult], list[JobResult], list[JobResult]]:
-    """Split one run into (needs buckets, covered, extracted, dry-run)."""
+) -> tuple[dict[str, list[tuple[Path, str]]], list[JobResult], list[JobResult],
+           list[JobResult], list[JobResult]]:
+    """Split one run into (needs buckets, covered, extracted, downloaded, dry-run)."""
     buckets: dict[str, list[tuple[Path, str]]] = {bucket.reason: [] for bucket in NEEDS_SUBTITLE_BUCKETS}
     covered: list[JobResult] = []
     dry_run: list[JobResult] = []
     extracted: list[JobResult] = []
+    downloaded: list[JobResult] = []
     for result in results:
         if result.reason == REASON_COVERED:
             covered.append(result)
         elif result.reason == REASON_EXTRACTED:
             extracted.append(result)
+        elif result.reason == REASON_DOWNLOADED:
+            downloaded.append(result)
         elif result.reason == REASON_DRY_RUN:
             dry_run.append(result)
         elif result.reason in buckets:
@@ -2261,41 +3108,80 @@ def group_results(
     covered.sort(key=lambda item: str(item.video).casefold())
     dry_run.sort(key=lambda item: str(item.video).casefold())
     extracted.sort(key=lambda item: str(item.video).casefold())
-    return buckets, covered, extracted, dry_run
+    downloaded.sort(key=lambda item: str(item.video).casefold())
+    return buckets, covered, extracted, downloaded, dry_run
+
 
 def build_report(results: Sequence[JobResult], cfg: ExtractorConfig, summary: dict[str, Any]) -> str:
     """Render the whole run as one report a human can act on in ten seconds."""
-    buckets, covered, extracted, dry_run = group_results(results)
+    buckets, covered, extracted, downloaded, dry_run = group_results(results)
     needs = sum(len(items) for items in buckets.values())
     total = int(summary.get("movies_discovered") or len(results))
+    below_min_size = int(summary.get("files_below_min_size") or 0)
+    sample_named = int(summary.get("files_sample_named") or 0)
     covered_count = int(summary.get("coverage_covered", len(covered) + len(extracted)
+                                    + len(downloaded)
                                     + (len(dry_run) if cfg.dry_run else 0)) or 0)
     coverage_pct = (100.0 * covered_count / total) if total else 100.0
+    # Zero movies is a finding, not a pass: either the library is empty or the
+    # filters removed everything, and only the walk knows which.
+    filtered_everything = total == 0 and (below_min_size or sample_named) > 0
+    if filtered_everything:
+        reasons = []
+        if below_min_size:
+            reasons.append(f"{below_min_size} smaller than --min-size ({cfg.min_movie_size_mb:g} MB)")
+        if sample_named:
+            reasons.append(f"{sample_named} named like a sample")
+        skipped_text = " and ".join(reasons)
+    else:
+        skipped_text = ""
 
     report = Report(
-        "JELLYFIN EMBEDDED SUBTITLE EXTRACTION REPORT",
-        f"One validated external English {EXTERNAL_SRT_SUFFIX} per movie \u00b7 built from the movie's own tracks",
+        "JELLYFIN SUBTITLE EXTRACTION REPORT",
+        f"One validated external English {EXTERNAL_SRT_SUFFIX} per movie "
+        f"\u00b7 from the movie's own tracks, or an exact-hash OpenSubtitles match",
     )
     report.metas([
         ("Generated", f"{utc_timestamp()} (UTC)"),
         ("Library", cfg.library),
         ("Embedded tracks", extract_banner_text(cfg)),
+        ("Image-only fallback", download_banner_text(cfg)),
         ("Triage", describe_workers(
             resolve_workers(cfg.workers, cap=MAX_TRIAGE_WORKERS), "movie")),
-        ("Ledger", cfg.log_file or "(none)"),
+        ("Log", cfg.log_file or "(none)"),
     ])
 
+    if filtered_everything:
+        coverage_row: tuple[object, str, str] = (
+            "n/a", "COVERAGE: nothing was inspected",
+            f"no movie was eligible: {skipped_text}",
+        )
+    elif total == 0:
+        coverage_row = ("n/a", "COVERAGE: no movie files found",
+                        "check the library root and that the movies are not in a skipped folder")
+    else:
+        coverage_row = (
+            f"{covered_count}/{total} ({coverage_pct:.1f}%)",
+            "COVERAGE: movies with a validated English SRT" + (" (would be covered)" if cfg.dry_run else ""),
+            "the goal: 100% - every uncovered movie is named below",
+        )
+
     rows: list[tuple[object, str, str]] = [
-        (f"{covered_count}/{total} ({coverage_pct:.1f}%)",
-         "COVERAGE: movies with a validated English SRT" + (" (would be covered)" if cfg.dry_run else ""),
-         "the goal: 100% - every uncovered movie is named below"),
+        coverage_row,
         (len(covered), "Already have .eng.srt", "authoritative; never re-extracted"),
         (len(extracted), "Extracted this run", f"written as <movie>{EXTERNAL_SRT_SUFFIX}"),
+        (len(downloaded), "Downloaded from OpenSubtitles",
+         "exact moviehash match; written as <movie>" + EXTERNAL_SRT_SUFFIX),
     ]
     if dry_run or cfg.dry_run:
-        rows.append((len(dry_run), "Dry-run extractions", "no files were written"))
-    rows.append((needs, "NEED ATTENTION", "no sidecar and no usable embedded track"))
-    rows.append((total, "Movies in the library", "every folder holding an eligible MKV or MP4"))
+        rows.append((len(dry_run), "Dry-run extractions", "no files were written; "
+                     "a preview never spends a provider download"))
+    rows.append((needs, "NEED ATTENTION", "no sidecar and no subtitle this tool could obtain"))
+    if filtered_everything:
+        rows.append((total, "Movies inspected",
+                     f"none eligible: {skipped_text}; raise --min-size or pass 0 to include them"))
+    else:
+        rows.append((total, "Movies in the library", "every folder holding an eligible MKV or MP4"))
     report.blank()
     report.scorecard(rows)
 
@@ -2306,6 +3192,16 @@ def build_report(results: Sequence[JobResult], cfg: ExtractorConfig, summary: di
         count = len(buckets[first_action.reason])
         report.paragraph(
             f"Start here: {count} movie(s) in \"{first_action.title}\" \u00b7 {first_action.quick}."
+        )
+    elif filtered_everything:
+        report.paragraph(
+            f"Nothing was inspected: {skipped_text}. This is a filtering result, not "
+            f"coverage - raise --min-size (or pass --min-size 0) and run again."
+        )
+    elif total == 0:
+        report.paragraph(
+            "No movie files were found under the library root. Check the path, and that "
+            "the movies are not inside a skipped folder."
         )
     elif needs == 0:
         report.paragraph(
@@ -2319,13 +3215,20 @@ def build_report(results: Sequence[JobResult], cfg: ExtractorConfig, summary: di
         count=needs,
         total=total,
         intro=(
-            "These movies have no external English subtitle and no embedded track this "
-            "tool could convert. Subtitle downloading was removed from this toolkit, so "
-            "each one is a human decision: place the subtitle yourself. Groups are "
-            "ordered cheapest fix first."
+            "These movies have no external English subtitle, no text-based embedded "
+            "track to extract, and no exact-hash OpenSubtitles match that could stand "
+            "in for image-based subtitles. Each one is now a human decision: place the "
+            "subtitle yourself. Groups are ordered by how close the fix is."
         ),
     )
-    if needs == 0:
+    if needs == 0 and filtered_everything:
+        report.paragraph(
+            "Nothing was inspected, so nothing can be claimed about these movies "
+            f"({skipped_text})."
+        )
+    elif needs == 0 and total == 0:
+        report.paragraph("No movie files were found to inspect.")
+    elif needs == 0:
         report.paragraph("None. Every movie already has a validated external English subtitle.")
     else:
         for bucket in NEEDS_SUBTITLE_BUCKETS:
@@ -2340,17 +3243,35 @@ def build_report(results: Sequence[JobResult], cfg: ExtractorConfig, summary: di
             )
 
     # ---- what this run changed -------------------------------------------
+    if downloaded:
+        report.section(
+            "DOWNLOADED FROM OPENSUBTITLES BY EXACT MOVIEHASH",
+            count=len(downloaded),
+            total=total,
+            intro=(
+                "These movies carried English subtitles only as images (PGS/VobSub/DVB), "
+                "which this tool does not OCR. It asked OpenSubtitles for subtitles "
+                "matching this precise file's moviehash - the release, not a title "
+                "guess - and installed the best English match as the canonical sidecar. "
+                "The lookup never runs for a movie that already has a usable text track."
+            ),
+        )
+        report.entries(
+            [{"text": movie_label(result.video, cfg.library), "detail": result.detail}
+             for result in downloaded],
+        )
+
     if extracted:
         report.section(
             "EXTRACTED FROM THE MOVIE'S OWN EMBEDDED TRACK",
             count=len(extracted),
             total=total,
             intro=(
-                "These movies carried an English subtitle track. It was extracted to the "
-                f"canonical <movie>{EXTERNAL_SRT_SUFFIX}: exact for this release, and its cues "
-                "come from the container's own timeline, so no offline timing correction "
-                "is needed. mkv_track_cleaner.py then strips every embedded subtitle, "
-                "leaving this sidecar as the sole subtitle option."
+                "These movies carried a text-based English subtitle track. It was "
+                f"extracted to the canonical <movie>{EXTERNAL_SRT_SUFFIX}: exact for this "
+                "release, and its cues come from the container's own timeline, so no "
+                "offline timing correction is needed. mkv_track_cleaner.py then strips "
+                "every embedded subtitle, leaving this sidecar as the sole subtitle option."
             ),
         )
         report.entries(
@@ -2391,10 +3312,23 @@ def build_report(results: Sequence[JobResult], cfg: ExtractorConfig, summary: di
             detail_column=48,
         )
 
+    if filtered_everything:
+        coverage_line = (
+            f"Coverage this run: nothing was inspected - {skipped_text}."
+        )
+    elif total == 0:
+        coverage_line = "Coverage this run: no movie files were found."
+    else:
+        coverage_line = (
+            f"Coverage this run: {covered_count} of {total} movie(s) "
+            f"({coverage_pct:.1f}%) end with a validated external English SRT."
+        )
     report.footer([
-        f"Coverage this run: {covered_count} of {total} movie(s) "
-        f"({coverage_pct:.1f}%) end with a validated external English SRT.",
+        coverage_line,
         f"Extraction provenance ledger  {extracted_ledger_path()}",
+        "Subtitles come from the movie's own tracks whenever they can; the "
+        "OpenSubtitles lookup runs only for image-only movies, matched by exact file "
+        "hash, and never replaces a sidecar that is already there.",
         f"This report  {cfg.report_file}",
         "Re-running is always safe: covered movies are skipped without reading the "
         "movie, and a sidecar this tool wrote is never written twice.",
@@ -2412,19 +3346,38 @@ def write_report(results: Sequence[JobResult], cfg: ExtractorConfig, summary: di
 def extract_banner_text(cfg: ExtractorConfig) -> str:
     """One banner line saying what extraction can do on this machine.
 
-    Every binary is required or optional somewhere, so the run has to say up
-    front whether the movies' tracks are usable here - otherwise an
-    image-only library looks broken when it is really a missing OCR tool.
+    mkvextract is the one hard requirement. Image-based subtitles are not a
+    toolchain question any more - they are the case the provider tier exists
+    for - so the banner names that tier instead of an OCR backend.
     """
     if not find_mkvtoolnix_binary("mkvmerge") or not find_mkvtoolnix_binary("mkvextract"):
         return f"unavailable: {MKVTOOLNIX_INSTALL_HINT}"
-    backend, note = detect_ocr_backend(cfg.ocr_backend, explicit_bin=cfg.ocr_bin,
-                                       arg_template=cfg.ocr_args)
-    text_part = f"text tracks (SRT/SSA/ASS) with mkvextract (>= {cfg.extract_min_cues} cues)"
-    image_part = (f"image tracks (PGS/VobSub) with {backend.label}"
-                  if backend is not None else f"image tracks (PGS/VobSub) reported: {note}")
-    return f"{text_part}; {image_part}; MP4s read through a temporary MKV bridge"
+    return (
+        f"text tracks (SRT/SSA/ASS/WebVTT/USF) with mkvextract "
+        f"(>= {cfg.extract_min_cues} cues); "
+        f"MP4s read through a temporary MKV bridge; "
+        f"image tracks (PGS/VobSub/DVB) are reported, never OCR'd"
+    )
 
+
+def download_banner_text(cfg: ExtractorConfig) -> str:
+    """One banner line saying whether the image-only fallback can run.
+
+    The fallback is the one networked step in the toolkit, so the banner says
+    exactly whether it is armed - an operator reading a report should never
+    have to guess whether a missing subtitle was a failed lookup or a
+    disabled one.
+    """
+    if not cfg.download_enabled:
+        return "disabled (--no-download): image-only movies are reported for a human"
+    if not cfg.opensubtitles_api_key:
+        return f"offline: {OPENSUBTITLES_KEY_HINT}"
+    account = "with a signed-in account" if (cfg.opensubtitles_username and cfg.opensubtitles_password) else "API key only"
+    cap = f", at most {cfg.download_limit} this run" if cfg.download_limit > 0 else ""
+    return (
+        "enabled: one exact-moviehash lookup per image-only movie "
+        f"({account}{cap})"
+    )
 
 
 # =============================================================================
@@ -2435,10 +3388,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Extract one validated external English SRT per movie from its own "
-            "embedded subtitle track. An existing .eng.srt beside a movie is "
-            "authoritative and is never re-extracted or rewritten. There is no "
-            "subtitle downloading: a movie with no usable embedded track and no "
-            "sidecar is reported for manual attention."
+            "embedded text-based subtitle track, written beside the movie as "
+            "<movie>.eng.srt. An existing .eng.srt beside a movie is authoritative "
+            "and is never re-extracted or rewritten. If the movie's English "
+            "subtitles exist only as images (PGS/VobSub/DVB), one OpenSubtitles "
+            "lookup by the movie file's exact hash can supply a matching English "
+            "subtitle; there is no title search and no OCR."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -2459,40 +3414,52 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Preview what would be extracted; no sidecar is written "
                              "(an MP4's temporary probe bridge is still built outside the library)")
     parser.add_argument("--extract-min-cues", type=int, default=DEFAULT_EXTRACT_MIN_CUES, metavar="N",
-                        help="Reject an embedded track with fewer than N cues as signs/songs-only")
-    parser.add_argument("--ocr-backend", default=OCR_BACKEND_AUTO, choices=list(OCR_BACKEND_CHOICES),
-                        help="OCR program for image-based tracks (PGS/VobSub): auto picks the first "
-                             "one installed; none disables image tracks entirely")
-    parser.add_argument("--ocr-bin", default="", metavar="PATH",
-                        help="Path to the OCR program or .NET dll (PgsToSrt) instead of searching PATH")
-    parser.add_argument("--ocr-args", default="", metavar="ARGS",
-                        help="Argument template for --ocr-backend custom, e.g. \"{input}\" \"{output}\" "
-                             "(placeholders: {input} {output} {track} {lang})")
-    parser.add_argument("--ocr-timeout", type=float, default=DEFAULT_OCR_TIMEOUT_SEC, metavar="SEC",
-                        help="Per-movie OCR time limit (0 disables the limit)")
-    parser.add_argument("--ocr-limit", type=int, default=0, metavar="N",
-                        help="OCR at most N movies per run (0 means no cap; OCR is minutes of local CPU)")
+                        help="Reject a subtitle with fewer than N cues as signs/songs-only "
+                             "(applies to extracted tracks and downloads alike)")
+    parser.add_argument("--no-download", action="store_true",
+                        help="Never contact OpenSubtitles; image-only movies are reported "
+                             "for a human instead")
+    parser.add_argument("--download-limit", type=int, default=0, metavar="N",
+                        help="At most N OpenSubtitles downloads per run (0 means no run-level "
+                             "cap; the provider's own daily allowance still applies). "
+                             "--dry-run counts the downloads it previews, so a preview "
+                             "matches the live run")
+    parser.add_argument("--download-min-cues", type=int, default=DEFAULT_DOWNLOAD_MIN_CUES, metavar="N",
+                        help="Reject a downloaded subtitle with fewer than N cues")
+    parser.add_argument("--download-timeout", type=float,
+                        default=OPENSUBTITLES_TIMEOUT_SEC, metavar="SEC",
+                        help="Per-request OpenSubtitles time limit")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
 
 def extractor_config_from_args(args: argparse.Namespace) -> ExtractorConfig:
+    # A configured .env beside the scripts (or a real environment variable)
+    # carries the OpenSubtitles credentials; nothing is ever passed on the
+    # command line where it would end up in a shell history or a process list.
+    api_key, username, password = opensubtitles_settings_from_env()
+    # Numbers are taken as typed, never clamped: a negative --download-limit
+    # silently becoming "no cap" would spend provider quota the operator was
+    # trying to bound, and validate_config already reports every out-of-range
+    # flag by name.
     return ExtractorConfig(
         library=args.source.resolve(),
         log_file=args.log.resolve() if args.log else None,
         report_file=args.report.resolve(),
         min_movie_size_mb=float(args.min_size),
-        lock_timeout_seconds=max(0.0, float(args.lock_timeout)),
+        lock_timeout_seconds=float(args.lock_timeout),
         workers=int(args.workers),
         dry_run=bool(args.dry_run),
-        limit=max(0, int(args.limit)),
-        extract_min_cues=max(1, int(args.extract_min_cues)),
-        ocr_backend=str(args.ocr_backend),
-        ocr_bin=str(args.ocr_bin),
-        ocr_args=str(args.ocr_args),
-        ocr_timeout_seconds=max(0.0, float(args.ocr_timeout)),
-        ocr_limit=max(0, int(args.ocr_limit)),
+        limit=int(args.limit),
+        extract_min_cues=int(args.extract_min_cues),
+        download_enabled=not bool(args.no_download),
+        download_limit=int(args.download_limit),
+        download_min_cues=int(args.download_min_cues),
+        download_timeout_seconds=float(args.download_timeout),
+        opensubtitles_api_key=api_key,
+        opensubtitles_username=username,
+        opensubtitles_password=password,
     )
 
 
@@ -2500,14 +3467,14 @@ def validate_config(cfg: ExtractorConfig) -> list[str]:
     errors: list[str] = []
     if not cfg.library.is_dir() or cfg.library.is_symlink():
         errors.append("--source must be an existing non-symlink movie-library directory")
-    if cfg.ocr_backend not in OCR_BACKEND_CHOICES:
-        errors.append(f"--ocr-backend must be one of: {', '.join(OCR_BACKEND_CHOICES)}")
     if cfg.extract_min_cues < 1:
         errors.append("--extract-min-cues must be at least 1")
-    if cfg.ocr_timeout_seconds < 0:
-        errors.append("--ocr-timeout must be zero (no limit) or greater")
-    if cfg.ocr_limit < 0:
-        errors.append("--ocr-limit must be zero (no cap) or greater")
+    if cfg.download_min_cues < 1:
+        errors.append("--download-min-cues must be at least 1")
+    if cfg.download_limit < 0:
+        errors.append("--download-limit must be zero (no run cap) or greater")
+    if cfg.download_timeout_seconds <= 0:
+        errors.append("--download-timeout must be greater than zero")
     if cfg.workers < 0:
         errors.append("--workers must be non-negative (0 = decide from the CPU count)")
     if cfg.min_movie_size_mb < 0 or cfg.lock_timeout_seconds < 0 or cfg.limit < 0:
@@ -2533,16 +3500,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         mode = "DRY-RUN (nothing will be written)" if cfg.dry_run else "LIVE"
         print_text(report_banner(
-            "JELLYFIN EMBEDDED ENGLISH SRT EXTRACTOR",
+            "JELLYFIN ENGLISH SRT EXTRACTOR",
             f"One validated external English {EXTERNAL_SRT_SUFFIX} per movie",
             [
                 ("Mode", mode),
                 ("Library", cfg.library),
                 ("Policy", "English human-authored UTF-8 SRT; an existing sidecar is authoritative"),
                 ("Embedded tracks", extract_banner_text(cfg)),
+                ("Image-only fallback", download_banner_text(cfg)),
                 ("Triage", describe_workers(
                     resolve_workers(cfg.workers, cap=MAX_TRIAGE_WORKERS), "movie")),
-                ("Ledger", cfg.log_file),
+                ("Log", cfg.log_file),
                 ("Report", cfg.report_file),
             ],
         ))
@@ -2565,11 +3533,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 def run_self_tests() -> int:
     """Field smoke test: can this copy judge a subtitle and name its sidecar?
 
-    The extraction paths (probe, classify, convert, OCR, the MP4 bridge and
-    the provenance ledger) are covered exhaustively in ``tests/``. The two
-    things worth re-checking on an unfamiliar machine are the sidecar
-    contract and the provenance ledger, because a wrong one silently breaks
-    the rest of the pipeline.
+    The extraction paths (probe, classify, convert, the MP4 bridge and the
+    provenance ledger) are covered exhaustively in ``tests/``. The things
+    worth re-checking on an unfamiliar machine are the sidecar contract, the
+    moviehash this tool sends to OpenSubtitles, and the provenance ledger,
+    because a wrong one silently breaks the rest of the pipeline.
     """
     def a_real_srt_validates() -> bool:
         with tempfile.TemporaryDirectory(prefix="extractor_smoke_") as td:
@@ -2586,6 +3554,33 @@ def run_self_tests() -> int:
     def the_sidecar_path_is_canonical() -> bool:
         movie = Path("/library/Movie (2020)/Movie (2020).mkv")
         return exact_external_english_srt_path(movie).name == "Movie (2020).eng.srt"
+
+    def the_moviehash_matches_the_documented_algorithm() -> bool:
+        # An all-zero 128 KiB file hashes to its own size: no chunk contributes.
+        with tempfile.TemporaryDirectory(prefix="extractor_smoke_") as td:
+            movie = Path(td) / "Movie (2020).mkv"
+            movie.write_bytes(b"\0" * (2 * 65536))
+            return moviehash_of_file(movie) == ("0000000000020000", 2 * 65536)
+
+    def a_file_below_the_hash_floor_is_refused() -> bool:
+        with tempfile.TemporaryDirectory(prefix="extractor_smoke_") as td:
+            movie = Path(td) / "Small.mkv"
+            movie.write_bytes(b"\0" * 1024)
+            try:
+                moviehash_of_file(movie)
+            except ValueError:
+                return True
+            return False
+
+    def a_foreign_download_link_is_refused() -> bool:
+        # A link that is not HTTPS on the provider's own host never gets read.
+        for link in ("https://evil.example/SRT.srt", "http://opensubtitles.com/x.srt"):
+            try:
+                _require_provider_link(link)
+            except OpenSubtitlesError:
+                continue
+            return False
+        return True
 
     def the_provenance_ledger_round_trips() -> bool:
         with tempfile.TemporaryDirectory(prefix="extractor_smoke_") as td:
@@ -2613,6 +3608,9 @@ def run_self_tests() -> int:
         ("a valid .eng.srt is accepted", a_real_srt_validates),
         ("an HTML error page is rejected", html_is_rejected),
         ("the sidecar path is canonical", the_sidecar_path_is_canonical),
+        ("the moviehash is the documented sum", the_moviehash_matches_the_documented_algorithm),
+        ("a file below the hash floor is refused", a_file_below_the_hash_floor_is_refused),
+        ("a foreign download link is refused", a_foreign_download_link_is_refused),
         ("the provenance ledger round-trips", the_provenance_ledger_round_trips),
     ])
 

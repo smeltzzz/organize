@@ -6,7 +6,10 @@ claims instead of restating them.
 ---
 
 The whole suite is **offline**: no media files, no `mkvmerge`, no `ffprobe`,
-no API keys, no network.
+no API keys, no network. The extractor's one networked tier (the exact-hash
+OpenSubtitles fallback) is driven through a fake `urlopen` that records
+requests and serves canned answers, and `tests/hermetic.py` pins the real
+`urlopen` out so no test can reach the network by accident.
 
 Offline means the suite does not *need* those things — not that it ignores
 them. `organize.py doctor` answers by probing the machine, and `--ffprobe` is a
@@ -19,7 +22,7 @@ patches the lookup itself, inside the test body.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,136 unit tests, ~25 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,174 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -37,6 +40,22 @@ The distribution is called **`organizekit`** — the name the shared package
 already has on disk — because `organize` on PyPI has belonged to an unrelated
 tabular-data parser since 2011, and `organize-media` to a media copier. The
 command you type is unaffected: `pip install organizekit` gives you `organize`.
+
+**Updating an installed copy** is one command; pip fetches the newest published
+version, which is whatever the latest git tag released:
+
+```bash
+python3 -m pip install --upgrade organizekit      # Windows: py -m pip install --upgrade organizekit
+organize --version                                # confirm the version you now have
+```
+
+Two things that look like failures and are not. If `organize` is not recognised
+afterwards, pip put it somewhere not on your `PATH` — the install worked. And if
+you have more than one Python, `pip -V` names the one an upgrade just changed;
+installing with a different interpreter leaves the old copy where it was (which
+is why the commands above spell out `python3 -m pip` rather than bare `pip`).
+A version is never replaced on PyPI — `--upgrade` moves forward to a higher one,
+never onto a different build of the same number.
 
 ## Cutting a release
 
@@ -167,8 +186,14 @@ themselves, and to a hand-planted hostile recovery journal pointing at
 `tests/fake_mkvmerge.py` — a real executable that speaks enough of the
 mkvmerge command line to be driven by the unmodified tool, so the subprocess
 launch, progress parsing, verification, atomic swap, locking and report are
-all the real ones. `tests/test_standardizer_destructive.py` does the same for
-the only tool that deletes folders, in all three maintenance modes.
+all the real ones. The same stand-in answers `mkvextract tracks`, which is what
+lets `tests/test_subtitle_extract_e2e.py` drive a real extraction: a real child
+process writing a real track file that the tool then has to convert, validate
+and publish beside the movie. `tests/test_subtitle_extract.py` is the
+decision-level half of that pair, with `tests/fakeprovider.py` serving the
+canned OpenSubtitles answers both suites use. `tests/test_standardizer_destructive.py`
+does the same for the only tool that deletes folders, in all three maintenance
+modes.
 
 Contributions: see [CONTRIBUTING.md](../CONTRIBUTING.md). Security reports: see
 [SECURITY.md](../SECURITY.md).

@@ -1,26 +1,38 @@
 """Tests for embedded-subtitle extraction in ``subtitle_extractor.py``.
 
 The whole suite is offline: ``subprocess.run`` is replaced with a fake that
-serves a canned ``mkvmerge -J`` payload and writes a canned subtitle track, so
-no MKVToolNix, no Tesseract, and no media file is needed.
+serves a canned ``mkvmerge -J`` payload and writes a canned subtitle track, and
+``urlopen`` is replaced with a fake transport that records requests and serves
+canned provider answers. No MKVToolNix, no media file and no network are
+needed.
 
 The properties pinned here are the ones that decide whether a sidecar is
-trustworthy: a movie's own track must only win when it is complete English
-(never a forced/signs-only stream, never OCR noise), and a sidecar built that
-way is recorded in the provenance ledger - while a sidecar that was already
-there before this tool ran is never touched at all.
+trustworthy: a movie's own *text* track must only win when it is complete
+English (never a forced/signs-only stream), the OpenSubtitles tier must only
+ever install a subtitle the provider matched to this exact file hash, and a
+sidecar built either way is recorded in the provenance ledger - while a sidecar
+that was already there before this tool ran is never touched at all.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
+import struct
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
+from fakeprovider import (
+    SRT_PAYLOAD,
+    FakeTransport,
+    download_answer,
+    http_error,
+    provider_entry,
+    search_answer,
+)
 
 import subtitle_extractor as sx
 
@@ -153,36 +165,30 @@ class QualityGateTests(unittest.TestCase):
         ])
 
     def test_complete_english_track_passes(self) -> None:
-        ok, reason = sx.extracted_subtitle_quality(
+        ok, reason = sx.subtitle_quality(
             self._cues("This is a line of English dialogue"))
         self.assertTrue(ok, reason)
 
     def test_signs_only_track_is_refused(self) -> None:
-        ok, reason = sx.extracted_subtitle_quality(
+        ok, reason = sx.subtitle_quality(
             sx.render_srt_cues([("00:00:01,000", "00:00:02,000", "Only line")]))
         self.assertFalse(ok)
         self.assertIn("signs/songs-only", reason)
 
     def test_cyrillic_track_is_refused(self) -> None:
-        ok, reason = sx.extracted_subtitle_quality(
+        ok, reason = sx.subtitle_quality(
             self._cues("Это предложение на русском языке"))
         self.assertFalse(ok)
         self.assertIn("not Latin-script", reason)
 
-    def test_ocr_noise_is_refused(self) -> None:
-        ok, reason = sx.extracted_subtitle_quality(
-            self._cues("||| ~~~ ### ||| ~~~"), method="ocr")
-        self.assertFalse(ok)
-        self.assertIn("noise", reason)
-
     def test_word_salad_is_refused(self) -> None:
-        ok, reason = sx.extracted_subtitle_quality(
+        ok, reason = sx.subtitle_quality(
             self._cues("Qwx zp vfg blrt mnk jklqwerty"))
         self.assertFalse(ok)
         self.assertIn("does not read as English", reason)
 
     def test_empty_text_is_refused(self) -> None:
-        ok, _reason = sx.extracted_subtitle_quality("")
+        ok, _reason = sx.subtitle_quality("")
         self.assertFalse(ok)
 
 
@@ -228,355 +234,449 @@ class TrackClassificationTests(unittest.TestCase):
         self.assertEqual(sx.classify_embedded_subtitle_tracks(tracks), [])
 
 
-class OcrBackendTests(unittest.TestCase):
-    def test_sup2srt_command(self) -> None:
-        backend = sx.OcrBackend(sx.OCR_BACKEND_SUP2SRT, "sup2srt + Tesseract", ("sup2srt",),
-                                frozenset({"PGS"}))
-        self.assertEqual(
-            backend.build_command(Path("/tmp/3.sup"), Path("/tmp/3.srt"), track_id=3, language="eng"),
-            ["sup2srt", "-l", "eng", "-o",
-             str(Path("/tmp/3.srt")), str(Path("/tmp/3.sup"))],
-        )
+class CommandLineTests(unittest.TestCase):
+    """Flags are taken as typed, and a bad number is reported, never repaired.
 
-    def test_pgsrip_command_and_language(self) -> None:
-        backend = sx.OcrBackend(sx.OCR_BACKEND_PGSRIP, "pgsrip + Tesseract", ("pgsrip",),
-                                frozenset({"PGS"}), output_mode="sibling")
-        # pgsrip filters by language itself and writes beside the input.
-        self.assertEqual(
-            backend.build_command(Path("/tmp/4.sup"), Path("/tmp/4.srt"),
-                                  track_id=4, language="eng"),
-            ["pgsrip", "-l", "en", str(Path("/tmp/4.sup"))],
-        )
-        self.assertEqual(backend.result_path(Path("/tmp/4.sup"), Path("/tmp/4.srt")),
-                         Path("/tmp/4.srt"))
-
-    def test_pgsrip_is_tried_first_when_auto_detecting(self) -> None:
-        self.assertEqual(sx.OCR_BACKEND_AUTO_ORDER[0], sx.OCR_BACKEND_PGSRIP)
-        self.assertIn(sx.OCR_BACKEND_PGSRIP, sx.OCR_BACKEND_CHOICES)
-
-    def test_backend_that_renames_its_output_is_still_found(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            tmp = Path(td)
-            source = tmp / "track4.sup"
-            source.write_bytes(b"pgs")
-            expected = tmp / "track4.srt"
-            self.assertIsNone(sx.find_sibling_srt(source, expected))
-            renamed = tmp / "track4.eng.srt"
-            renamed.write_text("1\n00:00:01,000 --> 00:00:02,000\nHi\n", encoding="utf-8")
-            self.assertEqual(sx.find_sibling_srt(source, expected), renamed)
-            expected.write_text("1\n00:00:01,000 --> 00:00:02,000\nHi\n", encoding="utf-8")
-            self.assertEqual(sx.find_sibling_srt(source, expected), expected,
-                             "the documented name always wins")
-
-    def test_subtitleedit_writes_beside_its_input(self) -> None:
-        backend = sx.OcrBackend(sx.OCR_BACKEND_SUBTITLEEDIT, "Subtitle Edit", ("SubtitleEdit",),
-                                frozenset({"PGS", "VOBSUB"}), output_mode="sibling")
-        argv = backend.build_command(Path("/tmp/3.sup"), Path("/tmp/out.srt"),
-                                     track_id=3, language="eng")
-        self.assertEqual(argv[:4],
-                         ["SubtitleEdit", "/convert", str(Path("/tmp/3.sup")), "srt"])
-        self.assertEqual(backend.result_path(Path("/tmp/3.sup"), Path("/tmp/out.srt")),
-                         Path("/tmp/3.srt"))
-
-    def test_custom_template_expands_placeholders(self) -> None:
-        backend = sx.OcrBackend(sx.OCR_BACKEND_CUSTOM, "custom", ("/opt/ocr.sh",),
-                                frozenset({"PGS"}), arg_template=("{input}", "{output}"))
-        self.assertEqual(
-            backend.build_command(Path("/tmp/3.sup"), Path("/tmp/o.srt"), track_id=3, language="en"),
-            ["/opt/ocr.sh", str(Path("/tmp/3.sup")), str(Path("/tmp/o.srt"))],
-        )
-
-    def test_backend_refuses_tracks_it_cannot_read(self) -> None:
-        backend = sx.OcrBackend(sx.OCR_BACKEND_SUP2SRT, "sup2srt", ("sup2srt",), frozenset({"PGS"}))
-        vobsub = sx.EmbeddedSubtitleTrack(2, "S_VOBSUB", "eng", "", "image", ".idx")
-        pgs = sx.EmbeddedSubtitleTrack(3, "S_HDMV/PGS", "eng", "", "image", ".sup")
-        self.assertFalse(backend.supports_track(vobsub))
-        self.assertTrue(backend.supports_track(pgs))
-
-    def test_none_backend_is_reported_not_fatal(self) -> None:
-        backend, note = sx.detect_ocr_backend(sx.OCR_BACKEND_NONE)
-        self.assertIsNone(backend)
-        self.assertIn("disabled", note)
-
-    def test_custom_backend_without_a_binary_explains_itself(self) -> None:
-        backend, note = sx.detect_ocr_backend(sx.OCR_BACKEND_CUSTOM, explicit_bin="",
-                                               arg_template="{input} {output}")
-        self.assertIsNone(backend)
-        self.assertIn("--ocr-bin", note)
-
-
-class ChoosingAnOcrBackendTests(unittest.TestCase):
-    """Which program will OCR an image track, and what it says when none will.
-
-    Four backends, four ways of being installed (a path handed in, a name on
-    PATH, a known install location, a Windows .exe under mono) and a custom
-    command an operator supplies themselves. None of it is fatal — an
-    image-only movie is simply reported as needing attention — so what matters
-    as much as the choice is that the note explains the fix.
+    A negative ``--download-limit`` quietly meaning "no cap" would spend
+    provider quota the operator was trying to bound, so the clamp that used to
+    hide these is gone and ``validate_config`` - whose checks for exactly these
+    ranges already existed - is the single gate.
     """
 
+    def config(self, *argv: str) -> sx.ExtractorConfig:
+        parser = sx.build_parser()
+        return sx.extractor_config_from_args(
+            parser.parse_args(["--source", tempfile.gettempdir(), *argv]))
+
+    def test_the_defaults_are_offline_and_uncapped(self) -> None:
+        cfg = self.config()
+        self.assertTrue(cfg.download_enabled)
+        self.assertEqual(cfg.download_limit, 0)
+        self.assertEqual(sx.validate_config(cfg), [], "the defaults must validate")
+
+    def test_a_negative_download_limit_is_reported_not_clamped(self) -> None:
+        cfg = self.config("--download-limit", "-1")
+        self.assertEqual(cfg.download_limit, -1, "the value is not silently rewritten")
+        self.assertTrue(any("--download-limit" in error for error in sx.validate_config(cfg)))
+
+    def test_a_zero_cue_floor_is_reported_not_clamped(self) -> None:
+        for flag in ("--download-min-cues", "--extract-min-cues"):
+            with self.subTest(flag=flag):
+                cfg = self.config(flag, "0")
+                self.assertTrue(any(flag in error for error in sx.validate_config(cfg)))
+
+    def test_a_nonpositive_timeout_is_reported_not_clamped(self) -> None:
+        cfg = self.config("--download-timeout", "0")
+        self.assertTrue(any("--download-timeout" in error for error in sx.validate_config(cfg)))
+
+    def test_the_no_download_switch_disables_the_tier(self) -> None:
+        cfg = self.config("--no-download")
+        self.assertFalse(cfg.download_enabled)
+        self.assertFalse(cfg.download_options().enabled)
+
+    def test_credentials_come_from_the_environment_and_nowhere_else(self) -> None:
+        parser = sx.build_parser()
+        flags = [flag for action in parser._actions for flag in action.option_strings]
+        self.assertNotIn("--opensubtitles-key", flags,
+                         "a key on the command line would land in shell history")
+        saved = os.environ.get("OPENSUBTITLES_API_KEY")
+        os.environ["OPENSUBTITLES_API_KEY"] = "  padded-key  "
+        try:
+            cfg = sx.extractor_config_from_args(parser.parse_args(
+                ["--source", tempfile.gettempdir()]))
+        finally:
+            if saved is None:
+                os.environ.pop("OPENSUBTITLES_API_KEY", None)
+            else:
+                os.environ["OPENSUBTITLES_API_KEY"] = saved
+        self.assertEqual(cfg.opensubtitles_api_key, "padded-key")
+
+
+class MoviehashTests(unittest.TestCase):
+    """The exact-file identity every provider lookup is keyed on."""
+
     def setUp(self) -> None:
-        self._td = tempfile.TemporaryDirectory(prefix="ocr_backend_")
+        self._td = tempfile.TemporaryDirectory(prefix="moviehash_")
         self.tmp = Path(self._td.name)
         self.addCleanup(self._td.cleanup)
 
-    def program(self, name: str = "ocr-tool") -> Path:
-        path = self.tmp / name
-        path.write_text("#!/bin/sh\n", encoding="utf-8")
-        return path
+    def test_the_hash_is_the_size_plus_the_two_chunk_sums(self) -> None:
+        # An all-zero file of exactly the minimum size: no chunk contributes,
+        # so the hash is the file size, and the size comes back with it.
+        movie = self.tmp / "Fake (2021).mkv"
+        movie.write_bytes(b"\0" * (2 * 65536))
+        self.assertEqual(sx.moviehash_of_file(movie), ("0000000000020000", 2 * 65536))
 
-    def nothing_on_path(self) -> None:
-        patcher = mock.patch.object(sx.shutil, "which", lambda _name: None)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+    def test_a_patterned_file_matches_the_documented_algorithm(self) -> None:
+        """The reference implementation, written out the long way."""
+        movie = self.tmp / "Fake (2021).mkv"
+        movie.write_bytes(bytes(range(256)) * 4096)  # 1 MiB, well over the floor
 
-        def _resolve_without_known(explicit: str, name: str, *search_paths: str) -> str | None:
-            if explicit:
-                pp = Path(explicit)
-                if pp.is_file():
-                    return str(pp)
-                found = sx.shutil.which(explicit)
-                if found:
-                    return found
-            found = sx.shutil.which(name)
-            if found:
-                return found
-            return None
+        def reference(path: Path) -> str:
+            with path.open("rb") as handle:
+                size = os.fstat(handle.fileno()).st_size
+                total = size
+                for _ in range(2):
+                    values = struct.unpack(f"<{65536 // 8}Q", handle.read(65536))
+                    total = (total + sum(values)) & 0xFFFFFFFFFFFFFFFF
+                return f"{total:016x}"
 
-        patcher2 = mock.patch.object(sx, "_resolve_program", side_effect=_resolve_without_known)
-        patcher2.start()
-        self.addCleanup(patcher2.stop)
-        patcher3 = mock.patch.object(sx, "_subtitleedit_program", lambda explicit="": None)
-        patcher3.start()
-        self.addCleanup(patcher3.stop)
-        patcher4 = mock.patch.object(sx, "_pgstosrt_program", lambda explicit="": None)
-        patcher4.start()
-        self.addCleanup(patcher4.stop)
+        self.assertEqual(sx.moviehash_of_file(movie)[0], reference(movie))
 
-    def on_path(self, **programs: str) -> None:
-        patcher = mock.patch.object(sx.shutil, "which", lambda name: programs.get(name))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+    def test_a_file_below_the_floor_is_refused(self) -> None:
+        movie = self.tmp / "Tiny.mkv"
+        movie.write_bytes(b"x" * 1024)
+        with self.assertRaises(ValueError):
+            sx.moviehash_of_file(movie)
 
-    # -- how a program is found --------------------------------------------
-
-    def test_a_path_handed_in_is_used_as_it_is(self) -> None:
-        self.nothing_on_path()
-        program = self.program("sup2srt")
-        backend = sx.build_ocr_backend(sx.OCR_BACKEND_SUP2SRT, str(program))
-        self.assertIsNotNone(backend)
-        assert backend is not None
-        self.assertEqual(backend.program, (str(program),))
-
-    def test_a_name_handed_in_is_looked_up_on_the_path(self) -> None:
-        self.on_path(**{"my-sup2srt": "/usr/local/bin/my-sup2srt"})
-        backend = sx.build_ocr_backend(sx.OCR_BACKEND_SUP2SRT, "my-sup2srt")
-        self.assertIsNotNone(backend)
-        assert backend is not None
-        self.assertEqual(backend.program, ("/usr/local/bin/my-sup2srt",))
-
-    def test_a_known_install_location_is_tried_after_the_path(self) -> None:
-        """Subtitle Edit and PgsToSrt are not usually on PATH at all."""
-        patcher = mock.patch.object(sx.shutil, "which", lambda _name: None)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        installed = self.program("SubtitleEdit.exe")
-        # _resolve_program is the shared lookup behind every backend; the
-        # known-location list is what makes a GUI install work unattended.
-        self.assertEqual(sx._resolve_program("", "SubtitleEdit", str(installed)),
-                         str(installed))
-        self.assertIsNone(sx._resolve_program("", "SubtitleEdit", str(self.tmp / "absent")))
-
-    @unittest.skipIf(os.name == "nt", "the mono wrapper is the non-Windows branch")
-    def test_a_windows_subtitle_edit_is_run_through_mono(self) -> None:
-        """A .NET .exe is not directly runnable off Windows.
-
-        This is where the mono wrapper used to be unreachable: the lookup
-        knows Subtitle Edit's Linux install locations, so it always resolved
-        the .exe first and the wrapper below it never ran.
-        """
-        self.on_path(mono="/usr/bin/mono")
-        exe = self.program("SubtitleEdit.exe")
-        backend = sx.build_ocr_backend(sx.OCR_BACKEND_SUBTITLEEDIT, str(exe))
-        self.assertIsNotNone(backend)
-        assert backend is not None
-        self.assertEqual(backend.program, ("/usr/bin/mono", str(exe)))
-        self.assertIn("VOBSUB", backend.supports)
-
-    @unittest.skipIf(os.name == "nt", "the mono wrapper is the non-Windows branch")
-    def test_subtitle_edit_without_mono_counts_as_not_installed(self) -> None:
-        self.nothing_on_path()
-        exe = self.program("SubtitleEdit.exe")
-        self.assertIsNone(sx.build_ocr_backend(sx.OCR_BACKEND_SUBTITLEEDIT, str(exe)))
-
-    def test_a_native_subtitle_edit_is_run_directly(self) -> None:
-        self.on_path(SubtitleEdit="/usr/bin/SubtitleEdit", mono="/usr/bin/mono")
-        backend = sx.build_ocr_backend(sx.OCR_BACKEND_SUBTITLEEDIT)
-        assert backend is not None
-        self.assertEqual(backend.program, ("/usr/bin/SubtitleEdit",))
-
-    def test_pgsrip_and_pgstosrt_are_built_when_present(self) -> None:
-        self.on_path(pgsrip="/usr/bin/pgsrip")
-        pgsrip = sx.build_ocr_backend(sx.OCR_BACKEND_PGSRIP)
-        self.assertIsNotNone(pgsrip)
-        assert pgsrip is not None
-        self.assertEqual(pgsrip.output_mode, "sibling", "pgsrip writes beside its input")
-
-        dll = self.program("PgsToSrt.dll")
-        self.on_path(dotnet="/usr/bin/dotnet")
-        pgstosrt = sx.build_ocr_backend(sx.OCR_BACKEND_PGSTOSRT, str(dll))
-        self.assertIsNotNone(pgstosrt)
-        assert pgstosrt is not None
-        self.assertIn(str(dll), pgstosrt.program)
-
-    def test_a_backend_this_tool_does_not_know_is_not_built(self) -> None:
-        self.assertIsNone(sx.build_ocr_backend("hand-typed"))
-
-    # -- what detect_ocr_backend decides and says --------------------------
-
-    def test_auto_takes_the_first_backend_it_finds(self) -> None:
-        self.on_path(sup2srt="/usr/bin/sup2srt")
-        backend, note = sx.detect_ocr_backend(sx.OCR_BACKEND_AUTO)
-        self.assertIsNotNone(backend)
-        assert backend is not None
-        self.assertEqual(backend.key, sx.OCR_BACKEND_SUP2SRT)
-        self.assertEqual(note, "")
-
-    def test_auto_with_nothing_installed_names_the_install(self) -> None:
-        self.nothing_on_path()
-        backend, note = sx.detect_ocr_backend(sx.OCR_BACKEND_AUTO)
-        self.assertIsNone(backend)
-        self.assertIn("no image-subtitle OCR backend found", note)
-        self.assertIn("pip install pgsrip", note)
-
-    def test_a_named_backend_is_the_only_one_tried(self) -> None:
-        self.on_path(sup2srt="/usr/bin/sup2srt")
-        backend, note = sx.detect_ocr_backend(sx.OCR_BACKEND_PGSRIP)
-        self.assertIsNone(backend, "asking for pgsrip must not silently use sup2srt")
-        self.assertIn("--ocr-backend pgsrip was not found", note)
-
-    def test_a_named_backend_that_is_installed_is_used(self) -> None:
-        self.on_path(sup2srt="/usr/bin/sup2srt")
-        backend, note = sx.detect_ocr_backend(sx.OCR_BACKEND_SUP2SRT)
-        self.assertIsNotNone(backend)
-        self.assertEqual(note, "")
-
-    def test_a_backend_name_that_does_not_exist_is_refused(self) -> None:
-        backend, note = sx.detect_ocr_backend("tesseract-by-hand")
-        self.assertIsNone(backend)
-        self.assertIn("unknown --ocr-backend", note)
-
-    # -- the custom command an operator supplies ---------------------------
-
-    def test_a_custom_command_needs_both_placeholders(self) -> None:
-        """Naming only the input was accepted until this test was written.
-
-        The message always said both were required, and it has to be: without
-        {output} the tool cannot know where the OCR result landed, so every
-        image track would fail minutes after the command was accepted.
-        """
-        program = self.program()
-        for template in ("--in {input}", "--out {output}", "--quiet"):
-            with self.subTest(template=template):
-                backend, note = sx.detect_ocr_backend(
-                    sx.OCR_BACKEND_CUSTOM, explicit_bin=str(program),
-                    arg_template=template)
-                self.assertIsNone(backend)
-                self.assertIn("{input} and {output}", note)
-
-    def test_a_custom_command_that_cannot_be_parsed_says_so(self) -> None:
-        program = self.program()
-        backend, note = sx.detect_ocr_backend(
-            sx.OCR_BACKEND_CUSTOM, explicit_bin=str(program),
-            arg_template='--in "{input} --out {output}')
-        self.assertIsNone(backend)
-        self.assertIn("--ocr-args could not be parsed", note)
-
-    def test_a_valid_custom_command_becomes_the_backend(self) -> None:
-        program = self.program()
-        backend, note = sx.detect_ocr_backend(
-            sx.OCR_BACKEND_CUSTOM, explicit_bin=str(program),
-            arg_template="--in {input} --out {output}")
-        self.assertEqual(note, "")
-        assert backend is not None
-        self.assertEqual(
-            backend.build_command(Path("/tmp/3.sup"), Path("/tmp/3.srt"),
-                                  track_id=3, language="eng"),
-            [str(program), "--in", str(Path("/tmp/3.sup")), "--out", str(Path("/tmp/3.srt"))],
-        )
+    def test_a_missing_file_is_an_error_not_a_hash(self) -> None:
+        with self.assertRaises(OSError):
+            sx.moviehash_of_file(self.tmp / "gone.mkv")
 
 
-class RunningTheOcrTests(unittest.TestCase):
-    """OCR is a minutes-long call to somebody else's program.
+class ProviderAnswerTests(unittest.TestCase):
+    """What the API's answer means, with no HTTP involved."""
 
-    Whatever it does — write the file asked for, write one next to its input,
-    fail loudly, fail silently — the caller gets back one boolean and one
-    sentence it can put in the report.
-    """
+    def test_a_hash_matched_english_subtitle_is_chosen(self) -> None:
+        candidates = sx.candidates_from_search(
+            json.loads(search_answer(provider_entry(11))), "test")
+        chosen, refusal = sx.choose_hash_match(candidates)
+        self.assertEqual(refusal, "")
+        assert chosen is not None
+        self.assertEqual(chosen.file_id, 11)
+        self.assertTrue(chosen.is_english)
+
+    def test_a_subtitle_that_is_not_a_hash_match_is_never_chosen(self) -> None:
+        candidates = sx.candidates_from_search(
+            json.loads(search_answer(provider_entry(11, hash_match=False))), "test")
+        chosen, refusal = sx.choose_hash_match(candidates)
+        self.assertIsNone(chosen)
+        self.assertIn("hash", refusal)
+
+    def test_a_plain_dialogue_subtitle_beats_a_hearing_impaired_one(self) -> None:
+        candidates = sx.candidates_from_search(json.loads(search_answer(
+            provider_entry(11, hearing_impaired=True, downloads=999),
+            provider_entry(12, hearing_impaired=False, downloads=1),
+        )), "test")
+        chosen, _ = sx.choose_hash_match(candidates)
+        assert chosen is not None
+        self.assertEqual(chosen.file_id, 12)
+
+    def test_forced_partial_and_machine_translated_subtitles_are_refused(self) -> None:
+        for kwargs in ({"foreign_parts_only": True}, {"machine_translated": True},
+                       {"ai_translated": True}):
+            with self.subTest(**kwargs):
+                candidates = sx.candidates_from_search(
+                    json.loads(search_answer(provider_entry(11, **kwargs))), "test")
+                chosen, refusal = sx.choose_hash_match(candidates)
+                self.assertIsNone(chosen)
+                self.assertTrue(refusal)
+
+    def test_a_subtitle_tagged_as_another_language_is_refused(self) -> None:
+        candidates = sx.candidates_from_search(
+            json.loads(search_answer(provider_entry(11, language="es"))), "test")
+        chosen, refusal = sx.choose_hash_match(candidates)
+        self.assertIsNone(chosen)
+        self.assertIn("English", refusal)
+
+    def test_an_entry_without_a_usable_file_id_is_dropped(self) -> None:
+        document = json.loads(search_answer(provider_entry(11, included=False)))
+        self.assertEqual(sx.candidates_from_search(document, "test"), [])
+
+    def test_a_document_without_a_subtitle_list_is_an_error(self) -> None:
+        with self.assertRaises(sx.OpenSubtitlesError):
+            sx.candidates_from_search({"total_count": 0}, "test")
+
+    def test_word_shaped_flags_are_read_as_flags(self) -> None:
+        entry = provider_entry(11)
+        entry["attributes"]["hearing_impaired"] = "true"
+        entry["attributes"]["moviehash_match"] = "TRUE"
+        candidates = sx.candidates_from_search(json.loads(search_answer(entry)), "test")
+        self.assertTrue(candidates[0].hearing_impaired)
+        self.assertTrue(candidates[0].moviehash_match)
+
+
+class OpenSubtitlesClientTests(unittest.TestCase):
+    """What actually leaves the machine: URL, params, headers, body."""
 
     def setUp(self) -> None:
-        self._td = tempfile.TemporaryDirectory(prefix="run_ocr_")
+        self._saved_sleep = None
+        self.addCleanup(self._restore_env)
+
+    def _restore_env(self) -> None:
+        os.environ.pop("OPENSUBTITLES_API_KEY", None)
+
+    def client(self, **kwargs: object) -> sx.OpenSubtitlesClient:
+        return sx.OpenSubtitlesClient("test-key", user_agent="organizekit v4.0.0",
+                                      **kwargs)  # type: ignore[arg-type]
+
+    def test_the_search_sends_the_hash_and_asks_for_hash_matches_only(self) -> None:
+        transport = FakeTransport(search_answer(provider_entry(11)))
+        with mock.patch.object(sx, "urlopen", transport):
+            found = self.client().search_by_movie_hash(
+                "8e245d9679d31e12", file_name="Fake (2021).mkv")
+        self.assertEqual(len(found), 1)
+        url = transport.urls()[0]
+        self.assertIn("moviehash=8e245d9679d31e12", url)
+        self.assertIn("moviehash_match=only", url)
+        self.assertIn("languages=en", url)
+        self.assertIn("query=Fake", url)
+        self.assertNotIn("moviebytesize", url)
+        self.assertEqual(transport.headers(0)["api-key"], "test-key")
+        self.assertEqual(transport.headers(0)["user-agent"], "organizekit v4.0.0")
+
+    def test_the_download_posts_the_file_id_with_both_headers(self) -> None:
+        transport = FakeTransport(download_answer())
+        with mock.patch.object(sx, "urlopen", transport), \
+                mock.patch.object(sx.OpenSubtitlesClient, "session_token",
+                                  return_value="session-token"):
+            download = self.client(username="user", password="pass").download_link(11)
+        self.assertEqual(download.link, "https://dl.opensubtitles.com/download/abc/Fake.2021.srt")
+        self.assertEqual(download.remaining, 4)
+        request = transport.requests[0]
+        self.assertEqual(json.loads(request.data.decode("utf-8")), {"file_id": 11, "sub_format": "srt"})
+        self.assertEqual(transport.headers(0)["authorization"], "Bearer session-token")
+
+    def test_a_foreign_download_link_is_refused_before_it_is_read(self) -> None:
+        for link in ("https://evil.example/x.srt", "http://opensubtitles.com/x.srt",
+                     "https://opensubtitles.com.evil.example/x.srt"):
+            with self.subTest(link=link), self.assertRaises(sx.OpenSubtitlesError):
+                sx._require_provider_link(link)
+
+    def test_a_rate_limited_request_waits_and_is_retried(self) -> None:
+        transport = FakeTransport(http_error(429, b'{"message": "API rate limit exceeded"}',
+                                             {"Retry-After": "1"}),
+                                  search_answer(provider_entry(11)))
+        with mock.patch.object(sx, "urlopen", transport), \
+                mock.patch.object(sx.time, "sleep") as sleep:
+            found = self.client().search_by_movie_hash("8e245d9679d31e12")
+        self.assertEqual(len(found), 1)
+        self.assertEqual(len(transport.requests), 2, "the same request was retried once")
+        # The provider's own Retry-After is what the retry waited on. (With a
+        # mocked clock the 0.25 s floor adds a second, tiny sleep, because no
+        # real time passed; in a live run the backoff already covers it.)
+        self.assertIn(mock.call(1.0), sleep.call_args_list)
+
+    def test_a_spent_allowance_is_recognized_by_its_status_and_words(self) -> None:
+        self.assertTrue(sx._looks_like_quota_error(
+            "OpenSubtitles answered HTTP 406: You have downloaded your allowed 5 subtitles for 24h"))
+        self.assertTrue(sx._looks_like_quota_error("HTTP 403: download limit reached"))
+        self.assertFalse(sx._looks_like_quota_error("OpenSubtitles answered HTTP 500"))
+
+    def test_a_rate_limit_that_never_lets_up_is_reported_once(self) -> None:
+        """Three refusals end the request; the message says what happened."""
+        transport = FakeTransport(*[http_error(429, b'{"message": "rate limited"}',
+                                              {"Retry-After": "1"})] * 3)
+        with mock.patch.object(sx, "urlopen", transport), \
+                mock.patch.object(sx.time, "sleep"), \
+                self.assertRaises(sx.OpenSubtitlesError) as caught:
+            self.client().search_by_movie_hash("8e245d9679d31e12")
+        self.assertIn("kept answering HTTP 429", str(caught.exception))
+        self.assertEqual(len(transport.requests), 3, "the retry count is bounded")
+
+    def test_a_rejected_request_still_counts_for_the_throttle(self) -> None:
+        """A refused request spends the provider's rate budget like any other."""
+        transport = FakeTransport(http_error(500, b'{"message": "boom"}'))
+        client = self.client()
+        with mock.patch.object(sx, "urlopen", transport), \
+                self.assertRaises(sx.OpenSubtitlesError):
+            client.search_by_movie_hash("8e245d9679d31e12")
+        self.assertGreater(client._last_request_at, 0.0,
+                           "the next request must be spaced from this one too")
+
+    def test_a_bad_hash_is_refused_before_any_request(self) -> None:
+        transport = FakeTransport()
+        with mock.patch.object(sx, "urlopen", transport), \
+                self.assertRaises(sx.OpenSubtitlesError):
+            self.client().search_by_movie_hash("not-a-hash")
+        self.assertEqual(transport.requests, [])
+
+
+class DownloadTierTests(unittest.TestCase):
+    """The image-only tier end to end: hash, search, download, gate, ledger."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="download_tier_")
         self.tmp = Path(self._td.name)
         self.addCleanup(self._td.cleanup)
-        self.source = self.tmp / "track3.sup"
-        self.source.write_bytes(b"pgs-bytes")
-        self.output = self.tmp / "track3.srt"
-        self.backend = sx.OcrBackend(sx.OCR_BACKEND_SUP2SRT, "sup2srt + Tesseract",
-                                     ("sup2srt",), frozenset({"PGS"}))
-        self.sibling_backend = sx.OcrBackend(
-            sx.OCR_BACKEND_PGSRIP, "pgsrip + Tesseract", ("pgsrip",),
-            frozenset({"PGS"}), output_mode="sibling")
+        self._saved_ledger = os.environ.get(sx.EXTRACTED_LEDGER_ENV)
+        os.environ[sx.EXTRACTED_LEDGER_ENV] = str(self.tmp / "extracted.json")
+        self.addCleanup(self._restore_ledger_env)
+        movie_dir = self.tmp / "library" / "Fake (2021)"
+        movie_dir.mkdir(parents=True)
+        self.movie = movie_dir / "Fake (2021).mkv"
+        # At least the provider's 128 KiB floor, so it can be hashed at all.
+        self.movie.write_bytes(b"\0" * (2 * 65536))
+        self.dest = self.movie.with_name("Fake (2021).eng.srt")
 
-    def command_that(self, rc: int = 0, writes: Path | None = None,
-                     text: str = "1\n00:00:01,000 --> 00:00:02,000\nHi\n",
-                     err: str = "") -> mock._patch:
-        def fake(_command, timeout=0.0):
-            if writes is not None:
-                writes.write_text(text, encoding="utf-8")
-            return rc, "", err
+    def _restore_ledger_env(self) -> None:
+        if self._saved_ledger is None:
+            os.environ.pop(sx.EXTRACTED_LEDGER_ENV, None)
+        else:
+            os.environ[sx.EXTRACTED_LEDGER_ENV] = self._saved_ledger
 
-        return mock.patch.object(sx, "run_external_command", side_effect=fake)
+    def options(self, **overrides: object) -> sx.DownloadOptions:
+        base: dict[str, object] = {"api_key": "test-key", "min_cues": 2}
+        base.update(overrides)
+        return sx.DownloadOptions(**base)  # type: ignore[arg-type]
 
-    def test_output_where_it_was_asked_for_is_a_success(self) -> None:
-        with self.command_that(writes=self.output):
-            ok, detail = sx.run_ocr(self.backend, self.source, self.output)
-        self.assertTrue(ok)
-        self.assertEqual(detail, "")
+    def test_an_exact_hash_match_becomes_the_sidecar_beside_the_movie(self) -> None:
+        transport = FakeTransport(search_answer(provider_entry(11)), download_answer(), SRT_PAYLOAD)
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(self.movie, self.dest, self.options())
+        self.assertTrue(outcome.ok, outcome.detail)
+        self.assertTrue(self.dest.is_file())
+        self.assertEqual(self.dest.parent, self.movie.parent)
+        self.assertEqual(self.dest.name, "Fake (2021).eng.srt")
+        written = self.dest.read_text(encoding="utf-8")
+        self.assertIn("A line of English dialogue", written)
+        self.assertEqual(outcome.cue_count, 2)
+        self.assertEqual(outcome.movie_hash, sx.moviehash_of_file(self.movie)[0])
+        self.assertEqual(transport.urls()[0].split("/api/v1/")[1].split("?")[0], "subtitles")
 
-    def test_output_written_beside_the_input_is_collected(self) -> None:
-        """pgsrip and Subtitle Edit name the file themselves."""
-        beside = self.tmp / "track3.eng.srt"
-        with self.command_that(writes=beside):
-            ok, detail = sx.run_ocr(self.sibling_backend, self.source, self.output)
-        self.assertTrue(ok, detail)
-        self.assertTrue(self.output.is_file(), "it ends up where the caller expects it")
-        self.assertFalse(beside.exists())
+    def test_every_accepted_payload_becomes_a_sidecar_the_toolkit_accepts(self) -> None:
+        """The bytes this tier installs must pass the toolkit's own validator.
 
-    def test_output_that_cannot_be_collected_is_reported(self) -> None:
-        beside = self.tmp / "track3.eng.srt"
-        with self.command_that(writes=beside), \
-                mock.patch.object(sx.shutil, "move", side_effect=OSError("read-only")):
-            ok, detail = sx.run_ocr(self.sibling_backend, self.source, self.output)
-        self.assertFalse(ok)
-        self.assertIn("could not collect the OCR output", detail)
+        A sidecar that the next run reads as invalid would be re-reported (or
+        worse, replaced by a hand edit), so the encoding and newline handling
+        here is not cosmetic: whatever the provider serves, the file that lands
+        beside the movie has to look like every other sidecar.
+        """
+        payloads = {
+            "utf-8, LF": SRT_PAYLOAD,
+            "utf-8 with a BOM": b"\xef\xbb\xbf" + SRT_PAYLOAD,
+            "cp1252 with an accented name": SRT_PAYLOAD.replace(
+                b"A line of English dialogue", b"Rene\xe9 and Zoe\xe9 speak"),
+            "CRLF line endings": SRT_PAYLOAD.replace(b"\n", b"\r\n"),
+            "surrounded by whitespace": b"\n\n  " + SRT_PAYLOAD + b"\n\n",
+        }
+        for label, payload in payloads.items():
+            with self.subTest(payload=label):
+                transport = FakeTransport(search_answer(provider_entry(11)),
+                                          download_answer(), payload)
+                with mock.patch.object(sx, "urlopen", transport):
+                    outcome = sx.download_hash_matched_srt(self.movie, self.dest, self.options())
+                self.assertTrue(outcome.ok, outcome.detail)
+                ok, reason = sx.validate_srt_sidecar(self.dest)
+                self.assertTrue(ok, f"{label}: the written sidecar is invalid ({reason})")
+                raw = self.dest.read_bytes()
+                self.assertNotIn(b"\r", raw, f"{label}: newlines are canonical")
+                self.assertFalse(raw.startswith(b"\xef\xbb\xbf"), f"{label}: no BOM is written")
+                self.dest.unlink()
 
-    def test_a_failing_backend_is_quoted_not_raised(self) -> None:
-        with self.command_that(rc=3, err="tesseract: unknown language 'eng'"):
-            ok, detail = sx.run_ocr(self.backend, self.source, self.output)
-        self.assertFalse(ok)
-        self.assertIn("sup2srt + Tesseract could not OCR this track (exit 3)", detail)
-        self.assertIn("unknown language", detail)
+    def test_the_download_is_recorded_in_the_provenance_ledger(self) -> None:
+        transport = FakeTransport(search_answer(provider_entry(11)), download_answer(), SRT_PAYLOAD)
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(self.movie, self.dest, self.options())
+        assert outcome.dest is not None
+        record = sx.find_extracted_record(outcome.dest, sx.sha256_text(
+            self.dest.read_text(encoding="utf-8")))
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record["method"], "download")
+        self.assertEqual(record["provider"], "opensubtitles")
+        self.assertEqual(record["moviehash"], outcome.movie_hash)
+        self.assertEqual(record["file_id"], 11)
+        self.assertNotIn("ocr_backend", record)
 
-    def test_a_backend_that_exits_clean_with_no_file_is_a_failure(self) -> None:
-        with self.command_that(rc=0):
-            ok, detail = sx.run_ocr(self.backend, self.source, self.output)
-        self.assertFalse(ok)
-        self.assertIn("could not OCR this track", detail)
+    def test_no_api_key_means_no_request_at_all(self) -> None:
+        transport = FakeTransport()
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(
+                self.movie, self.dest, self.options(api_key=""))
+        self.assertFalse(outcome.ok)
+        self.assertFalse(outcome.available)
+        self.assertIn("API key", outcome.unavailable_reason)
+        self.assertEqual(transport.requests, [])
+        self.assertFalse(self.dest.exists())
 
-    def test_an_empty_result_is_not_a_subtitle(self) -> None:
-        with self.command_that(writes=self.output, text=""):
-            ok, _detail = sx.run_ocr(self.backend, self.source, self.output)
-        self.assertFalse(ok)
+    def test_an_existing_sidecar_is_never_replaced(self) -> None:
+        self.dest.write_text("hand-made", encoding="utf-8")
+        transport = FakeTransport()
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(self.movie, self.dest, self.options())
+        self.assertTrue(outcome.ok)
+        self.assertTrue(outcome.covered_by_other)
+        self.assertEqual(self.dest.read_text(encoding="utf-8"), "hand-made")
+        self.assertEqual(transport.requests, [], "nothing was asked of the provider")
+
+    def test_a_download_that_fails_the_gate_is_not_installed(self) -> None:
+        junk = b"1\n00:00:01,000 --> 00:00:02,000\njust one cue\n"
+        transport = FakeTransport(search_answer(provider_entry(11)), download_answer(), junk)
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(self.movie, self.dest, self.options())
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.reason, sx.REASON_DOWNLOAD_FAILED)
+        self.assertIn("signs/songs-only", outcome.detail)
+        self.assertFalse(self.dest.exists())
+
+    def test_a_search_with_no_hash_match_reports_that_specific_fix(self) -> None:
+        transport = FakeTransport(search_answer(provider_entry(11, hash_match=False)))
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(self.movie, self.dest, self.options())
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.reason, sx.REASON_NO_HASH_MATCH)
+        self.assertIn("hash", outcome.detail)
+        self.assertFalse(self.dest.exists())
+
+    def test_a_spent_allowance_is_its_own_reason(self) -> None:
+        transport = FakeTransport(
+            search_answer(provider_entry(11)),
+            http_error(406, b'{"message": "You have downloaded your allowed 5 subtitles for 24h"}'),
+        )
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(self.movie, self.dest, self.options())
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.reason, sx.REASON_QUOTA_SPENT)
+        self.assertFalse(self.dest.exists())
+
+    def test_a_quota_refusal_on_the_search_is_still_a_quota_refusal(self) -> None:
+        """The API can refuse the search itself; the bucket must be the same."""
+        transport = FakeTransport(http_error(
+            406, b'{"message": "You have downloaded your allowed 5 subtitles for 24h"}'))
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(self.movie, self.dest, self.options())
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.reason, sx.REASON_QUOTA_SPENT)
+        self.assertFalse(self.dest.exists())
+
+    def test_an_unwritable_movie_folder_is_refused_before_any_spend(self) -> None:
+        """A folder that cannot take the sidecar must not cost a download."""
+        os.chmod(self.movie.parent, 0o500)
+        self.addCleanup(os.chmod, self.movie.parent, 0o700)
+        if os.access(self.movie.parent, os.W_OK):  # e.g. running as root
+            self.skipTest("this account can write to a read-only folder")
+        transport = FakeTransport()  # any request fails the test
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(self.movie, self.dest, self.options())
+        self.assertFalse(outcome.ok)
+        self.assertFalse(outcome.available)
+        self.assertEqual(outcome.reason, sx.REASON_DOWNLOAD_FAILED)
+        self.assertIn("not writable", outcome.unavailable_reason)
+        self.assertEqual(transport.requests, [], "the provider was never asked")
+        self.assertEqual(list(self.movie.parent.glob(".organize-write-probe*")), [],
+                         "the probe cleans up after itself")
+
+    def test_a_dry_run_names_the_match_and_spends_nothing(self) -> None:
+        transport = FakeTransport(search_answer(provider_entry(11)))
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(
+                self.movie, self.dest, self.options(dry_run=True))
+        self.assertTrue(outcome.ok)
+        self.assertIn("would download", outcome.detail)
+        self.assertEqual(len(transport.requests), 1, "a preview searches but never downloads")
+        self.assertFalse(self.dest.exists())
+
+    def test_a_movie_too_small_to_hash_is_reported_before_any_request(self) -> None:
+        small = self.movie.with_name("Small.mkv")
+        small.write_bytes(b"tiny")
+        transport = FakeTransport()
+        with mock.patch.object(sx, "urlopen", transport):
+            outcome = sx.download_hash_matched_srt(small, self.dest, self.options())
+        self.assertFalse(outcome.ok)
+        self.assertFalse(outcome.available)
+        self.assertIn("could not hash", outcome.unavailable_reason)
+        self.assertEqual(transport.requests, [])
 
 
 class ExtractionRunnerTests(unittest.TestCase):
@@ -625,25 +725,21 @@ class ExtractionRunnerTests(unittest.TestCase):
         self.assertTrue(outcome.ok)
         self.assertFalse(self.dest.exists(), "a preview must not create a sidecar")
 
-    def test_dry_run_does_not_spend_an_ocr_run(self) -> None:
+    def test_an_image_only_movie_reports_its_image_tracks(self) -> None:
+        """It is not extracted, but it is exactly what earns a hash lookup."""
         runner = FakeRunner(PGS_TRACKS)
-        backend = sx.OcrBackend(sx.OCR_BACKEND_SUP2SRT, "sup2srt + Tesseract", ("sup2srt",),
-                                frozenset({"PGS"}))
         with mock.patch.object(subprocess, "run", runner), \
-                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries), \
-                mock.patch.object(sx, "detect_ocr_backend", return_value=(backend, "")):
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries):
             outcome = sx.extract_embedded_english_srt(
-                self.movie, self.dest, sx.ExtractOptions(min_cues=2, dry_run=True))
-        self.assertTrue(outcome.ok)
-        self.assertFalse(any("tracks" in call for call in runner.calls),
-                         "a dry run must not run mkvextract/OCR on an image track")
-        self.assertFalse(self.dest.exists())
-
-    def test_image_only_movie_without_ocr_falls_through(self) -> None:
-        outcome = self._run(PGS_TRACKS, ocr_backend=sx.OCR_BACKEND_NONE)
+                self.movie, self.dest, sx.ExtractOptions(min_cues=2))
         self.assertFalse(outcome.ok)
         self.assertFalse(self.dest.exists())
-        self.assertIn("OCR is disabled", outcome.unavailable_reason or outcome.detail)
+        self.assertEqual(outcome.text_tracks, ())
+        self.assertEqual([track.codec_id for track in outcome.image_tracks],
+                         ["S_HDMV/PGS"])
+        self.assertIn("image-based", outcome.detail)
+        self.assertFalse(any("tracks" in call for call in runner.calls[1:]),
+                         "an image track is never extracted")
 
     def test_movie_without_an_english_track_falls_through(self) -> None:
         outcome = self._run({"tracks": [
@@ -681,11 +777,10 @@ class ExtractionRunnerTests(unittest.TestCase):
 class OneTrackAtATimeTests(unittest.TestCase):
     """What happens between mkvextract and a sidecar, for one track.
 
-    Extraction is the only way this tool covers a movie — no provider, no
-    quota, no network — but only if what comes out of the container is really the
-    movie's English dialogue. Everything below is a way for that to not be
-    true, and each one has to end with a reason a human can read and no file
-    on disk.
+    Text extraction is local and free, and for most movies it is the whole
+    story - but only if what comes out of the container is really the movie's
+    English dialogue. Everything below is a way for that to not be true, and
+    each one has to end with a reason a human can read and no file on disk.
     """
 
     def setUp(self) -> None:
@@ -714,17 +809,10 @@ class OneTrackAtATimeTests(unittest.TestCase):
              "properties": {"codec_id": codec, "language": "eng", "track_name": "English"}},
         ]}
 
-    def run_with(self, runner: object, *, backend: object = None,
-                 **options: object) -> sx.ExtractionOutcome:
+    def run_with(self, runner: object, **options: object) -> sx.ExtractionOutcome:
         opts = sx.ExtractOptions(min_cues=2, **options)  # type: ignore[arg-type]
-        patches = [mock.patch.object(subprocess, "run", runner),
-                   mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries)]
-        if backend is not None:
-            patches.append(mock.patch.object(sx, "detect_ocr_backend",
-                                             return_value=(backend, "")))
-        with contextlib.ExitStack() as stack:
-            for patcher in patches:
-                stack.enter_context(patcher)
+        with mock.patch.object(subprocess, "run", runner), \
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries):
             return sx.extract_embedded_english_srt(self.movie, self.dest, opts)
 
     # -- the formats a container can hold ----------------------------------
@@ -829,57 +917,8 @@ class OneTrackAtATimeTests(unittest.TestCase):
         self.assertIn("could not write the extracted sidecar", outcome.detail)
         self.assertIn("read-only file system", outcome.detail)
 
-    # -- the image tracks, which cost minutes ------------------------------
-
-    def ocr_backend(self) -> sx.OcrBackend:
-        return sx.OcrBackend(sx.OCR_BACKEND_SUP2SRT, "sup2srt + Tesseract", ("sup2srt",),
-                             frozenset({"PGS"}))
-
-    def test_an_ocred_image_track_becomes_a_sidecar(self) -> None:
-        text = sx.render_srt_cues([
-            (f"00:00:{index:02d},000", f"00:00:{index:02d},900",
-             "A whole line of English dialogue")
-            for index in range(1, 30)
-        ])
-
-        def ocr(_backend, _source, output, **_kwargs):
-            output.write_text(text, encoding="utf-8")
-            return True, ""
-
-        with mock.patch.object(sx, "run_ocr", side_effect=ocr):
-            outcome = self.run_with(FakeRunner(PGS_TRACKS), backend=self.ocr_backend())
-        self.assertTrue(outcome.ok, outcome.detail or outcome.unavailable_reason)
-        self.assertEqual(outcome.method, "ocr")
-        self.assertEqual(outcome.ocr_backend, "sup2srt + Tesseract")
-        self.assertTrue(self.dest.is_file())
-
-    def test_an_ocr_failure_is_carried_into_the_reason(self) -> None:
-        with mock.patch.object(sx, "run_ocr",
-                               return_value=(False, "sup2srt could not OCR this track (exit 1)")):
-            outcome = self.run_with(FakeRunner(PGS_TRACKS), backend=self.ocr_backend())
-        self.assertFalse(outcome.ok)
-        self.assertIn("could not OCR this track", outcome.detail)
-        self.assertFalse(self.dest.exists())
-
-    def test_an_ocr_result_that_cannot_be_read_is_a_failure(self) -> None:
-        """A backend that says it worked but wrote nowhere we can find."""
-        with mock.patch.object(sx, "run_ocr", return_value=(True, "")):
-            outcome = self.run_with(FakeRunner(PGS_TRACKS), backend=self.ocr_backend())
-        self.assertFalse(outcome.ok)
-        self.assertIn("could not read the OCR output", outcome.detail)
-
-    def test_a_backend_that_cannot_read_the_codec_is_not_run(self) -> None:
-        vobsub_only = sx.OcrBackend(sx.OCR_BACKEND_SUP2SRT, "sup2srt", ("sup2srt",),
-                                    frozenset({"VOBSUB"}))
-        with mock.patch.object(sx, "run_ocr") as run_ocr:
-            outcome = self.run_with(FakeRunner(PGS_TRACKS), backend=vobsub_only)
-        self.assertFalse(outcome.ok)
-        self.assertIn("cannot OCR S_HDMV/PGS", outcome.detail)
-        run_ocr.assert_not_called()
-
-
 class RunIntegrationTests(unittest.TestCase):
-    """The whole run: extraction is not a tier, it is the entire tool."""
+    """The whole run, tier by tier: text first, exact-hash lookup last."""
 
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory(prefix="queue_extract_")
@@ -925,19 +964,23 @@ class RunIntegrationTests(unittest.TestCase):
         self.assertEqual(int(summary["coverage_covered"]), 1, "extraction counts as coverage")
         self.assertEqual(int(summary["coverage_total"]), 1)
 
-    def test_a_movie_with_no_usable_track_needs_attention(self) -> None:
+    def test_an_image_only_movie_needs_attention_without_a_key(self) -> None:
         runner = FakeRunner(PGS_TRACKS)
         with mock.patch.object(subprocess, "run", runner), \
                 mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries):
-            results, summary = sx.extraction_run(self._config(ocr_backend=sx.OCR_BACKEND_NONE))
+            results, summary = sx.extraction_run(self._config())
         self.assertEqual(len(results), 1)
-        # No usable track and nothing to download: the movie is reported, not
-        # silently dropped, and never counts as covered.
-        self.assertEqual(results[0].reason, sx.REASON_NO_TRACK)
+        # Image-only, and no API key: the lookup cannot run, so the movie is
+        # reported in the bucket that names the fix (configure the key) rather
+        # than in "there is no usable track" - the tracks are usable, just not
+        # as text. It never counts as covered.
+        self.assertEqual(results[0].reason, sx.REASON_IMAGE_ONLY)
         self.assertEqual(results[0].status, "skip")
+        self.assertIn("API key", results[0].detail)
         self.assertEqual(int(summary["coverage_covered"]), 0)
+        self.assertEqual(int(summary["image_only_movies"]), 1)
         self.assertEqual(list(self.movie.parent.glob("*.srt")), [],
-                         "nothing is written for a movie with no usable track")
+                         "nothing is written when the lookup cannot run")
 
     def test_a_dry_run_names_the_track_it_would_use_and_writes_nothing(self) -> None:
         """The whole run, in dry-run: nothing is written, the movie is named."""
@@ -951,6 +994,149 @@ class RunIntegrationTests(unittest.TestCase):
         self.assertEqual(list(self.movie.parent.glob("*.srt")), [],
                          "a dry run writes no sidecar")
 
+    def test_no_download_says_so_even_with_a_key_configured(self) -> None:
+        """--no-download is a decision, not a missing key: say which it was."""
+        transport = FakeTransport()  # any request fails the test
+        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)), \
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries), \
+                mock.patch.object(sx, "urlopen", transport):
+            results, _summary = sx.extraction_run(self._config(
+                opensubtitles_api_key="test-key", download_enabled=False))
+        self.assertEqual(results[0].reason, sx.REASON_IMAGE_ONLY)
+        self.assertIn("--no-download", results[0].detail or "")
+        self.assertEqual(transport.requests, [], "a disabled tier makes no requests")
+
+    def test_a_text_track_beats_the_provider_tier(self) -> None:
+        """Text extraction is local: with a text track present, no lookup runs."""
+        combined = {"tracks": TEXT_TRACKS["tracks"] + PGS_TRACKS["tracks"]}
+        transport = FakeTransport()  # any request raises
+        with mock.patch.object(subprocess, "run", FakeRunner(combined)), \
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries), \
+                mock.patch.object(sx, "urlopen", transport):
+            results, _summary = sx.extraction_run(self._config(opensubtitles_api_key="test-key", download_min_cues=2))
+        self.assertEqual(results[0].reason, sx.REASON_EXTRACTED)
+        self.assertEqual(transport.requests, [],
+                         "the provider must not be asked when a text track exists")
+
+    def test_an_image_only_movie_is_covered_by_an_exact_hash_download(self) -> None:
+        """The whole run, both tiers: bitmaps go to the provider by file hash."""
+        # Big enough for the provider's 128 KiB hashing floor.
+        self.movie.write_bytes(b"\0" * (2 * 65536))
+        transport = FakeTransport(search_answer(provider_entry(11)), download_answer(), SRT_PAYLOAD)
+        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)), \
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries), \
+                mock.patch.object(sx, "urlopen", transport):
+            results, summary = sx.extraction_run(self._config(opensubtitles_api_key="test-key", download_min_cues=2))
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].reason, sx.REASON_DOWNLOADED)
+        self.assertEqual(results[0].status, "downloaded")
+        self.assertTrue(results[0].dest is not None and results[0].dest.is_file())
+        self.assertEqual(int(summary["downloaded_from_opensubtitles"]), 1)
+        self.assertEqual(int(summary["coverage_covered"]), 1, "a download counts as coverage")
+        search_url = transport.urls()[0]
+        self.assertIn("moviehash=0000000000020000", search_url)
+        text = sx.build_report(results, self._config(), summary)
+        self.assertIn("DOWNLOADED FROM OPENSUBTITLES BY EXACT MOVIEHASH", text)
+
+    def test_a_quota_refusal_on_the_first_search_stops_the_run_asking(self) -> None:
+        """One refusal, however it arrives, ends the tier for the whole run."""
+        self.movie.write_bytes(b"\0" * (2 * 65536))
+        second_dir = self.library / "Other (2019)"
+        second_dir.mkdir()
+        (second_dir / "Other (2019).mkv").write_bytes(b"\0" * (2 * 65536))
+        transport = FakeTransport(http_error(
+            406, b'{"message": "You have downloaded your allowed 5 subtitles for 24h"}'))
+        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)), \
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries), \
+                mock.patch.object(sx, "urlopen", transport):
+            results, _summary = sx.extraction_run(self._config(
+                opensubtitles_api_key="test-key", download_min_cues=2))
+        self.assertEqual({result.reason for result in results}, {sx.REASON_QUOTA_SPENT})
+        self.assertEqual(len(transport.requests), 1,
+                         "the second movie was never asked about")
+
+    def test_a_spent_allowance_stops_the_run_from_asking_again(self) -> None:
+        """One refusal ends the tier for the run; later movies are reported."""
+        self.movie.write_bytes(b"\0" * (2 * 65536))
+        second_dir = self.library / "Other (2019)"
+        second_dir.mkdir()
+        (second_dir / "Other (2019).mkv").write_bytes(b"\0" * (2 * 65536))
+        transport = FakeTransport(
+            search_answer(provider_entry(11)), download_answer(remaining=0), SRT_PAYLOAD,
+        )
+        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)), \
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries), \
+                mock.patch.object(sx, "urlopen", transport):
+            results, _summary = sx.extraction_run(self._config(opensubtitles_api_key="test-key", download_min_cues=2))
+        by_name = {result.video.parent.name: result.reason for result in results}
+        self.assertEqual(by_name["Fake (2021)"], sx.REASON_DOWNLOADED)
+        self.assertEqual(by_name["Other (2019)"], sx.REASON_QUOTA_SPENT)
+        self.assertEqual(len(transport.requests), 3,
+                         "one search, one download, and nothing for the second movie")
+
+    def test_a_run_level_download_limit_gets_its_own_explanation(self) -> None:
+        """The cap is this run's, not the provider's - so the fix is a re-run."""
+        self.movie.write_bytes(b"\0" * (2 * 65536))
+        second_dir = self.library / "Other (2019)"
+        second_dir.mkdir()
+        (second_dir / "Other (2019).mkv").write_bytes(b"\0" * (2 * 65536))
+        transport = FakeTransport(
+            search_answer(provider_entry(11)), download_answer(), SRT_PAYLOAD,
+        )
+        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)), \
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries), \
+                mock.patch.object(sx, "urlopen", transport):
+            results, _summary = sx.extraction_run(self._config(
+                opensubtitles_api_key="test-key", download_min_cues=2, download_limit=1))
+        by_name = {result.video.parent.name: result for result in results}
+        self.assertEqual(by_name["Fake (2021)"].reason, sx.REASON_DOWNLOADED)
+        limited = by_name["Other (2019)"]
+        self.assertEqual(limited.reason, sx.REASON_IMAGE_ONLY)
+        self.assertIn("--download-limit", limited.detail or "")
+        self.assertNotIn("--no-download", limited.detail or "")
+        self.assertEqual(len(transport.requests), 3,
+                         "the second movie must not reach the provider at all")
+
+    def test_a_dry_run_previews_exactly_what_the_live_run_would_do(self) -> None:
+        """The report calls the preview a forecast, cap included: two image-only
+        movies and room for one download means one preview, one capped movie."""
+        self.movie.write_bytes(b"\0" * (2 * 65536))
+        second_dir = self.library / "Other (2019)"
+        second_dir.mkdir()
+        (second_dir / "Other (2019).mkv").write_bytes(b"\0" * (2 * 65536))
+        transport = FakeTransport(search_answer(provider_entry(11)))
+        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)), \
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries), \
+                mock.patch.object(sx, "urlopen", transport):
+            results, summary = sx.extraction_run(self._config(
+                opensubtitles_api_key="test-key", download_min_cues=2,
+                download_limit=1, dry_run=True))
+        by_name = {result.video.parent.name: result for result in results}
+        self.assertEqual(by_name["Fake (2021)"].reason, sx.REASON_DRY_RUN)
+        self.assertIn("would download", by_name["Fake (2021)"].detail or "")
+        self.assertIn("OpenSubtitles", by_name["Fake (2021)"].detail or "")
+        self.assertEqual(by_name["Other (2019)"].reason, sx.REASON_IMAGE_ONLY)
+        self.assertIn("--download-limit", by_name["Other (2019)"].detail or "")
+        self.assertEqual(len(transport.requests), 1,
+                         "the preview searches once and downloads nothing")
+        self.assertEqual(int(summary["image_only_movies"]), 2,
+                         "both movies are image-only, whatever became of them")
+        self.assertEqual(list(self.library.rglob("*.srt")), [],
+                         "a preview never writes a sidecar")
+
+    def test_the_image_only_tally_survives_a_failed_download(self) -> None:
+        """The tally is about the library, not about how the tier behaved."""
+        self.movie.write_bytes(b"\0" * (2 * 65536))
+        transport = FakeTransport(search_answer(provider_entry(11)),
+                                  http_error(406, b'{"message": "quota exhausted"}'))
+        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)), \
+                mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries), \
+                mock.patch.object(sx, "urlopen", transport):
+            results, summary = sx.extraction_run(self._config(
+                opensubtitles_api_key="test-key", download_min_cues=2))
+        self.assertEqual(results[0].reason, sx.REASON_QUOTA_SPENT)
+        self.assertEqual(int(summary["image_only_movies"]), 1)
+
     def test_report_names_what_was_extracted(self) -> None:
         runner = FakeRunner(TEXT_TRACKS)
         with mock.patch.object(subprocess, "run", runner), \
@@ -959,6 +1145,108 @@ class RunIntegrationTests(unittest.TestCase):
         text = sx.build_report(results, self._config(), summary)
         self.assertIn("EXTRACTED FROM THE MOVIE'S OWN EMBEDDED TRACK", text)
         self.assertIn("Extracted this run", text)
+
+
+class NothingInspectedTests(unittest.TestCase):
+    """A library the filters emptied must not be reported as a green pass.
+
+    `--min-size` (300 MB by default) and the sample-name rule are both silent
+    filters: a walk that removes every file leaves the run with nothing to do,
+    and "nothing to do" used to be rendered as the *success* sentence -
+    "Nothing to do: every one of the 0 movie(s) in the library has a validated
+    external English .eng.srt", next to "0/0 (100.0%) COVERAGE". The operator
+    read that as "your library is fine" when the truth was "your library was
+    never looked at".
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="nothing_")
+        self.tmp = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.library = self.tmp / "library"
+        folder = self.library / "Tiny (2020)"
+        folder.mkdir(parents=True)
+        self.movie = folder / "Tiny (2020).mkv"
+        self.movie.write_bytes(b"x" * 4096)
+        self.min_size_mb = self.movie.stat().st_size  # a little over 4 kB
+
+    def scan(self, min_size_mb: float) -> sx.LibraryScan:
+        return sx.discover_videos(self.library, int(min_size_mb * 1024 * 1024))
+
+    def test_a_filtered_scan_reports_what_it_removed(self) -> None:
+        scan = self.scan(self.min_size_mb * 2 + 1)
+        self.assertEqual(scan.videos, [])
+        self.assertEqual(scan.below_min_size, 1)
+        self.assertEqual(scan.sample_named, 0)
+
+    def test_sample_named_files_are_counted_not_just_dropped(self) -> None:
+        (self.movie.parent / "Tiny (2020).sample.mkv").write_bytes(b"y" * 4096)
+        scan = self.scan(0)
+        self.assertEqual([path.name for path in scan.videos], [self.movie.name])
+        self.assertEqual(scan.sample_named, 1, "the sample is skipped, and reported as skipped")
+
+    def test_an_unfiltered_scan_counts_nothing_removed(self) -> None:
+        scan = self.scan(0)
+        self.assertEqual(scan.videos, [self.movie])
+        self.assertEqual((scan.below_min_size, scan.sample_named), (0, 0))
+
+    def test_the_report_says_the_library_was_not_inspected(self) -> None:
+        cfg = sx.ExtractorConfig(library=self.library, report_file=self.tmp / "r.txt",
+                                 log_file=self.tmp / "r.log",
+                                 min_movie_size_mb=self.min_size_mb * 2 + 1)
+        summary = {"movies_discovered": 0, "files_below_min_size": 1, "files_sample_named": 0,
+                   "coverage_covered": 0, "coverage_total": 0,
+                   "extracted_from_embedded": 0, "downloaded_from_opensubtitles": 0,
+                   "log_file": str(cfg.log_file)}
+        text = sx.build_report([], cfg, summary)
+        self.assertIn("Nothing was inspected", text)
+        self.assertIn("--min-size", text)
+        self.assertIn("Movies inspected", text)
+        self.assertNotIn("Nothing to do", text, "the success sentence is not a filter report")
+        self.assertNotIn("already has a validated external English", text)
+        self.assertNotIn("Coverage this run: 0 of 0", text)
+
+    def test_an_empty_library_is_named_as_empty(self) -> None:
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        cfg = sx.ExtractorConfig(library=empty, report_file=self.tmp / "r.txt",
+                                 log_file=self.tmp / "r.log", min_movie_size_mb=0)
+        summary = {"movies_discovered": 0, "files_below_min_size": 0, "files_sample_named": 0,
+                   "coverage_covered": 0, "coverage_total": 0,
+                   "extracted_from_embedded": 0, "downloaded_from_opensubtitles": 0,
+                   "log_file": str(cfg.log_file)}
+        text = sx.build_report([], cfg, summary)
+        self.assertIn("No movie files were found", text)
+        self.assertNotIn("Nothing to do", text)
+        self.assertNotIn("Nothing was inspected", text,
+                         "an empty library is not a filtering result")
+
+    def test_a_covered_library_still_gets_the_success_sentence(self) -> None:
+        """The fix must not silence the true case it replaced."""
+        video = self.movie
+        results = [sx.JobResult(video, "have", "validated exact .eng.srt",
+                                video.with_suffix(".eng.srt"), reason=sx.REASON_COVERED)]
+        cfg = sx.ExtractorConfig(library=self.library, report_file=self.tmp / "r.txt",
+                                 log_file=self.tmp / "r.log", min_movie_size_mb=0)
+        summary = {"movies_discovered": 1, "files_below_min_size": 0, "files_sample_named": 0,
+                   "coverage_covered": 1, "coverage_total": 1,
+                   "extracted_from_embedded": 0, "downloaded_from_opensubtitles": 0,
+                   "log_file": str(cfg.log_file)}
+        text = sx.build_report(results, cfg, summary)
+        self.assertIn("Nothing to do: every one of the 1 movie(s)", text)
+        self.assertNotIn("Nothing was inspected", text)
+
+    def test_the_run_logs_a_warning_when_the_filters_emptied_the_library(self) -> None:
+        """The console line, not just the report - this is what a cron job sees."""
+        cfg = sx.ExtractorConfig(library=self.library, report_file=self.tmp / "r.txt",
+                                 log_file=self.tmp / "run.log", min_movie_size_mb=5000)
+        with mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries):
+            results, summary = sx.extraction_run(cfg)
+        self.assertEqual(results, [])
+        self.assertEqual(int(summary["files_below_min_size"]), 1)
+        logged = (self.tmp / "run.log").read_text(encoding="utf-8")
+        self.assertIn("Nothing eligible", logged)
+        self.assertIn("smaller than --min-size", logged)
 
 
 class ProvenanceLedgerTests(unittest.TestCase):
@@ -1019,7 +1307,7 @@ class ProvenanceLedgerTests(unittest.TestCase):
         self.assertEqual(record["codec_id"], "S_TEXT/ASS")
         self.assertEqual(record["method"], "text")
         self.assertEqual(record["cue_count"], 11)
-        self.assertTrue(record["extracted_utc"], "the record is stamped")
+        self.assertTrue(record["recorded_utc"], "the record is stamped")
 
     def test_a_replaced_sidecar_is_no_longer_the_extraction(self) -> None:
         self._record_extraction()
@@ -1115,13 +1403,13 @@ class ExtractionQualityGateTests(unittest.TestCase):
 
     def test_a_track_bigger_than_the_safety_limit_is_refused(self) -> None:
         with mock.patch.object(sx, "MAX_SUBTITLE_BYTES", 64):
-            ok, reason = sx.extracted_subtitle_quality(
+            ok, reason = sx.subtitle_quality(
                 "1\n00:00:01,000 --> 00:00:02,000\n" + "x" * 200 + "\n", min_cues=1)
         self.assertFalse(ok)
         self.assertIn("safety limit", reason)
 
     def test_a_track_that_did_not_convert_is_refused(self) -> None:
-        ok, reason = sx.extracted_subtitle_quality("Dialogue: 0,0:00:01.50,...", min_cues=1)
+        ok, reason = sx.subtitle_quality("Dialogue: 0,0:00:01.50,...", min_cues=1)
         self.assertFalse(ok)
         self.assertIn("did not convert to valid SRT cues", reason)
 
@@ -1161,25 +1449,25 @@ class WhenExtractionCannotBeAttemptedTests(unittest.TestCase):
         self.assertIn("mkvmerge reported no tracks", outcome.unavailable_reason)
         self.assertFalse(self.dest.exists())
 
-    def test_an_image_only_movie_after_the_run_s_ocr_budget_is_spent(self) -> None:
-        """The limit is per run, so the reason names the limit, not the tools."""
+    def test_an_image_only_movie_says_text_tracks_are_what_it_wants(self) -> None:
+        """The movie is not "unsubtitleable": it is bitmap-subtitled, and that
+        is what the provider tier exists for - so the detail says so."""
         with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)), \
              mock.patch.object(sx, "find_mkvtoolnix_binary", fake_binaries):
             outcome = sx.extract_embedded_english_srt(
-                self.movie, self.dest, sx.ExtractOptions(min_cues=2, ocr_allowed=False))
+                self.movie, self.dest, sx.ExtractOptions(min_cues=2))
         self.assertFalse(outcome.ok)
-        self.assertIn("per-run OCR limit was reached",
-                      outcome.unavailable_reason or outcome.detail)
+        self.assertIn("image-based", outcome.detail)
+        self.assertEqual(len(outcome.image_tracks), 1)
         self.assertFalse(self.dest.exists())
 
 
 class OneTrackDirectlyTests(unittest.TestCase):
     """``_extract_one_track`` alone: the arms the caller normally prevents.
 
-    The loop above it checks for a backend before it hands over an image
-    track, and the outer entry point checks for MKVToolNix before it starts.
-    These tests remove those guarantees, because a helper that trusts its
-    caller is a helper that breaks the day the caller changes.
+    The outer entry point checks for MKVToolNix and only ever hands over text
+    tracks. These tests remove those guarantees, because a helper that trusts
+    its caller is a helper that breaks the day the caller changes.
     """
 
     def setUp(self) -> None:
@@ -1190,12 +1478,12 @@ class OneTrackDirectlyTests(unittest.TestCase):
         self.movie.write_bytes(b"mkv-bytes")
         self.dest = self.tmp / "Fake (2021).eng.srt"
 
-    def extract(self, track: sx.EmbeddedSubtitleTrack, *, backend: object = None,
+    def extract(self, track: sx.EmbeddedSubtitleTrack,
                 binary: object = fake_binaries) -> sx.ExtractionOutcome:
         with mock.patch.object(sx, "find_mkvtoolnix_binary", binary):
             return sx._extract_one_track(
                 self.movie, self.movie, self.dest, track, self.tmp,
-                sx.ExtractOptions(min_cues=2), backend=backend)  # type: ignore[arg-type]
+                sx.ExtractOptions(min_cues=2))
 
     def test_without_mkvextract_nothing_is_attempted(self) -> None:
         track = sx.EmbeddedSubtitleTrack(2, "S_TEXT/UTF8", "eng", "English", "text", ".srt")
@@ -1204,12 +1492,15 @@ class OneTrackDirectlyTests(unittest.TestCase):
         self.assertEqual(outcome.detail, "mkvextract is not installed")
         self.assertFalse(self.dest.exists())
 
-    def test_an_image_track_with_no_backend_is_refused_not_attempted(self) -> None:
+    def test_an_image_track_is_never_extracted(self) -> None:
+        """_extract_one_track refuses bitmaps outright, even if a caller asks."""
         track = sx.EmbeddedSubtitleTrack(4, "S_HDMV/PGS", "eng", "English", "image", ".sup")
-        with mock.patch.object(subprocess, "run", FakeRunner(PGS_TRACKS)):
-            outcome = self.extract(track, backend=None)
+        runner = FakeRunner(PGS_TRACKS)
+        with mock.patch.object(subprocess, "run", runner):
+            outcome = self.extract(track)
         self.assertFalse(outcome.ok)
-        self.assertIn("no OCR backend is available", outcome.detail)
+        self.assertIn("only text-based subtitle tracks are extracted", outcome.detail)
+        self.assertEqual(runner.calls, [], "nothing is run for an image track")
         self.assertFalse(self.dest.exists())
 
 

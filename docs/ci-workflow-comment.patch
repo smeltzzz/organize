@@ -1,0 +1,31 @@
+# Held back: the CI header comment says OCR is gone.
+#
+# The branch bot has no `workflows` permission, so this one-comment change to
+# `.github/workflows/ci.yml` cannot be pushed from here and is held as a patch
+# until someone with that permission applies it:
+#
+#     git apply docs/ci-workflow-comment.patch
+#
+# The change is a comment only - no job, step, matrix entry or command is
+# touched, so CI behaves identically before and after. It is the header that
+# still described the toolkit as deliberately free of any subtitle-provider
+# mention: the suite's one networked code path (the exact-moviehash
+# OpenSubtitles tier) is exercised against a fake transport, and the header now
+# says so.
+#
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index f0728f5..f8dca3c 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1,8 +1,9 @@
+ # Continuous Integration — runs the entire offline test suite on every push
+ # and pull request across all supported platforms and Python versions.
+ #
+-# The suite is deliberately hermetic: no media files, no mkvtoolnix, no ffprobe,
+-# no OpenSubtitles API key, and no network access are required.
++# The suite is deliberately hermetic: no media files, no MKVToolNix, no FFmpeg,
++# no OpenSubtitles API key and no network access are required - the one
++# networked code path is tested against a fake transport.
+ #
+ # Hermetic means the suite does not *need* those things, not that it is blind to
+ # them - a runner has none of them installed, so a test that behaves differently

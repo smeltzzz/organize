@@ -21,6 +21,7 @@ which the script asserts rather than assumes.
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 import tempfile
@@ -59,7 +60,13 @@ def timed(library: Path, workers: int) -> tuple[float, list[tuple[str, str]]]:
 
 
 def main() -> int:
-    la.log = lambda *args, **kwargs: None  # the benchmark is the output here
+    # Silence the audit's own logging without replacing the object: the audit
+    # reads ``log.live`` as well as calling ``log(...)``, so a stand-in function
+    # is not a drop-in for it (that is exactly how this benchmark used to
+    # crash). A real RunLog with its console pointed at a buffer has the same
+    # shape and prints nothing.
+    la.log.stream = io.StringIO()
+    la.log.file = None
     with tempfile.TemporaryDirectory(prefix="bench_audit_") as tmp:
         library = build_library(Path(tmp))
         verdicts: list[list[tuple[str, str]]] = []

@@ -4,9 +4,8 @@
 is rewritten in place as the remux advances, so an hours-long queue says what
 it is doing right now instead of going quiet. The other three sweeps went quiet.
 They print a line *after* each movie, which is the right permanent record and
-tells you nothing while a 40 GB file is being probed, an OCR backend is
-reading an image-based subtitle track, or a 3,000-folder walk is halfway
-through.
+tells you nothing while a 40 GB file is being probed, an mkvmerge remux is
+copying tracks, or a 3,000-folder library walk is halfway through.
 
 This module is the part of that renderer that is not about remuxing: what the
 terminal will accept (already answered by :mod:`organizekit.core.console`), how

@@ -39,7 +39,7 @@ To maintain its bulletproof stability, all contributions must respect the projec
    The tools that read the library in parallel (`subtitle_extractor.py`, `library_auditor.py`, `bitdepth.py`) all go through `organizekit.core.parallel`. Two rules come with it: `--workers 1` runs the work inline in the calling thread, so it is a real escape hatch rather than a one-worker pool; and anything whose output is a numbered list or an official verdict uses `map_ordered`, which returns results in input order, so the worker count cannot change a character of the report. Shared mutable state (the extraction provenance ledger) is mutated in exactly one locked function.
 
 9. **100% Offline Testability**
-   The test suite must run completely offline without internet connectivity, without OpenSubtitles or SubDL API keys, and without requiring external binaries (`mkvmerge` or `ffprobe`).
+   The test suite must run completely offline without internet connectivity, without any API keys, and without requiring external binaries (`mkvmerge` or `ffprobe`). The toolkit's one networked code path — the exact-moviehash OpenSubtitles tier — is exercised through a fake `urlopen`, and `tests/hermetic.py` pins the real one out so a test cannot reach the network by accident.
 
 ---
 

@@ -43,14 +43,16 @@ from every movie, so extraction must happen *while the track is still in
 the container*; after the remux, a subtitle that was already in the file is
 gone for good. The **audit** closes the sweep on purpose: it is read-only,
 so it can only report the library the other three steps just finished
-writing. (Two stages used to sit in this pipeline and no longer do.
-Subtitle *downloading* was removed outright — the movie's own tracks are
-the only source now, and a movie with no usable track is reported for a
-human decision. Subtitle *timing sync* was removed because a sidecar built
-from the movie's own track already carries the container's timestamps, and
-whatever drift a client still notices is corrected at playback time rather
-than by rewriting the library offline.) `pipeline.py` exists so you cannot
-get this wrong.
+writing. (Subtitles are **not** taken from a title search, and the movie's own tracks
+are always tried first: a text-based embedded English track is extracted
+locally, and only a movie whose English subtitles exist solely as bitmaps is
+looked up on OpenSubtitles — by the file's exact moviehash, never by title or
+release name. OCR was removed outright, because a garbled transcription is
+worse than none. Subtitle *timing sync* was removed too: a sidecar built from
+the movie's own track already carries the container's timestamps, and whatever
+drift a client still notices is corrected at playback time rather than by
+rewriting the library offline.) `pipeline.py` exists so you cannot get this
+wrong.
 
 ```
  torrent finishes
@@ -60,9 +62,9 @@ get this wrong.
 │ 1 · standardize       │   parse scene names, skip TV / discs / splits
 └───────────┬───────────┘
             ▼
-┌───────────────────────┐   extract the movie's own embedded English track
-│ 2 · subtitles         │   into <movie>.eng.srt (text, OCR, or the MP4
-└───────────┬───────────┘   bridge); an existing sidecar is authoritative
+┌───────────────────────┐   extract the movie's own text track into
+│ 2 · subtitles         │   <movie>.eng.srt (MP4 via the bridge); image-only
+└───────────┬───────────┘   movies: exact-moviehash OpenSubtitles match
             ▼
 ┌───────────────────────┐   lossless mkvmerge remux: 1 best audio, strip
 │ 3 · clean             │   commentary / dubs / embedded subs; MP4 → MKV

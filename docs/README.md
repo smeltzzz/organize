@@ -12,19 +12,18 @@ than a screen lives here.
 | [Testing & development](development.md) | The offline suite, the single-file `organize.pyz` build, the field smoke tests, and the crash tests. |
 | [Merging & releasing](merge-and-release.md) | The steps that need a permission the branch bot does not have: merging into main, applying the held workflow patch, and tagging the release. |
 
-Also in this folder — nothing is held any more. The two CI patches that used
-to live here (`ci-workflow.patch`, which renamed `subtitle_fetcher.py` to
-`subtitle_extractor.py` in the syntax gate's byte-compile list, dropped
-`jellyfin_one_shot.py`, and lowered the coverage floor 88% → 85%; and
-`ci-workflow-sync-removal.patch`, which dropped the deleted `sync_subtitles.py`
-and the `ffsubsync` requirements) have both been applied and committed to
-`.github/workflows/ci.yml`, and the files are gone — exactly like
-`release-workflow.patch` before them. What each changed is recorded in
-[Merging & releasing](merge-and-release.md) and in
-[`CHANGELOG.md`](../CHANGELOG.md), and `tests/test_docs.py` skips its
-held-patch class while `docs/` holds no patches. If a future branch needs a
-`workflows` change the bot cannot push, hold it as a new patch here and list
-it in this file again.
+Also in this folder: one held patch, **`ci-workflow-comment.patch`** — a
+comment-only change to the header of `.github/workflows/ci.yml`, held because
+the branch bot has no `workflows` permission (see
+[Merging & releasing](merge-and-release.md), which starts with how to apply
+it). The three earlier patches — `ci-workflow.patch`,
+`ci-workflow-sync-removal.patch` and `release-workflow.patch` — have all been
+applied and committed, and their files are gone; what each changed is recorded
+in [Merging & releasing](merge-and-release.md) and
+[`CHANGELOG.md`](../CHANGELOG.md). `tests/test_docs.py` checks every patch held
+here: that it still applies (or is already committed), that its header says why
+it is held, that it names the distribution this repo actually builds, and that
+it is listed on this page.
 
 Elsewhere in the repo: [`CHANGELOG.md`](../CHANGELOG.md) (what changed and
 why), [`OVERHAUL.md`](../OVERHAUL.md) (the measured plan the recent work
