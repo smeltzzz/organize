@@ -235,7 +235,6 @@ function Get-PathMatches {
                 'pgsrip.exe'       = 'pgsrip'
                 'sup2srt.exe'      = 'sup2srt'
                 'PgsToSrt.exe'     = 'PgsToSrt'
-                'pgstosrt.exe'     = 'PgsToSrt'
                 'mono.exe'         = 'Mono'
                 'ffsubsync.exe'    = 'ffsubsync'
             }
