@@ -11,7 +11,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-1174%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-1139%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -100,7 +100,7 @@ One file, one purpose. Nothing else.
 | `movie_standardizer.py` | Tool 5 — the torrent-completion hook: parse scene names, hardlink into `Title (Year)/`. |
 | `pipeline.py` | **The one runner.** Runs the maintenance tools in the one correct order: extract → clean → 10-bit → audit. |
 | `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `toolchain.py` — the one table describing what the four steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock — and `live.py` is the overwritable status line every sweep draws on a terminal and never anywhere else. |
-| `tests/` | Fully offline unit tests (1,174), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus the stand-ins: `fake_mkvmerge.py` / `fake_ffprobe.py` (real executables, enough to drive an end-to-end remux, extraction and inspection), `fakebin.py` (puts them on a PATH), `fakeprovider.py` (canned OpenSubtitles answers) and `hermetic.py` (pins the host toolchain and the network out). |
+| `tests/` | Fully offline unit tests (1,139), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus the stand-ins: `fake_mkvmerge.py` / `fake_ffprobe.py` (real executables, enough to drive an end-to-end remux, extraction and inspection), `fakebin.py` (puts them on a PATH), `fakeprovider.py` (canned OpenSubtitles answers) and `hermetic.py` (pins the host toolchain and the network out). |
 | `docs/` | The long-form documentation this page links to: the [tool reference](docs/tools.md), [the pipeline](docs/pipeline.md), [configuration](docs/configuration.md), [testing & development](docs/development.md) and, for maintainers, [merging & releasing](docs/merge-and-release.md). |
 | `benchmarks/` | The scripts behind every speed claim in this repo — stdlib-only, offline, re-runnable. |
 | `.env.example` | Every supported environment variable, annotated. |
@@ -231,7 +231,7 @@ Prerequisites per tool:
 | `mkv_track_cleaner.py` | `mkvmerge` (MKVToolNix) | — |
 | `bitdepth.py` | `ffprobe` (FFmpeg) | — |
 | `library_auditor.py` | — | — |
-| `movie_standardizer.py` | `ffprobe` (optional, for duplicate upgrades) | — |
+| `movie_standardizer.py` | — | A matching new download replaces the older library movie; no probe required. |
 
 Shared behaviour belongs in `organizekit/core/` and is imported, not copied.
 The test suite fails the build if a tool defines a helper the core already
@@ -254,7 +254,7 @@ one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
 | [`mkv_track_cleaner.py`](docs/tools.md#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best audio track (the movie's own language), strip every dub, commentary track and embedded subtitle. Video untouched; seeding movies deferred; a broken `.eng.srt` skips the movie. | `mkvmerge` |
 | [`bitdepth.py`](docs/tools.md#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect native HDR10 / HDR10+ / Dolby Vision fail-closed, flag anything ambiguous for review. | `ffprobe` |
 | [`library_auditor.py`](docs/tools.md#4--library_auditorpy--read-only-health-check) | Strictly read-only health check of layout, naming and subtitles, with gating exit codes for cron. | nothing |
-| [`movie_standardizer.py`](docs/tools.md#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names and hardlink one movie file per `Title (Year)/` — MKV canonical, MP4 placed as-is. Zero extra bytes. | `ffprobe` (optional) |
+| [`movie_standardizer.py`](docs/tools.md#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: hardlink one MKV/MP4 per `Title (Year)/`; the latest matching download replaces the older library file. Zero extra bytes. | nothing |
 | [`pipeline.py`](docs/pipeline.md) | The four maintenance steps in the one safe order — subtitles are extracted before the remux strips them, and the read-only audit closes the sweep. | — |
 
 ---
@@ -291,8 +291,9 @@ Non-negotiable rules every tool obeys:
    still in the container. The pipeline enforces the order. A movie cleaned
    with no sidecar simply never had a usable English track, and the report
    names it: that one is a human decision.
-3. **Seeding movies are inviolable** — link count > 1 means *deferred,
-   unconditionally*. No override flag exists.
+3. **Seeding source data is never modified** — the track cleaner defers a
+   hardlinked movie (link count > 1) unconditionally; the standardizer may
+   replace the library's link, but never changes the torrent's file.
 4. **Fail-closed concurrency** — all tools coordinate through advisory locks
    keyed by a SHA-256 of the normalized library path. Lock contention halts a
    tool; it never races.
@@ -300,9 +301,11 @@ Non-negotiable rules every tool obeys:
    caches, and remuxed MKVs are written to unique sibling temporaries and
    swapped with `os.replace`. A crash or power cut never leaves a
    half-written movie.
-6. **Unique data is never deleted** — declines are reported, duplicates
-   default to `REPORT` mode, and destructive maintenance modes
-   (`QUARANTINE`, `DELETE`) are strictly opt-in.
+6. **Unmatched data is never deleted** — declines are reported, duplicate
+   maintenance defaults to `REPORT` and destructive maintenance is opt-in.
+   The explicit exception is a newly downloaded movie matching the library's
+   title/year and version: its hardlink replaces the existing movie, even if
+   the old library file was the only copy. Torrent sources are not removed.
 7. **A sidecar is never rewritten behind your back** — the extractor creates
    `.eng.srt` files and nothing in this toolkit ever edits one afterwards. An
    existing sidecar is authoritative; timing is a playback-time concern, not

@@ -12,8 +12,8 @@ requests and serves canned answers, and `tests/hermetic.py` pins the real
 `urlopen` out so no test can reach the network by accident.
 
 Offline means the suite does not *need* those things — not that it ignores
-them. `organize.py doctor` answers by probing the machine, and `--ffprobe` is a
-hint that falls through to whatever is on the `PATH`, so a test that runs the
+them. `organize.py doctor` probes the machine, and the bit-depth inspector's
+`--ffprobe` is a hint that falls through to whatever is on the `PATH`, so a test that runs the
 real command takes a different branch on a workstation than on a CI runner.
 `tests/hermetic.py` pins every toolchain lookup to "not installed" for the
 tests that would otherwise consult the host; `tests/test_hermetic.py` is what
@@ -22,7 +22,7 @@ patches the lookup itself, inside the test body.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,174 unit tests, ~25 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,139 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```

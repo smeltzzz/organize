@@ -368,7 +368,7 @@ def check_mkvtoolnix(_ctx: DoctorContext) -> DiagnosticCheck:
 
 
 def check_ffprobe(_ctx: DoctorContext) -> DiagnosticCheck:
-    """ffprobe - needed by bitdepth.py and the standardizer's duplicate check."""
+    """ffprobe - needed by the bit-depth inspector."""
 
     def probe() -> str:
         import bitdepth as probe_mod

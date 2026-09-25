@@ -1,10 +1,9 @@
 """The offline self-tests lifted out of ``movie_standardizer.py``.
 
-These assertions used to ship inside the tool itself. They are unchanged; only
-their address is different. Each function is rebound to the tool module's
-namespace by :func:`bind_to_tool`, so a body that reads or patches a module
-global (``globals()["_movie_upgrade_decision"] = ...``,  ``global CFG``)
-affects the tool exactly as it did when it lived there.
+These assertions used to ship inside the tool itself. Each function is
+rebound to the tool module's namespace by :func:`bind_to_tool`, so a body that
+reads or patches a module global (such as ``CFG``) affects the tool exactly as
+it did when it lived there.
 
 ``tests/test_selftests.py`` runs them as part of the normal unit suite.
 """
@@ -104,17 +103,14 @@ def run_canonical_self_tests() -> int:
         guard_dest.parent.mkdir()
         guard_dest.write_bytes(b"destination")
         real_replace = os.replace
-        real_upgrade_decision = globals()["_movie_upgrade_decision"]
         try:
-            # This test isolates atomic activation failure. Duplicate identity
-            # and quality policy is covered separately by the unit suite.
-            globals()["_movie_upgrade_decision"] = lambda *_args: (True, "self-test upgrade")
+            # The two names match; only a failed atomic activation can veto
+            # replacing the library movie. Identity is covered by the unit suite.
             os.replace = lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("locked"))
             if process_file_action(guard_src, guard_dest):
                 errors.append("locked destination replacement unexpectedly succeeded")
         finally:
             os.replace = real_replace
-            globals()["_movie_upgrade_decision"] = real_upgrade_decision
         _assert_eq(guard_src.read_bytes(), b"source-replacement", "failed replacement keeps source", errors)
         _assert_eq(guard_dest.read_bytes(), b"destination", "failed replacement keeps destination", errors)
     finally:

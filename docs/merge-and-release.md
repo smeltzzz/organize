@@ -86,7 +86,7 @@ syntax gate, a file the merge deleted, and the `provisioned` job still did
 `pip install ffsubsync` then `import sync_subtitles`. The bot cannot fix a
 workflow file, so that was step 2's patch. **This is history: PR #40 applied
 the patch, and CI on `main` has been green since.** Everything else in that
-run was green on the same merge: the whole suite (1,174 tests) on Linux, macOS
+run was green on the same merge: the whole suite (1,139 tests) on Linux, macOS
 and Windows across Python 3.11–3.13, packaging, the single-file build, the lint
 job, the coverage floor and the doctor smoke test.
 

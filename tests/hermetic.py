@@ -5,16 +5,11 @@ FFmpeg and no network. Hermetic means the tests do not *require* those things.
 It does not, on its own, mean they ignore them - and a handful did not.
 
 ``organize.py doctor`` answers by probing the machine it runs on, and the CLI
-tests run the real doctor. ``movie_standardizer`` probes too: ``--ffprobe`` is
-a *hint*, and when the hinted path does not exist ``find_ffprobe`` falls
-through to ``shutil.which("ffprobe")`` and finds whatever the machine actually
-has. This module also pins outbound HTTP, because the extractor's OpenSubtitles
-tier is the toolkit's only networked path and a test that reached it would
-depend on the network just as badly. On
-a CI runner - which has none of these installed - every one of those probes
-came back empty, and the tests passed. On a workstation that has the tools, the
-same tests took the other branch: a real ``mkvmerge --version`` here, a real
-``ffprobe -show_streams`` against a fixture that is not a video there.
+tests run the real doctor. The bit-depth inspector also needs ffprobe. This
+module pins outbound HTTP, because the extractor's OpenSubtitles tier is the
+toolkit's only networked path and a test that reached it would depend on the
+network just as badly. On a CI runner with no media binaries these lookups
+came back empty; on a workstation with the tools the tests used real binaries.
 
 That is the whole bug: the outcome depended on the machine, and only one of the
 two machines was ever tested. Pinning the lookups makes the answer the same
@@ -95,7 +90,6 @@ def no_media_tools() -> Iterator[None]:
     """
     import bitdepth
     import mkv_track_cleaner
-    import movie_standardizer
     import subtitle_extractor
 
     with mock.patch("shutil.which", side_effect=_which_without_media_tools), \
@@ -106,7 +100,6 @@ def no_media_tools() -> Iterator[None]:
                               lambda name, explicit=None: None), \
             mock.patch.object(bitdepth, "find_ffprobe", lambda explicit=None: None), \
             mock.patch.object(bitdepth, "ffprobe_works", lambda binary: False), \
-            mock.patch.object(movie_standardizer, "find_ffprobe", lambda explicit="ffprobe": None), \
             mock.patch.object(subtitle_extractor, "urlopen", _no_network):
         yield
 
