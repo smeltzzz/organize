@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.0.0] - 2026-09-24
+
+**Matching new movie downloads now replace the library copy by default.** This
+is a major release because a library file that used to be retained unless a
+technical upgrade could be verified is now replaced when the incoming movie's
+parsed title, year and version markers match. Torrent sources remain untouched,
+but an old library movie with no other hardlinks or backups will be removed.
 
 ### Changed
 - `movie_standardizer.py` now replaces an existing movie with the latest

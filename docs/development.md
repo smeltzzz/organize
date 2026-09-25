@@ -84,8 +84,9 @@ cd /tmp && /tmp/checkinstall/bin/organize --version && /tmp/checkinstall/bin/org
 mkdir /tmp/sdist && tar xzf dist/*.tar.gz -C /tmp/sdist --strip-components=1
 cd /tmp/sdist && python3 -m unittest discover -s tests -p "test_*.py"
 
-# 6. Tag it. The workflow does the rest; the tag must match VERSION.
-git tag -a v3.6.0 -m "3.6.0" && git push origin v3.6.0
+# 6. After merging the release PR into main, tag the merged commit. The tag
+#    must match VERSION (7.0.0 for this release); the workflow does the rest.
+git tag -a v7.0.0 -m "7.0.0" && git push origin v7.0.0
 ```
 
 Steps 4 and 5 are not ceremony. The wheel ships eight top-level modules and a

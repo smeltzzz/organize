@@ -1,30 +1,25 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **6.0.0 is prepared and waiting on a tag.** The version bump, the changelog
-> entry and the release guard are committed with the OCR-removal work in
-> [PR #41](https://github.com/smeltzzz/organize/pull/41). Once that is merged:
+> **7.0.0 is prepared in [PR #43](https://github.com/smeltzzz/organize/pull/43),
+> not yet published.** 6.0.0 is already on PyPI and cannot be overwritten.
+> After PR #43 is merged into `main` and CI passes, the maintainer can tag the
+> merged commit from an up-to-date checkout of `main`:
 >
 > ```bash
-> git checkout main && git pull
-> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 6.0.0
-> git tag -a v6.0.0 -m "6.0.0" && git push origin v6.0.0
+> git checkout main && git pull origin main
+> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 7.0.0
+> git tag -a v7.0.0 -m "7.0.0" && git push origin v7.0.0
 > ```
 >
-> `release.yml` then re-runs the whole offline suite, refuses the tag if it
-> disagrees with `organizekit.VERSION`, builds the wheel, the sdist and the
-> zipapp, publishes to PyPI, and attaches `organize.pyz` to the GitHub release.
-> Afterwards, an installed copy updates with
-> `python3 -m pip install --upgrade organizekit`
-> ([Testing & development](development.md#cutting-a-release)).
->
-> **6.0.0, not 5.1.0**, for the same reason 4.0.0 and 5.0.0 were majors: the
-> five OCR flags no longer exist (all five are listed in the changelog's
-> `[6.0.0]` section), so a script that passed one now fails loudly instead of
-> quietly doing something else. This page is a live document, so it deliberately
-> does not quote flags that no tool accepts any more - `tests/test_docs.py`
-> fails when a live page names a flag that was deleted, which is how this
-> sentence came to be reworded. What the release contains is
-> [`CHANGELOG.md`](../CHANGELOG.md)'s `[6.0.0]` section.
+> The pushed tag triggers `release.yml`, which checks that the tag matches
+> `organizekit.VERSION`, runs the suite, builds the wheel/sdist/zipapp, publishes
+> to PyPI and attaches the zipapp to the GitHub release. **Wait for the release
+> workflow to succeed** before updating a pip install with
+> `python3 -m pip install --upgrade organizekit` (or `pipx upgrade organizekit`).
+> The major bump reflects the new default: an incoming movie with matching
+> title/year/version markers replaces the existing library movie without a
+> technical-upgrade check. Details and data-retention implications are in the
+> [7.0.0 changelog entry](../CHANGELOG.md).
 
 > **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
