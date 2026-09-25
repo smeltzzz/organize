@@ -6,7 +6,6 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any, cast
 
 from reporttext import scorecard, section
 
@@ -71,83 +70,6 @@ class SubtitleLanguageTests(unittest.TestCase):
     def test_suffix_order(self) -> None:
         self.assertEqual(ms.subtitle_suffix("Film.English.srt"), ".eng.srt")
 
-
-class DuplicateUpgradeTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._td = tempfile.TemporaryDirectory(prefix="standardizer_upgrade_")
-        self.root = Path(self._td.name)
-        self.addCleanup(self._td.cleanup)
-        release = self.root / "Film.2020.1080p.WEB-DL"
-        release.mkdir()
-        self.source = release / "Film.2020.1080p.WEB-DL.mkv"
-        self.destination = self.root / "Film (2020).mkv"
-        self.source.write_bytes(b"new movie")
-        self.destination.write_bytes(b"old")
-        self._find = ms.find_ffprobe
-        self._probe = ms.probe_media
-        self.addCleanup(self._restore)
-
-    def _restore(self) -> None:
-        ms.find_ffprobe = self._find
-        ms.probe_media = self._probe
-
-    @staticmethod
-    def _info(**changes) -> ms.MediaTechnicalInfo:
-        values: dict[str, Any] = {
-            "duration": 7200.0,
-            "width": 1920,
-            "height": 1080,
-            "video_codec": "h264",
-            "bit_depth": 8,
-            "hdr": False,
-            "video_bitrate": 5_000_000,
-            "audio_channels": 6,
-            "audio_bitrate": 640_000,
-        }
-        values.update(changes)
-        return ms.MediaTechnicalInfo(**values)
-
-    def _use_probe_results(self, source, existing) -> None:
-        ms.find_ffprobe = cast(Any, lambda _explicit="ffprobe": "ffprobe")
-        ms.probe_media = cast(Any, lambda path, _binary: ((source if path == self.source else existing), ""))
-
-    def test_ffprobe_is_required_instead_of_size_fallback(self) -> None:
-        ms.find_ffprobe = cast(Any, lambda _explicit="ffprobe": None)
-        replace, reason = ms.should_replace(self.source, self.destination)
-        self.assertFalse(replace)
-        self.assertIn("size alone never replaces", reason)
-
-    def test_runtime_mismatch_blocks_larger_source(self) -> None:
-        self._use_probe_results(self._info(duration=7400, width=3840, height=2160), self._info())
-        replace, reason = ms.should_replace(self.source, self.destination)
-        self.assertFalse(replace)
-        self.assertIn("different cut", reason)
-
-    def test_balanced_score_allows_clear_same_cut_upgrade(self) -> None:
-        self._use_probe_results(
-            self._info(duration=7210, width=3840, height=2160, video_codec="hevc", bit_depth=10,
-                       hdr=True, video_bitrate=12_000_000),
-            self._info(),
-        )
-        replace, reason = ms.should_replace(self.source, self.destination)
-        self.assertTrue(replace, reason)
-        self.assertIn("same-cut technical upgrade", reason)
-
-    def test_quality_downgrade_is_blocked_even_if_score_could_rise(self) -> None:
-        self._use_probe_results(
-            self._info(bit_depth=8, video_bitrate=20_000_000),
-            self._info(bit_depth=10, video_bitrate=3_000_000),
-        )
-        replace, reason = ms.should_replace(self.source, self.destination)
-        self.assertFalse(replace)
-        self.assertIn("lower video bit depth", reason)
-
-    def test_alternate_edition_is_never_automatically_replaced(self) -> None:
-        self.source = self.source.with_name("Film.2020.Directors.Cut.2160p.mkv")
-        self.source.write_bytes(b"alternate")
-        replace, reason = ms.should_replace(self.source, self.destination)
-        self.assertFalse(replace)
-        self.assertIn("alternate-cut", reason)
 
 class _RunStateMixin(unittest.TestCase):
     """Isolate the module-level run state that record_outcome mutates."""
@@ -318,11 +240,9 @@ class Mp4ContainerTests(_RunStateMixin):
     """MP4 releases are placed, under their own extension, one per folder.
 
     The tool never transcodes, so accepting a container means hardlinking it
-    as-is: an ``.mp4`` becomes ``Title (Year)/Title (Year).mp4``. MKV stays
-    canonical — it is the only container the rest of the pipeline can remux,
-    inspect and subtitle — so it wins any tie, and a folder never ends up
-    holding two features, which is what ``library_auditor.py`` reports as
-    MULTIPLE_DIRECT_MOVIE_FILES.
+    as-is: an ``.mp4`` becomes ``Title (Year)/Title (Year).mp4``. MKV wins when
+    both are in one release; on later downloads the newest matching movie wins
+    without leaving two features in the library folder.
     """
 
     def setUp(self) -> None:
@@ -376,23 +296,24 @@ class Mp4ContainerTests(_RunStateMixin):
         self.assertTrue((placed / "Both Movie (2018).mkv").exists())
         self.assertFalse((placed / "Both Movie (2018).mp4").exists())
 
-    def test_mp4_is_declined_when_an_mkv_already_holds_the_movie(self) -> None:
+    def test_mp4_replaces_an_existing_mkv_of_the_same_movie(self) -> None:
         existing = self.library / "Held Movie (2017)" / "Held Movie (2017).mkv"
         existing.parent.mkdir(parents=True)
         existing.write_bytes(b"already here")
-        ms.handle_single_file(self._source_file("Held.Movie.2017.mp4"))
-        self.assertFalse((existing.parent / "Held Movie (2017).mp4").exists())
-        self.assertEqual(existing.read_bytes(), b"already here")
-        self.assertIn("another container", ms.RUN_EVENTS[-1]["reason"])
+        incoming = self._source_file("Held.Movie.2017.mp4")
+        ms.handle_single_file(incoming)
+        self.assertFalse(existing.exists())
+        self.assertTrue((existing.parent / "Held Movie (2017).mp4").samefile(incoming))
+        self.assertIn("replaced", ms.RUN_EVENTS[-1]["reason"])
 
-    def test_mkv_is_declined_when_an_mp4_already_holds_the_movie(self) -> None:
-        """First container placed wins; unique data is never deleted."""
+    def test_mkv_replaces_an_existing_mp4_of_the_same_movie(self) -> None:
         existing = self.library / "Held Movie (2016)" / "Held Movie (2016).mp4"
         existing.parent.mkdir(parents=True)
         existing.write_bytes(b"already here")
-        ms.handle_single_file(self._source_file("Held.Movie.2016.mkv"))
-        self.assertFalse((existing.parent / "Held Movie (2016).mkv").exists())
-        self.assertEqual(existing.read_bytes(), b"already here")
+        incoming = self._source_file("Held.Movie.2016.mkv")
+        ms.handle_single_file(incoming)
+        self.assertFalse(existing.exists())
+        self.assertTrue((existing.parent / "Held Movie (2016).mkv").samefile(incoming))
 
     def test_reingesting_the_same_mp4_is_idempotent(self) -> None:
         src = self._source_file("Repeat.Movie.2015.mp4")
@@ -415,18 +336,17 @@ class Mp4ContainerTests(_RunStateMixin):
         (folder / "temp_clean_ab12__Staged Movie (2013).mkv").write_bytes(b"staging")
         self.assertIsNone(ms.existing_other_container(folder / "Staged Movie (2013).mp4"))
 
-    def test_mp4_replacement_still_goes_through_the_probe_decision(self) -> None:
-        """Size alone must never replace a placed movie, MP4 included."""
-        src = self._source_file("Upgrade.Movie.2012.2160p.mp4", b"x" * 9000)
+    def test_an_equal_or_smaller_mp4_replaces_a_matching_mp4(self) -> None:
+        src = self._source_file("Upgrade.Movie.2012.mp4", b"x" * 10)
         dest = self.library / "Upgrade Movie (2012)" / "Upgrade Movie (2012).mp4"
         dest.parent.mkdir(parents=True)
-        dest.write_bytes(b"x" * 10)
-        find = ms.find_ffprobe
-        ms.find_ffprobe = cast(Any, lambda _explicit="ffprobe": None)
-        self.addCleanup(lambda: setattr(ms, "find_ffprobe", find))
-        replace, reason = ms.should_replace(src, dest)
-        self.assertFalse(replace)
-        self.assertIn("size alone never replaces", reason)
+        dest.write_bytes(b"y" * 10)
+        ms.handle_single_file(src)
+        self.assertTrue(dest.samefile(src))
+        newer = self._source_file("Upgrade.Movie.2012.WEB.mp4", b"z" * 5)
+        ms.handle_single_file(newer)
+        self.assertTrue(dest.samefile(newer))
+        self.assertEqual(dest.read_bytes(), b"z" * 5)
 
     def test_automated_input_accepts_mp4_and_rejects_other_containers(self) -> None:
         accepted = self._source_file("Auto.Movie.2011.mp4")

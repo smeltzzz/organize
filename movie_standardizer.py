@@ -7,10 +7,10 @@ Organizes movie downloads into the exact canonical layout
 MP4 releases are placed too, keeping their own extension
 (``Title (Year)/Title (Year).mp4``); see "v3.5 MP4 releases are placed" below.
 
-Zero third-party Python dependencies. Initial placement needs no external
-binary; replacing an existing canonical movie uses optional ``ffprobe`` and
-otherwise keeps the existing copy. Safe by default: never deletes a unique
-source file and never follows a failed hard-link with a silent overwrite.
+Zero third-party Python dependencies or external binaries. When a new download
+matches the movie already in the library, its hardlink replaces the old one,
+regardless of file size or technical quality. The download itself is never
+removed; a failed hardlink never deletes the library copy.
 
 Movies-first: this tool is for movie libraries. TV-name detection exists
 purely to *exclude* TV content; ``--allow-tv`` is an escape hatch for
@@ -50,10 +50,10 @@ v3.5 MP4 releases are placed
 - ``.mp4`` sources are hardlinked into the library under their own extension.
   Nothing is transcoded and nothing is renamed to a container it is not: an
   MP4 arrives as ``Title (Year)/Title (Year).mp4``.
-- MKV stays canonical. When one movie arrives as both, the MKV is placed; when
-  a folder already holds one container, the other is declined and reported
-  rather than added beside it, because two features in one folder is precisely
-  what ``library_auditor.py`` flags as MULTIPLE_DIRECT_MOVIE_FILES.
+- MKV stays canonical when both arrive in one release. When a *later* download
+  matches a movie already in the library, it replaces the older movie even if
+  the new container differs; the old container is removed only after the new
+  hardlink is in place, so the folder ends with one feature.
 - The rest of the pipeline accepts the placed MP4 until the track cleaner
   converts it: ``subtitle_extractor.py`` builds its sidecar from the embedded
   track through a temp-MKV bridge, ``library_auditor.py`` reports it as
@@ -85,7 +85,7 @@ v2.3 (one-movie-file-per-folder guarantee)
 ------------------------------------------
 - Removed the opt-in --keep-versions multi-encode mode entirely: the library
   invariant is exactly ONE movie file per movie folder, and nothing can turn
-  that off. Two encodes of the same movie -> the larger is organized, the
+  that off. Two encodes in the same release -> the larger is organized, the
   smaller stays untouched in its source folder; duplicate *folders* of the
   same movie are identified by the dedup scan (near-identical sizes are kept
   and logged, never guessed; maintenance defaults to REPORT).
@@ -104,7 +104,6 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -142,7 +141,6 @@ from organizekit.core import (
     print_text,
     resolve_library,
     run_field_smoke_test,
-    tools_home,
 )
 
 # ---------------------------------------------------------------------------
@@ -293,15 +291,8 @@ JELLYFIN_MODE = False
 MIN_YEAR = 1880
 LOCK_NAME = ".movie_standardizer.lock"
 
-# Replacing an existing canonical movie is deliberately much stricter than
-# initial placement. Title/year comes from the canonical destination, while a
-# close runtime match establishes that the files are the same cut. A weighted
-# ffprobe score must then show a meaningful technical upgrade; file size alone
-# is never sufficient.
-DUPLICATE_DURATION_MAX_SECONDS = 30.0
-DUPLICATE_DURATION_MAX_FRACTION = 0.01
-DUPLICATE_MIN_SCORE_GAIN = 10.0
-FFPROBE_TIMEOUT_SECONDS = 30.0
+# A new download replaces an older movie only when the parsed title/year and
+# any edition label agree. No size or technical-quality comparison is made.
 
 # Plex / Jellyfin extra directory names (compared case-insensitively).
 EXTRA_FOLDER_NAMES = frozenset({
@@ -613,7 +604,6 @@ class Config:
     dry_run: bool = False
     verbose: bool = False
     lock_timeout_seconds: float = 60.0
-    ffprobe: str = "ffprobe"
 
     @property
     def min_movie_bytes(self) -> int:
@@ -1821,253 +1811,24 @@ def _create_hardlink(src: Path, dest: Path) -> None:
     """Create one hardlink or raise; never fall back to copying or moving."""
     os.link(str(src), str(dest))
 
-@dataclass(frozen=True)
-class MediaTechnicalInfo:
-    """Small, stable subset of ffprobe data used for duplicate decisions."""
+def _movie_replacement_decision(src: Path, dest: Path) -> tuple[bool, str]:
+    """Replace only the same named movie/cut, not a different title or edition.
 
-    duration: float
-    width: int
-    height: int
-    video_codec: str
-    bit_depth: int
-    hdr: bool
-    video_bitrate: int
-    audio_channels: int
-    audio_bitrate: int
-
-    @property
-    def resolution_tier(self) -> int:
-        longest = max(self.width, self.height)
-        if longest >= 3800:
-            return 4  # UHD / 4K
-        if longest >= 2500:
-            return 3  # 1440p-ish
-        if longest >= 1800:
-            return 2  # 1080p
-        if longest >= 1200:
-            return 1  # 720p
-        return 0
-
-def find_ffprobe(explicit: str = "ffprobe") -> str | None:
-    """Find ffprobe without making it a prerequisite for initial placement."""
-    candidates: list[str] = []
-    if explicit and explicit != "ffprobe":
-        candidates.append(explicit)
-        explicit_on_path = shutil.which(explicit)
-        if explicit_on_path:
-            candidates.append(explicit_on_path)
-    located = shutil.which("ffprobe") or shutil.which("ffprobe.exe")
-    if located:
-        candidates.append(located)
-    here = tools_home()  # beside the checkout, or beside the .pyz
-    candidates.extend([
-        str(here / "ffprobe.exe"),
-        str(here / "ffprobe"),
-        str(here / "ffmpeg" / "ffprobe.exe"),
-        r"C:\ffmpeg\bin\ffprobe.exe",
-        r"C:\Program Files\ffmpeg\bin\ffprobe.exe",
-        r"C:\Program Files\FFmpeg\bin\ffprobe.exe",
-    ])
-    seen: set[str] = set()
-    for candidate in candidates:
-        if candidate and candidate not in seen and Path(candidate).is_file():
-            return str(Path(candidate))
-        seen.add(candidate)
-    return None
-
-def _probe_int(value: Any) -> int:
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return 0
-
-def _probe_float(value: Any) -> float:
-    try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
-        return 0.0
-
-def _stream_bit_depth(stream: dict) -> int:
-    raw = _probe_int(stream.get("bits_per_raw_sample"))
-    if raw:
-        return raw
-    pix_fmt = str(stream.get("pix_fmt") or "").casefold()
-    match = re.search(r"(?:p|p0)(10|12|14|16)(?:le|be)?$", pix_fmt)
-    return int(match.group(1)) if match else 8
-
-def _stream_is_hdr(stream: dict) -> bool:
-    transfer = str(stream.get("color_transfer") or "").casefold()
-    if transfer in {"smpte2084", "arib-std-b67", "smpte428"}:
-        return True
-    side_data = " ".join(
-        str(item.get("side_data_type") or "")
-        for item in stream.get("side_data_list") or []
-        if isinstance(item, dict)
-    ).casefold()
-    return any(marker in side_data for marker in ("dovi", "dolby vision", "hdr dynamic"))
-
-def probe_media(path: Path, ffprobe: str) -> tuple[MediaTechnicalInfo | None, str]:
-    """Inspect one movie for conservative identity and quality comparison."""
-    command = [
-        ffprobe, "-v", "error", "-show_streams", "-show_format",
-        "-of", "json", str(path),
-    ]
-    try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            # ffprobe speaks ASCII, but decode explicitly anyway: the locale
-            # encoding (cp1252 on Windows) is never what we want here.
-            encoding="utf-8",
-            errors="replace",
-            timeout=FFPROBE_TIMEOUT_SECONDS,
-            check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return None, f"ffprobe could not inspect {path.name}: {exc}"
-    if completed.returncode != 0:
-        detail = (completed.stderr or "").strip().splitlines()
-        return None, f"ffprobe rejected {path.name}: {detail[-1] if detail else f'exit {completed.returncode}'}"
-    try:
-        payload = json.loads(completed.stdout)
-    except (TypeError, json.JSONDecodeError) as exc:
-        return None, f"ffprobe returned invalid JSON for {path.name}: {exc}"
-
-    streams = payload.get("streams") or []
-    videos = [
-        stream for stream in streams
-        if isinstance(stream, dict)
-        and stream.get("codec_type") == "video"
-        and not _probe_int((stream.get("disposition") or {}).get("attached_pic"))
-    ]
-    if not videos:
-        return None, f"ffprobe found no feature video stream in {path.name}"
-    video = max(videos, key=lambda stream: _probe_int(stream.get("width")) * _probe_int(stream.get("height")))
-    audios = [stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "audio"]
-    audio = max(
-        audios,
-        key=lambda stream: (_probe_int(stream.get("channels")), _probe_int(stream.get("bit_rate"))),
-        default={},
-    )
-    fmt = payload.get("format") if isinstance(payload.get("format"), dict) else {}
-    duration = _probe_float(fmt.get("duration")) or _probe_float(video.get("duration"))
-    width, height = _probe_int(video.get("width")), _probe_int(video.get("height"))
-    if duration <= 0 or width <= 0 or height <= 0:
-        return None, f"ffprobe returned incomplete duration/resolution data for {path.name}"
-    return MediaTechnicalInfo(
-        duration=duration,
-        width=width,
-        height=height,
-        video_codec=str(video.get("codec_name") or "unknown").casefold(),
-        bit_depth=_stream_bit_depth(video),
-        hdr=_stream_is_hdr(video),
-        video_bitrate=_probe_int(video.get("bit_rate")) or _probe_int(fmt.get("bit_rate")),
-        audio_channels=_probe_int(audio.get("channels")),
-        audio_bitrate=_probe_int(audio.get("bit_rate")),
-    ), ""
-
-def technical_quality_score(info: MediaTechnicalInfo) -> float:
-    """Balanced score; a replacement still must pass all downgrade guards."""
-    codec_bonus = {
-        "mpeg2video": -3.0, "h264": 0.0, "vp9": 4.0, "hevc": 5.0,
-        "av1": 8.0,
-    }.get(info.video_codec, 0.0)
-    video_mbps = min(info.video_bitrate / 1_000_000.0, 20.0)
-    audio_mbps = min(info.audio_bitrate / 1_000_000.0, 3.0)
-    return (
-        info.resolution_tier * 25.0
-        + (20.0 if info.hdr else 0.0)
-        + info.bit_depth * 3.0
-        + video_mbps * 2.0
-        + info.audio_channels * 1.5
-        + audio_mbps * 2.0
-        + codec_bonus
-    )
-
-def upgrade_verdict(
-    source_info: MediaTechnicalInfo, existing_info: MediaTechnicalInfo,
-) -> tuple[bool, str]:
-    """May this movie replace the one already in the library, on the numbers?
-
-    The guard chain that decides whether an existing movie is overwritten,
-    separated from the probing that produces its inputs so it can be checked
-    without ffprobe, without a movie and without a library. Every rule here
-    is a *veto*: a run of them all passing is the only way to reach the score
-    comparison, and the score alone can never replace anything.
-
-    Order matters and is deliberate. Runtime is asked first because a
-    different runtime means a different cut - a theatrical release and an
-    extended edition are two movies, not two copies of one, and no amount of
-    technical superiority makes it safe to overwrite one with the other.
-    Then the four one-way regressions (resolution tier, HDR, bit depth, audio
-    channels), each of which loses information the library will not get back.
-    Only what survives all of that is scored, and it still has to win by
-    ``DUPLICATE_MIN_SCORE_GAIN`` - a rounding-error improvement is not worth
-    rewriting a movie for.
+    A torrent-completion run makes ``src`` the newest download. The canonical
+    filename stores the title and year (and an edition only when configured);
+    it does not store technical quality. Unrepresented edition, 3D and split
+    markers therefore cannot be safely matched to an existing plain filename.
     """
-    duration_gap = abs(source_info.duration - existing_info.duration)
-    duration_limit = max(
-        DUPLICATE_DURATION_MAX_SECONDS,
-        max(source_info.duration, existing_info.duration) * DUPLICATE_DURATION_MAX_FRACTION,
-    )
-    if duration_gap > duration_limit:
-        return False, (
-            f"conflict: runtime differs by {duration_gap:.1f}s (limit {duration_limit:.1f}s); "
-            "likely a different cut"
-        )
-    if source_info.resolution_tier < existing_info.resolution_tier:
-        return False, "conflict: incoming movie has a lower resolution tier"
-    if existing_info.hdr and not source_info.hdr:
-        return False, "conflict: incoming movie would replace HDR with SDR"
-    if source_info.bit_depth < existing_info.bit_depth:
-        return False, "conflict: incoming movie has lower video bit depth"
-    if source_info.audio_channels < existing_info.audio_channels:
-        return False, "conflict: incoming movie has fewer audio channels"
-
-    source_score = technical_quality_score(source_info)
-    existing_score = technical_quality_score(existing_info)
-    gain = source_score - existing_score
-    if gain < DUPLICATE_MIN_SCORE_GAIN:
-        return False, (
-            f"conflict: no clear technical upgrade (score {source_score:.1f} vs "
-            f"{existing_score:.1f}, need +{DUPLICATE_MIN_SCORE_GAIN:.1f})"
-        )
-    return True, (
-        f"verified same-cut technical upgrade (runtime gap {duration_gap:.1f}s; "
-        f"score {source_score:.1f} vs {existing_score:.1f}, +{gain:.1f})"
-    )
-
-def _movie_upgrade_decision(src: Path, dest: Path) -> tuple[bool, str]:
-    """Require same-cut identity and a meaningful, non-regressive upgrade.
-
-    The name is checked before anything is probed, because two different
-    movies - or an extended cut and a theatrical one - are not candidates for
-    replacement whatever their bitrates say, and probing costs a subprocess
-    per file. Then the technical comparison, which needs ffprobe: without it,
-    or with a file it cannot read, the answer is *keep what you have*. Size
-    alone never replaces a movie.
-    """
-    source_name = parse_video_identity(src, fallback=src.parent)
-    existing_name = parse_movie_name(dest.name)
-    if (source_name.title.casefold(), source_name.year) != (existing_name.title.casefold(), existing_name.year):
+    incoming = parse_video_identity(src, fallback=src.parent)
+    existing = parse_movie_name(dest.name)
+    if (incoming.title.casefold(), incoming.year) != (existing.title.casefold(), existing.year):
         return False, "conflict: source and canonical title/year identities differ"
-    if source_name.edition or source_name.three_d or source_name.part:
-        markers = ", ".join(filter(None, (source_name.edition, source_name.three_d, source_name.part)))
-        return False, f"conflict: incoming release has alternate-cut/version marker ({markers})"
-
-    ffprobe = find_ffprobe(CFG.ffprobe)
-    if not ffprobe:
-        return False, "conflict: ffprobe unavailable; keeping existing movie (size alone never replaces)"
-    source_info, source_error = probe_media(src, ffprobe)
-    existing_info, existing_error = probe_media(dest, ffprobe)
-    if source_info is None or existing_info is None:
-        return False, f"conflict: {source_error or existing_error}; keeping existing movie"
-    return upgrade_verdict(source_info, existing_info)
+    if (incoming.edition, incoming.three_d, incoming.part) != (existing.edition, existing.three_d, existing.part):
+        return False, "conflict: alternate-cut/version markers differ or are absent from the canonical name"
+    return True, "matching movie; latest download replaces existing movie"
 
 def should_replace(src: Path, dest: Path) -> tuple[bool, str]:
-    """Decide whether a destination may be replaced without relying on size alone."""
+    """Let a new download replace a matching movie, independent of size."""
     if not dest.exists():
         return True, "missing"
     if paths_equal(src, dest):
@@ -2078,10 +1839,9 @@ def should_replace(src: Path, dest: Path) -> tuple[bool, str]:
     except OSError:
         pass
     if src.suffix.casefold() in VIDEO_EXTENSIONS and dest.suffix.casefold() in VIDEO_EXTENSIONS:
-        return _movie_upgrade_decision(src, dest)
+        return _movie_replacement_decision(src, dest)
 
-    # Non-movie sidecars retain their established behavior. The stricter probe
-    # policy applies only to replacement of a placed movie file.
+    # Non-movie sidecars retain their established size rule.
     src_sz, dest_sz = file_size(src), file_size(dest)
     if src_sz > dest_sz:
         return True, f"src-larger ({src_sz} > {dest_sz})"
@@ -2096,8 +1856,9 @@ def existing_other_container(dest: Path) -> Path | None:
     two different destinations, so nothing else in the placement path stops one
     folder from ending up with two features for one movie — exactly the layout
     ``library_auditor.py`` reports as MULTIPLE_DIRECT_MOVIE_FILES, and exactly
-    the ambiguity Jellyfin resolves by guessing. The container that is already
-    in the library wins; the newcomer is declined and reported, never deleted.
+    the ambiguity Jellyfin resolves by guessing. A matching later download
+    replaces the old container; it is removed only after the new hardlink has
+    been published.
     """
     if dest.suffix.lower() not in VIDEO_EXTENSIONS:
         return None
@@ -2137,43 +1898,64 @@ def process_file_action(src: Path, dest: Path) -> bool:
         return True
 
     rival = existing_other_container(dest)
-    if rival is not None:
-        reason = f"{rival.name} already holds this movie in another container"
-        LOG.info("Skip %s (%s)", dest, reason)
+    if rival is not None and (dest.exists() or dest.is_symlink()):
+        reason = "both movie containers already exist; leaving them for review"
+        LOG.warning("Skip %s (%s)", dest, reason)
         record_outcome("skipped", "media placement", src=src, dest=dest, reason=reason)
         return False
 
     mode = PROCESS_MODE
-    replace, reason = should_replace(src, dest)
+    replace, reason = should_replace(src, rival or dest)
     if not replace:
         LOG.info("Skip %s (%s)", dest, reason)
         record_outcome("skipped", "media placement", src=src, dest=dest, reason=reason)
-        return True
+        # Only an already-linked download may contribute a missing sidecar.
+        return reason in {"same-file", "already-linked"}
 
+    old_movie = rival or (dest if dest.exists() and dest.suffix.lower() in VIDEO_EXTENSIONS else None)
     _ensure_parent(dest)
     if CFG.dry_run:
-        LOG.info("[DRY-RUN] %s: %s -> %s", mode, src, dest)
-        record_outcome("reported", mode, src=src, dest=dest, reason="dry run")
+        LOG.info("[DRY-RUN] %s: %s -> %s (%s)", mode, src, dest, reason)
+        record_outcome("reported", mode, src=src, dest=dest, reason=f"dry run: {reason}")
         return True
 
+    published = False
     try:
-        # Stage the hardlink beside the destination, then atomically swap it.
+        # For a container change, keep the old movie until the new hardlink
+        # has been published and verified. A failed link/swap leaves it intact.
+        previous = rival.stat(follow_symlinks=False) if rival else None
+        if previous is not None and not S_ISREG(previous.st_mode):
+            raise OSError("existing movie container is not a regular file")
+
         def producer(tmp: Path, _src: Path = src) -> None:
             _create_hardlink(_src, tmp)
 
         _replace_with(f"{mode} {src}", dest, producer)
-        try:
-            if not src.samefile(dest):
-                raise OSError("post-placement hardlink verification failed")
-        except OSError as exc:
-            LOG.error("%s verification failed for '%s': %s", mode, src, exc)
-            record_outcome("failed", mode, src=src, dest=dest, reason=f"hardlink verification failed: {exc}")
-            return False
-        used = mode
-        LOG.info("%s: '%s' -> '%s' (verified hardlink)", used, src, dest)
-        record_outcome("completed", used, src=src, dest=dest, reason="verified hardlink")
+        published = True
+        if not src.samefile(dest):
+            raise OSError("post-placement hardlink verification failed")
+        if rival is not None and previous is not None:
+            current = rival.stat(follow_symlinks=False)
+            if (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns) != (
+                previous.st_dev, previous.st_ino, previous.st_size, previous.st_mtime_ns
+            ):
+                raise OSError("existing movie changed during container replacement")
+            rival.unlink()
+
+        detail = f"replaced {old_movie.name}; verified hardlink" if old_movie else "verified hardlink"
+        LOG.info("%s: '%s' -> '%s' (%s)", mode, src, dest, detail)
+        record_outcome("completed", mode, src=src, dest=dest, reason=detail)
         return True
     except OSError as exc:
+        if rival is not None and published:
+            # Undo the new link when the old container survives. If someone
+            # removed the old file in the meantime, leave the new one in place
+            # rather than leaving the library with no movie at all.
+            try:
+                if rival.exists() and dest.samefile(src):
+                    dest.unlink()
+            except OSError as rollback_error:
+                LOG.error("Could not roll back new container '%s': %s", dest, rollback_error)
         LOG.error("%s failed for '%s': %s", mode, src, exc)
         record_outcome("failed", mode, src=src, dest=dest, reason=str(exc))
         return False
@@ -2767,7 +2549,6 @@ def apply_env(cfg: Config) -> None:
         "MOVIE_STD_MIN_SIZE": ("min_movie_size_mb", float),
         "MOVIE_STD_REPORT": ("report_file", Path),
         "MOVIE_STD_LOCK_TIMEOUT": ("lock_timeout_seconds", float),
-        "MOVIE_STD_FFPROBE": ("ffprobe", str),
         "MOVIE_STD_DEDUPLICATE": ("enable_deduplication", lambda v: v.lower() in {"1", "true", "yes"}),
         "MOVIE_STD_MAINTENANCE_MODE": ("maintenance_mode", str),
         "MOVIE_STD_QUARANTINE": ("quarantine_dir", Path),
@@ -2794,10 +2575,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--report", type=Path,
                    help="Human-readable text report file (default: the platform's per-tool reports directory)")
     p.add_argument("--lock-timeout", type=float, metavar="SECONDS", help="Maximum wait for another organizer run")
-    p.add_argument(
-        "--ffprobe", default=None, metavar="PATH",
-        help="ffprobe used to verify same-cut technical upgrades before replacing an existing MKV",
-    )
+    # Existing qBittorrent hooks may still pass this old option. Accept but
+    # ignore it; replacement no longer launches ffprobe.
+    p.add_argument("--ffprobe", help=argparse.SUPPRESS)
     p.add_argument(
         "--deduplicate", action="store_true",
         help="Scan the organized library for duplicate folders of the same movie",
@@ -2834,8 +2614,6 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         cfg.report_file = args.report
     if args.lock_timeout is not None:
         cfg.lock_timeout_seconds = args.lock_timeout
-    if args.ffprobe:
-        cfg.ffprobe = args.ffprobe
     if args.deduplicate:
         cfg.enable_deduplication = True
     if args.maintenance_mode:
@@ -2937,13 +2715,24 @@ def batch_scan(source: Path) -> None:
         record_outcome("failed", "batch scan", src=source, reason="source folder does not exist")
         return
     try:
-        entries = sorted(source.iterdir(), key=lambda p: p.name.casefold())
+        entries = list(source.iterdir())
     except OSError as exc:
         LOG.error("Cannot list %s: %s", source, exc)
         record_outcome("failed", "batch scan", src=source, reason=str(exc))
         return
-    # A batch of finished torrents is mostly filesystem work with an ffprobe
-    # here and there, and every item already logs what happened to it. What
+
+    # When several downloads of one movie are still in the source directory,
+    # ingest older ones first so the most recently modified one wins. A
+    # vanished item is still passed to handle_item, which reports it safely.
+    def batch_order(item: Path) -> tuple[int, str]:
+        try:
+            return item.stat().st_mtime_ns, item.name.casefold()
+        except OSError:
+            return 0, item.name.casefold()
+
+    entries.sort(key=batch_order)
+    # A batch of finished torrents is mostly filesystem work, and every item
+    # already logs what happened to it. What
     # was missing on a terminal is where the run *is*: the line below is
     # rewritten in place between items and erased before every log line. It
     # does not draw at all off a terminal, so a scheduled run's output and its
@@ -2981,6 +2770,8 @@ def run(args: argparse.Namespace) -> int:
     RUN_EVENTS = []
     setup_logging(CFG)
     _print_banner()
+    if getattr(args, "ffprobe", None):
+        LOG.info("Ignoring legacy --ffprobe; matching movies now replace the library copy directly")
 
     errors = validate_config(CFG)
     if errors:

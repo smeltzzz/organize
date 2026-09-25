@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.0] - 2026-09-24
+
+**Matching new movie downloads now replace the library copy by default.** This
+is a major release because a library file that used to be retained unless a
+technical upgrade could be verified is now replaced when the incoming movie's
+parsed title, year and version markers match. Torrent sources remain untouched,
+but an old library movie with no other hardlinks or backups will be removed.
+
+### Changed
+- `movie_standardizer.py` now replaces an existing movie with the latest
+  matching download (same parsed title/year and version markers), regardless
+  of size or technical quality. Placement still uses staged hardlinks and
+  leaves torrent sources untouched. If the new container differs, the old
+  container is removed only after the new file is verified; existing English
+  sidecars are preserved. Distinct titles, years and labeled cuts remain
+  protected.
+
+### Removed
+- The standardizer's `ffprobe`-based upgrade scoring and
+  `MOVIE_STD_FFPROBE` setting; `ffprobe` is no longer required for replacement.
+  For existing torrent hooks, `--ffprobe PATH` is still accepted but ignored.
+
 ## [6.0.0] - 2026-09-17
 
 **OCR is gone from `subtitle_extractor.py`: image-based subtitles are never

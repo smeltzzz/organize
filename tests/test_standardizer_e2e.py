@@ -10,10 +10,8 @@ exit code: all of it needs a source tree, a target tree, and a filesystem that
 supports hardlinks, so none of it had ever been executed by a test.
 
 These tests drive `main(argv)` against two real directories and then look at
-what is on disk. The invariant behind most of them is that **ingest is
-additive**: a release is hardlinked into the library, the download folder is
-left exactly as it was, and nothing that already existed in the library is
-overwritten on a maybe.
+what is on disk. A matching new download replaces the library hardlink, while
+the torrent source is left alone and unrelated movies and sidecars are kept.
 """
 
 from __future__ import annotations
@@ -49,7 +47,7 @@ SRT = (
 # so the suite has to start from a known-empty environment.
 ENV_KEYS = (
     "MOVIE_STD_TARGET", "MOVIE_STD_SOURCE", "MOVIE_STD_LOG", "MOVIE_STD_MIN_SIZE",
-    "MOVIE_STD_REPORT", "MOVIE_STD_LOCK_TIMEOUT", "MOVIE_STD_FFPROBE",
+    "MOVIE_STD_REPORT", "MOVIE_STD_LOCK_TIMEOUT",
     "MOVIE_STD_DEDUPLICATE", "MOVIE_STD_MAINTENANCE_MODE", "MOVIE_STD_QUARANTINE",
     "MOVIE_STD_MANIFEST", "MOVIE_STD_DRY_RUN",
 )
@@ -297,24 +295,64 @@ class ExistingLibraryTests(hermetic.HermeticToolsMixin, StandardizerRunFixture):
         self.incoming = self.release("The.Great.Escape.1963.2160p.BluRay.x265-GRP",
                                      "the.great.escape.1963.2160p.x265-grp.mkv")
 
-    def test_an_unprovable_upgrade_keeps_the_existing_movie(self) -> None:
-        """Without a working ffprobe there is no evidence, so nothing is replaced."""
+    def test_the_latest_matching_download_replaces_the_existing_movie(self) -> None:
+        """An even smaller incoming movie wins without ffprobe or a size score."""
+        write_video(self.incoming, BIG // 4)
         before = self.existing.stat()
-        self.assertEqual(self.run_main("--ffprobe", str(self.root / "nope")), 0)
-        after = self.existing.stat()
-        self.assertEqual((after.st_size, after.st_ino), (before.st_size, before.st_ino))
-        self.assertFalse(self.existing.samefile(self.incoming))
+        self.assertEqual(self.run_main(paths=(str(self.incoming.parent),)), 0)
+        self.assertTrue(self.existing.samefile(self.incoming))
+        self.assertNotEqual(self.existing.stat().st_ino, before.st_ino)
+        self.assertEqual(self.incoming.stat().st_size, BIG // 4, "the seed is untouched")
+        self.assertIn("replaced", self.reasons())
+        self.assertIn("HARDLINK", self.report_text())
 
-    def test_the_refusal_is_reported_rather_than_silent(self) -> None:
-        self.assertEqual(self.run_main("--ffprobe", str(self.root / "nope")), 0)
-        self.assertIn("conflict", self.reasons().lower() + self.report_text().lower())
+    def test_a_legacy_ffprobe_hook_option_does_not_block_replacement(self) -> None:
+        self.assertEqual(self.run_main("--ffprobe", str(self.root / "nope"),
+                                       paths=(str(self.incoming),)), 0)
+        self.assertTrue(self.existing.samefile(self.incoming))
+        self.assertIn("Ignoring legacy --ffprobe", self.log_text())
+
+    def test_a_second_new_download_becomes_the_library_copy(self) -> None:
+        self.assertEqual(self.run_main(paths=(str(self.incoming),)), 0)
+        newer = self.release("The.Great.Escape.1963.720p.WEB", "The.Great.Escape.1963.720p.WEB.mkv",
+                             size=BIG // 4)
+        self.assertEqual(self.run_main(paths=(str(newer),)), 0)
+        self.assertTrue(self.existing.samefile(newer))
+        self.assertFalse(self.existing.samefile(self.incoming))
+        self.assertTrue(self.incoming.is_file(), "neither download was removed")
+        self.assertIn("replaced", self.reasons())
+
+    def test_a_different_edition_does_not_replace_the_movie_or_place_its_sidecar(self) -> None:
+        alternate = self.release("The.Great.Escape.1963.Extended",
+                                 "The.Great.Escape.1963.Extended.mkv")
+        write_srt(alternate.with_suffix(".eng.srt"))
+        self.assertEqual(self.run_main(paths=(str(alternate),)), 0)
+        self.assertFalse(self.existing.samefile(alternate))
+        self.assertFalse(self.existing.with_suffix(".eng.srt").exists())
+        self.assertIn("alternate-cut/version", self.reasons())
 
     def test_an_existing_sidecar_is_never_overwritten(self) -> None:
         canonical = self.existing.with_name("The Great Escape (1963).eng.srt")
         write_srt(canonical, "1\n00:00:01,000 --> 00:00:02,000\nthe good one\n")
         write_srt(self.incoming.with_suffix(".eng.srt"))
-        self.assertEqual(self.run_main("--ffprobe", str(self.root / "nope")), 0)
+        self.assertEqual(self.run_main(paths=(str(self.incoming),)), 0)
+        self.assertTrue(self.existing.samefile(self.incoming))
         self.assertIn("the good one", canonical.read_text(encoding="utf-8"))
+
+    def test_a_new_mp4_replaces_the_old_mkv_without_leaving_two_features(self) -> None:
+        incoming_mp4 = self.release("The.Great.Escape.1963.WEB",
+                                    "The.Great.Escape.1963.WEB.mp4", size=BIG // 4)
+        self.assertEqual(self.run_main(paths=(str(incoming_mp4),)), 0)
+        new_movie = self.existing.with_suffix(".mp4")
+        self.assertTrue(new_movie.samefile(incoming_mp4))
+        self.assertFalse(self.existing.exists())
+        self.assertEqual(self.library_tree(),
+                         ["The Great Escape (1963)/The Great Escape (1963).mp4"])
+
+    def test_a_dry_run_of_replacement_leaves_the_existing_movie_in_place(self) -> None:
+        self.assertEqual(self.run_main("--dry-run", paths=(str(self.incoming),)), 0)
+        self.assertFalse(self.existing.samefile(self.incoming))
+        self.assertIn("latest download", self.reasons())
 
 
 class DryRunTests(StandardizerRunFixture):
@@ -398,6 +436,18 @@ class BatchScanTests(StandardizerRunFixture):
         self.assertEqual(self.run_main(), 0)
         self.assertEqual(self.library_tree(),
                          ["Alien (1979)/Alien (1979).mkv", "Heat (1995)/Heat (1995).mkv"])
+
+    def test_the_newest_source_wins_a_batch_even_if_its_name_sorts_first(self) -> None:
+        older = write_video(self.source / "Film.2020.720p.WEB.mkv", BIG)
+        newest = write_video(self.source / "Film.2020.2160p.BluRay.mkv", BIG // 4)
+        os.utime(older, ns=(1_000_000_000, 1_000_000_000))
+        os.utime(newest, ns=(2_000_000_000, 2_000_000_000))
+        placed = self.library / "Film (2020)" / "Film (2020).mkv"
+        self.assertEqual(self.run_main(), 0)
+        self.assertTrue(placed.samefile(newest))
+        self.assertFalse(placed.samefile(older))
+        self.assertEqual(self.run_main(), 0, "a later batch must not restore the older source")
+        self.assertTrue(placed.samefile(newest))
 
 
 class ConfigurationRefusalTests(StandardizerRunFixture):

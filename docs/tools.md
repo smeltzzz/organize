@@ -13,7 +13,7 @@ For the order they run in and why that order is load-bearing, see
 | [`mkv_track_cleaner.py`](#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep one best audio, strip commentary, dubs and embedded subtitles | `mkvmerge` |
 | [`bitdepth.py`](#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed | `ffprobe` |
 | [`library_auditor.py`](#4--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
-| [`movie_standardizer.py`](#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: parse scene names, hardlink MKV/MP4 into `Title (Year)/` | `ffprobe` (optional) |
+| [`movie_standardizer.py`](#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: hardlink MKV/MP4 into `Title (Year)/`, replacing an older matching movie | nothing |
 
 Every tool runs on its own and accepts `--help`; `python3 <tool>.py --version`
 prints the version, and `python3 <tool>.py --self-test` runs that tool's
@@ -248,17 +248,23 @@ folder keeps seeding, the library uses 0 extra bytes. Skips TV, disc rips,
 and splits. Also finds duplicate folders of the same movie on request
 (`--deduplicate`, non-destructive by default).
 
-**MKV and MP4 are both placed; MKV is canonical.** Nothing is ever transcoded,
-so accepting a container means hardlinking it under its own extension: an MP4
-release lands as `Title (Year)/Title (Year).mp4`. Every other container
-(`.avi`, `.m4v`, `.ts`, disc images, …) is left in the download folder and
-named in the report, because renaming a file to a container it is not would be
-a lie about its contents. When one movie arrives as both an MKV and an MP4 the
-MKV is placed, and when a library folder already holds one of the two the other
-is declined and reported rather than added beside it — two features in one
-folder is exactly what `library_auditor.py` flags as
-`MULTIPLE_DIRECT_MOVIE_FILES`, and nothing here deletes the copy that is
-already there.
+**MKV and MP4 are both placed; MKV wins within a single release.** Nothing is
+transcoded: an MP4 lands as `Title (Year)/Title (Year).mp4`. Other containers
+(`.avi`, `.m4v`, `.ts`, disc images, …) stay in the download folder. When a
+*later* download has the same parsed title and year (and any edition/version
+marker matches the canonical name), its hardlink replaces the library movie,
+even if it is smaller or has a different container. No `ffprobe` or quality
+score is used; the latest incoming release wins (`--ffprobe` is accepted but
+ignored for compatibility with older hooks). The old file is not removed
+until the new link is published and verified. If the container changed, the old
+extension is removed afterwards, keeping one feature in the folder. The
+download remains untouched, and existing `.eng.srt` sidecars remain
+unchanged. Unmarked alternate cuts cannot be distinguished by filename alone;
+a release marked with an edition is *not* allowed to overwrite an unmarked
+canonical movie. The torrent-completion hook treats the incoming download as
+the latest; batch scans process source items by modification time, oldest
+first, so the newest source wins. The optional `--deduplicate` sweep is a
+separate maintenance operation, not this incoming replacement rule.
 
 An MP4 in the library is a guest that the pipeline converts: the
 `subtitle_extractor.py` step lifts any embedded subtitles out of it through

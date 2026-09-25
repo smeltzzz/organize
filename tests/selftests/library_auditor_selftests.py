@@ -3,8 +3,7 @@
 These assertions used to ship inside the tool itself. They are unchanged; only
 their address is different. Each function is rebound to the tool module's
 namespace by :func:`bind_to_tool`, so a body that reads or patches a module
-global (``globals()["_movie_upgrade_decision"] = ...``,  ``global CFG``)
-affects the tool exactly as it did when it lived there.
+global affects the tool exactly as it did when it lived there.
 
 ``tests/test_selftests.py`` runs them as part of the normal unit suite.
 """

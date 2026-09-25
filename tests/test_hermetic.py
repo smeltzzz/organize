@@ -30,7 +30,6 @@ import hermetic
 
 import bitdepth
 import mkv_track_cleaner
-import movie_standardizer
 import subtitle_extractor
 
 
@@ -76,7 +75,6 @@ class ThePinHoldsTests(unittest.TestCase):
             self.assertIsNone(subtitle_extractor.find_mkvtoolnix_binary("mkvmerge"))
             self.assertIsNone(bitdepth.find_ffprobe())
             self.assertFalse(bitdepth.ffprobe_works("/nonexistent/ffprobe"))
-            self.assertIsNone(movie_standardizer.find_ffprobe())
 
     def test_a_standard_install_location_is_not_a_back_door(self) -> None:
         """MKVToolNix on Windows lives in Program Files and is never on PATH.

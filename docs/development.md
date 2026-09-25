@@ -12,8 +12,8 @@ requests and serves canned answers, and `tests/hermetic.py` pins the real
 `urlopen` out so no test can reach the network by accident.
 
 Offline means the suite does not *need* those things — not that it ignores
-them. `organize.py doctor` answers by probing the machine, and `--ffprobe` is a
-hint that falls through to whatever is on the `PATH`, so a test that runs the
+them. `organize.py doctor` probes the machine, and the bit-depth inspector's
+`--ffprobe` is a hint that falls through to whatever is on the `PATH`, so a test that runs the
 real command takes a different branch on a workstation than on a CI runner.
 `tests/hermetic.py` pins every toolchain lookup to "not installed" for the
 tests that would otherwise consult the host; `tests/test_hermetic.py` is what
@@ -22,7 +22,7 @@ patches the lookup itself, inside the test body.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,174 unit tests, ~25 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,139 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -84,8 +84,9 @@ cd /tmp && /tmp/checkinstall/bin/organize --version && /tmp/checkinstall/bin/org
 mkdir /tmp/sdist && tar xzf dist/*.tar.gz -C /tmp/sdist --strip-components=1
 cd /tmp/sdist && python3 -m unittest discover -s tests -p "test_*.py"
 
-# 6. Tag it. The workflow does the rest; the tag must match VERSION.
-git tag -a v3.6.0 -m "3.6.0" && git push origin v3.6.0
+# 6. After merging the release PR into main, tag the merged commit. The tag
+#    must match VERSION (7.0.0 for this release); the workflow does the rest.
+git tag -a v7.0.0 -m "7.0.0" && git push origin v7.0.0
 ```
 
 Steps 4 and 5 are not ceremony. The wheel ships eight top-level modules and a
