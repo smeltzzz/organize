@@ -195,7 +195,6 @@ class RealTranscodeRunTests(ChainFixture):
         # (the transcoded bucket is empty; both now report chain-native).
         code = self._run()
         self.assertEqual(code, 0)
-        report = self.report_text()
         rows = self.plan_rows()
         self.assertEqual(rows["TrueHD Film (2001)"], aus.STATUS_NATIVE)
         self.assertEqual(rows["DTS HD Film (2002)"], aus.STATUS_NATIVE)

@@ -42,10 +42,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Shared implementation: everything imported here is defined exactly once,
-# in organizekit/core/. See tests/test_shared_core.py for the rule that
-# keeps it that way.
-from organizekit.core import playbackchain as pc
 from organizekit.core import (
     KIND_BITDEPTH,
     ExclusiveRunLock,
@@ -66,6 +62,11 @@ from organizekit.core import (
     run_field_smoke_test,
     tools_home,
 )
+
+# Shared implementation: everything imported here is defined exactly once,
+# in organizekit/core/. See tests/test_shared_core.py for the rule that
+# keeps it that way.
+from organizekit.core import playbackchain as pc
 
 
 def format_bytes(size: int | float | None) -> str:

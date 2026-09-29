@@ -82,10 +82,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
-# Shared implementation: everything imported here is defined exactly once,
-# in organizekit/core/. See tests/test_shared_core.py for the rule that
-# keeps it that way.
-from organizekit.core import playbackchain as pc
 from organizekit.core import (
     COVERING_ENGLISH_SRT_SUFFIXES,
     EXTERNAL_SRT_CUE_RE,
@@ -112,6 +108,11 @@ from organizekit.core import (
     strip_ansi,
     write_raw,
 )
+
+# Shared implementation: everything imported here is defined exactly once,
+# in organizekit/core/. See tests/test_shared_core.py for the rule that
+# keeps it that way.
+from organizekit.core import playbackchain as pc
 
 # ---------------------------------------------------------------------------
 # External English SRT sidecar contract

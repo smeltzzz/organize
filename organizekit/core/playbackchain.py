@@ -243,7 +243,6 @@ def classify_audio_blob(blob: str) -> str:
     # 1. Codec-name token + codec-ID token (the first words of the blob), and
     #    their pairwise join ("DTS" + "HD" is a marker, not a core track).
     head = " ".join(tokens[:2])
-    answers: list[str] = []
     for segment in (head, "".join(tokens[:2])):
         answer = _classify_audio_segment(segment)
         if answer is not None:

@@ -437,10 +437,10 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
     # configuration declined them above. Prefer a lossless source track: the
     # pool is quality-ranked, and a DTS-HD MA source transcodes to better
     # AC-3 than the fallback to a lossy core would.
-    src_stream, src_track, src_cls = classified[0]
+    src_stream, _src_track, src_cls = classified[0]
     for s, t, cls in classified:
         if cls == AUDIO_TRANSCODE_BOUND:
-            src_stream, src_track, src_cls = s, t, cls
+            src_stream, _src_track, src_cls = s, t, cls
             break
     target = target_audio_for(channels_of(src_stream))
     status = STATUS_PLANNED if cfg.dry_run else STATUS_TRANSCODED
@@ -858,7 +858,6 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
     ])
 
     by = {s: len(groups[s]) for s in CATEGORY_LABELS}
-    failed = [r for r in applied if r.error]
     report.blank()
     report.scorecard([
         ((by[STATUS_PLANNED] if cfg.dry_run else sum(1 for r in applied if not r.error)),
