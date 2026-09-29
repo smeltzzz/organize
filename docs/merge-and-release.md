@@ -1,6 +1,7 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **8.0.0 is prepared in PR <<<PR>>> (not yet published).** The PyPI record
+> **8.0.0 is prepared in [PR #44](https://github.com/smeltzzz/organize/pull/44),
+> not yet published.** The PyPI record
 > still stops at 6.0.0 — 7.0.0's PR (#43) merged but its tag was never cut,
 > so the release workflow never ran for it. That is fine: the v8.0.0 tag
 > builds and publishes the current tree, and 7.0.0's release notes stay
