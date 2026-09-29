@@ -341,6 +341,19 @@ the latest; batch scans process source items by modification time, oldest
 first, so the newest source wins. The optional `--deduplicate` sweep is a
 separate maintenance operation, not this incoming replacement rule.
 
+**A bundled English subtitle rides the same hardlink rule.** Folder-shaped
+releases are rescued tree-wide (a `Subs/` folder of `.eng.srt`/`.en.srt`
+included). A loose single-file torrent searches the release's own
+stem-matched sidecars first; when none of them is a usable plain-English SRT
+— the quality-tagged video whose subtitle ships bare, a `2_English.srt` by a
+different convention, the legacy `.en.srt` — the whole torrent directory
+answers instead: any candidate whose name points at a different movie
+(conflicting year) or looks like TV is rejected, exactly one remaining valid
+candidate is hardlinked under the canonical `Title (Year).eng.srt` (a legacy
+`.en.srt` lands already renamed), and zero or several valid candidates are
+left untouched and reported — never a guess. An existing `.eng.srt` is never
+overwritten, and the seeding copy is untouched either way.
+
 An MP4 in the library is a guest that the pipeline converts: the
 `subtitle_extractor.py` step lifts any embedded subtitles out of it through
 a temporary MKV bridge, and the `mkv_track_cleaner.py` step swaps the

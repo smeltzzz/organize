@@ -60,6 +60,17 @@ v3.5 MP4 releases are placed
   SINGLE_OTHER_CONTAINER until then, and ``mkv_track_cleaner.py`` converts it
   to the canonical MKV in the same remux that cleans its tracks.
 
+v3.1 bundled-English-subtitle rescue for single-file torrents
+--------------------------------------------------
+- A single-file torrent now also rescues an English sidecar that does not
+  carry the video's stem: when no stem-matched sidecar is usable, every
+  ``.eng.srt``/``.en.srt`` anywhere in the torrent directory whose name does
+  not point at a different movie becomes a candidate; exactly one valid
+  candidate is hardlinked under the canonical ``Title (Year).eng.srt`` name
+  (legacy ``.en.srt`` lands renamed), and zero or several stay untouched and
+  reported. Folder torrents were already rescued tree-wide; nothing else
+  changed.
+
 v2.6 canonical movie-and-English-subtitle output
 --------------------------------------------------
 - The default and documented contract is exactly one movie file per folder,
@@ -1986,6 +1997,66 @@ def place_one_safe_external_srt(candidates: Sequence[Path], destination: Path) -
         return
     process_file_action(source, destination)
 
+
+def _sidecar_pool_for_single(video: Path, parsed: ParsedName) -> list[Path]:
+    """External-English-SRT candidates for a single-file torrent.
+
+    Stem-matched neighbors ship with the release and stay the first choice.
+    When none of them is a usable plain-English SRT — the release that tags
+    the video ``.1080p.BluRay.x264`` but ships its subtitle bare, a
+    ``2_English.srt`` named by a different convention, the legacy ``.en.srt``
+    form — the whole torrent directory answers instead: every other subtitle
+    beside the video whose name does not identify a *different* movie (a
+    conflicting year) stays eligible. More than one valid candidate still ends
+    in the fail-closed ambiguity report inside ``place_one_safe_external_srt``,
+    never in a guess, and the winner is always placed under the canonical
+    ``Title (Year).eng.srt`` name with the same verified-hardlink rule as the
+    movie.
+    """
+    parent = video.parent
+    stem = video.stem.casefold()
+    matched: list[Path] = []
+    broad: list[Path] = []
+    try:
+        siblings = [
+            sibling for sibling in parent.iterdir()
+            if sibling.is_file() and sibling.suffix.lower() in SUBTITLE_EXTENSIONS
+        ]
+    except OSError as exc:
+        LOG.warning("Cannot list sidecars in %s: %s", parent, exc)
+        return []
+    for sibling in siblings:
+        sstem = sibling.stem
+        if (sstem.casefold() == stem
+                or sstem.casefold().startswith(stem + ".")
+                or _strip_known_sub_suffixes(sstem).casefold() == stem):
+            matched.append(sibling)
+        else:
+            broad.append(sibling)
+    # Any usable candidate in the stem-matched set keeps the pairing strict.
+    if any(is_valid_plain_english_srt(s)[0] for s in matched):
+        return matched
+    if not broad:
+        return matched
+    usable: list[Path] = []
+    for sibling in broad:
+        bearer_stem = _strip_known_sub_suffixes(sibling.stem)
+        if is_tv_show(bearer_stem):
+            LOG.info("Leaving sidecar '%s': its name looks like a TV episode, not a movie", sibling.name)
+            continue
+        bearer = parse_movie_name(bearer_stem)
+        if (bearer.title and bearer.year is not None
+                and (bearer.title.casefold() != parsed.title.casefold()
+                     or bearer.year != parsed.year)):
+            LOG.info("Leaving sidecar '%s': its name points at '%s (%s)', not at this movie",
+                     sibling.name, bearer.title, bearer.year)
+            continue
+        usable.append(sibling)
+    if usable:
+        LOG.info("No stem-named English subtitle beside '%s'; auditing the whole "
+                 "torrent directory for any plain-English SRT", video.name)
+    return matched + usable
+
 def skip_tv(name: str, origin: str) -> bool:
     if CFG.skip_tv_shows and is_tv_show(name):
         LOG.info("Skipping TV show (%s): %s", origin, name)
@@ -2030,26 +2101,11 @@ def handle_single_file(path: Path) -> None:
         part=parsed.part,
     )
     if process_file_action(path, dest):
-        # Sidecar subtitles next to the video
-        parent = path.parent
-        stem = path.stem
-        sidecars: list[Path] = []
-        try:
-            for sibling in parent.iterdir():
-                if not sibling.is_file():
-                    continue
-                if sibling.suffix.lower() not in SUBTITLE_EXTENSIONS:
-                    continue
-                sstem = sibling.stem
-                if (
-                    sstem.casefold() == stem.casefold()
-                    or sstem.casefold().startswith(stem.casefold() + ".")
-                    or _strip_known_sub_suffixes(sstem).casefold() == stem.casefold()
-                ):
-                    sidecars.append(sibling)
-        except OSError as exc:
-            LOG.warning("Cannot list sidecars in %s: %s", parent, exc)
-        place_one_safe_external_srt(sidecars, dest.with_name(parsed.file_stem(parsed.part) + EXTERNAL_SRT_SUFFIX))
+        # Sidecar subtitles: the release's stem-matched ones first, then any
+        # plain-English SRT anywhere in the torrent directory that cannot be
+        # naming a different movie (see _sidecar_pool_for_single).
+        place_one_safe_external_srt(_sidecar_pool_for_single(path, parsed),
+                                    dest.with_name(parsed.file_stem(parsed.part) + EXTERNAL_SRT_SUFFIX))
 
 def _group_videos(videos: Sequence[ScannedFile], root: Path) -> dict[tuple, list[tuple[ScannedFile, ParsedName]]]:
     groups: dict[tuple, list[tuple[ScannedFile, ParsedName]]] = {}
@@ -2506,7 +2562,7 @@ def deduplicate_movies(target: Path) -> None:
 # CLI / QBITTORRENT ARGUMENTS
 # =====================================================================
 
-__version__ = "3.0.0"
+__version__ = "3.1.0"
 
 def resolve_input_path(positional: Sequence[str]) -> Path | None:
     """Interpret qBittorrent ``%F`` or ``%D %N`` (and a few mix-ups)."""

@@ -49,6 +49,18 @@ the Jellyfin server to an audio transcode on every play.
 - **`organize.py doctor` now shows the playback chain** the toolkit is
   assuming, checks `ffmpeg` (the audio step's encoder) separately from
   `ffprobe`, and `organize status` gained the `audio-chain` step row.
+- **Bundled-English-subtitle rescue in `movie_standardizer.py` 3.1.0.** A
+  single-file torrent now rescues an English sidecar whose stem does not
+  match the video's: when no stem-matched sidecar is usable (the
+  quality-tagged video whose subtitle ships bare, a `2_English.srt` by a
+  different convention, the legacy `.en.srt`), every subtitle anywhere in
+  the torrent directory is considered — names pointing at a different movie
+  (conflicting year) or at TV are rejected, exactly one remaining
+  *validated* candidate is hardlinked with the same verified-hardlink
+  procedure as the movie under the canonical `Title (Year).eng.srt` name,
+  and none-or-several stay untouched and reported, never a guess.
+  Folder-shaped torrents were already rescued tree-wide; seeding copies stay
+  untouched either way.
 - New offline tests: `test_playbackchain.py`, `test_audio_standardizer.py`
   (end-to-end against `tests/fake_ffmpeg.py`), the audiofit selftest suite,
   and title-vs-codec classifier regressions. The suite count quoted in the

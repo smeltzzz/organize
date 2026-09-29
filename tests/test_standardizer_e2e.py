@@ -202,6 +202,66 @@ class HardlinkIngestTests(StandardizerRunFixture):
         self.assertIn("Insomnia (2002)/Insomnia (2002).mkv", self.library_tree())
 
 
+class BundledSidecarRescueTests(StandardizerRunFixture):
+    """A loose torrent's English SRT is rescued even when its stem is not the
+    video's — exactly one valid candidate, never a guess."""
+
+    def loose_movie(self, filename: str = "Rififi.1955.1080p.BluRay.x264-GRP.mkv") -> Path:
+        return write_video(self.source / filename)
+
+    def test_a_bare_english_sidecar_is_rescued_and_named_like_the_movie(self) -> None:
+        self.loose_movie()
+        write_srt(self.source / "2_English.eng.srt")
+        self.assertEqual(self.run_main(), 0)
+        placed = "Rififi (1955)/Rififi (1955).eng.srt"
+        self.assertIn(placed, self.library_tree())
+        self.assertIn("auditing the whole torrent", self.log_text())
+        # Same hardlink procedure as the movie: one inode, two names.
+        self.assertTrue((self.library / "Rififi (1955)" / "Rififi (1955).eng.srt")
+                        .samefile(self.source / "2_English.eng.srt"))
+        self.assertIn("2_English.eng.srt", self.source_tree(),
+                      "the seeding copy is untouched")
+
+    def test_a_legacy_en_suffix_lands_renamed_to_eng(self) -> None:
+        self.loose_movie()
+        write_srt(self.source / "Rififi.1955.en.srt")
+        self.assertEqual(self.run_main(), 0)
+        self.assertIn("Rififi (1955)/Rififi (1955).eng.srt", self.library_tree())
+        self.assertNotIn("Rififi (1955)/Rififi (1955).en.srt", self.library_tree())
+
+    def test_a_sidecar_pointing_at_a_different_movie_is_not_attached(self) -> None:
+        self.loose_movie()
+        write_srt(self.source / "Not.This.One.2012.eng.srt")
+        self.assertEqual(self.run_main(), 0)
+        self.assertNotIn("Rififi (1955)/Rififi (1955).eng.srt", self.library_tree())
+        self.assertIn("points at 'Not This One (2012)'", self.log_text())
+
+    def test_a_tv_named_sidecar_is_not_attached(self) -> None:
+        self.loose_movie()
+        write_srt(self.source / "The.Show.S01E01.eng.srt")
+        self.assertEqual(self.run_main(), 0)
+        self.assertNotIn("Rififi (1955)/Rififi (1955).eng.srt", self.library_tree())
+        self.assertIn("looks like a TV episode", self.log_text())
+
+    def test_two_bare_valid_candidates_stay_fail_closed(self) -> None:
+        self.loose_movie()
+        write_srt(self.source / "english.eng.srt")
+        write_srt(self.source / "2_English.eng.srt")
+        self.assertEqual(self.run_main(), 0)
+        self.assertNotIn("Rififi (1955)/Rififi (1955).eng.srt", self.library_tree())
+        self.assertIn("2 valid normal English SRT candidates", self.reasons())
+        self.assertIn("subtitle ambiguity", self.report_text())
+
+    def test_the_stem_matched_pairing_still_wins_over_a_bare_candidate(self) -> None:
+        movie = self.loose_movie()
+        write_srt(movie.with_suffix(".eng.srt"))
+        write_srt(self.source / "2_English.eng.srt")
+        self.assertEqual(self.run_main(), 0)
+        self.assertIn("Rififi (1955)/Rififi (1955).eng.srt", self.library_tree())
+        self.assertNotIn("auditing the whole torrent", self.log_text())
+        self.assertNotIn("2 valid normal English SRT candidates", self.reasons())
+
+
 class WhatItRefusesToIngestTests(StandardizerRunFixture):
     """Everything the run leaves in the download folder, and says so."""
 

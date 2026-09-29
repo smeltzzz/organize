@@ -68,9 +68,9 @@ wrong.
  torrent finishes
         │
         ▼
-┌───────────────────────┐   hardlink into Title (Year)/Title (Year).mkv
-│ 1 · standardize       │   parse scene names, skip TV / discs / splits
-└───────────┬───────────┘
+┌───────────────────────┐   hardlink into Title (Year)/ — movie, plus a
+│ 1 · standardize       │   bundled English sidecar renamed to
+└───────────┬───────────┘   Title (Year).eng.srt; skip TV / discs / splits
             ▼
 ┌───────────────────────┐   extract the movie's own text track into
 │ 2 · subtitles         │   <movie>.eng.srt (MP4 via the bridge); image-only
