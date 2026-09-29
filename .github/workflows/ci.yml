@@ -1,8 +1,9 @@
 # Continuous Integration — runs the entire offline test suite on every push
 # and pull request across all supported platforms and Python versions.
 #
-# The suite is deliberately hermetic: no media files, no mkvtoolnix, no ffprobe,
-# no OpenSubtitles API key, and no network access are required.
+# The suite is deliberately hermetic: no media files, no MKVToolNix, no FFmpeg,
+# no OpenSubtitles API key and no network access are required - the one
+# networked code path is tested against a fake transport.
 #
 # Hermetic means the suite does not *need* those things, not that it is blind to
 # them - a runner has none of them installed, so a test that behaves differently
@@ -45,7 +46,7 @@ jobs:
       - name: Byte-compile the package and every script (syntax gate)
         run: >-
           python -m compileall -q organizekit
-          organize.py pipeline.py bitdepth.py
+          organize.py pipeline.py audio_standardizer.py bitdepth.py
           library_auditor.py mkv_track_cleaner.py movie_standardizer.py
           subtitle_extractor.py
 

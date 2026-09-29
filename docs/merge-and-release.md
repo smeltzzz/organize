@@ -7,20 +7,15 @@
 > builds and publishes the current tree, and 7.0.0's release notes stay
 > readable in the [changelog](../CHANGELOG.md) and on merged PR #43.
 >
-> Two held workflow patches ride along this release: the pre-existing
-> `ci-workflow-comment.patch` (cosmetic header comment) and
-> `ci-workflow-audiofit.patch` (**one line adding `audio_standardizer.py` to
-> CI's byte-compile gate** — apply this one before tagging so release CI
-> gate-checks the new tool). Apply both first (commands are in each file's
-> header), then confirm the version, then tag from an up-to-date `main`:
+> The workflow changes this branch once needed held back as patch files are
+> **applied on the branch itself** — the token gained the `workflows` scope,
+> so `.github/workflows/ci.yml` (header comment + the `audio_standardizer.py`
+> byte-compile gate) rides inside PR #44 like any other file. What remains is
+> the merge and the tag. Confirm the version, then tag the merged commit from
+> an up-to-date `main`:
 >
 > ```bash
 > git checkout main && git pull origin main
-> git apply docs/ci-workflow-comment.patch
-> git apply docs/ci-workflow-audiofit.patch
-> git add .github/workflows/ci.yml
-> git commit -m "CI: header comment; byte-compile audio_standardizer.py"
-> git push
 > python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 8.0.0
 > git tag -a v8.0.0 -m "8.0.0" && git push origin v8.0.0
 > ```
