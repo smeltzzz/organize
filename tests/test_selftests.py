@@ -26,6 +26,7 @@ from types import ModuleType
 import hermetic
 
 from tests.selftests import (
+    audio_standardizer_selftests,
     bitdepth_selftests,
     library_auditor_selftests,
     mkv_track_cleaner_selftests,
@@ -35,6 +36,7 @@ from tests.selftests import (
 )
 
 SUITES = (
+    ("audio_standardizer", audio_standardizer_selftests.run_self_tests),
     ("bitdepth", bitdepth_selftests.run_self_tests),
     ("library_auditor", library_auditor_selftests.run_self_tests),
     ("mkv_track_cleaner", mkv_track_cleaner_selftests.run_self_tests),
@@ -49,6 +51,7 @@ SUITES = (
 #: with the moved suite for the rest of this process, so these bodies are
 #: reachable only from a clean import — see ShippedFieldSmokeTests.
 SHIPPED_SMOKE_TESTS = (
+    ("audio_standardizer", "run_self_tests"),
     ("bitdepth", "run_self_tests"),
     ("library_auditor", "run_self_tests"),
     ("mkv_track_cleaner", "run_self_tests"),

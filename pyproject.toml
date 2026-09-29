@@ -61,6 +61,7 @@ packages = ["organizekit", "organizekit.core"]
 py-modules = [
     "organize",
     "pipeline",
+    "audio_standardizer",
     "bitdepth",
     "library_auditor",
     "mkv_track_cleaner",

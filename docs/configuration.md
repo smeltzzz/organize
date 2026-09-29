@@ -16,8 +16,9 @@ Everything is overridable per run with CLI flags (see each tool's
 | `MOVIE_STD_TARGET` | every tool (legacy) | Older name for `ORGANIZE_LIBRARY`; still honoured, lower precedence |
 | `MOVIE_STD_LOCK_TIMEOUT` | movie_standardizer | Coordination-lock wait (default 60 s) |
 | `MOVIE_STD_MAINTENANCE_MODE` | movie_standardizer | `REPORT` (default) / `QUARANTINE` / `DELETE` for duplicates |
-| `ORGANIZE_STATE_DB` | auditor / cleaner / 10-bit / `status` | Where the shared state cache lives (default: beside the logs and reports, never inside the library) |
+| `ORGANIZE_STATE_DB` | auditor / cleaner / 10-bit / audio / `status` | Where the shared state cache lives (default: beside the logs and reports, never inside the library) |
 | `ORGANIZE_NO_STATE` | the same tools | Set to `1` to turn the cache off everywhere at once (equivalent to passing `--no-state`) |
+| `ORGANIZE_PLAYBACK_WIRING` | audio_standardizer (and `doctor`'s chain summary) | `tv-arc` (default — the as-shipped wiring: soundbar on the TV's HDMI (ARC) port) or `soundbar-hdmi-in` (upgrade wiring: Chromecast through the bar's HDMI IN) — on the default, multichannel AAC/FLAC/PCM movies become AC-3 transcode candidates (plain ARC/optical carries stereo PCM only). See [the dossier](hardware.md) |
 | `SUBTITLE_EXTRACTED_LEDGER` | subtitle_extractor | Where the sidecar provenance ledger lives (default: `ReportsAndLogs/subtitle_extractor_extracted.json`, outside the library). It records which sidecars the extractor wrote, from which movie and track (or which OpenSubtitles file_id and moviehash), with their SHA-256 |
 | `OPENSUBTITLES_API_KEY` | subtitle_extractor | API key for the exact-hash fallback that covers image-only movies. Unset means the tool never touches the network. Keys come from the [API consumers page](https://www.opensubtitles.com/en/consumers) |
 | `OPENSUBTITLES_USERNAME` / `OPENSUBTITLES_PASSWORD` | subtitle_extractor | Optional account for that fallback. Signing in raises the daily allowance from 5 downloads/day per IP to 20 (VIP: more). Only ever sent to `/login`; never logged |
@@ -37,5 +38,5 @@ folder needs attention.
 
 ---
 
-[← Back to the README](../README.md) · [Tool reference](tools.md) ·
-[The pipeline](pipeline.md)
+[← Back to the README](../README.md) · [Playback-chain dossier](hardware.md) ·
+[Tool reference](tools.md) · [The pipeline](pipeline.md)

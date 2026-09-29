@@ -1,6 +1,7 @@
 # The pipeline
 
-How a finished torrent becomes a canonical movie: the ingest hook, the four
+How a finished torrent becomes a canonical movie that Direct Plays on the
+reference chain ([hardware.md](hardware.md)): the ingest hook, the five
 maintenance steps and the order they must run in, and how to read what they
 write.
 
@@ -37,19 +38,28 @@ python3 /opt/organize/pipeline.py --source /path/to/movies
 
 ## 🔄 The order, and why it is fixed
 
-Four maintenance tools, one fixed order. The order between **extraction**
-and **remux** is load-bearing — the cleaner removes every embedded subtitle
-from every movie, so extraction must happen *while the track is still in
-the container*; after the remux, a subtitle that was already in the file is
-gone for good. The **audit** closes the sweep on purpose: it is read-only,
-so it can only report the library the other three steps just finished
-writing. (Subtitles are **not** taken from a title search, and the movie's own tracks
-are always tried first: a text-based embedded English track is extracted
-locally, and only a movie whose English subtitles exist solely as bitmaps is
-looked up on OpenSubtitles — by the file's exact moviehash, never by title or
-release name. OCR was removed outright, because a garbled transcription is
-worse than none. Subtitle *timing sync* was removed too: a sidecar built from
-the movie's own track already carries the container's timestamps, and whatever
+Five maintenance tools, one fixed order. Two orderings are load-bearing:
+
+1. **Extraction before audio-fit and remux.** The cleaner removes every
+   embedded subtitle from every movie, so extraction must happen *while the
+   track is still in the container*; after the remux, a subtitle that was
+   already in the file is gone for good.
+2. **Audio-fit before remux.** The audio standardizer bakes a chain-native
+   AC-3 5.1 track in from any TrueHD/DTS-HD master the G454V can never
+   emit; the cleaner's chain tiers then keep exactly that new track and a
+   remux can retire the lossless master **without ever leaving a movie with
+   no playable audio**. Reversed, the cleaner would keep a playable-but-lossy
+   survivor and discard a 7.1 master that could have become a 5.1 AC-3.
+
+The **audit** closes the sweep on purpose: it is read-only, so it can only
+report the library the other four steps just finished writing. (Subtitles
+are **not** taken from a title search, and the movie's own tracks are always
+tried first: a text-based embedded English track is extracted locally, and
+only a movie whose English subtitles exist solely as bitmaps is looked up on
+OpenSubtitles — by the file's exact moviehash, never by title or release
+name. OCR was removed outright, because a garbled transcription is worse
+than none. Subtitle *timing sync* was removed too: a sidecar built from the
+movie's own track already carries the container's timestamps, and whatever
 drift a client still notices is corrected at playback time rather than by
 rewriting the library offline.) `pipeline.py` exists so you cannot get this
 wrong.
@@ -58,30 +68,40 @@ wrong.
  torrent finishes
         │
         ▼
-┌───────────────────────┐   hardlink into Title (Year)/Title (Year).mkv
-│ 1 · standardize       │   parse scene names, skip TV / discs / splits
-└───────────┬───────────┘
+┌───────────────────────┐   hardlink into Title (Year)/ — movie, plus a
+│ 1 · standardize       │   bundled English sidecar renamed to
+└───────────┬───────────┘   Title (Year).eng.srt; skip TV / discs / splits
             ▼
 ┌───────────────────────┐   extract the movie's own text track into
 │ 2 · subtitles         │   <movie>.eng.srt (MP4 via the bridge); image-only
 └───────────┬───────────┘   movies: exact-moviehash OpenSubtitles match
             ▼
-┌───────────────────────┐   lossless mkvmerge remux: 1 best audio, strip
-│ 3 · clean             │   commentary / dubs / embedded subs; MP4 → MKV
-└───────────┬───────────┘
+┌───────────────────────┐   ffprobe sweep; AC-3 5.1 @ 640k baked in from any
+│ 3 · audio             │   TrueHD/DTS-HD master (video untouched, verified),
+└───────────┬───────────┘   chain-native tracks reported as done
+            ▼
+┌───────────────────────┐   lossless mkvmerge remux: 1 best chain-playable
+│ 4 · clean             │   audio (the AC-3 just created wins), strip
+└───────────┬───────────┘   commentary / dubs / embedded subs; MP4 → MKV
             ▼
 ┌───────────────────────┐   ffprobe sweep: QUEUE 8-bit SDR, KEEP native HDR,
-│ 4 · 10bit             │   REVIEW ambiguous metadata — never guess
+│ 5 · 10bit             │   REVIEW ambiguous metadata, report chain fit
 └───────────┬───────────┘
             ▼
 ┌───────────────────────┐   100% read-only layout + subtitle health check
-│ 5 · audit             │   gating exit codes for cron / Task Scheduler
+│ 6 · audit             │   gating exit codes for cron / Task Scheduler
 └───────────────────────┘
 ```
 
 `1 · standardize` fires automatically from the qBittorrent hook; `organize.py
-run` (or `pipeline.py`) executes steps 2 → 5 in order. Every step skips
+run` (or `pipeline.py`) executes steps 2 → 6 in order. Every step skips
 cleanly (with the reason printed) when its prerequisite is missing.
+
+A brand-new MP4 is the one case that takes two sweeps (by design — the order
+above is load-bearing and cannot be bent for it): the MP4 is converted to a
+canonical MKV by step 4 in sweep one, and step 3 only ever sees MKVs, so its
+AC-3 sweetening lands in sweep two. The movie Direct-Plays in between; the
+second pass is what removes the server's last audio transcode.
 
 ```bash
 python3 pipeline.py --source /path/to/movies --list-steps   # what's ready, what's blocked
@@ -149,7 +169,7 @@ organize status --json | jq '{movies, settled, pending}'
 organize status --json | jq -r '.steps[] | select(.recorded) | "\(.id)\t\(.settled)/\(.stale + .unmeasured) pending"'
 ```
 
-Each of the four steps is one row with `id`, `label`, `settled`, `stale`,
+Each of the library steps is one row with `id`, `label`, `settled`, `stale`,
 `unmeasured` and its `counts`, plus `recorded` — which is how a consumer tells
 *"nothing left to do"* apart from *"nobody has measured this yet"*, the
 distinction the printed report spells out in a footnote. `state_cache` reports
@@ -192,7 +212,7 @@ describe something that can be read in one shot; a full pipeline is an hour of
 work, and the questions worth asking about it — *which step is running now, how
 long did the remux take, what failed at 03:12* — cannot be answered by a file
 that only appears once it is over. It also cannot print to stdout: stdout
-belongs to the four tools the run launches. So the run reports to files, and it
+belongs to the five tools the run launches. So the run reports to files, and it
 reports twice.
 
 ```bash

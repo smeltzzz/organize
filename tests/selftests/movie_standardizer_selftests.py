@@ -97,6 +97,23 @@ def run_canonical_self_tests() -> int:
         _assert_eq(is_english_subtitle(Path("Film.Spanish.srt")), False, "non-English subtitle", errors)
         _assert_eq(parse_movie_name("The.Matrix.1999.1080p.mkv").file_stem(), "The Matrix (1999)", "canonical filename", errors)
 
+        # Bundled-English-subtitle rescue (v3.1): the broad pool keeps a bare
+        # English sidecar and drops one that names a different movie or a TV
+        # episode. Kept in a nested folder so earlier self-test files can sit
+        # next to the src root untouched.
+        cue = "1\n00:00:01,000 --> 00:00:02,000\nrescued\n"
+        rescue_dir = src / "rescuecase"
+        rescue_dir.mkdir()
+        lone = rescue_dir / "Pool.Movie.2010.1080p.mkv"
+        lone.write_bytes(b"movie")
+        (rescue_dir / "2_English.srt").write_text(cue, encoding="utf-8")
+        (rescue_dir / "Not.This.One.2012.eng.srt").write_text(cue, encoding="utf-8")
+        (rescue_dir / "Some.Show.S01E01.eng.srt").write_text(cue, encoding="utf-8")
+        pool_names = {p.name for p in
+                      _sidecar_pool_for_single(lone, parse_movie_name(lone.name))}
+        _assert_eq(pool_names, {"2_English.srt"},
+                   "broad pool: bare english in, other-year and tv out", errors)
+
         guard_src = src / "Guard.2019.mkv"
         guard_src.write_bytes(b"source-replacement")
         guard_dest = dst / "Guard (2019)" / "Guard (2019).mkv"

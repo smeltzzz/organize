@@ -65,9 +65,22 @@ def run_self_tests() -> int:
     check(native_audio_language([jpn]) == "ja", "a single language needs no marker")
     check(audio_language_token(jpn) == "ja", "language tokens are normalized")
 
+    # The chain tiers: on the G454V -> AX3125H chain, a track the player can
+    # actually emit always outranks a lossless one it cannot. TrueHD/DTS-HD
+    # are demoted below every chain-native format because playing one means
+    # the Jellyfin server transcodes the audio on every single play.
     truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
     aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
-    check(get_audio_quality_score(truehd) > get_audio_quality_score(aac), "TrueHD Atmos > AAC 5.1")
+    eac3 = {"codec": "E-AC-3", "properties": {"codec_id": "A_EAC3", "audio_channels": 6}}
+    ac3 = {"codec": "AC-3", "properties": {"codec_id": "A_AC3", "audio_channels": 6}}
+    check(get_audio_quality_score(eac3) > get_audio_quality_score(truehd),
+          "chain policy: E-AC-3 5.1 (player passthrough) > TrueHD 7.1 (cannot leave the G454V)")
+    check(get_audio_quality_score(ac3) > get_audio_quality_score(truehd),
+          "chain policy: AC-3 5.1 (player passthrough) > TrueHD 7.1")
+    check(get_audio_quality_score(aac) > get_audio_quality_score(truehd),
+          "chain policy: AAC (decoded to PCM by the player) > TrueHD 7.1")
+    check(get_audio_quality_score(eac3) > get_audio_quality_score(ac3),
+          "within the native class, DD+ edges DD")
 
     check(_parse_mkvmerge_progress("Progress: 45%") == 45, "plain progress")
     check(_parse_mkvmerge_progress("#GUI#progress 80%") == 80, "gui progress")

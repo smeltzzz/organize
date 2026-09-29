@@ -4,6 +4,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.0.0] - 2026-09-29
+
+**The toolkit is now engineered for one exact playback chain.** Every codec
+decision — which audio the cleaner keeps, what gets baked in, what the
+inspector flags — is derived from the reference living room: **Chromecast
+with Google TV (HD) G454V "boreal" → Hisense AX3125H soundbar (its HDMI IN)
+→ Samsung UN60F6350AF**. The facts and sources are in `docs/hardware.md`;
+the machine-readable form is the new `organizekit/core/playbackchain.py`,
+which every tool imports instead of maintaining private tables.
+
+This is a major release because the audio policy flips: "highest sample rate
+wins" becomes "plays without a server, wins". Tracks the player can emit
+(AC-3/E-AC-3 at every hop, base DTS core, client-decoded PCM) keep beating
+lossless-HD masters (TrueHD, DTS-HD MA, DTS:X) the G454V can never emit —
+a kept TrueHD used to look like the premium choice while silently committing
+the Jellyfin server to an audio transcode on every play.
+
+### Added
+- **`audio_standardizer.py` — the new pipeline step `audiofit`** (between
+  extraction and remux, and a test now pins that order). For every movie it
+  classifies audio against the chain: native Dolby/DTS-core/decode-to-PCM
+  verdicts leave the file alone; TrueHD/DTS-HD/DTS:X masters get one AC-3
+  track baked in (`-map 0 -c copy` video untouched, 5.1 @ 640 kbps 48 kHz
+  from surround sources, stereo at 192 kbps, language/provenance carried);
+  unknown codecs fail closed into the report. Publishing is verified
+  (re-probe: original streams identical + AC-3 appended + duration drift ≤
+  3 s) and atomic (`os.replace` from a named sibling temp, stale temps
+  swept). Seeding (hardlinked) movies are deferred, never replaced.
+  The wiring matters, and the toolkit assumes it: `tv-arc` is the default —
+  the as-shipped wiring, soundbar on the TV's HDMI (ARC) port — and rerates
+  multichannel PCM-decode movies as AC-3 transcode candidates, because
+  plain ARC/optical carries stereo PCM only. If the Chromecast is ever
+  moved through the bar's HDMI IN, `--wiring soundbar-hdmi-in` or
+  `ORGANIZE_PLAYBACK_WIRING` accepts those movies as-is. CLI on the front
+  door: `organize audio …`; direct: `python3 audio_standardizer.py`.
+- **`organizekit/core/playbackchain.py`**: the one hardware-truth table —
+  device facts, audio codec classes and tiers, video fit, wiring modes and
+  human notes — imported by the tools instead of three private approximations.
+- **Chain fit in `bitdepth.py` 2.5.0 reports**: every movie additionally
+  reports what it does on the G454V (tone-mapped Direct Play vs.
+  replace/re-encode for Dolby Vision and >1080p), with HandBrake guidance
+  shaped for the chain (≤1080p H.265 Main10/HEVC + AC-3 5.1 640k).
+- **`organize.py doctor` now shows the playback chain** the toolkit is
+  assuming, checks `ffmpeg` (the audio step's encoder) separately from
+  `ffprobe`, and `organize status` gained the `audio-chain` step row.
+- **Bundled-English-subtitle rescue in `movie_standardizer.py` 3.1.0.** A
+  single-file torrent now rescues an English sidecar whose stem does not
+  match the video's: when no stem-matched sidecar is usable (the
+  quality-tagged video whose subtitle ships bare, a `2_English.srt` by a
+  different convention, the legacy `.en.srt`), every subtitle anywhere in
+  the torrent directory is considered — names pointing at a different movie
+  (conflicting year) or at TV are rejected, exactly one remaining
+  *validated* candidate is hardlinked with the same verified-hardlink
+  procedure as the movie under the canonical `Title (Year).eng.srt` name,
+  and none-or-several stay untouched and reported, never a guess.
+  Folder-shaped torrents were already rescued tree-wide; seeding copies stay
+  untouched either way.
+- New offline tests: `test_playbackchain.py`, `test_audio_standardizer.py`
+  (end-to-end against `tests/fake_ffmpeg.py`), the audiofit selftest suite,
+  and title-vs-codec classifier regressions. The suite count quoted in the
+  docs tracks discovery (see the badge).
+
+### Changed
+- **`mkv_track_cleaner.py` 3.0.0**: the audio-keeper scoring now uses the
+  chain tiers (E-AC-3 100 / AC-3 95 > DTS core 80 > decode-to-PCM 66–60 >
+  lossless-HD 34–30 > unknown 0). The commentary/dub/dubbed-title rules and
+  the whole remux/verification/atomicity machinery are unchanged.
+- `pipeline.py` doc order and `organize.py` dashboard now describe the five
+  maintenance steps (extract → audio → clean → 10bit → audit).
+
 ## [7.0.0] - 2026-09-24
 
 **Matching new movie downloads now replace the library copy by default.** This

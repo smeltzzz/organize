@@ -3,20 +3,26 @@
 
 ``movie_standardizer.py`` is the qBittorrent completion hook and runs by itself
 the moment a download stops, so it is deliberately not part of this sweep. What
-is left — extracting subtitles, cleaning tracks, checking bit depth, auditing
-the library — is four separate commands, and the order between the first two is
-load-bearing:
+is left — extracting subtitles, normalizing audio for the one playback chain,
+cleaning tracks, checking bit depth & chain fit, auditing the library — is
+five separate commands, and the order between the first three is load-bearing:
 
-    subtitle_extractor.py   MUST run before mkv_track_cleaner.py
+    subtitle_extractor.py    MUST run before audio_standardizer.py and mkv_track_cleaner.py
+    audio_standardizer.py    MUST run before mkv_track_cleaner.py
 
 ``subtitle_extractor.py`` builds each movie's English sidecar from the
-movie's own embedded subtitle track. ``mkv_track_cleaner.py`` then strips every
-embedded subtitle once a validated sidecar exists - so a movie cleaned before
-its track was extracted has lost that track for good (a re-extraction would
-find nothing). ``library_auditor.py`` runs last: it is read-only, and it must
-see the sidecars the extractor finished writing. Running the four scripts
-by hand makes that easy to get wrong on a busy day; this script cannot get it
-wrong.
+movie's own embedded subtitle track. ``audio_standardizer.py`` then bakes a
+chain-native AC-3 5.1 track in (from TrueHD/DTS-HD masters the Chromecast HD
+G454V can never emit) while every original track is still in the file.
+``mkv_track_cleaner.py`` strips every embedded subtitle once a validated
+sidecar exists and keeps exactly one audio track — under the chain's tiers it
+always keeps the chain-native Dolby track audiofit just created, and drops the
+lossless master it came from. So a movie cleaned before its track was
+extracted has lost that track for good, and a movie cleaned before audiofit
+ran has lost its lossless master with no native AC-3 to show for it.
+``library_auditor.py`` runs last: it is read-only, and it must see the
+sidecars the extractor finished writing. Running the five scripts by hand
+makes that easy to get wrong on a busy day; this script cannot get it wrong.
 
 Subtitle *timing* is deliberately not a step here. A sidecar extracted from the
 movie's own track is frame-accurate by construction, and any remaining drift is

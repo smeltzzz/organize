@@ -59,7 +59,11 @@ KIND_LAYOUT = "layout"
 KIND_SUBTITLE = "subtitle"
 KIND_REMUX = "remux"
 KIND_BITDEPTH = "bitdepth"
-KINDS = (KIND_LAYOUT, KIND_SUBTITLE, KIND_REMUX, KIND_BITDEPTH)
+# The audio-normalization verdict audio_standardizer.py stores: does this
+# movie have a track the Chromecast HD chain can play natively (AC-3/E-AC-3),
+# or did it need one synthesized?
+KIND_AUDIOFIT = "audiofit"
+KINDS = (KIND_LAYOUT, KIND_SUBTITLE, KIND_REMUX, KIND_BITDEPTH, KIND_AUDIOFIT)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS movie (

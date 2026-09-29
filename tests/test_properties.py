@@ -334,7 +334,8 @@ class RemuxPlanTests(PropertyTestCase):
         The property above re-derives "best" from `get_audio_quality_score`,
         which makes it a consistency check rather than a test of the ranking:
         invert that function and both sides invert with it. This one states an
-        ordering the product owns - lossless Atmos 7.1 at 5 Mbps beats every
+        ordering the product owns - on the G454V playback chain, a chain-native
+        DD+ Atmos 5.1 track (the player bitstreams it end-to-end) beats every
         lossy stereo track in the same language - and plants exactly such a
         pair among the random ones. Whenever the planted language is the one
         the file settles on, the great track must be the keeper. Reverse the
@@ -345,13 +346,13 @@ class RemuxPlanTests(PropertyTestCase):
             case["info"]["tracks"].append({
                 "type": "audio",
                 "id": best_id,
-                "codec": "TrueHD Atmos",
+                "codec": "E-AC-3 Atmos",
                 "properties": {
                     "language": "eng",
-                    "track_name": "Surround 7.1",
-                    "audio_channels": 8,
-                    "codec_id": "A_TRUEHD",
-                    "tag_bps": 5_000_000,
+                    "track_name": "DD+ Atmos 5.1",
+                    "audio_channels": 6,
+                    "codec_id": "A_EAC3",
+                    "tag_bitrate": "1536000",
                     "flag_commentary": False,
                 },
             })
@@ -365,7 +366,8 @@ class RemuxPlanTests(PropertyTestCase):
                 return
             self.assertEqual(
                 plan.best_audio_id, best_id,
-                f"kept {plan.best_audio.get('codec')!r} over lossless English Atmos 7.1",
+                f"kept {plan.best_audio.get('codec')!r} over the chain-native "
+                "DD+ Atmos 5.1 (the track this player can actually emit)",
             )
         self.for_all(plan_case, prop)
 

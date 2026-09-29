@@ -22,7 +22,7 @@ patches the lookup itself, inside the test body.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,139 unit tests, ~25 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,191 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
@@ -116,7 +116,7 @@ ssh nas 'cd /volume1 && python3 organize.pyz doctor'
 
 It is the same toolkit, not a cut-down one: `organize.pyz test` runs every
 field smoke test, `organize.pyz run-tool pipeline.py --source …` runs the full
-four-step pass, and each step is still its own process with its own locks, log,
+five-step pass, and each step is still its own process with its own locks, log,
 report and exit code. Logs and reports land *beside* the archive, never inside
 it. The module list comes from `pyproject.toml`, so the archive and the wheel
 cannot drift apart, and the build is reproducible — the same source always

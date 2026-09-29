@@ -1,25 +1,36 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **7.0.0 is prepared in [PR #43](https://github.com/smeltzzz/organize/pull/43),
-> not yet published.** 6.0.0 is already on PyPI and cannot be overwritten.
-> After PR #43 is merged into `main` and CI passes, the maintainer can tag the
-> merged commit from an up-to-date checkout of `main`:
+> **8.0.0 is prepared in [PR #44](https://github.com/smeltzzz/organize/pull/44),
+> not yet published.** The PyPI record
+> still stops at 6.0.0 — 7.0.0's PR (#43) merged but its tag was never cut,
+> so the release workflow never ran for it. That is fine: the v8.0.0 tag
+> builds and publishes the current tree, and 7.0.0's release notes stay
+> readable in the [changelog](../CHANGELOG.md) and on merged PR #43.
+>
+> The workflow changes this branch once needed held back as patch files are
+> **applied on the branch itself** — the token gained the `workflows` scope,
+> so `.github/workflows/ci.yml` (header comment + the `audio_standardizer.py`
+> byte-compile gate) rides inside PR #44 like any other file. What remains is
+> the merge and the tag. Confirm the version, then tag the merged commit from
+> an up-to-date `main`:
 >
 > ```bash
 > git checkout main && git pull origin main
-> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 7.0.0
-> git tag -a v7.0.0 -m "7.0.0" && git push origin v7.0.0
+> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 8.0.0
+> git tag -a v8.0.0 -m "8.0.0" && git push origin v8.0.0
 > ```
 >
 > The pushed tag triggers `release.yml`, which checks that the tag matches
-> `organizekit.VERSION`, runs the suite, builds the wheel/sdist/zipapp, publishes
-> to PyPI and attaches the zipapp to the GitHub release. **Wait for the release
-> workflow to succeed** before updating a pip install with
-> `python3 -m pip install --upgrade organizekit` (or `pipx upgrade organizekit`).
-> The major bump reflects the new default: an incoming movie with matching
-> title/year/version markers replaces the existing library movie without a
-> technical-upgrade check. Details and data-retention implications are in the
-> [7.0.0 changelog entry](../CHANGELOG.md).
+> `organizekit.VERSION`, runs the suite, builds the wheel/sdist/zipapp,
+> publishes to PyPI and attaches the zipapp to the GitHub release. **Wait for
+> the release workflow to succeed** before updating a pip install with
+> `python3 -m pip install --upgrade organizekit` (or `pipx upgrade
+> organizekit`). The major bump is the audio-policy flip plus the new
+> `audiofit` pipeline step: a TrueHD/DTS-HD/DTS:X movie now gets a
+> chain-native AC-3 track baked in instead of being committed to a server
+> transcode on every play, and on the as-shipped ARC wiring the same happens
+> to multichannel AAC/FLAC/PCM. Details are in the
+> [8.0.0 changelog entry](../CHANGELOG.md).
 
 > **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
@@ -81,7 +92,7 @@ syntax gate, a file the merge deleted, and the `provisioned` job still did
 `pip install ffsubsync` then `import sync_subtitles`. The bot cannot fix a
 workflow file, so that was step 2's patch. **This is history: PR #40 applied
 the patch, and CI on `main` has been green since.** Everything else in that
-run was green on the same merge: the whole suite (1,139 tests) on Linux, macOS
+run was green on the same merge: the whole suite (1,191 tests) on Linux, macOS
 and Windows across Python 3.11–3.13, packaging, the single-file build, the lint
 job, the coverage floor and the doctor smoke test.
 

@@ -44,7 +44,12 @@ RUN_TOOL_VERB = "run-tool"
 # The canonical order. Index order is the execution order; do not reorder
 # without re-reading the pipeline notes in the module docstring and each
 # tool's own documentation.
-STEP_ORDER = ("extractor", "cleaner", "10bit", "auditor")
+#
+# "audiofit" sits AFTER the extractor (a sidecar must exist before any remux
+# can drop embedded tracks) and BEFORE the cleaner (the cleaner keeps exactly
+# one audio track; audiofit makes sure a chain-native AC-3 exists to keep,
+# while the lossless master it transcodes from is still in the file).
+STEP_ORDER = ("extractor", "audiofit", "cleaner", "10bit", "auditor")
 
 @dataclass(frozen=True)
 class Step:
@@ -74,9 +79,14 @@ STEPS: dict[str, Step] = {
         title="Extract embedded English SRT subtitles",
         root_flag="--source",
     ),
+    "audiofit": Step(
+        key="audiofit", script="audio_standardizer.py",
+        title="Normalize audio for the G454V chain (AC-3 5.1)",
+        root_flag="--source", supports_nice=True,
+    ),
     "cleaner": Step(
         key="cleaner", script="mkv_track_cleaner.py",
-        title="Clean MKV tracks (remux)",
+        title="Clean MKV tracks (remux; keeps the chain-native audio)",
         root_flag="--dir", supports_nice=True,
     ),
     "10bit": Step(
@@ -142,11 +152,29 @@ def ffprobe_installed() -> bool:
         return shutil.which("ffprobe") is not None
 
 
+def ffmpeg_installed() -> bool:
+    """The audio standardizer needs both halves of FFmpeg (probe and engine)."""
+    try:
+        import audio_standardizer as aus
+        probe = aus.find_ffprobe()
+        engine = aus.find_ffmpeg()
+        return bool(probe and engine)
+    except Exception:  # noqa: BLE001 - same degrade-to-PATH rule as the others
+        return (shutil.which("ffprobe") is not None
+                and shutil.which("ffmpeg") is not None)
+
+
 PREREQUISITES: dict[str, tuple[Callable[[], bool], str]] = {
     "extractor": (
         mkvtoolnix_installed,
         "MKVToolNix (mkvmerge and mkvextract) not found on PATH or in the standard "
         "install locations; the extractor needs both",
+    ),
+    "audiofit": (
+        ffmpeg_installed,
+        "ffmpeg and ffprobe not found on PATH or in the standard install locations; "
+        "the audio standardizer needs both (plan-only runs work with just ffprobe "
+        "via --dry-run)",
     ),
     "cleaner": (
         mkvmerge_installed,

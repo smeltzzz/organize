@@ -82,9 +82,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
-# Shared implementation: everything imported here is defined exactly once,
-# in organizekit/core/. See tests/test_shared_core.py for the rule that
-# keeps it that way.
 from organizekit.core import (
     COVERING_ENGLISH_SRT_SUFFIXES,
     EXTERNAL_SRT_CUE_RE,
@@ -112,6 +109,11 @@ from organizekit.core import (
     write_raw,
 )
 
+# Shared implementation: everything imported here is defined exactly once,
+# in organizekit/core/. See tests/test_shared_core.py for the rule that
+# keeps it that way.
+from organizekit.core import playbackchain as pc
+
 # ---------------------------------------------------------------------------
 # External English SRT sidecar contract
 # ---------------------------------------------------------------------------
@@ -137,7 +139,7 @@ from organizekit.core import (
 # decodes almost any byte sequence and would mask a genuine encoding problem.
 
 
-VERSION = "2.6.2"
+VERSION = "3.0.0"
 
 # ==================== DEFAULT CONFIGURATION ====================
 TARGET_DIR = str(resolve_library())
@@ -794,34 +796,30 @@ def is_forced_subtitle(track: dict[str, Any]) -> bool:
     return bool(re.search(r"\b(forced|foreign only|signs?/?songs?)\b", name.lower()))
 
 def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, int, int]:
-    """(codec tier, atmos, channels, bitrate, sample-rate, original-flag)."""
+    """(codec tier, atmos, channels, bitrate, sample-rate, original-flag).
+
+    The codec tier is the ONE playback chain's table
+    (``organizekit.core.playbackchain``): this library is engineered for a
+    Chromecast with Google TV (HD) G454V feeding a Hisense AX3125H over the
+    soundbar's HDMI IN, and on that chain the "best" track is the best one
+    that plays natively. Dolby Digital Plus (E-AC-3, Atmos included) and
+    Dolby Digital (AC-3) top the table because the player bitstreams them
+    end-to-end; base DTS follows (the bar decodes it and the player's
+    firmware passes it); client-decodable formats (AAC/FLAC/PCM/Opus/...)
+    sit mid-table because they arrive as PCM; and lossless-HD formats sit
+    BELOW all of them: the G454V can never emit TrueHD / DTS-HD / DTS:X, so
+    keeping one would force the Jellyfin server to transcode the audio on
+    every single play. ``audio_standardizer.py`` runs before this tool and
+    bakes a chain-native AC-3 track in from exactly those lossless masters,
+    so nothing of audible value is lost when they leave.
+    """
     props = track.get("properties") or {}
     codec_id = str(props.get("codec_id") or "").upper()
     codec = str(track.get("codec") or "").upper()
     name = str(props.get("track_name") or "").upper()
     blob = f"{codec} {codec_id} {name}"
 
-    tier = 10
-    if "TRUEHD" in blob or "A_MLP" in codec_id:
-        tier = 100
-    elif any(k in blob for k in ("DTS-HD MA", "DTS-HD MASTER", "DTS/HD_MA", "DTS:X", "DTS-X")):
-        tier = 95
-    elif any(k in blob for k in ("PCM", "FLAC", "ALAC", "WAVPACK", "APE", "MONKEY")):
-        tier = 90
-    elif any(k in blob for k in ("DTS-HD HRA", "DTS-HD HR", "DTS/HD_HRA", "DTS-HD HIGH RESOLUTION", "DTS-HD")):
-        tier = 85
-    elif any(k in blob for k in ("E-AC-3", "EAC3", "E_AC3", "DOLBY DIGITAL PLUS", "DD+", "DDPLUS")):
-        tier = 80
-    elif "DTS" in blob:
-        tier = 70
-    elif any(k in blob for k in ("AC-3", "AC3", "A_AC3", "DOLBY DIGITAL")):
-        tier = 60
-    elif "OPUS" in blob:
-        tier = 50
-    elif "AAC" in blob:
-        tier = 40
-    elif any(k in blob for k in ("MP3", "MPEG", "VORBIS", "WMA")):
-        tier = 20
+    tier = chain_audio_tier(blob)
 
     try:
         channels = int(props.get("audio_channels") or 2)
@@ -838,6 +836,52 @@ def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, 
         sampling_freq = 48000
     original = 1 if props.get("flag_original") else 0
     return (tier, atmos_flag, channels, bitrate, sampling_freq, original)
+
+
+def chain_audio_tier(blob: str) -> int:
+    """The chain's codec tier, with the sub-class refinements this tool needs.
+
+    The shared table (playbackchain.CLASS_TIERS) ranks CLASSES of codec; the
+    cleaner's job is choosing one track among many, so within a class the
+    historical quality order still applies (DD+ above DD, lossless-decodable
+    above lossy-decodable, DTS-HD above DTS core). The one load-bearing
+    change from the pre-chain table: native Dolby formats rank above EVERY
+    lossless-HD format.
+    """
+    b = blob.upper()
+    cls = playbackchain_classify(b)
+    if cls == pc.AUDIO_NATIVE:
+        # Both are Dolby-native to the chain; E-AC-3 (DD+/Atmos-capable)
+        # edges out plain AC-3 inside the class.
+        if any(k in b for k in ("E-AC-3", "EAC3", "E_AC3", "EC-3", "EC3",
+                                "DOLBY DIGITAL PLUS", "DD+", "DDPLUS")):
+            return 100
+        return 95
+    if cls == pc.AUDIO_DTS_CORE:
+        return 80
+    if cls == pc.AUDIO_DECODE_PCM:
+        # All arrive as PCM after the player decodes them; lossless sources
+        # rank above lossy ones *within* the class.
+        if any(k in b for k in ("PCM", "FLAC", "ALAC", "WAVPACK", "A_PCM", "A_FLAC")):
+            return 66
+        if "OPUS" in b or "A_OPUS" in b:
+            return 62
+        return 60
+    if cls == pc.AUDIO_TRANSCODE_BOUND:
+        # Not playable natively on the G454V, ever. If forced to keep one
+        # (no chain-native track exists yet — i.e. audiofit has not run),
+        # prefer the better master as the transcode source.
+        if any(k in b for k in ("DTS-HD MA", "DTS-HD MASTER", "DTS/HD_MA", "DTS:X", "DTS-X")):
+            return 34
+        if any(k in b for k in ("DTS-HD HRA", "DTS-HD HR", "DTS/HD_HRA", "DTS-HD HIGH RESOLUTION")):
+            return 32
+        return 30
+    return 10
+
+
+def playbackchain_classify(blob: str) -> str:
+    """The shared chain classifier (organizekit.core.playbackchain)."""
+    return pc.classify_audio_blob(blob)
 
 def is_matching_language(track: dict[str, Any] | None, target_languages: set[str]) -> bool:
     if not track:

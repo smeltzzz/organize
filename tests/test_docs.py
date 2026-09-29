@@ -159,8 +159,8 @@ class DocumentedFlagTests(unittest.TestCase):
     #: Every file that is a tool in its own right. `__main__.py` is the
     #: zipapp's entry point; it has no flags of its own and passes everything
     #: to the front door.
-    TOOLS = ("organize.py", "pipeline.py", "subtitle_extractor.py", "mkv_track_cleaner.py",
-             "bitdepth.py", "library_auditor.py", "movie_standardizer.py")
+    TOOLS = ("organize.py", "pipeline.py", "subtitle_extractor.py", "audio_standardizer.py",
+             "mkv_track_cleaner.py", "bitdepth.py", "library_auditor.py", "movie_standardizer.py")
 
     def tool_files(self) -> list[Path]:
         return [REPO / name for name in self.TOOLS]
@@ -205,6 +205,7 @@ class DocumentedFlagTests(unittest.TestCase):
         aliases: dict[str, list[Path]] = {
             "pipeline": [REPO / "pipeline.py"],
             "extractor": [REPO / "subtitle_extractor.py"],
+            "audiofit": [REPO / "audio_standardizer.py"],
             "cleaner": [REPO / "mkv_track_cleaner.py"],
             "bit-depth": [REPO / "bitdepth.py"],
             "auditor": [REPO / "library_auditor.py"],

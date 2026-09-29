@@ -42,9 +42,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Shared implementation: everything imported here is defined exactly once,
-# in organizekit/core/. See tests/test_shared_core.py for the rule that
-# keeps it that way.
 from organizekit.core import (
     KIND_BITDEPTH,
     ExclusiveRunLock,
@@ -65,6 +62,11 @@ from organizekit.core import (
     run_field_smoke_test,
     tools_home,
 )
+
+# Shared implementation: everything imported here is defined exactly once,
+# in organizekit/core/. See tests/test_shared_core.py for the rule that
+# keeps it that way.
+from organizekit.core import playbackchain as pc
 
 
 def format_bytes(size: int | float | None) -> str:
@@ -130,7 +132,7 @@ SKIP_DIR_NAMES = frozenset({
 # CONSTANTS
 # =============================================================================
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 # This inspector never changes media. It writes one append-only log, one
 # replaceable report, and (unless --no-cache) one reusable probe cache; all
 # three live outside the media library.
@@ -180,10 +182,18 @@ STATUS_REVIEW_UNKNOWN_DEPTH = "REVIEW_UNKNOWN_BIT_DEPTH"
 STATUS_ERROR = "ERROR"
 STATUS_SKIPPED = "SKIPPED"
 
+# The one playback chain this library is tuned for (facts + sources in
+# organizekit/core/playbackchain.py): Chromecast with Google TV (HD) G454V
+# -> Samsung UN60F6350AF --ARC--> Hisense AX3125H (tv-arc, the as-shipped
+# wiring; the soundbar HDMI IN wiring is the documented alternative). The inspector's
+# bit-depth job is unchanged and still fail-closed; what the chain adds for
+# THIS movie set is a second, informational verdict: does the picture Direct
+# Play on the G454V at all? (resolution ceiling, codec roster, Dolby Vision.)
 CATEGORY_LABELS = {
     STATUS_QUEUE: "1. 8-BIT SDR  —  QUEUE FOR HANDBRAKE",
     STATUS_SKIP_SDR: "2. HIGH BIT-DEPTH SDR  —  SKIP (already 10/12/16-bit)",
-    STATUS_SKIP_HDR: "3. NATIVE HDR  —  KEEP (do not send through HandBrake)",
+    STATUS_SKIP_HDR: "3. NATIVE HDR  —  KEEP (do not send through HandBrake)"
+                     " [G454V: HDR10/HDR10+/HLG Direct Play, tone-mapped to SDR]",
     STATUS_REVIEW_8BIT_HDR: "4. 8-BIT TAGGED HDR  —  REVIEW (do not treat as SDR)",
     STATUS_REVIEW_UNKNOWN_DEPTH: "5. UNKNOWN BIT DEPTH  —  REVIEW (do not queue)",
     STATUS_ERROR: "6. UNREADABLE / ERRORS",
@@ -236,6 +246,13 @@ class ProbeResult:
     size_bytes: int = 0
     duration_sec: float | None = None
     error: str = ""
+    # Informational chain fit (G454V/AX3125H/UN60F6350AF). These never
+    # override the fail-closed bit-depth ``status`` above; they tell the
+    # reader what the file does on the ONE playback chain this library is
+    # tuned for. See organizekit/core/playbackchain.py.
+    chain_video: str = ""
+    chain_audio: str = ""
+    chain_note: str = ""
 
 CFG = Config()
 # The console/file logger every tool shares: see organizekit/core/runlog.py
@@ -597,6 +614,8 @@ def result_from_probe(
         info += f" | trc={transfer}"
     info += f" | depth={bit_depth_evidence}"
 
+    chain_video, chain_audio, chain_note = chain_fit(payload, stream, flavors, dv_detail)
+
     return ProbeResult(
         path=path,
         status=status,
@@ -614,7 +633,44 @@ def result_from_probe(
         height=height,
         size_bytes=size_bytes,
         duration_sec=duration,
+        chain_video=chain_video,
+        chain_audio=chain_audio,
+        chain_note=chain_note,
     )
+
+
+def chain_fit(payload: dict[str, Any], video_stream: dict[str, Any],
+              hdr_flavors: list[str], dv_profile: str) -> tuple[str, str, str]:
+    """The file's fit on the ONE playback chain, read from the same probe.
+
+    Video: the G454V decodes H.264/HEVC/VP9/AV1 up to 1080p60 and no more;
+    Dolby Vision is not licensed on it at all. Audio: the best class present
+    (the cleaner keeps the best playable track, so that is what will play).
+    """
+    width = _as_int(video_stream.get("width")) or 0
+    height = _as_int(video_stream.get("height")) or 0
+    video = pc.classify_video(
+        str(video_stream.get("codec_name") or ""),
+        width=width, height=height,
+        hdr_flavors=hdr_flavors, dv_profile=dv_profile,
+    )
+    best_audio = ""
+    best_tier = -1
+    for astream in payload.get("streams") or []:
+        if astream.get("codec_type") != "audio":
+            continue
+        cls = pc.classify_audio_ffprobe(
+            str(astream.get("codec_name") or ""),
+            str(astream.get("profile") or ""),
+        )
+        tier = pc.CLASS_TIERS.get(cls, 0)
+        if tier > best_tier:
+            best_tier, best_audio = tier, cls
+    note_bits = [pc.video_chain_note(video)]
+    if best_audio == pc.AUDIO_TRANSCODE_BOUND:
+        note_bits.append("audio cannot leave the G454V either — audio_standardizer.py "
+                         "synthesizes a chain-native AC-3 track")
+    return video, best_audio, " · ".join(note_bits)
 
 # =============================================================================
 # FILE DISCOVERY
@@ -775,7 +831,9 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         "QUEUE FOR HANDBRAKE (8-BIT SDR)",
         "8-bit SDR (QUEUE)",
         "re-encode these to 10-bit",
-        "Re-encode in HandBrake with H.265 (x265 / NVENC / QSV) 10-bit, or AV1 10-bit.",
+        "Re-encode in HandBrake for the G454V chain: H.265 Main10 10-bit at <=1080p "
+        "(or H.264 High@L4.1 8-bit), audio mixdown Dolby Digital (AC-3) 5.1 @ 640 kbps — "
+        "both Direct Play end-to-end on the Chromecast HD.",
     ),
     ActionGroup(
         STATUS_REVIEW_8BIT_HDR,
@@ -885,17 +943,46 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
                 fields.append(("HDR evidence", "; ".join(item.hdr_evidence)))
             if item.bit_depth_evidence:
                 fields.append(("Depth evidence", item.bit_depth_evidence))
+            if item.chain_note:
+                fields.append(("Chain (G454V)", item.chain_note))
             if item.error:
                 fields.append(("Error", item.error))
             report.entry(Path(item.path).name, ordinal=position, fields=fields)
 
+    # The chain-fit summary: one information row per way a file can fail to
+    # Direct Play on the ONE hardware chain this library is tuned for.
+    chain_counts: dict[str, int] = {}
+    for item in results:
+        if item.chain_video:
+            chain_counts[item.chain_video] = chain_counts.get(item.chain_video, 0) + 1
+    interesting = {v: n for v, n in chain_counts.items() if v != pc.VIDEO_NATIVE}
+    if interesting:
+        report.subsection("PLAYBACK CHAIN FIT (Chromecast HD G454V)", count=len(results))
+        audio_bound = sum(1 for item in results if item.chain_audio == pc.AUDIO_TRANSCODE_BOUND)
+        chain_rows = [(n, v, pc.video_chain_note(v)) for v, n in sorted(interesting.items())]
+        if audio_bound:
+            chain_rows.append((audio_bound, pc.AUDIO_TRANSCODE_BOUND,
+                               "best audio cannot leave the G454V — audio_standardizer.py "
+                               "synthesizes a chain-native AC-3 track"))
+        report.scorecard(chain_rows)
+        report.paragraph(
+            "These rows change no bit-depth verdict — they say what each file does on "
+            "the chain the library serves: HDR10/HDR10+/HLG Direct Plays tone-mapped to "
+            "SDR (the TV is a 1080p SDR panel and still protected from re-encoding); "
+            "Dolby Vision and >1080p files force a server transcode on every play and "
+            "are the ones worth replacing or re-encoding. Facts: docs/hardware.md."
+        )
+
     report.footer([
-        "QUEUE = 8-bit SDR. Re-encode to H.265 10-bit (or AV1 10-bit) in HandBrake.",
+        "QUEUE = 8-bit SDR. Re-encode for the chain: H.265 10-bit (or H.264 High) at "
+        "<=1080p + AC-3 5.1 640k audio in HandBrake.",
         "SKIP = already 10-bit or better SDR. Re-encoding only loses quality.",
         "KEEP = HDR10 / HDR10+ / Dolby Vision / HLG. HandBrake tone-maps or strips "
-        "dynamic metadata.",
-        "A Dolby Vision profile ending in 'no fallback' needs a Dolby Vision "
-        "client; one listing a base layer still plays as HDR10, HLG or SDR.",
+        "dynamic metadata; the G454V tone-maps HDR10/HDR10+/HLG to SDR for this TV at "
+        "playback time instead, with no generation loss.",
+        "A Dolby Vision profile ending in 'no fallback' needs a Dolby Vision client — "
+        "and the G454V is NOT one; one listing an HDR10/SDR base layer plays as that "
+        "base layer on this chain, tone-mapped.",
         "REVIEW = HDR-tagged 8-bit, or metadata too uncertain to trust. Never queued "
         "automatically.",
         "BT.2020 primaries without PQ or HLG is wide-gamut SDR, not HDR.",
