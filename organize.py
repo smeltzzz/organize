@@ -155,18 +155,19 @@ def print_dashboard() -> None:
     """Print the interactive overview dashboard when run with no arguments."""
     print_hero_banner()
 
-    print(bold("  WORKFLOW PIPELINE:"))
+    print(bold("  WORKFLOW PIPELINE (tuned for: Chromecast HD G454V -> AX3125H -> UN60F6350AF):"))
     print(f"    {cyan('1. standardize')} {SYM_ARROW} qBittorrent completion hook: hardlinks & names into Title (Year)")
     print(f"    {cyan('2. extract')}     {SYM_ARROW} subtitle_extractor: text track -> <movie>.eng.srt; image-only movies by exact OpenSubtitles hash")
-    print(f"    {cyan('3. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps 1 audio, strips subs (MP4 -> MKV)")
-    print(f"    {cyan('4. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect native HDR")
-    print(f"    {cyan('5. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
+    print(f"    {cyan('3. audio')}       {SYM_ARROW} audio_standardizer: TrueHD/DTS-HD -> chain-native AC-3 5.1 640k (video untouched)")
+    print(f"    {cyan('4. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps the chain-native audio (E-AC-3/AC-3), strips subs")
+    print(f"    {cyan('5. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect HDR, check G454V fit")
+    print(f"    {cyan('6. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
     print()
 
     print(bold("  QUICK COMMANDS:"))
     print(f"    {green('python organize.py doctor')}             Run comprehensive environment & prerequisite diagnostics")
     print(f"    {green('python organize.py status')}             Summarise progress: what is done, what the next pass touches")
-    print(f"    {green('python organize.py run')}                Run manual maintenance pipeline (steps 2 -> 3 -> 4 -> 5)")
+    print(f"    {green('python organize.py run')}                Run manual maintenance pipeline (steps 2 -> 3 -> 4 -> 5 -> 6)")
     print(f"    {green('python organize.py run --dry-run')}      Preview pipeline commands without executing")
     print(f"    {green('python organize.py standardize [PATH]')} Standardize a specific torrent download or batch scan")
     print(f"    {green('python organize.py audit')}              Audit current library layout and subtitle coverage")
@@ -398,6 +399,56 @@ def check_ffprobe(_ctx: DoctorContext) -> DiagnosticCheck:
     )
 
 
+def check_ffmpeg(_ctx: DoctorContext) -> DiagnosticCheck:
+    """ffmpeg itself - needed by the audio standardizer (the AC-3 transcodes)."""
+
+    def probe() -> str:
+        import audio_standardizer as aus
+        ffmpeg_bin = aus.find_ffmpeg()
+        if not ffmpeg_bin or not aus.binary_works(ffmpeg_bin):
+            raise FileNotFoundError("ffmpeg not found or not working")
+        return ffmpeg_bin
+
+    ffmpeg_bin = probe_quietly(probe)
+    if ffmpeg_bin:
+        return DiagnosticCheck(
+            name="FFmpeg (ffmpeg)",
+            status="ok",
+            message=f"Found: {get_binary_version(ffmpeg_bin, '-version') or 'ffmpeg'}",
+            detail=ffmpeg_bin,
+        )
+    return DiagnosticCheck(
+        name="FFmpeg (ffmpeg)",
+        status="warn",
+        message="Not found on PATH or standard install paths",
+        detail="The 'audio' step will be skipped (TrueHD/DTS-HD tracks stay server-transcoded "
+               "on every play). --dry-run still produces the plan with ffprobe alone.",
+        remedy=(
+            "Windows: winget install Gyan.FFmpeg or drop ffmpeg.exe in C:\\ffmpeg\\bin\\\n"
+            "Debian/Ubuntu: sudo apt install -y ffmpeg\n"
+            "macOS: brew install ffmpeg"
+        ),
+    )
+
+
+def check_playback_chain(_ctx: DoctorContext) -> DiagnosticCheck:
+    """The single hardware chain every default in this toolkit is tuned for."""
+    from organizekit.core import playbackchain as pc
+    wiring = pc.resolve_wiring()
+    lines = pc.chain_summary_lines(wiring)
+    if wiring == pc.WIRING_TV_ARC:
+        topology = f"{pc.PLAYER.model_id} -> {pc.DISPLAY.model} --ARC--> {pc.SINK.model}"
+    else:
+        topology = f"{pc.PLAYER.model_id} -> {pc.SINK.model} (HDMI IN) -> {pc.DISPLAY.model}"
+    return DiagnosticCheck(
+        name="Playback chain",
+        status="ok",
+        message=f"{topology} (wiring: {wiring})",
+        detail="\n".join(lines),
+        remedy="docs/hardware.md has the wiring diagram, the codec matrix and the device settings",
+    )
+
+
 def check_mkvextract(_ctx: DoctorContext) -> DiagnosticCheck:
     """mkvextract - reads a movie's own embedded subtitle tracks.
 
@@ -567,8 +618,10 @@ def check_hardlink_compatibility(ctx: DoctorContext) -> list[DiagnosticCheck]:
 DOCTOR_CHECKS: tuple[tuple[str, DoctorProbe], ...] = (
     ("python", check_python_runtime),
     ("os", check_operating_system),
+    ("chain", check_playback_chain),
     ("mkvmerge", check_mkvtoolnix),
     ("ffprobe", check_ffprobe),
+    ("ffmpeg", check_ffmpeg),
     ("mkvextract", check_mkvextract),
     ("opensubtitles", check_opensubtitles),
     ("library-dir", check_library_directory),
@@ -800,9 +853,10 @@ def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
     to ignore. Which steps were left out is printed, so the figure is never
     quietly optimistic.
     """
+    import audio_standardizer as audio_mod
     import bitdepth as probe_mod
     import mkv_track_cleaner as remux_mod
-    from organizekit.core import KIND_BITDEPTH, KIND_REMUX, path_norm
+    from organizekit.core import KIND_AUDIOFIT, KIND_BITDEPTH, KIND_REMUX, path_norm
 
     # Each step's own module says which of its verdicts mean "nothing further
     # to do", so this command cannot drift from the tool that wrote the answer.
@@ -811,6 +865,7 @@ def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
     settled_verdicts: dict[str, frozenset[str] | None] = {
         KIND_REMUX: remux_mod.SETTLED_REMUX,
         KIND_BITDEPTH: frozenset({probe_mod.STATUS_SKIP_SDR, probe_mod.STATUS_SKIP_HDR}),
+        KIND_AUDIOFIT: audio_mod.SETTLED_AUDIOFIT,
     }
     cached_kinds = tuple(settled_verdicts)
 
@@ -875,7 +930,8 @@ def collect_status(audit, verdicts: dict, stamps: dict) -> LibraryStatus:
         StepStatus("Subtitles", subtitle, settled["subtitle"]),
         *(
             StepStatus(label, cached[kind], settled[kind], stale[kind], unmeasured[kind])
-            for label, kind in (("Remux", KIND_REMUX), ("Bit depth", KIND_BITDEPTH))
+            for label, kind in (("Remux", KIND_REMUX), ("Bit depth", KIND_BITDEPTH),
+                                ("Audio (chain)", KIND_AUDIOFIT))
         ),
     )
     return LibraryStatus(
@@ -1142,6 +1198,7 @@ def run_all_self_tests() -> int:
 
     scripts = [
         ("organize.py", ["--internal-self-test"]),
+        ("audio_standardizer.py", ["--self-test"]),
         ("bitdepth.py", ["--self-test"]),
         ("library_auditor.py", ["--self-test"]),
         ("movie_standardizer.py", ["--self-test"]),
@@ -1253,8 +1310,11 @@ def build_parser() -> argparse.ArgumentParser:
     # extract
     subparsers.add_parser("extract", aliases=["extract-subs"], help="Extract embedded English tracks into validated <movie>.eng.srt sidecars", add_help=False)
 
+    # audio
+    subparsers.add_parser("audio", aliases=["audiofit", "ac3"], help="Bake chain-native AC-3 5.1 in from TrueHD/DTS-HD tracks the G454V can never emit", add_help=False)
+
     # clean
-    subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep 1 best audio, strip subs; MP4 converted to MKV", add_help=False)
+    subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep 1 chain-native audio (E-AC-3/AC-3), strip subs; MP4 converted to MKV", add_help=False)
 
     # 10bit
     subparsers.add_parser("10bit", aliases=["probe"], help="FFprobe 8-bit vs 10-bit & native HDR compliance check", add_help=False)
@@ -1351,6 +1411,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if command in {"extract", "extract-subs"}:
         return delegate_to_script("subtitle_extractor.py", sub_args)
+
+    if command in {"audio", "audiofit", "ac3"}:
+        return delegate_to_script("audio_standardizer.py", sub_args)
 
     if command in {"clean", "remux"}:
         return delegate_to_script("mkv_track_cleaner.py", sub_args)

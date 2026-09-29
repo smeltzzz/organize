@@ -50,10 +50,25 @@ class LanguageAndCommentaryTests(unittest.TestCase):
 
 
 class AudioQualityTests(unittest.TestCase):
-    def test_truehd_beats_aac(self) -> None:
+    def test_chain_native_beats_lossless_hd(self) -> None:
+        """The chain's one scoring rule: playable-at-all beats higher-sample-rate.
+
+        The G454V can passthrough AC-3/E-AC-3 but can never emit TrueHD; AAC
+        it decodes to PCM. So on the chain this library is tuned for, every
+        one of those outranks a TrueHD 7.1 master (which the chain serves by
+        transcoding the audio on every play).
+        """
         truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
         aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
-        self.assertGreater(tc.get_audio_quality_score(truehd), tc.get_audio_quality_score(aac))
+        eac3 = {"codec": "E-AC-3", "properties": {"codec_id": "A_EAC3", "audio_channels": 6}}
+        self.assertGreater(tc.get_audio_quality_score(eac3), tc.get_audio_quality_score(truehd))
+        self.assertGreater(tc.get_audio_quality_score(aac), tc.get_audio_quality_score(truehd))
+
+    def test_lossless_hd_is_the_best_transcode_SOURCE(self) -> None:
+        """Among unplayable tracks the better master still wins (it feeds audiofit)."""
+        dtshd = {"codec": "DTS-HD MA", "properties": {"codec_id": "A_DTS/HD_MA", "audio_channels": 8}}
+        dtshr = {"codec": "DTS-HD HRA", "properties": {"codec_id": "A_DTS-HD HRA", "audio_channels": 6}}
+        self.assertGreater(tc.get_audio_quality_score(dtshd), tc.get_audio_quality_score(dtshr))
 
 
 class ProgressParsingTests(unittest.TestCase):
@@ -781,6 +796,13 @@ class ExternalSrtRecordPathTests(unittest.TestCase):
         tc._target_root = real_root
 
 
+CODEC_IDS = {
+    "AAC": "A_AAC", "AC-3": "A_AC3", "E-AC-3": "A_EAC3", "DTS": "A_DTS",
+    "TrueHD": "A_TRUEHD", "DTS-HD MA": "A_DTS/HD_MA", "DTS-HD HRA": "A_DTS/HD_HRA",
+    "FLAC": "A_FLAC", "Opus": "A_OPUS",
+}
+
+
 def _audio(track_id: int, language: str = "eng", *, name: str = "", codec: str = "AAC",
            channels: int = 2, commentary: bool = False,
            default: bool = False, original: bool = False) -> dict:
@@ -788,7 +810,7 @@ def _audio(track_id: int, language: str = "eng", *, name: str = "", codec: str =
     props = {
         "language": language,
         "language_ietf": language,
-        "codec_id": "A_AAC" if codec == "AAC" else "A_MLP",
+        "codec_id": CODEC_IDS.get(codec, "A_MLP"),
         "audio_channels": channels,
     }
     if name:
@@ -841,9 +863,12 @@ class CleanupPlanTests(unittest.TestCase):
         plan, reason = tc.plan_cleanup(info)
         self.assertEqual(reason, "")
         assert plan is not None
-        # TrueHD beats AAC, commentary and dubs are dropped.
-        self.assertEqual(plan.best_audio_id, 2)
-        self.assertEqual([t["id"] for t in plan.removed_audio], [1, 3, 4])
+        # Chain policy: AAC decodes to PCM on the player, TrueHD can never be
+        # emitted by the G454V — so the playable AAC wins; commentary and dubs
+        # are dropped. (In the real pipeline audiofit has already baked an
+        # AC-3 5.1 in from that TrueHD before this tool runs.)
+        self.assertEqual(plan.best_audio_id, 1)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3, 4])
         # Every embedded subtitle goes, English (SDH/forced included) or not.
         self.assertEqual(plan.keep_sub_ids, [])
         self.assertEqual([t["id"] for t in plan.removed_subs], [5, 6, 7, 8])
@@ -877,8 +902,10 @@ class CleanupPlanTests(unittest.TestCase):
         self.assertEqual(reason, "")
         assert plan is not None
         self.assertTrue(plan.foreign_with_srt)
-        self.assertEqual(plan.best_audio_id, 1)
-        self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3])
+        # Chain policy: the Spanish AAC (player decodes to PCM) beats the
+        # Spanish TrueHD (un-emittable on the G454V).
+        self.assertEqual(plan.best_audio_id, 2)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [1, 3])
         # The external sidecar is the sole subtitle option.
         self.assertEqual(plan.keep_sub_ids, [])
         self.assertEqual([t["id"] for t in plan.removed_subs], [4])
@@ -894,8 +921,9 @@ class CleanupPlanTests(unittest.TestCase):
         self.assertEqual(reason, "")
         assert plan is not None
         self.assertFalse(plan.foreign_with_srt)
-        self.assertEqual(plan.best_audio_id, 1)
-        self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3])
+        # Chain policy again: playable AAC beats un-emittable TrueHD.
+        self.assertEqual(plan.best_audio_id, 2)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [1, 3])
         # No sidecar, and the subs still go: extraction happens before this
         # tool in the pipeline, so retention buys nothing.
         self.assertEqual(plan.keep_sub_ids, [])
@@ -980,8 +1008,9 @@ class CleanupPlanTests(unittest.TestCase):
 
     def test_remove_commentary_false_keeps_commentary_in_the_pool(self) -> None:
         # remove_commentary=False is the operator's explicit override: the
-        # commentary track stays a candidate and can even win on quality.
-        comm = _audio(2, codec="TrueHD", channels=8, name="Director Commentary", commentary=True)
+        # commentary track stays a candidate and can even win on quality
+        # (here: a chain-native E-AC-3 commentary beats an AAC feature track).
+        comm = _audio(2, codec="E-AC-3", channels=6, name="Director Commentary", commentary=True)
         plan, reason = tc.plan_cleanup(
             _media_info(_audio(1), comm), remove_commentary=False
         )

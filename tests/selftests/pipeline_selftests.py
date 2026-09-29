@@ -32,7 +32,8 @@ def run_self_tests() -> int:
             errors.append(msg)
 
     # The ordering is the whole point of this script.
-    check(STEP_ORDER == ("extractor", "cleaner", "10bit", "auditor"), "canonical step order")
+    check(STEP_ORDER == ("extractor", "audiofit", "cleaner", "10bit", "auditor"),
+          "canonical step order")
     check(STEP_ORDER.index("extractor") < STEP_ORDER.index("cleaner"),
           "subtitles must be extracted before the remux strips the embedded tracks")
     check(STEP_ORDER.index("auditor") == len(STEP_ORDER) - 1,

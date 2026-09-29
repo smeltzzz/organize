@@ -21,11 +21,16 @@ from organizekit import core
 
 class StepOrderTests(unittest.TestCase):
     def test_canonical_order(self) -> None:
-        self.assertEqual(pl.STEP_ORDER, ("extractor", "cleaner", "10bit", "auditor"))
+        self.assertEqual(pl.STEP_ORDER, ("extractor", "audiofit", "cleaner", "10bit", "auditor"))
 
     def test_extractor_precedes_cleaner(self) -> None:
         """The embedded track is destroyed by the remux, so this is load-bearing."""
         self.assertLess(pl.STEP_ORDER.index("extractor"), pl.STEP_ORDER.index("cleaner"))
+        # audiofit sits between them: the cleaner keeps exactly one audio
+        # track, and the chain-native AC-3 audiofit synthesizes must exist
+        # before a remux could drop the lossless master it came from.
+        self.assertLess(pl.STEP_ORDER.index("extractor"), pl.STEP_ORDER.index("audiofit"))
+        self.assertLess(pl.STEP_ORDER.index("audiofit"), pl.STEP_ORDER.index("cleaner"))
 
     def test_the_auditor_runs_last(self) -> None:
         """The audit is read-only and must see the sidecars extraction wrote."""

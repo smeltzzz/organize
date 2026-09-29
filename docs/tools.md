@@ -10,10 +10,11 @@ For the order they run in and why that order is load-bearing, see
 | Tool | One line | Needs |
 | :--- | :--- | :--- |
 | [`subtitle_extractor.py`](#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: from the movie's own text track, or an exact-hash OpenSubtitles match when only bitmaps exist | `mkvmerge` + `mkvextract` (an OpenSubtitles API key for image-only movies) |
-| [`mkv_track_cleaner.py`](#2--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep one best audio, strip commentary, dubs and embedded subtitles | `mkvmerge` |
-| [`bitdepth.py`](#3--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed | `ffprobe` |
-| [`library_auditor.py`](#4--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
-| [`movie_standardizer.py`](#5--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: hardlink MKV/MP4 into `Title (Year)/`, replacing an older matching movie | nothing |
+| [`audio_standardizer.py`](#2--audio_standardizerpy--chain-native-audio) | Chain-native audio for the G454V: bake one AC-3 5.1 @ 640 kbps in from every TrueHD/DTS-HD master, or report what's already native | `ffprobe` (+ `ffmpeg` when something needs the new track) |
+| [`mkv_track_cleaner.py`](#3--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best chain-playable audio, strip commentary, dubs and embedded subtitles | `mkvmerge` |
+| [`bitdepth.py`](#4--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed, report each file's chain fit | `ffprobe` |
+| [`library_auditor.py`](#5--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
+| [`movie_standardizer.py`](#6--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: hardlink MKV/MP4 into `Title (Year)/`, replacing an older matching movie | nothing |
 
 Every tool runs on its own and accepts `--help`; `python3 <tool>.py --version`
 prints the version, and `python3 <tool>.py --self-test` runs that tool's
@@ -28,14 +29,14 @@ root; the auditor has nothing to write so it has no `--dry-run`).
 
 | Flag | Tools | Meaning |
 | :--- | :--- | :--- |
-| `--source PATH` | pipeline, extractor, bit-depth, auditor, standardizer | The library (or, for the standardizer without paths, the batch-scan root) to work on. Equivalent to `ORGANIZE_LIBRARY`, which is the reason the flag is rarely needed. |
-| `--log PATH` · `--report PATH` | extractor, cleaner, bit-depth, auditor, standardizer | Where this run's log and its single replaceable report live. Both default outside the library — `$XDG_STATE_HOME/organize/<tool>/` on Linux/macOS, `E:\torrents\tools\ReportsAndLogs\<tool>` on Windows ([Configuration](configuration.md)). |
-| `--dry-run` | pipeline, extractor, cleaner, bit-depth, standardizer | Do everything except the mutation, and say what would have happened. The auditor needs no such flag: it never writes. |
-| `--min-size MB` | extractor, cleaner, bit-depth, standardizer | Ignore movies smaller than this. The point is to skip samples, extras and half-downloaded files rather than to filter a library. If it filters away *every* movie, the extractor says so — a report of "0 movies, 100% covered" would be a green page about a library nothing had looked at. |
-| `--lock-timeout SECONDS` | extractor, bit-depth, auditor, standardizer | How long to wait for a conflicting run before refusing to start, instead of racing it. The extractor and the standardizer share one cross-tool advisory lock — that is what stops the completion hook placing hardlinks under a sweep that is reading the library — while the auditor and bit-depth each take a lock of their own. The cleaner passes the same idea through `--standardizer-lock-timeout`. |
-| `--workers N` | extractor, bit-depth, auditor | How many movies to inspect at once (`0` = decide from the CPU count, `1` = the serial run). Results come back in input order, so the output does not change with the number. |
-| `--state-db PATH` · `--no-state` | cleaner, bit-depth, auditor, `organize status` | The shared verdict cache (`--no-state` turns it off for this run, `ORGANIZE_NO_STATE=1` turns it off for every run). It is only ever a cache: every tool re-checks what it is about to act on. |
-| `--verbose` | bit-depth, standardizer, `organize.py` | Print the per-file decisions the summary folds away. |
+| `--source PATH` | pipeline, extractor, audiofit, bit-depth, auditor, standardizer | The library (or, for the standardizer without paths, the batch-scan root) to work on. Equivalent to `ORGANIZE_LIBRARY`, which is the reason the flag is rarely needed. |
+| `--log PATH` · `--report PATH` | extractor, audiofit, cleaner, bit-depth, auditor, standardizer | Where this run's log and its single replaceable report live. Both default outside the library — `$XDG_STATE_HOME/organize/<tool>/` on Linux/macOS, `E:\torrents\tools\ReportsAndLogs\<tool>` on Windows ([Configuration](configuration.md)). |
+| `--dry-run` | pipeline, extractor, audiofit, cleaner, bit-depth, standardizer | Do everything except the mutation, and say what would have happened. The auditor needs no such flag: it never writes. |
+| `--min-size MB` | extractor, audiofit, cleaner, bit-depth, standardizer | Ignore movies smaller than this. The point is to skip samples, extras and half-downloaded files rather than to filter a library. If it filters away *every* movie, the extractor says so — a report of "0 movies, 100% covered" would be a green page about a library nothing had looked at. |
+| `--lock-timeout SECONDS` | extractor, audiofit, bit-depth, auditor, standardizer | How long to wait for a conflicting run before refusing to start, instead of racing it. The extractor and the standardizer share one cross-tool advisory lock — that is what stops the completion hook placing hardlinks under a sweep that is reading the library — while the auditor, audiofit and bit-depth each take a lock of their own. The cleaner passes the same idea through `--standardizer-lock-timeout`. |
+| `--workers N` | extractor, audiofit, bit-depth, auditor | How many movies to inspect at once (`0` = decide from the CPU count, `1` = the serial run). Results come back in input order, so the output does not change with the number. (audiofit probes in parallel; transcodes run one at a time — an encode is the ceiling anyway.) |
+| `--state-db PATH` · `--no-state` | audiofit, cleaner, bit-depth, auditor, `organize status` | The shared verdict cache (`--no-state` turns it off for this run, `ORGANIZE_NO_STATE=1` turns it off for every run). It is only ever a cache: every tool re-checks what it is about to act on. |
+| `--verbose` | audiofit, bit-depth, standardizer, `organize.py` | Print the per-file decisions the summary folds away. |
 | `--self-test` · `--version` | every tool | Shipped in the file so a machine with no checkout can still be asked "is this thing sane, and which build is it?". |
 
 ---
@@ -172,21 +173,80 @@ Four flags tune that tier, and none of them is needed to run it:
 A folder the sidecar cannot be written to is checked *before* the search, so a
 read-only mount or a permissions mistake costs no download.
 
-## 2 · `mkv_track_cleaner.py` — lossless remux
+## 2 · `audio_standardizer.py` — chain-native audio
+
+Every verdict derives from one fact the hardware dossier
+([hardware.md](hardware.md)) establishes: the **Chromecast with Google TV
+(HD) G454V can emit Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3,
+Atmos included) and decoded PCM — never TrueHD, DTS-HD MA, DTS:X or WMA
+Pro.** A movie whose best track is one of those lossless-HD formats is
+*audio-transcoded by the Jellyfin server on every single play* — for the
+whole runtime of the file, forever. This tool is the one-time offline
+answer. For each movie it probes (`ffprobe`) and classifies:
+
+| Source situation | Verdict | What happens |
+| :--- | :--- | :--- |
+| AC-3 / E-AC-3 on board | `native-ok` | nothing — already bitstreams end-to-end |
+| base 5.1 DTS core | `dts-core-ok` | accepted (the AX3125H has a DTS decoder and the player's Amlogic firmware passes core DTS — unofficial but real); `--no-dts-passthrough` transcodes these too |
+| AAC / FLAC / PCM / MP3 / Opus | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; on the default ARC wiring multichannel variants become transcode candidates (plain ARC/optical = stereo PCM only), while `--wiring soundbar-hdmi-in` accepts them as-is |
+| TrueHD / DTS-HD MA / DTS-HD HRA / DTS:X | `transcoded-ac3` | **one AC-3 track is synthesized and appended, video untouched** |
+| unknown codec | `review-unknown` | fail-closed in the report; never auto-touched |
+| still hardlinked to a seed | `deferred-seeding` | untouched until seeding stops |
+
+The AC-3 bake-in is exactly one ffmpeg invocation per movie:
+`ffmpeg -i movie.mkv -map 0 -c copy … -c:a:N ac3 -b:a 640k -ac 6 -ar 48000`.
+Every original stream is copied; the new track is **appended, marked
+default, and titled with its provenance** ("Dolby Digital 5.1 (from TrueHD)").
+7.1 folds to 5.1 at 640 kbps; stereo sources stay stereo at 192 kbps, never
+upmixed. The **source is the best track in the movie's own language** —
+using `mkv_track_cleaner`'s own commentary/dub/native-language rules, so a
+Japanese film is transcoded from its Japanese TrueHD even when an English
+DTS dub sits next to it. Video streams are never re-encoded.
+
+Publishing is fail-closed: the output is **re-probed** before the swap —
+every original stream identical, the appended track AC-3 with the right
+channel count, duration drift ≤ 3 s — and dropped otherwise. The temp file
+carries the tool's marker name (`.*.audiofit-PID.tmp.mkv`), a stale one is
+swept the next run, and `os.replace` publishes atomically. A movie hardlinked
+to its torrent seed is deferred rather than replaced. `--dry-run` needs only
+`ffprobe` (it prints the plan; ffmpeg is checked at run start when
+transcodes are due and missing makes the step skip with a reason, like every
+other prerequisite in the toolkit).
+
+```bash
+python3 audio_standardizer.py --source /path/to/movies --dry-run
+python3 audio_standardizer.py --source /path/to/movies --wiring soundbar-hdmi-in  # upgrade wiring
+```
+
+## 3 · `mkv_track_cleaner.py` — lossless remux
 
 Every movie ends up with exactly one audio track — the best-scoring one in
-the movie's own (native) language — and video is never re-encoded. Dubs,
-commentary and every other language go. The native language is decided by
-the file's own markers, in order: a track flagged *original*, a single
-shared language, the default-flagged track, then track order (dubs are
-conventionally appended last); a track titled "dub"/"dubbed" is never the
-keeper whatever its language. Every embedded subtitle is removed on every
-remux, sidecar or not — the external `.eng.srt` is the library's only
-subtitle, which is why `subtitle_extractor.py` runs first in the pipeline.
-A movie remuxed with no sidecar is named in the report (it has no subtitle
-now), and a movie with a **broken** `.eng.srt` beside it is skipped
-entirely: an existing sidecar is authoritative even when it is unusable —
-fix or delete it, and the next run cleans the movie.
+the movie's own (native) language — and video is never re-encoded. Which
+track *is* best is the playback chain's table, not a golden-ear ranking: on
+the G454V → AX3125H chain ([hardware.md](hardware.md)) the keeper is the best
+track **the player can actually emit**. Scores in descending order: Dolby
+Digital Plus (E-AC-3, Atmos included, 100) and Dolby Digital (AC-3, 95)
+bitstream end-to-end; base DTS (80) is decoded by the soundbar; client-
+decodable formats (AAC 60/62, FLAC/PCM 66) arrive as PCM; and the lossless-HD
+formalities — TrueHD, DTS-HD MA, DTS-HD HRA, DTS:X — sit **below all of
+them** (30–34) because the G454V can never emit them, so keeping one would
+commit the server to an audio transcode on every play. `audio_standardizer.py`
+runs *before* this tool in the pipeline and bakes the chain-native AC-3 in
+from exactly those masters, so nothing of audible value is lost when they
+leave.
+
+The rest of the contract is unchanged: dubs, commentary and every other
+language go. The native language is decided by the file's own markers, in
+order: a track flagged *original*, a single shared language, the
+default-flagged track, then track order (dubs are conventionally appended
+last); a track titled "dub"/"dubbed" is never the keeper whatever its
+language. Every embedded subtitle is removed on every remux, sidecar or
+not — the external `.eng.srt` is the library's only subtitle, which is why
+`subtitle_extractor.py` runs first in the pipeline. A movie remuxed with no
+sidecar is named in the report (it has no subtitle now), and a movie with a
+**broken** `.eng.srt` beside it is skipped entirely: an existing sidecar is
+authoritative even when it is unusable — fix or delete it, and the next run
+cleans the movie.
 **MP4s are converted to MKV** in the same remux (a lossless container swap
 with the transactional replace, free-space check and seeding deferral the
 MKV path already had). A movie remuxed *without* a validated sidecar keeps
@@ -199,7 +259,7 @@ python3 mkv_track_cleaner.py --dir /path/to/movies --dry-run
 python3 mkv_track_cleaner.py --dir /path/to/movies --nice --only "Some Movie (2020).mkv"
 ```
 
-## 3 · `bitdepth.py` — bit-depth & HDR inspector
+## 4 · `bitdepth.py` — bit-depth & HDR inspector
 
 Probes every movie with ffprobe and classifies it: 8-bit SDR goes into a
 HandBrake queue, native HDR10 / HDR10+ / Dolby Vision is protected, ambiguous
@@ -215,12 +275,27 @@ by profile — `profile 8.1 · HDR10 base` falls back to HDR10 on a client witho
 Dolby Vision, while `profile 5 · no SDR/HDR10 fallback` does not play correctly
 on one.
 
+Beyond that bit-depth verdict, every report row also carries the file's
+**playback-chain fit** for the G454V chain ([hardware.md](hardware.md)) —
+informational, never an override of the fail-closed status above:
+
+| File | What it does on the chain |
+| :--- | :--- |
+| ≤1080p H.264/HEVC/VP9/AV1(+MPEG-2), SDR or HDR10/HDR10+/HLG | Direct Play (HDR is tone-mapped to SDR for this 1080p SDR panel at playback time — zero generation loss, and the file still must NOT go through HandBrake) |
+| Dolby Vision (no HDR10/SDR base layer) | the G454V is not DV-licensed: server transcodes every play → replace with HDR10+ or re-encode |
+| >1080p (4K, 8K) | the player has no 4K output: server transcodes every play → a 1080p version belongs in this library |
+| VC-1 / ProRes / unknown codecs | never work → replace |
+
+The HandBrake guidance for anything queued is chain-shaped: H.265 Main10
+10-bit at ≤1080p (or H.264 High@L4.1 8-bit) + AC-3 5.1 @ 640 kbps audio —
+both Direct Play end-to-end.
+
 ```bash
 python3 bitdepth.py --source /path/to/movies
 python3 bitdepth.py --source /path/to/movies --fail-if-queue   # for schedulers
 ```
 
-## 4 · `library_auditor.py` — read-only health check
+## 5 · `library_auditor.py` — read-only health check
 
 Validates the `Title (Year)/Title (Year).mkv` + `.eng.srt` layout, flags
 foreign artifacts, misnamed sidecars, and missing subtitles. Strictly
@@ -240,7 +315,7 @@ per folder — an HDD seek, or a library on SMB/NFS — it is **3.1 s serial →
 at 8 workers (7.8×)**. The audit itself is identical either way: results are
 returned in input order, so the report cannot tell how it was scheduled.
 
-## 5 · `movie_standardizer.py` — the ingest hook
+## 6 · `movie_standardizer.py` — the ingest hook
 
 Parses scene release names and places one hardlinked movie file (plus any
 validated subtitle) per `Title (Year)/` folder. Hardlink-only: the download

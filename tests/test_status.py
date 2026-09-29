@@ -299,9 +299,9 @@ class StatusJsonTests(StatusFixture, unittest.TestCase):
         self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
         steps = self._json()[1]["steps"]
         self.assertEqual([step["id"] for step in steps],
-                         ["layout", "subtitles", "remux", "bit-depth"])
+                         ["layout", "subtitles", "remux", "bit-depth", "audio-chain"])
         self.assertEqual([step["label"] for step in steps],
-                         ["Layout", "Subtitles", "Remux", "Bit depth"])
+                         ["Layout", "Subtitles", "Remux", "Bit depth", "Audio (chain)"])
 
     def test_counts_are_reported_per_step(self) -> None:
         self._movie("Alpha (2001)", sidecar="Alpha (2001).eng.srt")
