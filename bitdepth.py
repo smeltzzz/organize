@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -83,10 +84,24 @@ def format_bytes(size: int | float | None) -> str:
     return f"{value:.2f} TiB"  # pragma: no cover - unreachable
 
 def format_duration(seconds: float | None) -> str:
-    """``H:MM:SS`` (or ``M:SS`` under an hour); an em-dash-free ``-`` when unknown."""
-    if not seconds or seconds <= 0:
+    """``H:MM:SS`` (or ``M:SS`` under an hour); an em-dash-free ``-`` when unknown.
+
+    Total by construction. A probe payload is external input, and ffprobe's
+    duration reaches here straight out of ``json.loads`` - which accepts the
+    non-standard ``NaN``/``Infinity`` literals and hands back real floats. Both
+    of those used to reach ``int(round(...))`` (ValueError / OverflowError),
+    and a non-numeric field raised TypeError on the comparison, all while
+    rendering a report for a run that had already finished.
+    """
+    if seconds is None:
         return "-"
-    total = int(round(seconds))
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return "-"
+    if not math.isfinite(value) or value <= 0:
+        return "-"
+    total = int(round(value))
     hours, total = divmod(total, 3600)
     minutes, secs = divmod(total, 60)
     if hours:

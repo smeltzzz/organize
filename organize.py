@@ -55,7 +55,9 @@ from organizekit.core import (  # noqa: E402, F401
     Ansi,
     color_enabled,
     json_document,
+    load_dotenv,
     print_json,
+    resolve_library,
     slug_id,
     stream_can_encode,
     style,
@@ -220,23 +222,18 @@ def _resolve_library_path(explicit: Path | None) -> Path:
     library. Precedence is the repo-wide contract: an explicit flag, then
     ``ORGANIZE_LIBRARY``, then the legacy ``MOVIE_STD_TARGET``, then the
     platform default - and a ``.env`` next to the scripts is honoured too.
-    Delegate to the tools' shared resolver; the inline fallback keeps a copied
-    ``organize.py`` usable when its siblings are not present.
+
+    It is the *core's* resolver, bound directly. This used to ``import
+    bitdepth`` at call time to reach one function, which cost a full import of
+    a 1,300-line sibling on a path that had already imported
+    ``organizekit.core`` - and then carried an inline copy of the precedence
+    rules as a fallback. That copy is how the two drifted: it accepted a
+    whitespace-only ``--source`` where the core falls through to
+    ``ORGANIZE_LIBRARY``, and it never called ``load_dotenv()``, so a ``.env``
+    silently stopped working whenever the sibling import failed. A resolver
+    that every tool shares should have exactly one implementation.
     """
-    if explicit is not None:
-        return explicit.expanduser()
-    try:
-        import bitdepth as probe_mod
-        return probe_mod.resolve_library(None)
-    except Exception:  # noqa: BLE001 - a sibling that will not import must not stop
-        # the CLI; fall through to the environment and the documented default.
-        pass
-    for value in (os.environ.get("ORGANIZE_LIBRARY"), os.environ.get("MOVIE_STD_TARGET")):
-        if value and value.strip():
-            return Path(value).expanduser()
-    if os.name == "nt":
-        return Path(r"E:\torrents\final_organized")
-    return Path.home() / "Media" / "Movies"
+    return resolve_library(explicit)
 
 
 def _resolve_source_path(explicit: Path | None) -> Path:
@@ -246,15 +243,11 @@ def _resolve_source_path(explicit: Path | None) -> Path:
     for the source directory and a platform-aware default so a POSIX machine
     never sees a literal ``E:\\torrents\\final`` warning.
     """
-    if explicit is not None:
-        return explicit.expanduser()
-    try:
-        import movie_standardizer as standardizer
-        return standardizer.resolve_source_root(None)
-    except Exception:  # noqa: BLE001 - as above: the CLI still has a default
-        pass
-    value = os.environ.get("MOVIE_STD_SOURCE")
-    if value and value.strip():
+    load_dotenv()
+    if explicit is not None and str(explicit).strip():
+        return Path(explicit).expanduser()
+    value = (os.environ.get("MOVIE_STD_SOURCE") or "").strip()
+    if value:
         return Path(value).expanduser()
     if os.name == "nt":
         return Path(r"E:\torrents\final")

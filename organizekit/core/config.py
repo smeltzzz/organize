@@ -43,7 +43,25 @@ def _dotenv_candidates() -> list[Path]:
         add(Path.cwd())
     except OSError:
         pass
-    add(Path(__file__).resolve().parents[3])  # <repo>/src/organize/core -> <repo>
+    # The installation root, in both of the layouts this package ships in.
+    #
+    # The source layout is ``<root>/organizekit/core/config.py``, so the root is
+    # ``parents[2]``. This used to ask for ``parents[3]`` on the assumption of a
+    # ``src/`` tree, which in this layout is the directory *above* the checkout
+    # - so a `.env` sitting at the repository root was never actually a
+    # candidate, and the documented "the repository root for a clone" behaviour
+    # only worked by accident when the tool happened to be launched from there.
+    #
+    # In the zipapp build ``__file__`` is ``<dir>/organize.pyz/organizekit/core/
+    # config.py``: ``parents[2]`` is the archive itself (a file, so the join
+    # simply never exists) and ``parents[3]`` is ``<dir>``, which is exactly
+    # where a `.env` beside the single file should be found. Offering both, in
+    # that order, is what makes one list correct for both deployments.
+    for parent in (2, 3):
+        try:
+            add(Path(__file__).resolve().parents[parent])
+        except (OSError, IndexError):
+            pass
     return seen
 
 

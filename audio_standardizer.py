@@ -438,7 +438,7 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
                   audio_chain_note(_stream_blob(stream), channels_of(stream), cfg.wiring),
                   AUDIO_NATIVE)
 
-    best_stream, best_track, best_cls = classified[0]
+    best_stream, _best_track, best_cls = classified[0]
     best_blob = _stream_blob(best_stream)
     best_channels = channels_of(best_stream)
 
@@ -1087,7 +1087,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cfg_from_args(args: argparse.Namespace) -> Config:
-    workers = args.workers if args.workers > 0 else (os.cpu_count() or 4)
+    # `--workers 0` means "decide", and the decision is the *shared* one. This
+    # used to expand it inline with `os.cpu_count() or 4`, which ignored the
+    # cap: on a 16- or 64-core host `cfg.workers` became the raw core count and
+    # this tool's own "--workers ... max 8" help text was simply untrue - the
+    # limit was only applied later, by accident, at the point where the run
+    # happened to call `resolve_workers` again. That is where the cap lives.
+    workers = resolve_workers(args.workers, cap=MAX_CPU_WORKERS)
     return Config(
         source_dir=args.source,
         log_file=args.log,
