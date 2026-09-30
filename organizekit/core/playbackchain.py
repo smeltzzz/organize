@@ -3,11 +3,18 @@
 Everything the tools decide about codecs, resolutions and audio tracks is
 grounded in exactly one chain of three physical devices, wired like this::
 
-                                 HDMI (video+audio)            HDMI OUT (TV eARC/ARC)
+                                 HDMI (video+audio)            HDMI OUT -> TV
     Chromecast with Google TV ───────────────────────► Hisense ─────────────────────────► Samsung
     (HD), model G454V "boreal"        plug into the   AX3125H  video passes through;    UN60F6350AF
                                       soundbar's      3.1.2ch  audio is decoded here    60" 1080p SDR
                                       HDMI IN         440W
+
+That is the wiring this install actually runs (``soundbar-hdmi-in``), and it
+is the toolkit's default: the Chromecast feeds the soundbar's HDMI IN, the
+bar decodes the audio, and its HDMI OUT passes the picture through to the TV.
+The alternative (``tv-arc``: Chromecast into the TV, TV --ARC/optical--> bar)
+is still fully supported, and on this display it is the degraded one — see
+``Display.arc`` and docs/hardware.md §3–§4.
 
 This file is the single source of truth for what that chain can do, so
 ``mkv_track_cleaner.py``, ``bitdepth.py`` and ``audio_standardizer.py`` never
@@ -25,10 +32,14 @@ The short version of the physics, and why it drives every default:
   guaranteed server-side audio transcode on every single play.
 * The AX3125H is fed through its HDMI IN port, which decodes everything
   the Chromecast can emit — AC-3, DD+ Atmos, DTS, and multichannel PCM —
-  before the video passes through to the TV. The TV is a 2013 panel
-  whose own audio return path (plain ARC, no eARC, optical fallback)
-  is the weakest, least-documented leg, which is why the recommended
-  wiring never asks it to carry sound.
+  before the video passes through to the TV. That is what makes the
+  default audio rule permissive: a 5.1 AAC/FLAC/PCM track arrives as
+  multichannel PCM at the bar and needs no transcode.
+* The TV is a 2013 panel whose own audio return path is the weak leg: its
+  Digital Audio Out menu offers per-input formats, and on this unit only
+  PCM is selectable for HDMI sources (user-confirmed; see ``Display.arc``),
+  so plain ARC/optical would deliver multichannel content as stereo PCM.
+  The default wiring simply never asks the TV to carry sound.
 * The TV tops out at 1920x1080 SDR. HDR10/HDR10+/HLG files still Direct
   Play — the Chromecast decodes them and tone-maps to SDR for this
   display — but Dolby Vision is NOT licensed on the G454V, so any
@@ -90,10 +101,10 @@ class Sink:
         "Bluetooth 5.3",
     )
     note: str = (
-        "Feeding the Chromecast into the soundbar's HDMI IN is the wiring "
-        "this toolkit assumes: the bar decodes DD/DD+ Atmos/DTS/multichannel "
-        "PCM directly and passes the picture to the TV, so the 2013 TV never "
-        "has to carry audio."
+        "Fed from the Chromecast's HDMI OUT into this HDMI IN, the bar "
+        "decodes DD/DD+ Atmos/DTS/multichannel PCM directly and passes the "
+        "picture to the TV, so the 2013 TV never has to carry audio. This is "
+        "the wiring this toolkit assumes by default (soundbar-hdmi-in)."
     )
 
 @dataclass(frozen=True)
@@ -105,12 +116,17 @@ class Display:
     panel_hz: int = 120  # "Clear Motion Rate 240" marketing; native 120 Hz
     hdmi_ports: int = 4  # one labelled (ARC); Anynet+ CEC on all
     arc: str = (
-        "plain ARC on the HDMI port labelled (ARC); no eARC. 2013 Samsung "
-        "sets of this series pass Dolby Digital 5.1 over ARC/optical from "
-        "internal sources, but passthrough of external HDMI audio is "
-        "famously unreliable on this generation (DD/DTS menu options are "
-        "often greyed out for HDMI inputs, leaving PCM 2.0). The toolkit "
-        "treats the ARC link conservatively for exactly this reason."
+        "Plain ARC on the HDMI port labelled (ARC); no eARC. Samsung's "
+        "F-series e-manual states the available Digital Audio Output (SPDIF) "
+        "formats 'may vary depending on the input source', and on this unit "
+        "only PCM is selectable for HDMI sources (user-confirmed, 2026-09): "
+        "with a Chromecast plugged into the TV, multichannel audio is "
+        "downmixed to stereo PCM before it ever reaches an ARC/optical "
+        "soundbar. Samsung's own ARC article lists PCM 2.0 / Dolby Digital "
+        "5.1 / DTS 5.1 as the formats ARC can carry, but what this TV "
+        "actually offers is input-dependent, which is why the toolkit's "
+        "default wiring (soundbar-hdmi-in) does not route audio through the "
+        "TV at all."
     )
     optical_out: bool = True
 
@@ -125,8 +141,11 @@ SOURCES: tuple[str, ...] = (
     "https://www.androidtv-guide.com/streaming-gaming/chromecast-google-tv-hd/ (G454V 'boreal': S805X2, 1.5GB/8GB, AV1/VP9/H.264/HEVC)",
     "https://www.androidpolice.com/chromecast-with-google-tv-hd-review/ (no Dolby Vision on the HD model; 1.5 GB RAM; audio passthrough list)",
     "https://www.reddit.com/r/googlehome/comments/j2ggur/ (Amlogic Android TV >= 8.1 passthrough: 5.1 DTS, DD, DD+, DD+/Atmos; NO TrueHD/DTS-HD)",
-    "https://files.hisense-usa.com/download/f25648883914883a (AX3125H official spec sheet: decoders, HDMI IN + eARC out, 4K/3D passthrough)",
-    "https://www.manualowl.com/m/Samsung/UN60F6350AF/Manual/347300 (UN60F6350AF e-manual: ARC only via the HDMI (ARC) port)",
+    "https://files.hisense-usa.com/download/f25648883914883a (AX3125H official spec sheet: 1x HDMI IN + 1x HDMI OUT eARC, Dolby Atmos/TrueHD/DD+/DD, DTS:X/DTS-HD/DTS decoders, PCM and Multich PCM)",
+    "https://manuals.plus/hisense/ax3125h-3-1-2ch-440w-dolby-atmos-soundbar-with-wireless-subwoofer-manual (AX3125H user manual: HDMI IN socket for HDMI source devices; HDMI OUT (TV eARC/ARC); input-format table PCM / Dolby Digital / DD+ / TrueHD -> MPCM)",
+    "https://www.manualowl.com/m/Samsung/UN60F6350AF/Manual/347300 (UN60F6350AF e-manual: 'ARC is only available through the HDMI (ARC) port'; Digital Audio Output (SPDIF) formats 'may vary depending on the input source')",
+    "https://www.samsung.com/sg/support/tv-audio-video/how-to-use-the-hdmi-arc-port-on-a-samsung-tv/ (Samsung support: HDMI-ARC carries PCM 2ch, Dolby Digital up to 5.1 and DTS Digital Surround up to 5.1; 2013-2014 F/H-series sound-output path)",
+    "USER-CONFIRMED 2026-09 on the actual UN60F6350AF: with HDMI sources connected, the TV offers PCM only as its digital audio output format, so the ARC/optical path delivers multichannel content as stereo PCM",
     "https://jellyfin.org/docs/general/clients/codec-support/ (Jellyfin Android-TV codec support matrix: AAC/AC3/EAC3 direct)",
 )
 
@@ -134,20 +153,31 @@ SOURCES: tuple[str, ...] = (
 # WIRING MODES
 # =============================================================================
 
-#: Chromecast -> soundbar HDMI IN -> TV. Audio never crosses the 2013 TV.
-#: Fully supported as the upgrade wiring (docs/hardware.md §4).
+#: Chromecast -> soundbar HDMI IN -> TV. Audio never crosses the 2013 TV:
+#: the bar decodes AC-3/DD+ Atmos/DTS/multichannel PCM itself and passes the
+#: picture through. THE DEFAULT — this is how the chain is actually cabled.
 WIRING_SOUNDBAR_HDMI_IN = "soundbar-hdmi-in"
-#: Chromecast -> TV HDMI, TV --ARC/optical--> soundbar. How this setup is
-#: actually plugged: the soundbar hangs off the TV's HDMI (ARC) port.
+#: Chromecast -> TV HDMI, TV --ARC/optical--> soundbar. Explicit alternative
+#: only: on this 2013 TV the digital audio output offers PCM for HDMI sources,
+#: so multichannel content arrives at the bar as stereo PCM (docs/hardware.md
+#: §3-§4). Kept supported and tested; never assumed.
 WIRING_TV_ARC = "tv-arc"
 
 WIRING_ENV_VAR = "ORGANIZE_PLAYBACK_WIRING"
-#: The as-shipped wiring: the soundbar plugs into the TV's ARC port.
-DEFAULT_WIRING = WIRING_TV_ARC
+#: The wiring this chain is actually cabled with: the Chromecast feeds the
+#: soundbar's HDMI IN and the bar passes video through to the TV. Set by
+#: explicit decision (supersedes the earlier tv-arc default); the flag
+#: ``--wiring`` and ``ORGANIZE_PLAYBACK_WIRING`` override it per run.
+DEFAULT_WIRING = WIRING_SOUNDBAR_HDMI_IN
 
 
 def resolve_wiring(explicit: str | None = None) -> str:
-    """Which wiring to assume: flag, then environment, then the default."""
+    """Which wiring to assume: flag, then environment, then the default.
+
+    Defaults to ``soundbar-hdmi-in`` (``DEFAULT_WIRING``); an unrecognized
+    value (from either source) falls back to that default rather than
+    guessing, and ``tv-arc`` remains available as an explicit alternative.
+    """
     raw = (explicit or os.environ.get(WIRING_ENV_VAR) or "").strip().lower()
     if raw in (WIRING_SOUNDBAR_HDMI_IN, WIRING_TV_ARC):
         return raw
@@ -218,20 +248,58 @@ def _classify_audio_segment(b: str) -> str | None:
     return None
 
 
+#: Codec-NAME tokens a profile field may legitimately refine. Only a bare
+#: DTS codec name (mkvmerge's "DTS", ffprobe's "DTS"/"DCA") needs the second
+#: field: "DTS" + profile "DTS-HD MA" is an HD master, "DTS" + "A_DTS" is a
+#: core track. A codec ID ("A_DTS/HD_MA") or a full name ("DTS-HD") already
+#: carries the answer, so the field after it is never consulted.
+_DTS_CODEC_NAME_TOKENS = frozenset({"DTS", "DCA"})
+
+#: Substrings that make a DTS *profile* field an HD/DTS:X variant rather than
+#: a plain core. Deliberately DTS-specific: "DTS TRUEHD 7.1" is a core track
+#: whose title narrates a source, and must not be promoted to an HD master.
+_DTS_HD_PROFILE_MARKERS = (
+    "DTS-HD", "DTS/HD", "DTS:X", "DTS-X", "DTS_X",
+    "DTS HD", "DTSHD", "A_DTS/LOSSLESS", "DTS LOSSLESS",
+)
+
+
+def _dts_profile_is_hd(*segments: str) -> bool:
+    """True when any DTS profile segment names an HD / DTS:X format."""
+    return any(marker in segment
+               for segment in segments if segment
+               for marker in _DTS_HD_PROFILE_MARKERS)
+
+
 def classify_audio_blob(blob: str) -> str:
     """Classify one audio track from an upper-cased description blob.
 
-    The blob is codec name + codec ID + track title, upper-cased — the same
-    convention mkv_track_cleaner's scorer has always used, which keeps the
-    ffprobe names ("EAC3", "TRUEHD") and the MKVToolNix names ("E-AC-3",
-    "DTS-HD MA", "A_AC3") equally readable in one string.
+    The blob is codec name + codec ID (or profile) + track title, upper-cased
+    — the convention ``mkv_track_cleaner``'s scorer has always used, which
+    keeps the ffprobe names ("EAC3", "TRUEHD") and the MKVToolNix names
+    ("E-AC-3", "AC-3", "A_AC3") equally readable in one string. Only the
+    FIRST field is treated as authoritative:
 
-    The codec name and codec ID are authoritative, the track title is not:
-    release groups name tracks things like "AC3 5.1 (from TrueHD 7.1)", and
-    this tool itself appends titles like "Dolby Digital 5.1 (from truehd)".
-    Titles are therefore only consulted when the codec fields say nothing at
-    all — never to demote a proven Dolby track because its title narrates
-    history ("from TrueHD") or marketing ("TrueHD 7.1 Surround Sound").
+    1. the **codec name** (``ffprobe``'s ``codec_name``, mkvmerge's codec
+       column) decides on its own — so a real E-AC-3 stream is native even
+       when its profile is empty/unknown and its title says "TrueHD 7.1";
+    2. the **second field** may only *refine* a bare DTS codec name into an
+       HD/DTS:X master (ffprobe's ``profile``, mkvmerge's codec ID);
+    3. everything after that is a **title**, and titles are consulted only
+       when the codec fields say nothing at all.
+
+    Titles describe the source or the release, not the encoded stream —
+    release groups write "TrueHD 7.1" or "DTS-HD MA 7.1" on tracks that are
+    plain AC-3/E-AC-3, and this tool itself appends "Dolby Digital 5.1 (from
+    truehd)". No such title may ever schedule a chain-native stream for an
+    AC-3 transcode, which is why the codec name is read in isolation here
+    (see tests: ``test_titles_never_demote_a_proven_codec`` and the E-AC-3
+    false-positive regressions in ``tests/test_audio_standardizer.py``).
+
+    Because field 2 is read as the profile, every blob builder must keep the
+    field positions stable: render an absent field with a placeholder rather
+    than letting the title shift up (``audio_standardizer._stream_blob``
+    uses ``-`` for exactly this reason).
     """
     b = blob.upper()
     tokens = b.split()
@@ -240,21 +308,31 @@ def classify_audio_blob(blob: str) -> str:
     if "ATRAC" in tokens[0]:
         # Sony ATRAC3 contains "AC3" as a substring; it is none of this chain.
         return AUDIO_UNKNOWN
-    # 1. Codec-name token + codec-ID token (the first words of the blob), and
-    #    their pairwise join ("DTS" + "HD" is a marker, not a core track).
-    head = " ".join(tokens[:2])
-    for segment in (head, "".join(tokens[:2])):
-        answer = _classify_audio_segment(segment)
+    # 1. The codec-NAME field decides, in isolation. A title word can never
+    #    enter this step: with no profile field present, the old code joined
+    #    the first two whitespace tokens, which put the title's first word
+    #    next to the codec and let "TrueHD 7.1" turn an E-AC-3 stream into a
+    #    transcode candidate.
+    codec_class = _classify_audio_segment(tokens[0])
+    if codec_class == AUDIO_DTS_CORE and tokens[0] in _DTS_CODEC_NAME_TOKENS:
+        # Only a bare DTS codec name is refined by the second field, and only
+        # by DTS-specific HD vocabulary (never "TRUEHD", so a DTS core track
+        # titled "TrueHD 7.1 (source)" stays core).
+        second = tokens[1] if len(tokens) > 1 else ""
+        if _dts_profile_is_hd(second, f"{tokens[0]} {second}".strip()):
+            return AUDIO_TRANSCODE_BOUND
+    if codec_class is not None:
+        return codec_class
+    # 2. The codec-name field is not a name this table knows (mkvmerge's
+    #    human label "Dolby Digital Plus", a raw codec ID): widen the lens,
+    #    shortest prefix first, so "DOLBY DIGITAL" is proven native before a
+    #    later title word such as "TRUEHD" can be reached.
+    for width in range(1, min(5, len(tokens) + 1)):
+        answer = _classify_audio_segment(" ".join(tokens[:width]))
         if answer is not None:
             return answer
-    # 2. Codec-ID tokens anywhere up front ("A_DTS/HD_MA" says HD even when
-    #    the display name doesn't).
-    for token in tokens[:4]:
-        answer = _classify_audio_segment(token)
-        if answer is not None:
-            return answer
-    # 3. Full blob, last resort: for mkvmerge's human-readable codec field
-    #    ("DTS-HD Master Audio") a title substring is the only available hint.
+    # 3. Full blob, last resort: for a human-readable codec field with no
+    #    separating ID ("DTS-HD Master Audio") a substring is the only hint.
     answer = _classify_audio_segment(b)
     if answer is not None:
         return answer
@@ -320,17 +398,19 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> 
                 "AX3125H decodes (Dolby Digital / DD+ Atmos)")
     if cls == AUDIO_DTS_CORE:
         if wiring == WIRING_TV_ARC:
-            return ("DTS core: the soundbar decodes it, but the 2013 TV's ARC/optical "
-                    "path is not documented to pass DTS from HDMI sources - "
-                    "move the Chromecast to the soundbar's HDMI IN")
+            return ("DTS core: the soundbar decodes it, but this TV offers PCM only "
+                    "for HDMI sources, so the ARC/optical path cannot be relied on "
+                    "to carry it - the default wiring (Chromecast -> soundbar "
+                    "HDMI IN) can")
         return ("DTS core: chipset-level passthrough from the Chromecast "
                 "(works on Amlogic Android TV builds; not on Google's "
                 "official list) -> AX3125H DTS decoder")
     if cls == AUDIO_DECODE_PCM:
         if ch > 2 and wiring == WIRING_TV_ARC:
-            return ("the Chromecast decodes this to PCM, but plain ARC/optical "
-                    "carries only stereo PCM - this 5.1+ track arrives as 2.0 "
-                    "unless the Chromecast plugs into the soundbar's HDMI IN")
+            return ("the Chromecast decodes this to PCM, but this TV's digital audio "
+                    "output offers PCM 2.0 for HDMI sources - over ARC/optical this "
+                    "5.1+ track arrives as stereo unless the Chromecast plugs into "
+                    "the soundbar's HDMI IN (the default wiring)")
         return ("decoded by the Chromecast to PCM " +
                 ("(multichannel; the bar accepts it over HDMI IN)" if ch > 2
                  else "(stereo)") )
@@ -412,10 +492,11 @@ def chain_summary_lines(wiring: str | None = None) -> list[str]:
     wiring = resolve_wiring(wiring)
     if wiring == WIRING_TV_ARC:
         wiring_line = (f"Wiring : Chromecast -> {DISPLAY.model} HDMI, TV --ARC/optical--> "
-                       f"{SINK.model} (as shipped; multichannel PCM arrives stereo-only)")
+                       f"{SINK.model} (explicit alternative; this TV offers PCM for "
+                       "HDMI sources, so multichannel PCM arrives stereo-only)")
     else:
         wiring_line = (f"Wiring : Chromecast -> {SINK.model} HDMI IN -> {DISPLAY.model} "
-                       "(audio never crosses the 2013 TV)")
+                       "(default; audio never crosses the 2013 TV)")
     return [
         f"Player : {PLAYER.model} ({PLAYER.model_id} '{PLAYER.codename}', {PLAYER.soc}, {PLAYER.ram} RAM)",
         f"         video  <= {PLAYER.max_resolution[0]}x{PLAYER.max_resolution[1]}p{PLAYER.max_fps}: "

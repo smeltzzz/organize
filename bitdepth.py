@@ -184,8 +184,9 @@ STATUS_SKIPPED = "SKIPPED"
 
 # The one playback chain this library is tuned for (facts + sources in
 # organizekit/core/playbackchain.py): Chromecast with Google TV (HD) G454V
-# -> Samsung UN60F6350AF --ARC--> Hisense AX3125H (tv-arc, the as-shipped
-# wiring; the soundbar HDMI IN wiring is the documented alternative). The inspector's
+# -> Hisense AX3125H (HDMI IN) -> Samsung UN60F6350AF (soundbar-hdmi-in, the
+# DEFAULT — how this chain is cabled; tv-arc is the documented alternative).
+# The inspector's
 # bit-depth job is unchanged and still fail-closed; what the chain adds for
 # THIS movie set is a second, informational verdict: does the picture Direct
 # Play on the G454V at all? (resolution ceiling, codec roster, Dolby Vision.)

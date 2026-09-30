@@ -45,6 +45,15 @@ EAC3_DONE = _payload({"codec_name": "eac3", "channels": 6})
 DTS_CORE = _payload({"codec_name": "dts", "channels": 6})
 UNKNOWN_AUDIO = _payload({"codec_name": "gsm_ms", "channels": 2})
 FLAC_MULTI = _payload({"codec_name": "flac", "channels": 6})
+# A real E-AC-3 stream whose title narrates the source it came from — the
+# shape that used to be misread as transcode-bound (ffprobe reports no
+# profile for E-AC-3, and the title then sat in the profile's field).
+EAC3_TITLED_TRUEHD = _payload(
+    {"codec_name": "eac3", "profile": "unknown", "channels": 6,
+     "tags": {"language": "eng", "title": "TrueHD 7.1"}})
+EAC3_TITLED_DTSHD = _payload(
+    {"codec_name": "eac3", "channels": 6,
+     "tags": {"language": "eng", "title": "DTS-HD MA 7.1"}})
 FOREIGN_JPN = _payload(
     {"codec_name": "truehd", "channels": 8, "tags": {"language": "jpn"}},
     {"codec_name": "dts", "channels": 6, "tags": {"language": "eng"}},
@@ -220,19 +229,85 @@ class RealTranscodeRunTests(ChainFixture):
         self.assertNotEqual(film.read_bytes(), before)
         self.assertEqual(self.payload_of(film)["streams"][-1]["codec_name"], "ac3")
 
-    def test_the_default_arc_wiring_transcodes_multichannel_flac(self) -> None:
-        # The soundbar hangs off the TV's ARC port: plain ARC/optical carries
-        # stereo PCM only, so a 6-channel FLAC must become AC-3 by default.
+    def test_the_default_hdmi_in_wiring_accepts_multichannel_flac(self) -> None:
+        # The default wiring is the chain as cabled: the Chromecast feeds the
+        # soundbar's HDMI IN, which carries multichannel PCM, so a 6-channel
+        # FLAC is done — no ffmpeg run, no new track, not even in a plan.
         film = self.movie("Concert (2010)", FLAC_MULTI)
-        self.assertEqual(self._run("--dry-run"), 0)
-        self.assertIn("Concert (2010).mkv", self.report_section("WOULD TRANSCODE"))
-        # Explicitly rewired through the bar's HDMI IN, the same file is done.
-        self.assertEqual(self._run("--wiring", pc.WIRING_SOUNDBAR_HDMI_IN, "--dry-run"), 0)
+        before = film.read_bytes()
+        code = self._run("--dry-run",
+                         env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
+        self.assertEqual(code, 0)
         self.assertIn("Concert (2010).mkv", self.report_section("DECODE-TO-PCM"))
-        # And the default run actually performs the conversion it planned.
-        code = self._run(env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
+        self.assertIn(pc.WIRING_SOUNDBAR_HDMI_IN, self.report_text())
+        # Applying the plan leaves the file byte-identical and runs no ffmpeg.
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(film.read_bytes(), before)
+        self.assertEqual(self.ffmpeg_invocations(), [])
+        self.assertEqual(self.plan_rows()["Concert (2010)"], aus.STATUS_PCM)
+
+    def test_the_explicit_arc_wiring_transcodes_multichannel_flac(self) -> None:
+        # `--wiring tv-arc` is the supported alternative: this TV offers PCM
+        # only for HDMI sources, so a 6-channel FLAC becomes AC-3.
+        film = self.movie("Concert (2010)", FLAC_MULTI)
+        self.assertEqual(self._run("--wiring", pc.WIRING_TV_ARC, "--dry-run"), 0)
+        self.assertIn("Concert (2010).mkv", self.report_section("WOULD TRANSCODE"))
+        self.assertIn(pc.WIRING_TV_ARC, self.report_text())
+        # And the run actually performs the conversion it planned.
+        code = self._run("--wiring", pc.WIRING_TV_ARC,
+                         env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
         self.assertEqual(code, 0)
         self.assertEqual(self.payload_of(film)["streams"][-1]["codec_name"], "ac3")
+
+    def test_the_environment_variable_selects_the_arc_alternative(self) -> None:
+        # No flag: ORGANIZE_PLAYBACK_WIRING is the documented override, and
+        # setting it to tv-arc re-enables the multichannel-PCM compensation.
+        self.movie("Concert (2010)", FLAC_MULTI)
+        code = self._run("--dry-run",
+                         env={pc.WIRING_ENV_VAR: pc.WIRING_TV_ARC})
+        self.assertEqual(code, 0)
+        self.assertIn("Concert (2010).mkv", self.report_section("WOULD TRANSCODE"))
+        # Unset (the ambient default), the same file plans no work at all.
+        self.assertEqual(self._run("--dry-run"), 0)
+        self.assertIn("Concert (2010).mkv", self.report_section("DECODE-TO-PCM"))
+
+    def test_an_eac3_stream_titled_like_a_lossless_master_is_never_transcoded(self) -> None:
+        """The reported false positive, end to end.
+
+        ffprobe reports no (or `unknown`) profile for E-AC-3 streams, so the
+        track title used to be read as the profile field: an actual `eac3`
+        stream titled "TrueHD 7.1" was scheduled for an AC-3 transcode that
+        never should have happened. It must be chain-native, untouched, and
+        absent from the transcode bucket — in the report and in state.
+        """
+        titled = self.movie("Titled Film (2007)", EAC3_TITLED_TRUEHD)
+        titled_dts = self.movie("Titled DTS Film (2008)", EAC3_TITLED_DTSHD)
+        # A genuine lossless master in the same run must still be transcoded,
+        # so this regression cannot pass by disabling the transcode entirely.
+        master = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
+        before = {path: path.read_bytes() for path in (titled, titled_dts)}
+        env = {"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")}
+
+        code = self._run("--dry-run", env=env)
+        self.assertEqual(code, 0)
+        for path in (titled, titled_dts):
+            with self.subTest(movie=path.name):
+                self.assertIn(path.name, self.report_section("CHAIN-NATIVE"))
+                self.assertNotIn(path.name, self.report_section("WOULD TRANSCODE"))
+                self.assertEqual(self.plan_rows()[path.stem], aus.STATUS_NATIVE)
+        self.assertIn("TrueHD Film (2001).mkv", self.report_section("WOULD TRANSCODE"))
+
+        # Applying is the same: the titled E-AC-3 files are untouched and no
+        # ffmpeg runs for them; the TrueHD master is converted exactly once.
+        code = self._run(env=env)
+        self.assertEqual(code, 0)
+        for path in (titled, titled_dts):
+            self.assertEqual(path.read_bytes(), before[path])
+            self.assertEqual(self.payload_of(path)["streams"][1]["codec_name"], "eac3")
+            self.assertEqual(self.plan_rows()[path.stem], aus.STATUS_NATIVE)
+        runs = self.ffmpeg_invocations()
+        self.assertEqual(len(runs), 1, "only the real TrueHD master may be transcoded")
+        self.assertIn(str(master), " ".join(runs[0]))
 
     def test_a_seeding_release_is_deferred_not_broken(self) -> None:
         film = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
@@ -280,18 +355,31 @@ class PlannerUnitTests(unittest.TestCase):
         self.cfg = aus.Config(dry_run=True)
 
     def test_every_real_world_codec_family_has_a_verdict(self) -> None:
-        # self.cfg uses the shipped default wiring, tv-arc: plain ARC/optical
-        # can only carry stereo PCM, so multichannel PCM-decodes are AC-3
-        # transcode candidates by default.
+        # self.cfg uses the DEFAULT wiring, soundbar-hdmi-in: the soundbar's
+        # HDMI IN carries multichannel PCM, so multichannel PCM-decodes are
+        # accepted as-is; only the lossless-HD masters still need work.
         cases = {
             "eac3": aus.STATUS_NATIVE, "ac3": aus.STATUS_NATIVE,
-            "dts": aus.STATUS_DTS, "aac": aus.STATUS_PLANNED, "flac": aus.STATUS_PLANNED,
+            "dts": aus.STATUS_DTS, "aac": aus.STATUS_PCM, "flac": aus.STATUS_PCM,
             "truehd": aus.STATUS_PLANNED, "gsm_ms": aus.STATUS_REVIEW,
         }
         for codec, wanted in cases.items():
             with self.subTest(codec=codec):
                 v = aus.plan_for_payload("m.mkv", _payload({"codec_name": codec}), self.cfg)
                 self.assertEqual(v.status, wanted)
+
+    def test_the_default_config_is_the_hdmi_in_wiring(self) -> None:
+        # No flag, no environment override: the planner must assume the chain
+        # as cabled, which accepts multichannel PCM sources untouched.
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(pc.WIRING_ENV_VAR, None)
+            self.assertEqual(aus.Config().wiring, pc.WIRING_SOUNDBAR_HDMI_IN)
+            self.assertEqual(aus.resolve_wiring(None), pc.WIRING_SOUNDBAR_HDMI_IN)
+        for codec in ("aac", "flac"):
+            with self.subTest(codec=codec):
+                v = aus.plan_for_payload("m.mkv", _payload({"codec_name": codec}), self.cfg)
+                self.assertEqual(v.status, aus.STATUS_PCM)
+                self.assertIsNone(v.target, "no AC-3 target is planned by default")
 
     def test_stereo_pcm_decodes_stay_fine_even_over_arc(self) -> None:
         for codec in ("aac", "flac"):
@@ -306,6 +394,30 @@ class PlannerUnitTests(unittest.TestCase):
             with self.subTest(codec=codec):
                 v = aus.plan_for_payload("m.mkv", _payload({"codec_name": codec}), cfg)
                 self.assertEqual(v.status, aus.STATUS_PCM)
+
+    def test_the_arc_alternative_transcodes_multichannel_pcm(self) -> None:
+        cfg = aus.Config(dry_run=True, wiring=pc.WIRING_TV_ARC)
+        for codec in ("aac", "flac"):
+            with self.subTest(codec=codec):
+                v = aus.plan_for_payload("m.mkv", _payload({"codec_name": codec}), cfg)
+                self.assertEqual(v.status, aus.STATUS_PLANNED)
+                assert v.target is not None
+                self.assertEqual(v.target.codec, "ac3")
+
+    def test_a_titled_eac3_stream_is_native_from_the_ffprobe_fields(self) -> None:
+        """The classifier reads codec_name/profile; the title never decides."""
+        for payload in (EAC3_TITLED_TRUEHD, EAC3_TITLED_DTSHD):
+            with self.subTest(title=payload["streams"][1]["tags"]["title"]):
+                v = aus.plan_for_payload("m.mkv", payload, self.cfg)
+                self.assertEqual(v.status, aus.STATUS_NATIVE)
+                self.assertIsNone(v.target)
+                self.assertEqual(v.audio_class, pc.AUDIO_NATIVE)
+                # The blob is built with stable field positions, so the title
+                # can never be read as the codec's profile.
+                self.assertEqual(aus._stream_blob(payload["streams"][1]),
+                                 "EAC3 UNKNOWN TRUEHD 7.1"
+                                 if payload is EAC3_TITLED_TRUEHD else
+                                 "EAC3 - DTS-HD MA 7.1")
 
     def test_the_transcode_source_is_the_highest_tier_lossless_master(self) -> None:
         # Two lossless masters, no native track: AC-3 comes from the
