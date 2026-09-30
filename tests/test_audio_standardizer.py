@@ -262,7 +262,7 @@ class RealTranscodeRunTests(ChainFixture):
     def test_the_environment_variable_selects_the_arc_alternative(self) -> None:
         # No flag: ORGANIZE_PLAYBACK_WIRING is the documented override, and
         # setting it to tv-arc re-enables the multichannel-PCM compensation.
-        film = self.movie("Concert (2010)", FLAC_MULTI)
+        self.movie("Concert (2010)", FLAC_MULTI)
         code = self._run("--dry-run",
                          env={pc.WIRING_ENV_VAR: pc.WIRING_TV_ARC})
         self.assertEqual(code, 0)
@@ -290,7 +290,6 @@ class RealTranscodeRunTests(ChainFixture):
 
         code = self._run("--dry-run", env=env)
         self.assertEqual(code, 0)
-        report = self.report_text()
         for path in (titled, titled_dts):
             with self.subTest(movie=path.name):
                 self.assertIn(path.name, self.report_section("CHAIN-NATIVE"))

@@ -60,8 +60,7 @@ class DeviceFactTests(unittest.TestCase):
         self.assertGreaterEqual(len(pc.SOURCES), 5)
         for source in pc.SOURCES:
             with self.subTest(source=source[:60]):
-                self.assertTrue(source.startswith("http") or source.startswith("USER-CONFIRMED"),
-                                source)
+                self.assertTrue(source.startswith(("http", "USER-CONFIRMED")), source)
         # The PCM-only reading that drives the default wiring is recorded as
         # what it is — an observation on the actual unit, not a datasheet.
         self.assertTrue(any(s.startswith("USER-CONFIRMED") and "PCM" in s
