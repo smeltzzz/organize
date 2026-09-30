@@ -65,11 +65,23 @@ def run_self_tests() -> int:
 
     flac = _payload({"codec_name": "flac", "channels": 6})
     v = plan_for_payload("m.mkv", flac, base_cfg)
+    _assert(v.status == STATUS_PCM,
+            f"multichannel FLAC plays as multichannel PCM on the DEFAULT "
+            f"soundbar-hdmi-in wiring, got {v.status}", errors)
+    v = plan_for_payload("m.mkv", flac, Config(dry_run=True, wiring=WIRING_TV_ARC))
     _assert(v.status == STATUS_PLANNED,
-            f"multichannel FLAC is a transcode candidate on the as-shipped ARC "
-            f"wiring (ARC/optical carries stereo PCM only), got {v.status}", errors)
-    v = plan_for_payload("m.mkv", flac, Config(dry_run=True, wiring=WIRING_SOUNDBAR_HDMI_IN))
-    _assert(v.status == STATUS_PCM, f"multichannel FLAC plays via HDMI IN PCM, got {v.status}", errors)
+            f"the explicit tv-arc alternative makes multichannel FLAC a "
+            f"transcode candidate, got {v.status}", errors)
+
+    # A track title never decides the codec: an actual E-AC-3 stream titled
+    # like a lossless master stays chain-native (the false positive this
+    # suite's regression tests pin).
+    titled = _payload({"codec_name": "eac3", "profile": "unknown", "channels": 6,
+                       "tags": {"language": "eng", "title": "TrueHD 7.1"}})
+    v = plan_for_payload("m.mkv", titled, base_cfg)
+    _assert(v.status == STATUS_NATIVE,
+            f"an E-AC-3 stream titled 'TrueHD 7.1' must stay native, got {v.status}", errors)
+    _assert(v.target is None, "a chain-native E-AC-3 stream gets no AC-3 target", errors)
 
     dtshd = _payload({"codec_name": "dts", "profile": "DTS-HD MA", "channels": 8})
     v = plan_for_payload("m.mkv", dtshd, base_cfg)

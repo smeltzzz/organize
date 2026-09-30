@@ -4,14 +4,20 @@
 This toolkit serves exactly one playback chain (the researched facts live in
 ``organizekit/core/playbackchain.py``; the full write-up is docs/hardware.md):
 
-    Chromecast with Google TV (HD) G454V --HDMI--> Samsung UN60F6350AF
-    (the player; the ONLY audio source         (1080p SDR; relays audio to
-     this library is tuned for)                 the bar on its HDMI (ARC)
-                                               port -- the as-shipped
-                                               wiring, ASSUMED here by
-                                               default; --wiring /
-                                        ORGANIZE_PLAYBACK_WIRING tweaks it)
-                                                  --ARC--> Hisense AX3125H
+    Chromecast with Google TV (HD) G454V --HDMI--> Hisense AX3125H
+    (the player; the ONLY audio                   (decodes AC-3/DD+ Atmos/
+     source this library is tuned for)             DTS/multichannel PCM;
+                                                   audio never crosses the TV)
+                                                        --HDMI OUT--> Samsung
+                                                         UN60F6350AF (1080p SDR,
+                                                         video pass-through)
+
+That is ``soundbar-hdmi-in`` — the wiring this install actually runs, and the
+toolkit's DEFAULT. The alternative (``tv-arc``: Chromecast into the TV, TV
+--ARC/optical--> bar) stays supported via ``--wiring`` /
+``ORGANIZE_PLAYBACK_WIRING``, but on this 2013 TV it is the degraded one: the
+set offers PCM only for HDMI sources, so multichannel PCM arrives at the bar as
+stereo.
 
 The chain's hard rule about audio: the G454V can only ever EMIT Dolby Digital
 (AC-3), Dolby Digital Plus (E-AC-3, Atmos included), base 5.1 DTS
@@ -265,12 +271,28 @@ def _audio_streams(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [s for s in (payload.get("streams") or []) if s.get("codec_type") == "audio"]
 
 
+#: Placeholder for an absent ffprobe field in the classification blob. It
+#: keeps the blob's field POSITIONS stable — the classifier reads field 1 as
+#: the codec name and field 2 as the profile, so an empty slot would shift a
+#: track title into the profile's place and could make a title decide the
+#: codec (the E-AC-3-vs-"TrueHD 7.1" false positive).
+_BLOB_FIELD_ABSENT = "-"
+
+
 def _stream_blob(stream: dict[str, Any]) -> str:
-    """Upper-case classification blob for one ffprobe audio stream."""
+    """Upper-case classification blob for one ffprobe audio stream.
+
+    ``codec_name`` is authoritative, ``profile`` may refine it, and the title
+    is never allowed to decide — so every field is rendered, absent ones as
+    ``-``: ``"E-AC-3 - TrueHD 7.1"`` reads as E-AC-3, while an empty slot
+    would make it ``"E-AC-3  TrueHD 7.1"`` and hand the title the profile's
+    position.
+    """
     tags = stream.get("tags") if isinstance(stream.get("tags"), dict) else {}
-    return " ".join(str(x or "") for x in (
-        stream.get("codec_name"), stream.get("profile"), tags.get("title"),
-    )).upper()
+    fields = [stream.get("codec_name"), stream.get("profile"), tags.get("title")]
+    rendered = [str(field).strip() if str(field or "").strip() else _BLOB_FIELD_ABSENT
+                for field in fields]
+    return " ".join(rendered).upper()
 
 
 def _stream_language(stream: dict[str, Any]) -> str:
@@ -368,9 +390,12 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
     3. Otherwise the pool's best track decides: base DTS is accepted (the
        AX3125H has a DTS decoder and the G454V's firmware passes core DTS)
        unless ``--no-dts-passthrough`` distrusts the unofficial passthrough;
-       client-decodable tracks are fine over the soundbar's HDMI IN, but
-       multichannel ones become transcode candidates on a plain-ARC wiring
-       (ARC/optical carries stereo PCM only);
+       client-decodable tracks are fine — multichannel included, on the
+       default wiring, because the soundbar's HDMI IN accepts multichannel
+       PCM. Only under the explicit ``--wiring tv-arc`` alternative do the
+       multichannel ones become transcode candidates (this TV's digital
+       audio output offers PCM 2.0 for HDMI sources, so ARC/optical would
+       deliver them as stereo);
     4. lossless-HD / WMA-Pro tracks get an AC-3 synthesized from the pool's
        best track, preferring a lossless source over a lossy one;
     5. unknown codecs are reported, never touched (fail-closed).
@@ -839,9 +864,9 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
     for bucket in groups.values():
         bucket.sort(key=lambda r: Path(r.path).name.casefold())
 
-    topology = (f"{PLAYER.model_id} Chromecast -> TV -> {SINK.model} (ARC)"
+    topology = (f"{PLAYER.model_id} Chromecast -> TV -> {SINK.model} (ARC/optical)"
                 if cfg.wiring == WIRING_TV_ARC
-                else f"{PLAYER.model_id} Chromecast -> {SINK.model} (HDMI IN) -> TV")
+                else f"{PLAYER.model_id} Chromecast -> {SINK.model} (HDMI IN) -> TV (default)")
     report = Report(
         "AUDIO STANDARDIZER — CHAIN REPORT",
         f"Chain: {topology} · can the player emit this movie's audio natively?",
@@ -1037,13 +1062,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ffmpeg", default="ffmpeg", help="Path to ffmpeg")
     parser.add_argument("--wiring", choices=(WIRING_SOUNDBAR_HDMI_IN, WIRING_TV_ARC),
                         default=None,
-                        help=(f"How the chain is cabled. '{WIRING_TV_ARC}' (default, as "
-                              "shipped): Chromecast into the TV, audio returned to the "
-                              "soundbar over the TV's ARC/optical lead — multichannel PCM "
-                              "arrives stereo-only there, so 5.1+ decode-to-pcm movies are "
-                              f"transcoded too. '{WIRING_SOUNDBAR_HDMI_IN}' (upgrade "
-                              "wiring): Chromecast into the soundbar's HDMI IN instead. "
-                              f"Env: {WIRING_ENV_VAR}."))
+                        help=(f"How the chain is cabled. '{WIRING_SOUNDBAR_HDMI_IN}' "
+                              "(default, and how this chain is wired): Chromecast into the "
+                              "soundbar's HDMI IN, so multichannel PCM (5.1+ AAC/FLAC/PCM) "
+                              "decoded by the player plays as-is. "
+                              f"'{WIRING_TV_ARC}' (explicit alternative): Chromecast into "
+                              "the TV, audio returned to the soundbar over the TV's "
+                              "ARC/optical lead — this TV offers PCM only for HDMI "
+                              "sources, so multichannel PCM arrives stereo-only and 5.1+ "
+                              f"decode-to-pcm movies are transcoded too. Env: "
+                              f"{WIRING_ENV_VAR}."))
     parser.add_argument("--no-dts-passthrough", dest="dts_passthrough_ok",
                         action="store_false", default=True,
                         help="Treat base DTS as transcode-bound (some Android-TV builds "

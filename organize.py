@@ -437,9 +437,11 @@ def check_playback_chain(_ctx: DoctorContext) -> DiagnosticCheck:
     wiring = pc.resolve_wiring()
     lines = pc.chain_summary_lines(wiring)
     if wiring == pc.WIRING_TV_ARC:
-        topology = f"{pc.PLAYER.model_id} -> {pc.DISPLAY.model} --ARC--> {pc.SINK.model}"
+        topology = (f"{pc.PLAYER.model_id} -> {pc.DISPLAY.model} --ARC/optical--> "
+                    f"{pc.SINK.model} (alternative wiring)")
     else:
-        topology = f"{pc.PLAYER.model_id} -> {pc.SINK.model} (HDMI IN) -> {pc.DISPLAY.model}"
+        topology = (f"{pc.PLAYER.model_id} -> {pc.SINK.model} (HDMI IN) -> "
+                    f"{pc.DISPLAY.model} (default)")
     return DiagnosticCheck(
         name="Playback chain",
         status="ok",

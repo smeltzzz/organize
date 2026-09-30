@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.0.1] - 2026-09-29
+
+Two defects found on the reference chain within hours of the 8.0.0 tag: the
+toolkit did not actually ship the playback-chain default 8.0.0's notes
+described, and a track *title* could talk the classifier into transcoding an
+already-native stream. Nothing else changes — same tools, same stdlib-only
+runtime, same ingest and safety contracts. To move an existing install onto
+it: `python -m pip install --upgrade organizekit` (or `pipx upgrade
+organizekit`); from a checkout, `python -m pip install --upgrade
+--force-reinstall .`.
+
+### Fixed
+- **`soundbar-hdmi-in` is now the effective default — 8.0.0 documented it,
+  but its code still resolved `tv-arc`.** With no `--wiring` flag and no
+  `ORGANIZE_PLAYBACK_WIRING`, every tool now assumes the chain as actually
+  cabled: Chromecast → soundbar HDMI IN → TV. A 5.1+ AAC/FLAC/PCM movie is
+  therefore `pcm-decode-ok` and left alone, exactly as the 8.0.0 notes and
+  `docs/hardware.md` said. The ARC mode (`--wiring tv-arc` /
+  `ORGANIZE_PLAYBACK_WIRING=tv-arc`) still exists, is still tested, and
+  re-enables the AC-3 compensation for those movies on a TV whose digital
+  audio output offers PCM only for HDMI sources. Tests pin the
+  no-flag/no-env default, the environment override, and that the flag beats
+  the environment. `docs/hardware.md` records the input-dependent Digital
+  Audio Output behavior Samsung documents for this generation and the
+  PCM-only reading confirmed on this UN60F6350AF, with the manufacturer
+  sources.
+- **A track title can no longer schedule a chain-native stream for
+  transcode.** The classifier joined the first two whitespace tokens of its
+  description blob before testing the lossless-HD markers, so when the
+  `ffprobe` profile field was absent the track *title* landed next to the
+  codec name: an actual `eac3` stream titled "TrueHD 7.1" (or "DTS-HD MA
+  7.1") classified as `transcode-bound` and got an unnecessary AC-3 track
+  baked in. (The remux cleaner was never misled: its blob always carries
+  mkvmerge's codec id — `E-AC-3 A_EAC3 TrueHD 7.1` — so the id held the
+  second slot.) The codec NAME field is now read in isolation and decides
+  on its own; the second field may only refine a bare DTS codec name into an
+  HD/DTS:X master, and DTS-specific vocabulary is required for that. Titles
+  are consulted only when the codec fields say nothing at all. Blob builders
+  render an absent field as `-` rather than leaving a gap
+  (`"EAC3 - TRUEHD 7.1"`), so field positions cannot shift and a title
+  cannot be read as a profile. Regressions pin
+  `classify_audio_ffprobe("eac3", "unknown")` and the full scan →
+  classification → plan → report → transcode-selection path: two
+  byte-identical mistitled E-AC-3 films stay untouched with zero ffmpeg
+  runs (`native-ok` in the state cache) while the real TrueHD master in the
+  same run is transcoded exactly once.
+
 ## [8.0.0] - 2026-09-29
 
 **The toolkit is now engineered for one exact playback chain.** Every codec
@@ -32,13 +79,12 @@ the Jellyfin server to an audio transcode on every play.
   (re-probe: original streams identical + AC-3 appended + duration drift ≤
   3 s) and atomic (`os.replace` from a named sibling temp, stale temps
   swept). Seeding (hardlinked) movies are deferred, never replaced.
-  The wiring matters, and the toolkit assumes it: `tv-arc` is the default —
-  the as-shipped wiring, soundbar on the TV's HDMI (ARC) port — and rerates
-  multichannel PCM-decode movies as AC-3 transcode candidates, because
-  plain ARC/optical carries stereo PCM only. If the Chromecast is ever
-  moved through the bar's HDMI IN, `--wiring soundbar-hdmi-in` or
-  `ORGANIZE_PLAYBACK_WIRING` accepts those movies as-is. CLI on the front
-  door: `organize audio …`; direct: `python3 audio_standardizer.py`.
+  The wiring is a first-class setting — `--wiring soundbar-hdmi-in|tv-arc`
+  (or `ORGANIZE_PLAYBACK_WIRING`) — and **8.0.1 settles which one ships as
+  the default**: `soundbar-hdmi-in`, the chain as actually cabled, under
+  which multichannel AAC/FLAC/PCM movies play as-is. (This release's code
+  still resolved the ARC mode; see the 8.0.1 entry below.) CLI on the
+  front door: `organize audio …`; direct: `python3 audio_standardizer.py`.
 - **`organizekit/core/playbackchain.py`**: the one hardware-truth table —
   device facts, audio codec classes and tiers, video fit, wiring modes and
   human notes — imported by the tools instead of three private approximations.

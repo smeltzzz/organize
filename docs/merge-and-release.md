@@ -28,9 +28,11 @@
 > organizekit`). The major bump is the audio-policy flip plus the new
 > `audiofit` pipeline step: a TrueHD/DTS-HD/DTS:X movie now gets a
 > chain-native AC-3 track baked in instead of being committed to a server
-> transcode on every play, and on the as-shipped ARC wiring the same happens
-> to multichannel AAC/FLAC/PCM. Details are in the
-> [8.0.0 changelog entry](../CHANGELOG.md).
+> transcode on every play. The wiring default ships as `soundbar-hdmi-in`
+> (the chain as actually cabled: Chromecast → soundbar HDMI IN → TV), so
+> multichannel AAC/FLAC/PCM plays as-is; `tv-arc` remains a supported
+> alternative and re-enables the AC-3 compensation for those tracks.
+> Details are in the [8.0.0 changelog entry](../CHANGELOG.md).
 
 > **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
@@ -92,7 +94,7 @@ syntax gate, a file the merge deleted, and the `provisioned` job still did
 `pip install ffsubsync` then `import sync_subtitles`. The bot cannot fix a
 workflow file, so that was step 2's patch. **This is history: PR #40 applied
 the patch, and CI on `main` has been green since.** Everything else in that
-run was green on the same merge: the whole suite (1,191 tests) on Linux, macOS
+run was green on the same merge: the whole suite (1,202 tests) on Linux, macOS
 and Windows across Python 3.11–3.13, packaging, the single-file build, the lint
 job, the coverage floor and the doctor smoke test.
 

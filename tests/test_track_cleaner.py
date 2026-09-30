@@ -70,6 +70,27 @@ class AudioQualityTests(unittest.TestCase):
         dtshr = {"codec": "DTS-HD HRA", "properties": {"codec_id": "A_DTS-HD HRA", "audio_channels": 6}}
         self.assertGreater(tc.get_audio_quality_score(dtshd), tc.get_audio_quality_score(dtshr))
 
+    def test_a_titled_eac3_track_is_still_chain_native(self) -> None:
+        """The scorer reads codec fields, never the track title.
+
+        Release groups title an E-AC-3 track "TrueHD 7.1" (the source it was
+        made from); if that title decided the class, the cleaner would rank
+        the playable track below a lossless master the G454V cannot emit — or
+        below the AC-3 audiofit baked in — and could drop the best track.
+        """
+        eac3_titled = _audio(1, codec="E-AC-3", channels=6, name="TrueHD 7.1")
+        dtshd_titled = _audio(2, codec="E-AC-3", channels=6, name="DTS-HD MA 7.1")
+        truehd = _audio(3, codec="TrueHD", channels=8, name="Atmos")
+        for track in (eac3_titled, dtshd_titled):
+            with self.subTest(name=track["properties"]["track_name"]):
+                self.assertEqual(tc.playbackchain_classify(
+                    f'{track["codec"]} {track["properties"]["codec_id"]} '
+                    f'{track["properties"]["track_name"]}'), "native-passthrough")
+        self.assertGreater(tc.get_audio_quality_score(eac3_titled),
+                           tc.get_audio_quality_score(truehd))
+        self.assertGreater(tc.get_audio_quality_score(dtshd_titled),
+                           tc.get_audio_quality_score(truehd))
+
 
 class ProgressParsingTests(unittest.TestCase):
     def test_progress_forms(self) -> None:
