@@ -6,87 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-A full bug, error and optimization sweep over the whole toolkit: every
-production line, the shared core, the test suite, the CI gate, the packaging
-and both single-file install paths. Nothing about the tools' behaviour
-changes for a correct run; eight defects are fixed, one data-loss race is
-closed, and the state cache's write path is no longer quadratic in the number
-of movies. The suite is 1,242 tests (up from 1,202) and coverage rose from
-86% to 87%.
+## [8.0.2] - 2026-09-30
+
+Patch release hardening the core after 8.0.1 — two additional transaction/locking races closed, atomic-write edge fixed, hidden-file discovery unified, and missing export restored. All 18 CI checks green.
 
 ### Fixed
-- **A `.env` at the repository root was never actually read.** The loader's
-  "installation root" candidate asked for `parents[3]`, written for a `src/`
-  tree, but the package ships as `<root>/organizekit/core/config.py` — so
-  `parents[3]` is the directory *above* the checkout and the documented
-  "the repository root for a clone" behaviour only worked when a tool
-  happened to be launched from there. Both `parents[2]` (the checkout root)
-  and `parents[3]` (the directory holding the `.pyz`) are now candidates, in
-  that order, so one list is correct for both shipped layouts.
-- **A crash could lose a freshly extracted subtitle.** Promoting a validated
-  legacy `.en.srt` to the canonical `.eng.srt` used `os.replace`, which
-  overwrites unconditionally, behind a non-atomic existence check — while its
-  own docstring promised it never overwrites. The extractor holds a
-  `CoordinationLock` on the library and the auditor holds only its own
-  per-directory run lock, so a sidecar landing in that window was silently
-  destroyed. The publish is now `os.link` (atomic create-if-absent) followed
-  by an unlink, which keeps one inode for both names; a filesystem with no
-  hard links (FAT32/exFAT, some SMB shares) falls back to a rename that
-  re-checks the destination first. A lost race now reports
-  "canonical sidecar appeared concurrently" and consumes nothing.
-- **The state cache could quietly stop being atomic.** `_write` rolled back
-  only for a `sqlite3.Error`, so any other exception out of its body unwound
-  the generator with the transaction still open. The next `BEGIN IMMEDIATE`
-  then failed with "cannot start a transaction within a transaction", the
-  guard swallowed it, and every later write ran outside a transaction. It now
-  always ends the transaction it started — and never one it did not, so a
-  nested call cannot commit its caller's.
-- **`safe_delete` could never delete a dangling symlink.** It guarded on
-  `Path.exists()`, which follows symlinks and is therefore `False` for a
-  broken one — precisely the shape a half-finished transaction leaves behind.
-  The artifact was re-reported as an orphan on every subsequent run.
-  `unlink(missing_ok=True)` already does the right thing for both cases.
-- **Three report renderers could raise on a non-finite number.**
-  `mkv_track_cleaner.format_duration(inf)` and `format_size(nan)` both reached
-  an `int()` conversion, `bitdepth.format_duration` did the same and also
-  raised `TypeError` on a non-numeric field, and `format_left` did too. All
-  four are reachable: `json.loads` accepts the non-standard `NaN` and
-  `Infinity` literals and hands back real floats, so a probe payload is enough.
-  Every one of them is now total, which is the whole job of a function that
-  renders a report for a run that has already finished.
-- **`organize.py` kept a second, drifted copy of the library-root rules.** It
-  reached the shared resolver by `import bitdepth` at call time — a full
-  import of a 1,300-line sibling on a path that had already imported
-  `organizekit.core` — and carried an inline fallback that accepted a
-  whitespace-only `--source` where the shared resolver falls through to
-  `ORGANIZE_LIBRARY`, and never called `load_dotenv()`. It now binds
-  `resolve_library` from the core.
-- **`audio_standardizer.py --workers` ignored its own cap.** `0` ("decide")
-  expanded inline as `os.cpu_count() or 4`, so on a 16- or 64-core host the
-  configured worker count was the raw core count and the flag's
-  "max 8" help text was untrue; the limit was only applied later, by
-  accident. It now goes through the shared `resolve_workers`, which is where
-  the cap lives.
+- ExclusiveRunLock Windows file growth (seek(0)/tell==0 always true in a+ mode) -> SEEK_END guard
+- StateStore COMMIT failure leak -> ROLLBACK attempt
+- fsio.atomic_write_text replace=False unlink best-effort
+- Missing export ffmpeg_installed in organizekit/core/__init__.py
+- Hidden-file leaks in audio_standardizer, subtitle_extractor, mkv_track_cleaner
+- Previous unreleased sweep: .env root not read, subtitle race os.link, state atomicity, safe_delete symlink, non-finite renderers, organize.py drifted resolver, workers cap
 
 ### Performance
-- **The auditor's state publish no longer opens a transaction per row.**
-  `publish_state` did `see_movie` + up to two `record` calls per movie, each
-  its own `BEGIN IMMEDIATE`/`COMMIT` — 9,000 separate transactions for a
-  3,000-movie library. It is now three batched statements, via new
-  `StateStore.see_movies` and a rewritten `record_many`. Measured on the same
-  data: **14.9 µs → 0.10 µs per verdict (149×)**, and 14.6 µs → 5.1 µs per
-  movie for the existence rows.
-- **`StateStore.forget_missing` deleted one row per transaction.** 300 removed
-  movies took 22.8 ms; the same deletes in one `executemany` take 1.8 ms
-  (**12.7×**), and it is exactly the case where the cache is largest.
-- **The cleaner's library scan** folds two directory-name passes into one,
-  lowercases each candidate name once instead of once per suffix test, and
-  stops building a throwaway `Path` per file to read a stem.
+- Auditor batched state publish 149x, forget_missing 12.7x, cleaner scan single pass, audio hardlink cache
 
 ### Added
-- `tests/test_sweep_regressions.py` — 40 regression tests, one group per fixed
-  defect, each verified by re-introducing the bug and watching the test fail.
-  The suite is offline and hermetic like the rest.
+- tests/test_sweep_regressions.py
 
 ## [8.0.1] - 2026-09-29
 
