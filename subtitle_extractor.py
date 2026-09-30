@@ -401,6 +401,8 @@ def discover_videos(root: Path, min_bytes: int) -> LibraryScan:
         ]
         current = Path(dirpath)
         for name in filenames:
+            if name.startswith("."):
+                continue
             ext = Path(name).suffix.lower()
             if ext not in VIDEO_EXTENSIONS:
                 continue

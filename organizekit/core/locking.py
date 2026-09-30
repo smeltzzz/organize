@@ -191,10 +191,22 @@ class ExclusiveRunLock:
         assert self.handle is not None
         if os.name == "nt":
             # Materialize a leading byte once, exactly as the original did.
-            self.handle.seek(0)
-            if self.handle.tell() == 0:
-                self.handle.write("0")
-                self.handle.flush()
+            # In "a+" mode every write appends regardless of seek position, so
+            # the emptiness check must look at the file size (seek to end),
+            # not at tell() after seek(0) which is always 0. The old
+            # seek(0)/tell() version wrote a "0" on every retry, growing the
+            # lock file for the lifetime of a contended wait.
+            try:
+                self.handle.seek(0, os.SEEK_END)
+                is_empty = self.handle.tell() == 0
+            except OSError:
+                is_empty = False
+            if is_empty:
+                try:
+                    self.handle.write("0")
+                    self.handle.flush()
+                except OSError:
+                    pass
         return try_file_lock(self.handle, strict_non_contention=False)
 
     def __enter__(self) -> ExclusiveRunLock:

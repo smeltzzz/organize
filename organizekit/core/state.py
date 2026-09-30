@@ -269,7 +269,13 @@ class StateStore:
         try:
             self._db.execute(statement)
         except sqlite3.Error:
-            pass
+            # A failed COMMIT leaves the transaction open; without a ROLLBACK
+            # the next BEGIN IMMEDIATE would fail with "cannot start a
+            # transaction within a transaction" and silently degrade to
+            # autocommit. Try to roll back so the connection is clean.
+            if statement.upper() == "COMMIT":
+                with contextlib.suppress(sqlite3.Error, OSError):
+                    self._db.execute("ROLLBACK")
 
     # -- movies ------------------------------------------------------------
 

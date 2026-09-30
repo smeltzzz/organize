@@ -36,8 +36,26 @@ def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
         if replace:
             os.replace(str(stage), str(dest))
         else:
-            os.link(str(stage), str(dest))
-            stage.unlink()
+            try:
+                os.link(str(stage), str(dest))
+            except FileExistsError:
+                # Destination already exists: the create-if-absent contract
+                # says the existing file wins, so clean up the stage and
+                # propagate the error for the caller to handle.
+                try:
+                    stage.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise
+            # Link succeeded: dest is now published. The stage is a second
+            # name for the same inode; its removal is best-effort — a failure
+            # here must not turn a successful publish into an error, it just
+            # leaves a harmless duplicate that the next run's housekeeping
+            # or the OS will clean up.
+            try:
+                stage.unlink()
+            except OSError:
+                pass
     except OSError:
         try:
             stage.unlink(missing_ok=True)
