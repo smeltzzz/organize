@@ -1,38 +1,38 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **8.0.0 is prepared in [PR #44](https://github.com/smeltzzz/organize/pull/44),
-> not yet published.** The PyPI record
-> still stops at 6.0.0 — 7.0.0's PR (#43) merged but its tag was never cut,
-> so the release workflow never ran for it. That is fine: the v8.0.0 tag
-> builds and publishes the current tree, and 7.0.0's release notes stay
-> readable in the [changelog](../CHANGELOG.md) and on merged PR #43.
+> **8.0.1 is prepared in [PR #45](https://github.com/smeltzzz/organize/pull/45),
+> on top of the published 8.0.0.** v8.0.0 was tagged on 2026-09-29 and the
+> tag ran `release.yml` to completion: the wheel, sdist and zipapp were
+> built, PyPI published
+> [organizekit 8.0.0](https://pypi.org/project/organizekit/8.0.0/), and the
+> artifacts were attached to the
+> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.0.0).
+> (7.0.0's PR (#43) merged but its tag was never cut, so its release notes
+> live in the [changelog](../CHANGELOG.md) and on merged PR #43.)
 >
-> The workflow changes this branch once needed held back as patch files are
-> **applied on the branch itself** — the token gained the `workflows` scope,
-> so `.github/workflows/ci.yml` (header comment + the `audio_standardizer.py`
-> byte-compile gate) rides inside PR #44 like any other file. What remains is
-> the merge and the tag. Confirm the version, then tag the merged commit from
-> an up-to-date `main`:
+> 8.0.1 is the patch release for two defects found on the reference chain
+> hours after that tag: the code still resolved `tv-arc` as the default
+> wiring while the notes and docs described `soundbar-hdmi-in`, and the audio
+> classifier let a track *title* schedule an already-native E-AC-3 stream for
+> transcode. The workflow changes earlier branches held back as patch files
+> are applied on their branches — the token has the `workflows` scope — so
+> PR #45 carries only code, docs and tests. What remains is the merge and the
+> tag. Confirm the version, then tag the merged commit from an up-to-date
+> `main`:
 >
 > ```bash
 > git checkout main && git pull origin main
-> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 8.0.0
-> git tag -a v8.0.0 -m "8.0.0" && git push origin v8.0.0
+> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 8.0.1
+> git tag -a v8.0.1 -m "8.0.1" && git push origin v8.0.1
 > ```
 >
 > The pushed tag triggers `release.yml`, which checks that the tag matches
 > `organizekit.VERSION`, runs the suite, builds the wheel/sdist/zipapp,
 > publishes to PyPI and attaches the zipapp to the GitHub release. **Wait for
-> the release workflow to succeed** before updating a pip install with
+> the release workflow to succeed** before moving an existing install onto it:
 > `python3 -m pip install --upgrade organizekit` (or `pipx upgrade
-> organizekit`). The major bump is the audio-policy flip plus the new
-> `audiofit` pipeline step: a TrueHD/DTS-HD/DTS:X movie now gets a
-> chain-native AC-3 track baked in instead of being committed to a server
-> transcode on every play. The wiring default ships as `soundbar-hdmi-in`
-> (the chain as actually cabled: Chromecast → soundbar HDMI IN → TV), so
-> multichannel AAC/FLAC/PCM plays as-is; `tv-arc` remains a supported
-> alternative and re-enables the AC-3 compensation for those tracks.
-> Details are in the [8.0.0 changelog entry](../CHANGELOG.md).
+> organizekit`); from a checkout, `python3 -m pip install --upgrade .`.
+> Details are in the [8.0.1 changelog entry](../CHANGELOG.md).
 
 > **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
