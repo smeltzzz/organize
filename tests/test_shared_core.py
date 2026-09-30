@@ -149,7 +149,11 @@ class ExclusiveRunLockKeepsTheSaferWindowsGuard(unittest.TestCase):
         source = ast.unparse(
             ast.parse((REPO / "organizekit" / "core" / "locking.py").read_text(encoding="utf-8"))
         )
-        self.assertIn("if self.handle.tell() == 0:", source,
+        # The guarded implementation must check emptiness via SEEK_END before
+        # writing, not via seek(0)/tell() which is always 0 and grows the file.
+        self.assertIn("SEEK_END", source,
+                      "the Windows lock byte must only be written when the file is empty")
+        self.assertIn("tell() == 0", source,
                       "the Windows lock byte must only be written when the file is empty")
 
 

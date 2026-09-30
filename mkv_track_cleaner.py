@@ -1935,7 +1935,8 @@ def canonical_movie_layout_issue(mkv_path: Path, target_root: Path) -> str | Non
         siblings = [
             path for path in parent.iterdir()
             if path.suffix.lower() in {".mkv", ".mp4"} and path.is_file() and not path.is_symlink()
-            and not path.name.startswith(TEMP_PREFIX) and not SAMPLE_NAME_RE.search(path.stem)
+            and not path.name.startswith(".") and not path.name.startswith(TEMP_PREFIX)
+            and not SAMPLE_NAME_RE.search(path.stem)
         ]
     except OSError as exc:
         return f"noncanonical layout: could not inspect movie folder ({exc})"
@@ -1986,7 +1987,7 @@ def discover_mkv_files(
                 pass  # accepted; converted to MKV in place by this run
             else:
                 continue
-            if f.startswith(TEMP_PREFIX):
+            if f.startswith((".", TEMP_PREFIX)):
                 continue
             if SAMPLE_NAME_RE.search(os.path.splitext(f)[0]):
                 continue

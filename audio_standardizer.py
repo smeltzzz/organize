@@ -636,6 +636,8 @@ def is_skipped_dir(name: str) -> bool:
 
 def is_junk_name(name: str) -> bool:
     lowered = name.lower()
+    if lowered.startswith("."):
+        return True
     stem = Path(lowered).stem
     return (stem == "sample" or lowered.startswith(("sample-", "-sample"))
             or lowered.endswith(".sample.mkv"))
@@ -645,8 +647,11 @@ def discover_videos(root: Path, cfg: Config) -> list[Path]:
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames
-                       if not is_skipped_dir(d) and not d.startswith(".aria_tmp")]
+                       if not is_skipped_dir(d) and not d.startswith(".")
+                       and not d.startswith(".aria_tmp")]
         for name in filenames:
+            if name.startswith("."):
+                continue
             p = Path(dirpath) / name
             if p.suffix.lower() not in VIDEO_EXTENSIONS or is_junk_name(name):
                 continue
@@ -722,14 +727,15 @@ def evaluate_file(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -
                              category=CATEGORY_LABELS[STATUS_ERROR], info=str(exc),
                              size_bytes=size, error=str(exc)), None)
     verdict = plan_for_payload(str(file_path), payload, cfg, size_bytes=size)
-    if verdict.status in (STATUS_PLANNED, STATUS_TRANSCODED) and hardlink_count(file_path) > 1:
+    if verdict.status in (STATUS_PLANNED, STATUS_TRANSCODED):
         links = hardlink_count(file_path)
-        verdict.status = STATUS_DEFERRED
-        verdict.category = CATEGORY_LABELS[STATUS_DEFERRED]
-        verdict.info = (f"{links} hardlinks — still hardlinked to a seeding source, so the "
-                        "replace step is deferred until seeding stops (plan kept: "
-                        f"{verdict.source_codec} -> AC-3 {verdict.target.channel_name if verdict.target else ''})")
-        return verdict, None
+        if links > 1:
+            verdict.status = STATUS_DEFERRED
+            verdict.category = CATEGORY_LABELS[STATUS_DEFERRED]
+            verdict.info = (f"{links} hardlinks — still hardlinked to a seeding source, so the "
+                            "replace step is deferred until seeding stops (plan kept: "
+                            f"{verdict.source_codec} -> AC-3 {verdict.target.channel_name if verdict.target else ''})")
+            return verdict, None
     return verdict, payload
 
 
