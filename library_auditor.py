@@ -330,17 +330,24 @@ def publish_state(audit: Audit, cfg: Config) -> int:
         return 0
     published = 0
     try:
-        seen: list[str] = []
+        # Three writes per movie - the movie row and up to two verdicts - each
+        # in its own transaction, so a 3,000-movie audit meant 9,000 of them.
+        # Collected first and written in three batched statements instead, which
+        # is the same data arriving at the same place far more cheaply.
+        movies: list[tuple[Path, Path]] = []
+        verdicts: list[tuple[Path, str, str, str]] = []
         for item in audit.folders:
             if len(item.movie_files) != 1:
                 continue  # no single movie file: nothing to key a verdict on
             movie = item.folder / item.movie_files[0].name
-            seen.append(store.see_movie(movie, folder=item.folder))
-            store.record(movie, KIND_LAYOUT, item.state, item.detail)
+            movies.append((movie, item.folder))
+            verdicts.append((movie, KIND_LAYOUT, item.state, item.detail))
             subtitle_state = SUBTITLE_STATE_FOR_AUDIT.get(item.state)
             if subtitle_state is not None:
-                store.record(movie, KIND_SUBTITLE, subtitle_state, item.detail)
+                verdicts.append((movie, KIND_SUBTITLE, subtitle_state, item.detail))
             published += 1
+        seen = store.see_movies(movies)
+        store.record_many(verdicts)
         store.forget_missing(seen)
         store.note("audit", f"{published} movie(s) audited")
         store.prune_events()

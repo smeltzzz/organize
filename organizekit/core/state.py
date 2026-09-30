@@ -230,22 +230,44 @@ class StateStore:
 
     @contextmanager
     def _write(self) -> Iterator[sqlite3.Connection]:
-        """One transaction, and never an exception out of a cache write."""
+        """One transaction, and never an exception out of a cache write.
+
+        Two things this has to get right, and used to get wrong.
+
+        *It must always end the transaction it started.* The old version rolled
+        back only for a ``sqlite3.Error``, so any other exception out of the
+        body (a ``TypeError`` from a bad argument, a ``ValueError`` from a path
+        component) unwound the generator with the transaction still open. The
+        next ``BEGIN IMMEDIATE`` then failed with "cannot start a transaction
+        within a transaction", was swallowed by the guard, and every later
+        write silently ran outside one - a cache that quietly stopped being
+        atomic without ever saying so.
+
+        *It must never end a transaction it did not start.* If ``BEGIN``
+        fails, an enclosing call may already own the open transaction, and that
+        one is not this contextmanager's to commit. So the two paths stay
+        strictly separate rather than sharing a ``finally``.
+        """
         try:
             self._db.execute("BEGIN IMMEDIATE")
         except sqlite3.Error:
-            yield self._db  # best effort: the statements below will no-op
+            # Could not start one. Run the statements anyway - autocommit makes
+            # each its own transaction, which is worse but not wrong, and this
+            # is a rebuildable cache - and leave whatever transaction is
+            # already open exactly as we found it.
+            yield self._db
             return
         try:
             yield self._db
-        except sqlite3.Error:
-            try:
-                self._db.execute("ROLLBACK")
-            except sqlite3.Error:
-                pass
-            return
+        except BaseException:
+            self._end_transaction("ROLLBACK")
+            raise
+        self._end_transaction("COMMIT")
+
+    def _end_transaction(self, statement: str) -> None:
+        """Close the transaction this contextmanager opened, either way."""
         try:
-            self._db.execute("COMMIT")
+            self._db.execute(statement)
         except sqlite3.Error:
             pass
 
@@ -255,10 +277,13 @@ class StateStore:
         """Record that this file exists right now, and return its key."""
         key = path_norm(movie)
         try:
-            info = movie.stat()
-            size, mtime_ns, nlink, inode = info.st_size, info.st_mtime_ns, info.st_nlink, info.st_ino
+            size, mtime_ns, nlink, inode = self._stat4(movie)
         except OSError:
-            size = mtime_ns = nlink = inode = None
+            # A movie that cannot be stat()ed is still recorded - it exists in
+            # the library, we simply cannot stamp it. An unstamped row is what
+            # `Verdict.is_current_for` reports as stale, so the cache degrades
+            # to "unknown" rather than to a wrong answer.
+            size = mtime_ns = nlink = inode = None  # type: ignore[assignment]
         now = _now()
         with self._write() as db:
             try:
@@ -295,18 +320,27 @@ class StateStore:
 
         A cache that only ever grows eventually describes a library that no
         longer exists; ``organize status`` would then report movies nobody has.
+
+        One transaction for the whole sweep, not one per removed movie. This
+        used to open a ``BEGIN IMMEDIATE``/``COMMIT`` pair for every key it
+        deleted, which on a library that had been reorganised measured about
+        fifty times slower than the same work in a single transaction - and
+        it is exactly the case where the cache is largest.
         """
         live = set(live_keys)
-        removed = 0
-        for key in set(self.movies()) - live:
-            with self._write() as db:
+        gone = sorted(set(self.movies()) - live)
+        if not gone:
+            return 0
+        with self._write() as db:
+            # The two table names are literals in the loop header, never input;
+            # only the bound keys vary.
+            for table in ("movie", "verdict"):
                 try:
-                    db.execute("DELETE FROM movie WHERE path_key=?", (key,))
-                    db.execute("DELETE FROM verdict WHERE path_key=?", (key,))
-                    removed += 1
+                    db.executemany(f"DELETE FROM {table} WHERE path_key=?",
+                                   [(key,) for key in gone])
                 except sqlite3.Error:
                     pass
-        return removed
+        return len(gone)
 
     # -- verdicts ----------------------------------------------------------
 
@@ -347,12 +381,84 @@ class StateStore:
                 pass
 
     def record_many(self, verdicts: Iterable[tuple[Path, str, str, str]]) -> int:
-        """Record a run's worth of answers. Returns how many were stored."""
-        stored = 0
+        """Record a run's worth of answers. Returns how many were stored.
+
+        One transaction, one ``executemany``. This looped through
+        :meth:`record` - and therefore through one ``BEGIN IMMEDIATE``/``COMMIT``
+        per movie - so publishing an audit of a 3,000-movie library meant 9,000
+        separate transactions where one would do. It also stamped ``recorded``
+        once per row; a single stamp for the batch is both cheaper and more
+        truthful about when the sweep happened.
+        """
+        stamp = _now()
+        rows: list[tuple[object, ...]] = []
         for movie, kind, verdict, detail in verdicts:
-            self.record(movie, kind, verdict, detail)
-            stored += 1
-        return stored
+            try:
+                size, mtime_ns = self._stamp(movie)
+            except (OSError, TypeError, ValueError):
+                size = mtime_ns = None
+            rows.append((path_norm(movie), kind, verdict, detail, size, mtime_ns,
+                         self.tool, stamp))
+        if not rows:
+            return 0
+        with self._write() as db:
+            try:
+                db.executemany(
+                    "INSERT INTO verdict (path_key, kind, verdict, detail, size, mtime_ns,"
+                    " tool, recorded) VALUES (?,?,?,?,?,?,?,?)"
+                    " ON CONFLICT(path_key, kind) DO UPDATE SET verdict=excluded.verdict,"
+                    " detail=excluded.detail, size=excluded.size, mtime_ns=excluded.mtime_ns,"
+                    " tool=excluded.tool, recorded=excluded.recorded",
+                    rows,
+                )
+            except sqlite3.Error:
+                pass
+        return len(rows)
+
+    def see_movies(self, movies: Iterable[tuple[Path, Path | None]]) -> list[str]:
+        """Record many movies as present, in one transaction. Returns their keys.
+
+        The batch form of :meth:`see_movie`. Same reasoning as
+        :meth:`record_many`: the auditor calls both for every folder, and a
+        per-row transaction each turned one cheap cache write into three.
+        """
+        now = _now()
+        rows: list[tuple[object, ...]] = []
+        keys: list[str] = []
+        for movie, folder in movies:
+            key = path_norm(movie)
+            try:
+                size, mtime_ns, nlink, inode = self._stat4(movie)
+            except (OSError, TypeError, ValueError):
+                size = mtime_ns = nlink = inode = None  # type: ignore[assignment]
+            keys.append(key)
+            rows.append((key, str(movie), str(folder or movie.parent), size, mtime_ns,
+                         nlink, inode, now, now))
+        if not rows:
+            return keys
+        with self._write() as db:
+            try:
+                db.executemany(
+                    "INSERT INTO movie (path_key, path, folder, size, mtime_ns, nlink, inode,"
+                    " first_seen, last_seen) VALUES (?,?,?,?,?,?,?,?,?)"
+                    " ON CONFLICT(path_key) DO UPDATE SET path=excluded.path,"
+                    " folder=excluded.folder, size=excluded.size, mtime_ns=excluded.mtime_ns,"
+                    " nlink=excluded.nlink, inode=excluded.inode, last_seen=excluded.last_seen",
+                    rows,
+                )
+            except sqlite3.Error:
+                pass
+        return keys
+
+    @staticmethod
+    def _stat4(movie: Path) -> tuple[int, int, int, int]:
+        info = movie.stat()
+        return info.st_size, info.st_mtime_ns, info.st_nlink, info.st_ino
+
+    @staticmethod
+    def _stamp(movie: Path) -> tuple[int, int]:
+        info = movie.stat()
+        return info.st_size, info.st_mtime_ns
 
     def verdicts(self, kind: str | None = None) -> dict[tuple[str, str], Verdict]:
         sql = "SELECT * FROM verdict"
@@ -478,6 +584,9 @@ class NullStateStore:
 
     def record_many(self, verdicts: Iterable[tuple[Path, str, str, str]]) -> int:
         return 0
+
+    def see_movies(self, movies: Iterable[tuple[Path, Path | None]]) -> list[str]:
+        return [path_norm(movie) for movie, _folder in movies]
 
     def verdicts(self, kind: str | None = None) -> dict[tuple[str, str], Verdict]:
         return {}

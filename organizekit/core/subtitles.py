@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import stat
 from pathlib import Path
 
 EXTERNAL_SRT_MAX_BYTES = 4 * 1024 * 1024
+
+#: Errno values meaning "this filesystem has no hard links", which is the
+#: signal to fall back to a rename when publishing a promoted sidecar.
+_NO_HARDLINK_ERRNOS = frozenset({
+    errno.EPERM, errno.EACCES, errno.EXDEV,
+    getattr(errno, "ENOTSUP", errno.EPERM),
+    getattr(errno, "EOPNOTSUPP", errno.EPERM),
+    getattr(errno, "ENOSYS", errno.EPERM),
+})
 
 
 EXTERNAL_SRT_CUE_RE = re.compile(
@@ -113,6 +123,17 @@ def promote_legacy_external_english_srt(media_path: Path) -> tuple[Path | None, 
     exist, legacy is invalid, or the destination is occupied by a non-file).
 
     Never overwrites an existing ``.eng.srt``.  Never follows symlinks.
+
+    That promise is kept by publishing with ``os.link``, which is an atomic
+    create-if-absent, rather than with ``os.replace``, which overwrites
+    unconditionally. The two are not protected by the same lock - the extractor
+    holds a :class:`~organizekit.core.locking.CoordinationLock` on the library
+    while the auditor holds only its own per-directory run lock - so a
+    freshly-extracted sidecar really can land between the existence check above
+    and the publish. With ``os.replace`` that file was silently destroyed.
+    Linking then unlinking also keeps one inode for both names, so a failure
+    between the two steps leaves a harmless duplicate rather than a half-renamed
+    sidecar.
     """
     canonical = exact_external_english_srt_path(media_path)
     legacy = legacy_external_english_srt_path(media_path)
@@ -132,7 +153,29 @@ def promote_legacy_external_english_srt(media_path: Path) -> tuple[Path | None, 
     if not ok:
         return None, f"legacy .en.srt is unusable ({reason})"
     try:
-        os.replace(str(legacy), str(canonical))
-    except OSError as exc:
-        return None, f"could not rename legacy .en.srt to .eng.srt: {exc}"
+        os.link(str(legacy), str(canonical))
+    except FileExistsError:
+        # Somebody published the canonical name between the check and here.
+        return None, f"canonical sidecar appeared concurrently: {canonical.name}"
+    except (OSError, NotImplementedError, AttributeError) as exc:
+        if not isinstance(exc, OSError) or exc.errno not in _NO_HARDLINK_ERRNOS:
+            return None, f"could not promote legacy .en.srt: {exc}"
+        # FAT32/exFAT and some SMB shares cannot hard link at all. Fall back to
+        # a plain rename - still atomic, but it can overwrite - after
+        # re-checking the destination, so the guarantee is as good as the
+        # filesystem allows rather than silently absent.
+        try:
+            if canonical.exists() or canonical.is_symlink():
+                return None, f"canonical sidecar path is occupied: {canonical.name}"
+            os.replace(str(legacy), str(canonical))
+        except OSError as inner:
+            return None, f"could not rename legacy .en.srt to .eng.srt: {inner}"
+        return canonical, ""
+    try:
+        legacy.unlink()
+    except OSError:
+        # Both names now point at one validated file. A stray ``.en.srt`` is
+        # harmless - the next call short-circuits on the canonical path - and
+        # reporting it as a promotion failure would be worse than leaving it.
+        pass
     return canonical, ""

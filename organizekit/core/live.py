@@ -25,6 +25,7 @@ Two rules make it safe to adopt everywhere:
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import shutil
@@ -71,8 +72,19 @@ def format_left(seconds: float) -> str:
 
     Deliberately not one of the three duration formats the reports use: this
     string is never written to a report or a log, so it is free to be short.
+
+    Total like every other renderer in the toolkit: the estimate is derived
+    from a division of two clocks, and a non-finite one used to raise
+    ValueError/OverflowError out of ``int(round(...))`` - taking down a sweep
+    that was only drawing a progress line.
     """
-    total = max(0, int(round(seconds)))
+    try:
+        value = float(seconds)
+    except (TypeError, ValueError):
+        value = 0.0
+    if not math.isfinite(value):
+        value = 0.0
+    total = max(0, int(round(value)))
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
     if hours:

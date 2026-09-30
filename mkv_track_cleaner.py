@@ -65,6 +65,7 @@ import argparse
 import atexit
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -269,7 +270,15 @@ def get_mkvmerge_version(mkvmerge_bin: str) -> str:
         return "unknown version"
 
 def format_size(bytes_val: int) -> str:
-    if not isinstance(bytes_val, (int, float)) or bytes_val <= 0:
+    # `math.isfinite` and not `bytes_val <= 0`: NaN compares False against
+    # everything, so a NaN size used to fall through the guard and die on
+    # `int(nan)` - and an infinite one printed the literal text "inf TB". A
+    # report line is the last place a sweep should be able to fail, and both
+    # values can reach here from a probe payload (`json.loads` accepts the
+    # non-standard `NaN` / `Infinity` literals and hands back real floats).
+    if not isinstance(bytes_val, (int, float)) or not math.isfinite(bytes_val):
+        return "0 Bytes"
+    if bytes_val <= 0:
         return "0 Bytes"
     n = float(bytes_val)
     for unit, div in (("TB", 1024 ** 4), ("GB", 1024 ** 3), ("MB", 1024 ** 2), ("KB", 1024)):
@@ -282,7 +291,12 @@ def format_duration(seconds: float) -> str:
         seconds_f = float(seconds)
     except (TypeError, ValueError):
         return "0s"
-    if seconds_f < 0 or seconds_f != seconds_f:
+    # `x != x` only catches NaN. Positive infinity passes it - and then dies on
+    # `int(inf)` with an OverflowError, i.e. halfway through rendering a
+    # report, after the remux it describes has already happened. One
+    # `isfinite` rejects both non-finite values, and a negative one is still
+    # meaningless as an elapsed time.
+    if not math.isfinite(seconds_f) or seconds_f < 0:
         return "0s"
     total = int(seconds_f)
     h, rem = divmod(total, 3600)
@@ -1179,10 +1193,16 @@ def safe_replace(src_path: Path, dst_path: Path, max_retries: int = 10, initial_
     return False
 
 def safe_delete(file_path: Path, max_retries: int = 6, delay: float = 0.5):
+    # `Path.exists()` follows symlinks, so it is False for a *dangling* one -
+    # which is precisely the shape a half-finished transaction can leave behind
+    # (the target was removed first). The `exists()` guard therefore turned
+    # "delete it if it is there" into "never delete a broken symlink", and the
+    # artifact was re-reported as an orphan on every subsequent run.
+    # `unlink(missing_ok=True)` already does the right thing for both cases: it
+    # removes whatever is at the path, and does nothing when nothing is.
     for _ in range(max_retries):
         try:
-            if file_path.exists():
-                file_path.unlink(missing_ok=True)
+            file_path.unlink(missing_ok=True)
             return
         except OSError:
             time.sleep(delay)
@@ -1941,21 +1961,34 @@ def discover_mkv_files(
     for root, dirnames, names in os.walk(target_path, **walk_kwargs):
         if _interrupt_requested:
             break
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        # One pass over the subdirectories rather than two: the second
+        # comprehension used to re-filter a list the first one had just
+        # rebuilt, and on a library with thousands of folders that is a second
+        # full traversal of every directory name for no extra information.
         if skip_extras:
-            dirnames[:] = [d for d in dirnames if d.strip().lower() not in EXTRA_DIR_NAMES]
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and d.strip().lower() not in EXTRA_DIR_NAMES
+            ]
+        else:
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for f in names:
             if _interrupt_requested:
                 break
-            if f.lower().endswith(".mkv"):
+            lowered = f.lower()
+            # `.lower()` once per file rather than once per suffix test, and
+            # `os.path.splitext` rather than `Path(f).stem` for the sample
+            # check: building a throwaway Path per candidate was the single
+            # largest cost in this loop, and pathlib parses a path eagerly.
+            if lowered.endswith(".mkv"):
                 pass  # the canonical container
-            elif f.lower().endswith(".mp4"):
+            elif lowered.endswith(".mp4"):
                 pass  # accepted; converted to MKV in place by this run
             else:
                 continue
             if f.startswith(TEMP_PREFIX):
                 continue
-            if SAMPLE_NAME_RE.search(Path(f).stem):
+            if SAMPLE_NAME_RE.search(os.path.splitext(f)[0]):
                 continue
             pth = Path(root) / f
             if skip_extras and _in_extra_dir(pth, target_path):
