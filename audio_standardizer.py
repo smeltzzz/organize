@@ -19,12 +19,16 @@ toolkit's DEFAULT. The alternative (``tv-arc``: Chromecast into the TV, TV
 set offers PCM only for HDMI sources, so multichannel PCM arrives at the bar as
 stereo.
 
-The chain's hard rule about audio: the G454V can only ever EMIT Dolby Digital
-(AC-3), Dolby Digital Plus (E-AC-3, Atmos included), base 5.1 DTS
-(chipset-level, unofficial), or decoded PCM. TrueHD, DTS-HD MA/HRA, DTS:X and
-WMA Pro cannot leave the box — so a movie whose only good track is lossless-HD
-gets its audio re-encoded by the Jellyfin server on EVERY single play. That is
-the one audio problem worth fixing offline, once, forever.
+The chain's hard rule about audio: Google's passthrough list for the G454V is
+Dolby Digital (AC-3) and Dolby Digital Plus (E-AC-3, Atmos included); anything
+else it plays is decoded to PCM. TrueHD, DTS-HD MA/HRA, DTS:X and WMA Pro
+cannot leave the box — so a movie whose only good track is lossless-HD gets its
+audio re-encoded by the Jellyfin server on EVERY single play. That is the one
+audio problem worth fixing offline, once, forever. Base 5.1 DTS is the grey
+zone: Google does not list it (its staff say the device "only supports" the
+Dolby formats) and field reports conflict, so it is accepted by default but
+UNVERIFIED on this unit — see ``--no-dts-passthrough`` / ORGANIZE_DTS_PASSTHROUGH
+and docs/hardware.md §1 for the one-minute test that settles it.
 
 What this tool does, per movie:
 
@@ -32,7 +36,7 @@ What this tool does, per movie:
   2. Classify the audio with the chain table:
 
        native-passthrough   AC-3 / E-AC-3            -> done, bitstreams as-is
-       dts-core             base 5.1 DTS             -> done (see --no-dts-passthrough)
+       dts-core             base 5.1 DTS             -> accepted, UNVERIFIED (--no-dts-passthrough)
        decode-to-pcm        AAC/FLAC/MP3/Opus/PCM... -> done (see --wiring note)
        transcode-bound      TrueHD/DTS-HD/DTS:X/WMA  -> FIX, offline, now
 
@@ -86,6 +90,7 @@ from organizekit.core import (
     AUDIO_UNKNOWN,
     CLASS_TIERS,
     DEFAULT_WIRING,
+    DTS_ENV_VAR,
     KIND_AUDIOFIT,
     PLAYER,
     SINK,
@@ -107,6 +112,7 @@ from organizekit.core import (
     open_state,
     path_is_within,
     probe_cache_path,
+    resolve_dts_passthrough,
     resolve_library,
     resolve_wiring,
     resolve_workers,
@@ -159,7 +165,7 @@ SETTLED_AUDIOFIT = frozenset({STATUS_NATIVE, STATUS_DTS, STATUS_PCM, STATUS_TRAN
 
 CATEGORY_LABELS = {
     STATUS_NATIVE: "1. CHAIN-NATIVE  —  AC-3 / E-AC-3 already present",
-    STATUS_DTS: "2. DTS CORE  —  OK (bar decodes; chipset passthrough)",
+    STATUS_DTS: "2. DTS CORE  —  ACCEPTED (bar decodes; player passthrough UNVERIFIED)",
     STATUS_PCM: "3. DECODE-TO-PCM  —  OK (Chromecast decodes to PCM)",
     STATUS_TRANSCODED: "4. TRANSCODED  —  AC-3 baked in from a lossless track",
     STATUS_PLANNED: "4. WOULD TRANSCODE  —  dry-run plan only",
@@ -388,8 +394,9 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
        bitstreams end-to-end — done. (Under the chain's tiers the cleaner
        always keeps that track over anything lossless.)
     3. Otherwise the pool's best track decides: base DTS is accepted (the
-       AX3125H has a DTS decoder and the G454V's firmware passes core DTS)
-       unless ``--no-dts-passthrough`` distrusts the unofficial passthrough;
+       AX3125H has a DTS decoder; whether the G454V passes core DTS is NOT
+       something Google documents and field reports conflict) unless
+       ``--no-dts-passthrough`` / ``ORGANIZE_DTS_PASSTHROUGH=0`` distrusts it;
        client-decodable tracks are fine — multichannel included, on the
        default wiring, because the soundbar's HDMI IN accepts multichannel
        PCM. Only under the explicit ``--wiring tv-arc`` alternative do the
@@ -747,7 +754,9 @@ def scan(cfg: Config) -> int:
     log(f"Wiring                 : {cfg.wiring}"
         + (" (recommended)" if cfg.wiring == WIRING_SOUNDBAR_HDMI_IN
            else " (degraded: plain ARC/optical — see docs/hardware.md)"))
-    log(f"DTS core accepted      : {'yes' if cfg.dts_passthrough_ok else 'no (transcode too)'}")
+    log("DTS core accepted      : "
+        + ("yes (unverified on this player - see docs/hardware.md §1)"
+           if cfg.dts_passthrough_ok else "no (transcoded to AC-3 like DTS-HD)"))
     log(f"Dry run                : {cfg.dry_run}")
     log(f"ffprobe                : {cfg.ffprobe}")
     log(f"ffmpeg                 : {cfg.ffmpeg}")
@@ -901,10 +910,11 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         (len(results), "Movies inspected", "every MKV in the library"),
     ])
     report.paragraph(
-        "The chain's hard rule: the Chromecast with Google TV (HD) G454V can emit "
-        "Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3, Atmos included), base "
-        "5.1 DTS (unofficial) and decoded PCM — never TrueHD, DTS-HD, DTS:X or "
-        "WMA Pro. A movie whose best track is lossless-HD is audio-transcoded by "
+        "The chain's hard rule: the Chromecast with Google TV (HD) G454V passes "
+        "Dolby Digital (AC-3) and Dolby Digital Plus (E-AC-3, Atmos included) "
+        "through and decodes the rest to PCM — never TrueHD, DTS-HD, DTS:X or "
+        "WMA Pro; base 5.1 DTS is not on Google's list and is accepted here "
+        "but unverified. A movie whose best track is lossless-HD is audio-transcoded by "
         "the Jellyfin server on every play, which is why one AC-3 5.1 @ 640 kbps "
         "track is synthesized here, once, from the best lossless source (video "
         "copied untouched, subtitles untouched). mkv_track_cleaner.py runs next "
@@ -923,8 +933,11 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         STATUS_DEFERRED: "Action: nothing — rerun once seeding stops and these transcode normally.",
         STATUS_ERROR: "Action: read the error lines; no listed file was modified.",
         STATUS_NATIVE: "Action: none. Dolby Digital / Digital Plus already bitstreams end-to-end.",
-        STATUS_DTS: "Action: none on this chain. Distrust the unofficial DTS passthrough? "
-                    "Rerun with --no-dts-passthrough to transcode these to AC-3 too.",
+        STATUS_DTS: "Action: none by default - but Google does not list DTS passthrough for "
+                    "this Chromecast. Play one of these and read the soundbar's display: "
+                    "DTS = fine, PCM = not passed through. If it says PCM (or Jellyfin "
+                    "transcodes the audio), rerun with --no-dts-passthrough (or set "
+                    "ORGANIZE_DTS_PASSTHROUGH=0) to bake AC-3 in for these too.",
         STATUS_PCM: "Action: none. The Chromecast decodes these to PCM; over the soundbar's "
                     "HDMI IN even multichannel PCM plays.",
     }
@@ -952,7 +965,7 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
 
     footer = [
         "native-ok = AC-3/E-AC-3 on board: Dolby licenses every hop of this chain (official G454V passthrough).",
-        "dts-core-ok = base 5.1 DTS: Amlogic firmware passes it, the AX3125H decodes it; unofficial but real.",
+        "dts-core-ok = base 5.1 DTS: the AX3125H decodes it, but Google does not list DTS passthrough for this Chromecast - UNVERIFIED on this unit.",
         "pcm-decode-ok = AAC/FLAC/MP3/Opus/PCM: the Chromecast decodes; HDMI IN accepts multichannel PCM.",
         "transcoded-ac3 = TrueHD/DTS-HD/DTS:X/WMA Pro can never leave the G454V, so AC-3 5.1 @ 640 kbps was synthesized.",
         "review-unknown = unrecognized audio; fail-closed, untouched. deferred-seeding = still hardlinked to a seed.",
@@ -1078,10 +1091,20 @@ def build_parser() -> argparse.ArgumentParser:
                               "sources, so multichannel PCM arrives stereo-only and 5.1+ "
                               f"decode-to-pcm movies are transcoded too. Env: "
                               f"{WIRING_ENV_VAR}."))
+    # Two literal flags on one destination, default None = "not said": the
+    # environment (ORGANIZE_DTS_PASSTHROUGH) decides, and either flag beats it,
+    # the same precedence --wiring has.
     parser.add_argument("--no-dts-passthrough", dest="dts_passthrough_ok",
-                        action="store_false", default=True,
-                        help="Treat base DTS as transcode-bound (some Android-TV builds "
-                             "or apps decline the unofficial DTS passthrough)")
+                        action="store_const", const=False, default=None,
+                        help="Treat base 5.1 DTS as transcode-bound: bake AC-3 in for it "
+                             "like DTS-HD. Google lists no DTS passthrough for the Chromecast "
+                             "with Google TV and field reports conflict - test it once with "
+                             "the soundbar's display (DTS = fine, PCM = use this). "
+                             f"Env: {DTS_ENV_VAR}=0.")
+    parser.add_argument("--dts-passthrough", dest="dts_passthrough_ok",
+                        action="store_const", const=True, default=None,
+                        help="Accept base 5.1 DTS as-is (the default); overrides "
+                             f"{DTS_ENV_VAR}=0 for this run.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Probe and show the plan; never modify any file")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N movies (testing)")
@@ -1118,7 +1141,7 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         use_state=not bool(args.no_state),
         state_db=args.state_db,
         wiring=resolve_wiring(args.wiring),
-        dts_passthrough_ok=bool(args.dts_passthrough_ok),
+        dts_passthrough_ok=resolve_dts_passthrough(args.dts_passthrough_ok),
         limit=args.limit,
     )
 

@@ -818,8 +818,9 @@ def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, 
     soundbar's HDMI IN, and on that chain the "best" track is the best one
     that plays natively. Dolby Digital Plus (E-AC-3, Atmos included) and
     Dolby Digital (AC-3) top the table because the player bitstreams them
-    end-to-end; base DTS follows (the bar decodes it and the player's
-    firmware passes it); client-decodable formats (AAC/FLAC/PCM/Opus/...)
+    end-to-end; base DTS follows (the bar decodes it; whether the player
+    passes it is unverified - Google lists no DTS passthrough, see
+    docs/hardware.md §1); client-decodable formats (AAC/FLAC/PCM/Opus/...)
     sit mid-table because they arrive as PCM; and lossless-HD formats sit
     BELOW all of them: the G454V can never emit TrueHD / DTS-HD / DTS:X, so
     keeping one would force the Jellyfin server to transcode the audio on

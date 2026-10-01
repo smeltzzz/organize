@@ -16,6 +16,7 @@ from __future__ import annotations
 import collections
 import io
 import json
+import os
 import sys
 import tempfile
 import types
@@ -550,6 +551,44 @@ class JsonDocumentTests(unittest.TestCase):
         self.assertNotIn("generated", first)
 
 
+class PlaybackChainCheckTests(unittest.TestCase):
+    """The doctor is where the owner sees the one policy that rewrites movies.
+
+    Whether base DTS is accepted or converted is the single decision the
+    hardware research could not settle from documents, so the page that
+    describes the chain must state the current setting and how to test it.
+    """
+
+    ENV = "ORGANIZE_DTS_PASSTHROUGH"
+
+    def setUp(self) -> None:
+        saved = os.environ.pop(self.ENV, None)
+        self.addCleanup(self._restore, saved)
+
+    def _restore(self, saved: str | None) -> None:
+        os.environ.pop(self.ENV, None)
+        if saved is not None:
+            os.environ[self.ENV] = saved
+
+    def test_by_default_it_shows_dts_accepted_and_unverified(self) -> None:
+        check = organize.check_playback_chain(context())
+        self.assertEqual(check.status, "ok")
+        self.assertIn("accepted as-is", check.detail)
+        self.assertIn("UNVERIFIED", check.detail)
+        self.assertIn(self.ENV, check.detail)
+
+    def test_the_environment_setting_is_reflected(self) -> None:
+        with patch.dict(os.environ, {self.ENV: "0"}):
+            check = organize.check_playback_chain(context())
+        self.assertIn("converted to AC-3", check.detail)
+        self.assertNotIn("accepted as-is", check.detail)
+
+    def test_the_check_states_the_decoder_profile_limits(self) -> None:
+        detail = organize.check_playback_chain(context()).detail
+        self.assertIn("Hi10P", detail)
+        self.assertIn("no 4K playback", detail)
+
+
 class JsonRenderTests(hermetic.HermeticToolsMixin, unittest.TestCase):
     def run_json(self, **kwargs: object) -> tuple[int, str]:
         buf = io.StringIO()
@@ -563,7 +602,11 @@ class JsonRenderTests(hermetic.HermeticToolsMixin, unittest.TestCase):
             code, output = self.run_json(library_path=Path(td), source_path=Path(td))
         document = json.loads(output)
         self.assertEqual(code, document["exit_code"])
-        self.assertNotIn("ORGANIZE", output)
+        # The hero banner's signature, not the bare word: the chain summary
+        # legitimately names settings such as ORGANIZE_DTS_PASSTHROUGH, and a
+        # parser-breaking decorative line is what this test exists to catch.
+        self.assertNotIn("Management Toolkit", output)
+        self.assertNotIn("\u2588", output)
         self.assertNotIn("Scorecard", output)
         # A drawn rule, not the character: on a console without Unicode the
         # rule is "-", which any JSON document is entitled to contain.

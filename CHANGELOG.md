@@ -27,8 +27,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — rather than settling it by assertion. §2's "bitstream through the entire
   chain with zero conversions anywhere" is scoped to the default wiring.
 
+- **The video verdict no longer treats a codec name as a decoder.**
+  `classify_video()` judged a file by codec, resolution, HDR and Dolby Vision
+  alone, so an H.264 *10-bit* ("Hi10P") file — the encode common in anime
+  releases — read `direct-play`, and `bitdepth.py` filed it under "SKIP —
+  already 10-bit, re-encoding only loses quality". The Chromecast's decoders
+  are profile-limited: Google documents H.264 *High* and HEVC *Main/Main10*
+  for this device family, the S805X2's decode block is 4:2:0 only, no ARM
+  hardware decodes Hi10P (Kodi's Android hardware page; LibreELEC's Amlogic
+  thread), Plex users on the Chromecast with Google TV report 10-bit x264
+  playing back corrupted, and Jellyfin's Android-TV client offers `high 10`
+  only when a decoder reports it (`deviceProfile.kt`). New verdict
+  `unsupported-profile` for H.264 above 8-bit or High 10 / 4:2:2 / 4:4:4, any
+  other codec with non-4:2:0 chroma, and HEVC/VP9/AV1 above 10-bit. Missing
+  probe fields never condemn a file (a contradictory bit depth raises no
+  alarm). The bit-depth *status* is deliberately unchanged — the chain fit is
+  the informational second verdict — but the report's SKIP advice no longer
+  says "do nothing" for these, and the PLAYBACK CHAIN FIT section lists them.
+- **`docs/hardware.md` cited sources that do not exist.** Opened one by one:
+  the Google help article for the G454V manual, the AFTVnews article, the
+  Rtings review, the Hisense USA product page, a second Hisense PDF and a
+  Samsung support article returned 404; another Samsung article id redirected
+  to a generic page; the GSMArena URL opened an unrelated Oppo phone; and a
+  Reddit thread cited for DTS could not be retrieved — while the text
+  attributed specific facts to them ("confirms codename boreal", "Rtings
+  measured HDR behavior"). Every one of those facts is true and is covered
+  by sources that were retrieved (Google's spec and comparison pages, Android
+  Police, CNX Software, Android TV Guide, the Hisense spec sheet and manual,
+  Samsung's ARC articles and e-manual). The dead citations are gone, the
+  `SOURCES` table agrees with the dossier (a test now enforces both), and a
+  guard test keeps the retracted URLs from returning.
+- **Base DTS core was documented as working; Google says it is unsupported.**
+  The dossier, the chain table, the audio tool's report and four docstrings
+  said the Amlogic firmware "passes core DTS — unofficial but real", resting
+  on that unretrievable thread. Google's own Cast documentation lists audio
+  passthrough as AC-3, E-AC-3, MPEG-H and Dolby Atmos, a Google staff answer
+  on the Nest Community says the Chromecast with Google TV "only supports"
+  the Dolby formats and DTS "technically wasn't supported", and field reports
+  split (worked after the Android 12 update for some; stereo PCM or silence
+  for others, including Plex in July 2025). Nobody documents the HD model.
+  The wording now says UNVERIFIED everywhere and says how to settle it in a
+  minute (play a DTS file and read the soundbar's display). **Behaviour is
+  unchanged: base DTS is still accepted by default**, because converting it
+  rewrites every DTS movie irreversibly — that decision is the owner's, made
+  from one measurement.
+- Smaller dossier corrections: "Audio output format: Standard", which no
+  source shows on this model (Google added an "Output format" menu to the
+  Google TV *Streamer* in Nov 2024), is gone from the settings checklist; the
+  match-content-frame-rate advice, which contradicted itself, is replaced by
+  what the community reports for this dongle; the tier sentence now matches
+  the code (E-AC-3 100, AC-3 95, unknown **10**, not 0); the HDMI IN is
+  "4K pass-through" as the spec sheet says, not an unsourced "4K@60"; and the
+  HandBrake guidance no longer claims HEVC Main10 *and* H.264 both "Direct
+  Play end-to-end" (Plex users report some 1080p Main10 releases stuttering on
+  this device family, so it now recommends trying a sample first and calls the
+  8-bit queue an optional space optimisation).
+
 ### Added
-- Two `WiringTests` pinning the above (suite 1242 → 1244).
+- **`ORGANIZE_DTS_PASSTHROUGH`, `--dts-passthrough` / `--no-dts-passthrough`.**
+  The DTS decision used to exist only as `--no-dts-passthrough` on the
+  standalone tool, but `organize run` passes the audio step no flags — so the
+  pipeline could never apply it, unlike the wiring, which has an environment
+  variable. `0` / `false` / `no` / `off` (environment or `.env`) makes base DTS
+  transcode-bound like DTS-HD; anything else, including unset, keeps the
+  default; either flag beats the variable, the same precedence `--wiring` has;
+  an unrecognized value never guesses a destructive policy on. `organize
+  doctor` now prints the setting and the one-minute test.
+- **Dossier §7, "What is verified, and what only your unit can tell you"**: a
+  claim-by-claim status table (verified / community-verified / unverified /
+  user-confirmed) and four checks that need only the soundbar's display —
+  DTS passthrough, Atmos and multichannel-PCM acceptance on the HDMI IN, HDR
+  sanity through the soundbar's EDID, and an optional experiment (Jellyfin's
+  per-codec *Bitstream: Enable* with its bundled FFmpeg decoder) that could
+  make the lossless-master-discarding AC-3 bake-in unnecessary. Also new in
+  the dossier, quoted from the sources: the Hisense manual's "set the source
+  to PCM or Dolby Digital" and its Atmos-in-eARC/ARC sentence, the bar's AV
+  SYNC control, what Jellyfin's Android-TV client declares for Direct Play
+  (read from its source), and Google's "Chromecast with Google TV (HD) doesn't
+  support 4K playback".
+- 32 tests (suite 1244 → 1276): DTS policy resolution and precedence, the
+  honest DTS note, the profile verdicts and their fail-closed edges, the
+  Hi10P path through `bitdepth.py` including the report text, the environment
+  switch driving a real dry run and a real conversion, the doctor line, the
+  retracted-citation guard, and `SOURCES` ↔ dossier agreement.
+
+### Changed
+- `tests/test_doctor.py` asserted that `doctor --json` contained no decorative
+  line by searching for the bare word `ORGANIZE`; the chain summary now
+  legitimately names `ORGANIZE_DTS_PASSTHROUGH`, so the assertion looks for
+  the hero banner's actual signature (its subtitle and block characters).
+
+### Audited and found correct (no change)
+Re-checked against primary sources on 2026-10-01 and left alone: the G454V's
+identity and silicon (boreal, S805X2, 1.5 GB / 8 GB, 1080p60, HDR10 / HDR10+ /
+HLG, no Dolby Vision, AV1 decode, AC-3 / E-AC-3 / Atmos passthrough); the "no
+4K" rule, now sourced to Google's own support page; the AX3125H's ports and
+decoder list (1 HDMI IN, 1 HDMI OUT eARC/ARC, optical, AUX, USB, Bluetooth
+5.3, 6.5″ sub, Atmos / TrueHD / DD+ / DD / DTS:X / DTS-HD / DTS / multichannel
+PCM); the UN60F6350AF's four HDMI inputs, single ARC port and PCM 2.0 / DD 5.1
+/ DTS 5.1 ARC formats; the AC-3 5.1 @ 640 kbps target (the Hisense manual
+itself says to feed the bar PCM or Dolby Digital); the HDR rule (users report
+on-device tone-mapping on Google TV 12, the G454V's shipping OS, and Jellyfin's
+client gates HDR on the decoder, not the display); and the user-confirmed
+PCM-only reading on this TV.
 
 ## [8.0.2] - 2026-09-30
 

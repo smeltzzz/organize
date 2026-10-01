@@ -187,7 +187,7 @@ answer. For each movie it probes (`ffprobe`) and classifies:
 | Source situation | Verdict | What happens |
 | :--- | :--- | :--- |
 | AC-3 / E-AC-3 on board | `native-ok` | nothing — already bitstreams end-to-end |
-| base 5.1 DTS core | `dts-core-ok` | accepted (the AX3125H has a DTS decoder and the player's Amlogic firmware passes core DTS — unofficial but real); `--no-dts-passthrough` transcodes these too |
+| base 5.1 DTS core | `dts-core-ok` | accepted by default — the AX3125H decodes DTS, but Google lists **no** DTS passthrough for this Chromecast and field reports conflict, so it is **unverified on this unit** ([hardware.md §1](hardware.md)). Test one file (the bar's display says DTS or PCM); if PCM, `--no-dts-passthrough` or `ORGANIZE_DTS_PASSTHROUGH=0` transcodes these like DTS-HD |
 | AAC / FLAC / PCM / MP3 / Opus | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar takes multichannel PCM, while the explicit `--wiring tv-arc` (this TV offers PCM only for HDMI sources = stereo PCM) makes them transcode candidates |
 | TrueHD / DTS-HD MA / DTS-HD HRA / DTS:X | `transcoded-ac3` | **one AC-3 track is synthesized and appended, video untouched** |
 | unknown codec | `review-unknown` | fail-closed in the report; never auto-touched |
@@ -216,7 +216,13 @@ other prerequisite in the toolkit).
 ```bash
 python3 audio_standardizer.py --source /path/to/movies --dry-run
 python3 audio_standardizer.py --source /path/to/movies --wiring tv-arc  # explicit alternative wiring
+python3 audio_standardizer.py --source /path/to/movies --no-dts-passthrough  # bake AC-3 in for base DTS too
 ```
+
+`--no-dts-passthrough` (or `ORGANIZE_DTS_PASSTHROUGH=0`, which also reaches
+`organize run`) is the one policy this tool cannot settle from documents: it
+rewrites every DTS-core movie and the cleaner then drops the DTS track, so run
+`--dry-run` first to see how many movies it touches.
 
 ## 3 · `mkv_track_cleaner.py` — lossless remux
 
@@ -281,14 +287,18 @@ informational, never an override of the fail-closed status above:
 
 | File | What it does on the chain |
 | :--- | :--- |
-| ≤1080p H.264/HEVC/VP9/AV1(+MPEG-2), SDR or HDR10/HDR10+/HLG | Direct Play (HDR is tone-mapped to SDR for this 1080p SDR panel at playback time — zero generation loss, and the file still must NOT go through HandBrake) |
+| ≤1080p 8-bit H.264 High, HEVC Main/Main10, VP9, AV1 (4:2:0) (+MPEG-2), SDR or HDR10/HDR10+/HLG | Direct Play (HDR is tone-mapped to SDR for this 1080p SDR panel by the player at playback time — community-verified on Google TV 12 — zero generation loss, and the file still must NOT go through HandBrake) |
+| H.264 10-bit ("Hi10P"), 4:2:2/4:4:4 chroma, or >10-bit | `unsupported-profile`: no decoder on the G454V (Google documents H.264 High and HEVC Main/Main10 only; no ARM hardware decodes Hi10P) → the server transcodes every play, or playback corrupts → re-encode to 8-bit H.264 High or HEVC Main10 4:2:0. The bit-depth verdict still reads SKIP ("already ≥10-bit"); this row is the one to act on |
 | Dolby Vision (no HDR10/SDR base layer) | the G454V is not DV-licensed: server transcodes every play → replace with HDR10+ or re-encode |
 | >1080p (4K, 8K) | the player has no 4K output: server transcodes every play → a 1080p version belongs in this library |
 | VC-1 / ProRes / unknown codecs | never work → replace |
 
-The HandBrake guidance for anything queued is chain-shaped: H.265 Main10
-10-bit at ≤1080p (or H.264 High@L4.1 8-bit) + AC-3 5.1 @ 640 kbps audio —
-both Direct Play end-to-end.
+The HandBrake guidance for anything queued is chain-shaped: H.264 High@L4.1
+8-bit (the safest choice) or H.265 Main10 at ≤1080p + AC-3 5.1 @ 640 kbps audio.
+Re-encoding 8-bit SDR is an optional space/banding optimisation, not a chain
+requirement — 8-bit H.264 ≤1080p already Direct Plays, and Plex users report
+some 1080p HEVC Main10 releases stuttering on this device family, so play a
+sample before converting a batch.
 
 ```bash
 python3 bitdepth.py --source /path/to/movies

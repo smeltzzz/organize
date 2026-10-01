@@ -630,7 +630,10 @@ def result_from_probe(
         info += f" | trc={transfer}"
     info += f" | depth={bit_depth_evidence}"
 
-    chain_video, chain_audio, chain_note = chain_fit(payload, stream, flavors, dv_detail)
+    chain_video, chain_audio, chain_note = chain_fit(
+        payload, stream, flavors, dv_detail,
+        bit_depth=None if conflict is not None else bit_depth,
+    )
 
     return ProbeResult(
         path=path,
@@ -656,12 +659,19 @@ def result_from_probe(
 
 
 def chain_fit(payload: dict[str, Any], video_stream: dict[str, Any],
-              hdr_flavors: list[str], dv_profile: str) -> tuple[str, str, str]:
+              hdr_flavors: list[str], dv_profile: str,
+              bit_depth: int | None = None) -> tuple[str, str, str]:
     """The file's fit on the ONE playback chain, read from the same probe.
 
-    Video: the G454V decodes H.264/HEVC/VP9/AV1 up to 1080p60 and no more;
-    Dolby Vision is not licensed on it at all. Audio: the best class present
-    (the cleaner keeps the best playable track, so that is what will play).
+    Video: the G454V decodes H.264 High (8-bit), HEVC Main/Main10, VP9 and AV1
+    (4:2:0) up to 1080p60 and no more - a file's *profile* matters as much as
+    its codec name, so H.264 10-bit (Hi10P) and 4:2:2/4:4:4 streams are
+    flagged here even though their bit-depth verdict is a plain SKIP. Dolby
+    Vision is not licensed on it at all. Audio: the best class present (the
+    cleaner keeps the best playable track, so that is what will play).
+
+    ``bit_depth`` is the depth the caller resolved (``None`` when unknown or
+    contradictory, which never condemns a file).
     """
     width = _as_int(video_stream.get("width")) or 0
     height = _as_int(video_stream.get("height")) or 0
@@ -669,6 +679,9 @@ def chain_fit(payload: dict[str, Any], video_stream: dict[str, Any],
         str(video_stream.get("codec_name") or ""),
         width=width, height=height,
         hdr_flavors=hdr_flavors, dv_profile=dv_profile,
+        bit_depth=bit_depth,
+        pix_fmt=str(video_stream.get("pix_fmt") or ""),
+        profile=str(video_stream.get("profile") or ""),
     )
     best_audio = ""
     best_tier = -1
@@ -847,9 +860,12 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         "QUEUE FOR HANDBRAKE (8-BIT SDR)",
         "8-bit SDR (QUEUE)",
         "re-encode these to 10-bit",
-        "Re-encode in HandBrake for the G454V chain: H.265 Main10 10-bit at <=1080p "
-        "(or H.264 High@L4.1 8-bit), audio mixdown Dolby Digital (AC-3) 5.1 @ 640 kbps — "
-        "both Direct Play end-to-end on the Chromecast HD.",
+        "Optional space/banding optimisation, not a chain requirement: 8-bit H.264 "
+        "at <=1080p already Direct Plays on the Chromecast HD. If you re-encode in "
+        "HandBrake for the G454V chain: H.265 Main10 10-bit at <=1080p (or H.264 "
+        "High@L4.1 8-bit, the safest choice - Plex users report some 1080p HEVC "
+        "Main10 releases stuttering on this device family, so play a sample before "
+        "converting a batch), audio mixdown Dolby Digital (AC-3) 5.1 @ 640 kbps.",
     ),
     ActionGroup(
         STATUS_REVIEW_8BIT_HDR,
@@ -887,7 +903,11 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         "HIGH BIT-DEPTH SDR (SKIP - NOTHING TO DO)",
         "10/12/16-bit SDR (SKIP)",
         "already high bit depth",
-        "Do nothing. Re-encoding an already high bit-depth file only loses quality.",
+        "Do nothing - with one exception the chain verdict (below) names: H.264 10-bit "
+        "(Hi10P) and 4:2:2/4:4:4 streams have no decoder on the G454V, so the server "
+        "transcodes them on every play; those are worth re-encoding (to HEVC Main10 "
+        "4:2:0 or 8-bit H.264 High). Re-encoding any other high bit-depth file only "
+        "loses quality.",
     ),
 )
 
@@ -985,14 +1005,17 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
             "These rows change no bit-depth verdict — they say what each file does on "
             "the chain the library serves: HDR10/HDR10+/HLG Direct Plays tone-mapped to "
             "SDR (the TV is a 1080p SDR panel and still protected from re-encoding); "
-            "Dolby Vision and >1080p files force a server transcode on every play and "
+            "Dolby Vision, >1080p and unsupported-profile files (H.264 10-bit / Hi10P, "
+            "4:2:2 or 4:4:4 chroma) force a server transcode on every play and "
             "are the ones worth replacing or re-encoding. Facts: docs/hardware.md."
         )
 
     report.footer([
         "QUEUE = 8-bit SDR. Re-encode for the chain: H.265 10-bit (or H.264 High) at "
         "<=1080p + AC-3 5.1 640k audio in HandBrake.",
-        "SKIP = already 10-bit or better SDR. Re-encoding only loses quality.",
+        "SKIP = already 10-bit or better SDR. Re-encoding only loses quality - except "
+        "H.264 10-bit (Hi10P) and 4:2:2/4:4:4, which the G454V cannot decode (see the "
+        "playback chain fit section).",
         "KEEP = HDR10 / HDR10+ / Dolby Vision / HLG. HandBrake tone-maps or strips "
         "dynamic metadata; the G454V tone-maps HDR10/HDR10+/HLG to SDR for this TV at "
         "playback time instead, with no generation loss.",

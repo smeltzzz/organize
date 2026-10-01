@@ -122,6 +122,68 @@ class BitDepthConflictTests(unittest.TestCase):
         self.assertNotEqual(result.status, tb.STATUS_QUEUE)
 
 
+class ChainFitProfileTests(unittest.TestCase):
+    """A codec NAME is not a decoder: the chain verdict reads the stream's profile.
+
+    The bit-depth verdict is deliberately unchanged (fail-closed, informational
+    chain fit on top), so a 10-bit H.264 file still reads "already high
+    bit-depth - SKIP" while its *chain* verdict says the Chromecast cannot
+    decode it - the one case where those two answers disagree and the second
+    one is the one to act on.
+    """
+
+    SDR = {"color_transfer": "bt709", "color_primaries": "bt709"}
+
+    def _probe(self, **stream: Any) -> Any:
+        base = {"index": 0, "codec_type": "video", "codec_name": "h264",
+                "width": 1920, "height": 1080, "pix_fmt": "yuv420p",
+                "profile": "High", "bits_per_raw_sample": "8"}
+        base.update(self.SDR)
+        base.update(stream)
+        return tb.result_from_probe("/m/Movie.mkv", {"streams": [base], "format": {}})
+
+    def test_hi10p_keeps_its_skip_verdict_but_fails_the_chain(self) -> None:
+        result = self._probe(pix_fmt="yuv420p10le", profile="High 10",
+                             bits_per_raw_sample="10")
+        self.assertEqual(result.status, tb.STATUS_SKIP_SDR)
+        self.assertEqual(result.chain_video, tb.pc.VIDEO_UNSUPPORTED_PROFILE)
+        self.assertIn("Hi10P", result.chain_note)
+
+    def test_plain_8bit_h264_direct_plays_and_stays_queueable(self) -> None:
+        result = self._probe()
+        self.assertEqual(result.status, tb.STATUS_QUEUE)
+        self.assertEqual(result.chain_video, tb.pc.VIDEO_NATIVE)
+
+    def test_hevc_main10_is_fine(self) -> None:
+        result = self._probe(codec_name="hevc", pix_fmt="yuv420p10le",
+                             profile="Main 10", bits_per_raw_sample="10")
+        self.assertEqual(result.status, tb.STATUS_SKIP_SDR)
+        self.assertEqual(result.chain_video, tb.pc.VIDEO_NATIVE)
+
+    def test_hevc_422_has_no_decoder(self) -> None:
+        result = self._probe(codec_name="hevc", pix_fmt="yuv422p10le",
+                             profile="Main 4:2:2 10", bits_per_raw_sample="10")
+        self.assertEqual(result.chain_video, tb.pc.VIDEO_UNSUPPORTED_PROFILE)
+
+    def test_a_contradictory_bit_depth_raises_no_false_alarm(self) -> None:
+        # raw sample says 8, the pixel format says 10: the depth is unknown, so
+        # the profile check must not condemn the file on half a label.
+        result = self._probe(pix_fmt="yuv420p10le", bits_per_raw_sample="8")
+        self.assertEqual(result.status, tb.STATUS_REVIEW_UNKNOWN_DEPTH)
+        self.assertEqual(result.chain_video, tb.pc.VIDEO_NATIVE)
+
+    def test_the_report_tells_the_reader_to_act_on_the_chain_row(self) -> None:
+        result = self._probe(pix_fmt="yuv420p10le", profile="High 10",
+                             bits_per_raw_sample="10")
+        cfg = tb.Config(source_dir=Path("/m"), report_file=Path("/m/report.txt"))
+        text = tb.build_report([result], cfg, 0.5)
+        self.assertIn(tb.pc.VIDEO_UNSUPPORTED_PROFILE, text)
+        self.assertIn("PLAYBACK CHAIN FIT", text)
+        # The SKIP advice names its one exception instead of contradicting it.
+        self.assertIn("Hi10P", text)
+        self.assertNotIn("Do nothing. Re-encoding an already high bit-depth file only", text)
+
+
 class DolbyVisionTests(unittest.TestCase):
     """Dolby Vision is more than one thing: the profile says what plays it."""
 

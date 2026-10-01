@@ -67,6 +67,34 @@ class DeviceFactTests(unittest.TestCase):
                             for s in pc.SOURCES))
 
 
+    def test_the_sources_cite_googles_own_dts_position_and_nothing_unretrievable(self) -> None:
+        """The grey zone is documented with Google's words, not a lone forum link.
+
+        An earlier revision cited a Reddit thread for "base DTS passes through on
+        every Amlogic build"; it could not be retrieved, and Google's own list
+        and staff say the opposite. The replacement sources must stay in.
+        """
+        joined = "\n".join(pc.SOURCES)
+        self.assertIn("developers.google.com/cast/docs/media", joined)
+        self.assertIn("googlenestcommunity.com", joined)
+        self.assertIn("deviceProfile.kt", joined)
+        self.assertNotIn("r/googlehome/comments/j2ggur", joined)
+
+    def test_base_dts_is_never_listed_as_a_documented_passthrough(self) -> None:
+        # Google's list is Dolby only; DTS core rides along as *unofficial*.
+        self.assertNotIn("dts-core", pc.PLAYER.passthrough_audio)
+        self.assertIn("dts-core", pc.PLAYER.passthrough_audio_unofficial)
+
+    def test_every_source_url_is_also_in_the_dossier(self) -> None:
+        """docs/hardware.md says it must agree with this table; hold it to that."""
+        from pathlib import Path
+        dossier = (Path(__file__).resolve().parents[1] / "docs" / "hardware.md").read_text(
+            encoding="utf-8")
+        missing = [s.split()[0] for s in pc.SOURCES
+                   if s.startswith("http") and s.split()[0] not in dossier]
+        self.assertEqual(missing, [], "SOURCES cites URLs the dossier does not")
+
+
 class AudioClassificationTests(unittest.TestCase):
     """Every codec string a real library carries lands in one class."""
 
@@ -271,9 +299,146 @@ class VideoClassificationTests(unittest.TestCase):
 
     def test_every_verdict_has_an_explanation(self) -> None:
         for verdict in (pc.VIDEO_NATIVE, pc.VIDEO_TONEMAPPED, pc.VIDEO_DV_FLAG,
-                        pc.VIDEO_OVERSIZE, pc.VIDEO_UNSUPPORTED, pc.VIDEO_UNKNOWN):
+                        pc.VIDEO_OVERSIZE, pc.VIDEO_UNSUPPORTED,
+                        pc.VIDEO_UNSUPPORTED_PROFILE, pc.VIDEO_UNKNOWN):
             with self.subTest(verdict=verdict):
                 self.assertTrue(pc.video_chain_note(verdict))
+                self.assertNotEqual(pc.video_chain_note(verdict), verdict)
+
+    # -- profile limits: a codec NAME is not a decoder ----------------------
+
+    def test_h264_hi10p_has_no_decoder_on_this_player(self) -> None:
+        # Google documents H.264 *High*; no ARM hardware decodes High 10.
+        for kwargs in ({"bit_depth": 10},
+                       {"bit_depth": 10, "pix_fmt": "yuv420p10le", "profile": "High 10"},
+                       {"profile": "High 10"},
+                       {"profile": "High 10 Intra"}):
+            with self.subTest(**kwargs):
+                self.assertEqual(
+                    pc.classify_video("h264", width=1920, height=1080, **kwargs),
+                    pc.VIDEO_UNSUPPORTED_PROFILE)
+
+    def test_the_8bit_h264_the_library_is_full_of_still_direct_plays(self) -> None:
+        for profile in ("High", "Main", "Constrained Baseline", ""):
+            with self.subTest(profile=profile):
+                self.assertEqual(
+                    pc.classify_video("h264", width=1920, height=1080, bit_depth=8,
+                                      pix_fmt="yuv420p", profile=profile),
+                    pc.VIDEO_NATIVE)
+
+    def test_hevc_main10_420_is_inside_the_envelope(self) -> None:
+        self.assertEqual(
+            pc.classify_video("hevc", width=1920, height=1080, bit_depth=10,
+                              pix_fmt="yuv420p10le", profile="Main 10"),
+            pc.VIDEO_NATIVE)
+        self.assertEqual(
+            pc.classify_video("av1", width=1920, height=1080, bit_depth=10,
+                              pix_fmt="yuv420p10le"),
+            pc.VIDEO_NATIVE)
+
+    def test_chroma_other_than_420_and_depth_beyond_10_have_no_decoder(self) -> None:
+        for codec, kwargs in (("hevc", {"pix_fmt": "yuv422p10le", "bit_depth": 10}),
+                              ("hevc", {"pix_fmt": "yuv444p"}),
+                              ("h264", {"profile": "High 4:2:2"}),
+                              ("h264", {"profile": "High 4:4:4 Predictive"}),
+                              ("hevc", {"bit_depth": 12}),
+                              ("vp9", {"pix_fmt": "gbrp"})):
+            with self.subTest(codec=codec, **kwargs):
+                self.assertEqual(
+                    pc.classify_video(codec, width=1920, height=1080, **kwargs),
+                    pc.VIDEO_UNSUPPORTED_PROFILE)
+
+    def test_a_missing_field_never_condemns_a_file(self) -> None:
+        """Fail closed in the toolkit's own sense: unknown facts raise no alarm."""
+        self.assertEqual(pc.classify_video("h264", width=1920, height=1080),
+                         pc.VIDEO_NATIVE)
+        self.assertEqual(pc.classify_video("h264", width=1920, height=1080,
+                                           bit_depth=None, pix_fmt="", profile=""),
+                         pc.VIDEO_NATIVE)
+        self.assertEqual(pc.unsupported_profile_reason("h264"), "")
+
+    def test_resolution_and_dolby_vision_still_win_over_the_profile_check(self) -> None:
+        self.assertEqual(
+            pc.classify_video("h264", width=3840, height=2160, bit_depth=10),
+            pc.VIDEO_OVERSIZE)
+        self.assertEqual(
+            pc.classify_video("hevc", width=1920, height=1080, dv_profile="8.1",
+                              pix_fmt="yuv422p10le"),
+            pc.VIDEO_DV_FLAG)
+        # An unsupported codec is reported as that, not as a profile problem.
+        self.assertEqual(
+            pc.classify_video("vc1", width=1920, height=1080, bit_depth=10),
+            pc.VIDEO_UNSUPPORTED)
+
+    def test_the_reason_names_what_is_wrong(self) -> None:
+        self.assertIn("Hi10P", pc.unsupported_profile_reason("h264", bit_depth=10))
+        self.assertIn("4:2:0", pc.unsupported_profile_reason("hevc", pix_fmt="yuv444p"))
+        self.assertIn("High 4:2:2", pc.unsupported_profile_reason("h264", profile="High 4:2:2"))
+
+
+class DtsPolicyTests(unittest.TestCase):
+    """Base DTS core: accepted by default, declinable by flag OR environment.
+
+    The research could not settle whether this Chromecast passes DTS core to the
+    bar (Google lists no DTS passthrough; field reports conflict), so the one
+    policy decision that rewrites the library is a switch the owner can reach
+    from the pipeline entry point - the same way the wiring is.
+    """
+
+    def setUp(self) -> None:
+        saved = os.environ.pop(pc.DTS_ENV_VAR, None)
+        self.addCleanup(self._restore_env, saved)
+
+    @staticmethod
+    def _restore_env(saved: str | None) -> None:
+        os.environ.pop(pc.DTS_ENV_VAR, None)
+        if saved is not None:
+            os.environ[pc.DTS_ENV_VAR] = saved
+
+    def test_the_default_is_unchanged_accept(self) -> None:
+        self.assertEqual(pc.DTS_ENV_VAR, "ORGANIZE_DTS_PASSTHROUGH")
+        self.assertNotIn(pc.DTS_ENV_VAR, os.environ)
+        self.assertTrue(pc.resolve_dts_passthrough())
+        self.assertTrue(pc.resolve_dts_passthrough(None))
+
+    def test_the_environment_can_decline_dts_core(self) -> None:
+        for value in ("0", "false", "FALSE", "no", "off", " 0 "):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {pc.DTS_ENV_VAR: value}):
+                self.assertFalse(pc.resolve_dts_passthrough())
+
+    def test_anything_else_in_the_environment_keeps_the_default(self) -> None:
+        # Unrecognized values never guess a destructive policy on.
+        for value in ("", "1", "true", "yes", "maybe", "2"):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {pc.DTS_ENV_VAR: value}):
+                self.assertTrue(pc.resolve_dts_passthrough())
+
+    def test_an_explicit_flag_beats_the_environment_either_way(self) -> None:
+        with mock.patch.dict(os.environ, {pc.DTS_ENV_VAR: "0"}):
+            self.assertTrue(pc.resolve_dts_passthrough(True))
+        self.assertFalse(pc.resolve_dts_passthrough(False))
+
+    def test_the_dts_note_does_not_claim_it_works(self) -> None:
+        note = pc.audio_chain_note("DTS A_DTS", 6)
+        self.assertIn("UNVERIFIED", note)
+        self.assertIn("ORGANIZE_DTS_PASSTHROUGH", note)
+        self.assertNotIn("works on Amlogic", note)
+
+    def test_the_summary_states_the_setting_and_how_to_test_it(self) -> None:
+        accepted = "\n".join(pc.chain_summary_lines())
+        self.assertIn("accepted as-is", accepted)
+        self.assertIn(pc.DTS_ENV_VAR, accepted)
+        self.assertIn("UNVERIFIED", accepted)
+        with mock.patch.dict(os.environ, {pc.DTS_ENV_VAR: "0"}):
+            declined = "\n".join(pc.chain_summary_lines())
+        self.assertIn("converted to AC-3", declined)
+        # An explicit argument beats the environment here as well.
+        self.assertIn("converted to AC-3",
+                      "\n".join(pc.chain_summary_lines(dts_passthrough=False)))
+
+    def test_the_summary_names_the_decoder_profile_limits(self) -> None:
+        text = "\n".join(pc.chain_summary_lines())
+        self.assertIn("Hi10P", text)
+        self.assertIn("no 4K playback", text)
 
 
 class WiringTests(unittest.TestCase):

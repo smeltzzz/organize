@@ -233,6 +233,51 @@ class DocumentedFlagTests(unittest.TestCase):
                                       f"the table says {tool.name} accepts {flag}, and it does not")
 
 
+class HardwareDossierSourceTests(unittest.TestCase):
+    """The dossier is the evidence behind every codec rule; its citations must be real.
+
+    On 2026-10-01 every link in `docs/hardware.md` was opened. These resolved
+    to a 404, to the wrong page (the GSMArena URL opened an unrelated phone;
+    one Samsung article id redirected to a generic support page), or could not
+    be retrieved at all - while the dossier attributed specific claims to
+    them ("confirms codename boreal", "Rtings measured HDR behavior"). The
+    facts survived on other, verified sources; the citations were removed.
+    Nothing here may bring them back, in the dossier or in the chain table
+    that is supposed to agree with it.
+    """
+
+    RETRACTED = (
+        "support.google.com/chromecast/answer/11236184",
+        "aftvnews.com/googles-new-1080p-chromecast-with-google-tv-hd-model-g454v",
+        "rtings.com/streaming/reviews/google/chromecast-with-google-tv-hd",
+        "hisense-usa.com/product/ax3125h",
+        "66406cbb29a362.pdf",
+        "samsung.com/us/support/answer/ANS00077530",
+        "samsung.com/us/support/answer/ANS00085244",
+        "gsmarena.com/google_chromecast_with_google_tv_%28hd%29-11907",
+        "reddit.com/r/googlehome/comments/j2ggur",
+    )
+
+    def texts(self) -> dict[str, str]:
+        files = [*live_documents(), REPO / "organizekit" / "core" / "playbackchain.py"]
+        return {str(path.relative_to(REPO)): path.read_text(encoding="utf-8")
+                for path in files if path.is_file()}
+
+    def test_no_retracted_citation_returns(self) -> None:
+        offenders = [f"{name} cites {url}"
+                     for name, body in self.texts().items()
+                     for url in self.RETRACTED if url in body]
+        self.assertEqual(offenders, [], "a source that was verified dead or wrong is back")
+
+    def test_the_dossier_says_which_claims_are_unverified(self) -> None:
+        """A dossier that cannot say what it does not know is a brochure."""
+        body = (DOCS / "hardware.md").read_text(encoding="utf-8")
+        self.assertIn("## 7 · What is verified, and what only your unit can tell you", body)
+        self.assertIn("UNVERIFIED", body)
+        # The one decision that rewrites the library has a reachable switch.
+        self.assertIn("ORGANIZE_DTS_PASSTHROUGH", body)
+
+
 class DocumentedTestCountTests(unittest.TestCase):
     """The suite's own size is quoted in four places, and it has to be right.
 

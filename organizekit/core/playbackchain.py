@@ -24,12 +24,19 @@ source it was checked against (see ``SOURCES``).
 The short version of the physics, and why it drives every default:
 
 * The Chromecast with Google TV (HD) is the *only* player. It decodes
-  H.264, HEVC, VP9 and AV1 up to 1080p60, and it can only ever EMIT
-  Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3, including DD+ Atmos
-  via HDMI pass-through), base 5.1 DTS (chipset-level, unofficial), and
-  decoded PCM. It cannot pass through TrueHD, DTS-HD or DTS:X — so a
-  "better" lossless track in a file is not free quality, it is a
-  guaranteed server-side audio transcode on every single play.
+  H.264 (High profile, 8-bit), HEVC (Main/Main10), VP9 and AV1 up to
+  1080p60, and Google's complete audio-passthrough list is Dolby Digital
+  (AC-3), Dolby Digital Plus (E-AC-3, including DD+ Atmos via HDMI
+  pass-through) and MPEG-H; everything else it plays is decoded to PCM.
+  It cannot pass through TrueHD, DTS-HD or DTS:X — so a "better"
+  lossless track in a file is not free quality, it is a guaranteed
+  server-side audio transcode on every single play. Base 5.1 DTS is the
+  grey zone: it is NOT on Google's list (Google staff: the device "only
+  supports Dolby Digital, Dolby Digital Plus, Dolby Atmos"), and field
+  reports conflict — passed through on some firmware/app combinations,
+  stereo PCM or silence on others. The toolkit therefore *accepts* it
+  but marks it UNVERIFIED on this unit; ``ORGANIZE_DTS_PASSTHROUGH=0``
+  converts it to AC-3 like the lossless formats (docs/hardware.md §1).
 * The AX3125H is fed through its HDMI IN port, which decodes everything
   the Chromecast can emit — AC-3, DD+ Atmos, DTS, and multichannel PCM —
   before the video passes through to the TV. That is what makes the
@@ -66,18 +73,30 @@ class Player:
     os: str = "Google TV (Android 12, upgradeable to 14)"
     max_resolution: tuple[int, int] = (1920, 1080)
     max_fps: int = 60
-    # Hardware video decoders (Amlogic S805X2 media block). AV1 decode is the
-    # one silicon advantage the HD model holds over the 2020 4K model.
+    # Hardware video decoders (Amlogic S805X2 media block: 1080p60 AV1,
+    # H.265, VP9 P-2, H.264, MPEG-4/2/1 - CNX Software's SoC table). AV1
+    # decode is the one silicon advantage the HD model holds over the 2020
+    # 4K model. The decoders are *profile*-limited, which a codec name alone
+    # does not say: Google documents H.264 High Profile and HEVC Main /
+    # Main10 for this device family, and no ARM hardware decoder exists for
+    # H.264 High 10 (Hi10P) or 4:2:2 / 4:4:4 chroma - see
+    # ``classify_video`` and ``VIDEO_UNSUPPORTED_PROFILE``.
     video_codecs: tuple[str, ...] = ("h264", "hevc", "vp9", "av1", "mpeg2video", "mpeg1video")
     # HDR it decodes. NO Dolby Vision licence on the HD model (the 4K model
     # has one; this one outputs HDR10/HDR10+/HLG only), and because the
     # display below is SDR, supported HDR is tone-mapped to SDR at output.
     hdr_formats: tuple[str, ...] = ("HDR10", "HDR10+", "HLG")
     dolby_vision: bool = False
-    # What the device can pass through over HDMI. Official Google list is
-    # DD/DD+/Atmos(DD+); base 5.1 DTS passes at the Android/Amlogic firmware
-    # layer (every Amlogic TV build since 8.1) but is NOT on Google's list,
-    # hence "unofficial". No TrueHD / DTS-HD / DTS:X ever leaves this box.
+    # What the device can pass through over HDMI. Google's list is
+    # DD/DD+/Atmos(DD+) (+ MPEG-H): developers.google.com/cast/docs/media,
+    # and Google staff on the Nest Community: the device "only supports
+    # Dolby Digital, Dolby Digital Plus, Dolby Atmos". Base 5.1 DTS is NOT
+    # on that list; whether it reaches the soundbar depends on firmware,
+    # app and the sink's EDID (reports conflict: worked after the Android 12
+    # update for some, stereo PCM or silence for others, including Plex and
+    # Jellyfin users). It is listed here as *unofficial AND unverified on
+    # this unit*, never as a fact. No TrueHD / DTS-HD / DTS:X ever leaves
+    # this box.
     passthrough_audio: tuple[str, ...] = ("ac3", "eac3", "eac3-joc")
     passthrough_audio_unofficial: tuple[str, ...] = ("dts-core",)
 
@@ -138,9 +157,16 @@ DISPLAY = Display()
 # full write-up with the same references).
 SOURCES: tuple[str, ...] = (
     "https://support.google.com/chromecast/answer/3046409 (official CCwGTV HD specs: 1080p60, HDR10/HDR10+/HLG, DD/DD+/Atmos passthrough)",
-    "https://www.androidtv-guide.com/streaming-gaming/chromecast-google-tv-hd/ (G454V 'boreal': S805X2, 1.5GB/8GB, AV1/VP9/H.264/HEVC)",
+    "https://www.androidtv-guide.com/streaming-gaming/chromecast-google-tv-hd/ (G454V 'boreal': S805X2, 8GB, AV1/VP9/H.264/HEVC, HDR10/HDR10+)",
     "https://www.androidpolice.com/chromecast-with-google-tv-hd-review/ (no Dolby Vision on the HD model; 1.5 GB RAM; audio passthrough list)",
-    "https://www.reddit.com/r/googlehome/comments/j2ggur/ (Amlogic Android TV >= 8.1 passthrough: 5.1 DTS, DD, DD+, DD+/Atmos; NO TrueHD/DTS-HD)",
+    "https://developers.google.com/cast/docs/media (Google: audio passthrough = AC-3, E-AC-3, MPEG-H, Dolby Atmos - no DTS; Chromecast with Google TV video = H.264 High Profile, HEVC Main/Main10)",
+    "https://www.googlenestcommunity.com/t5/Streaming/Chromecast-4K-with-DTS/m-p/335714 (Google staff: Chromecast with Google TV 'only supports' Dolby Digital / DD+ / Atmos; DTS 'technically wasn't supported' if it ever worked)",
+    "https://support.google.com/chromecast/answer/7151529 (Google: 'Chromecast with Google TV (HD) doesn't support 4K playback')",
+    "https://www.cnx-software.com/2021/05/14/s805x2-av1-android-tv-dongles-tv-boxes-are-starting-to-show-up/ (Amlogic S805X2 video decoder: 1080p60 10-bit AV1, H.265, VP9 P-2, H.264, MPEG-4/2/1)",
+    "https://kodi.wiki/view/Android_hardware (no hardware decoder for H.264 Hi10P exists for any ARM SoC)",
+    "https://github.com/jellyfin/jellyfin-androidtv/blob/master/app/src/main/java/org/jellyfin/androidtv/util/profile/deviceProfile.kt (the Jellyfin Android-TV client's device profile: DTS/TrueHD direct play only when passthrough is available or forced; 'high 10' only if a decoder reports it; H.264 <=4 ref frames at width >= 1900; HDR gated on the decoder, not the display)",
+    "https://www.reddit.com/r/Chromecast/comments/yodnsb/ (user reports: HDR-to-SDR conversion works on Google TV 12 - the G454V's shipping OS - and did not on Android 10)",
+    "https://www.reddit.com/r/PleX/comments/18dgtqu/ (user report: Chromecast with Google TV tone-maps HDR to SDR on-device on an SDR display - 'slightly dark, but … not discolored/gray')",
     "https://files.hisense-usa.com/download/f25648883914883a (AX3125H official spec sheet: 1x HDMI IN + 1x HDMI OUT eARC, Dolby Atmos/TrueHD/DD+/DD, DTS:X/DTS-HD/DTS decoders, PCM and Multich PCM)",
     "https://manuals.plus/hisense/ax3125h-3-1-2ch-440w-dolby-atmos-soundbar-with-wireless-subwoofer-manual (AX3125H user manual: HDMI IN socket for HDMI source devices; HDMI OUT (TV eARC/ARC); input-format table PCM / Dolby Digital / DD+ / TrueHD -> MPCM)",
     "https://www.manualowl.com/m/Samsung/UN60F6350AF/Manual/347300 (UN60F6350AF e-manual: 'ARC is only available through the HDMI (ARC) port'; Digital Audio Output (SPDIF) formats 'may vary depending on the input source')",
@@ -185,6 +211,36 @@ def resolve_wiring(explicit: str | None = None) -> str:
 
 
 # =============================================================================
+# DTS POLICY: accept base 5.1 DTS core as-is, or convert it like TrueHD?
+# =============================================================================
+
+#: Environment switch for the one policy question the research could not
+#: settle from documents: does THIS Chromecast actually pass base DTS core to
+#: the soundbar? Google does not list it (docs/hardware.md §1), field reports
+#: conflict, and only a look at the bar's display on the real unit can say.
+#: ``0`` / ``false`` / ``no`` / ``off`` makes the audio step treat DTS core
+#: as transcode-bound (an AC-3 5.1 track is baked in, exactly as for
+#: DTS-HD); anything else - including unset - keeps the long-standing
+#: default of accepting it. The ``--dts-passthrough`` / ``--no-dts-passthrough``
+#: flag beats this variable, the same precedence ``--wiring`` has.
+DTS_ENV_VAR = "ORGANIZE_DTS_PASSTHROUGH"
+_FALSEY = frozenset({"0", "false", "no", "off", "n", "f"})
+
+
+def resolve_dts_passthrough(explicit: bool | None = None) -> bool:
+    """Whether base DTS core is accepted as-is: flag, then environment, then yes.
+
+    ``True`` means "leave DTS-core movies alone" (the default, unchanged);
+    ``False`` means "bake an AC-3 track in from them too". Unrecognized
+    environment values keep the default rather than guessing.
+    """
+    if explicit is not None:
+        return bool(explicit)
+    raw = (os.environ.get(DTS_ENV_VAR) or "").strip().lower()
+    return raw not in _FALSEY
+
+
+# =============================================================================
 # AUDIO: what happens to a track on THIS chain
 # =============================================================================
 
@@ -192,7 +248,7 @@ def resolve_wiring(explicit: str | None = None) -> str:
 # The string values are the stored vocabulary (reports, JSON, state cache) —
 # treat them as part of the toolkit's on-disk format, not as display text.
 AUDIO_NATIVE = "native-passthrough"       # AC-3 / E-AC-3(+Atmos): bitstreamed end-to-end
-AUDIO_DTS_CORE = "dts-core-passthrough"   # base DTS: works here, but unofficially (chipset, not Google spec)
+AUDIO_DTS_CORE = "dts-core-passthrough"   # base DTS: NOT on Google's list; accepted, but UNVERIFIED on this unit
 AUDIO_DECODE_PCM = "decode-to-pcm"        # AAC/FLAC/MP3/Opus/Vorbis/PCM: player decodes; PCM into the bar
 AUDIO_TRANSCODE_BOUND = "transcode-bound" # TrueHD/DTS-HD/DTS:X/WMA Pro: the player can never emit these
 AUDIO_UNKNOWN = "unknown"                 # fail-closed: reported, never auto-touched
@@ -423,9 +479,11 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> 
                     "for HDMI sources, so the ARC/optical path cannot be relied on "
                     "to carry it - the default wiring (Chromecast -> soundbar "
                     "HDMI IN) can")
-        return ("DTS core: chipset-level passthrough from the Chromecast "
-                "(works on Amlogic Android TV builds; not on Google's "
-                "official list) -> AX3125H DTS decoder")
+        return ("DTS core: the AX3125H decodes it, but Google does not list DTS "
+                "passthrough for this Chromecast and field reports conflict - "
+                "UNVERIFIED on this unit (the bar's display shows DTS if it is "
+                "passed through, PCM if not); ORGANIZE_DTS_PASSTHROUGH=0 "
+                "converts it to AC-3")
     if cls == AUDIO_DECODE_PCM:
         if ch > 2 and wiring == WIRING_TV_ARC:
             return ("the Chromecast decodes this to PCM, but this TV's digital audio "
@@ -451,7 +509,52 @@ VIDEO_TONEMAPPED = "direct-play-tonemapped"   # HDR10/HDR10+/HLG -> SDR output
 VIDEO_DV_FLAG = "dolby-vision-flagged"        # no DV licence on the G454V
 VIDEO_OVERSIZE = "oversize-needs-downscale"   # >1080p cannot even decode here
 VIDEO_UNSUPPORTED = "unsupported-codec"       # VC-1, Xvid, ProRes, ...
+VIDEO_UNSUPPORTED_PROFILE = "unsupported-profile"  # H.264 Hi10P, 4:2:2/4:4:4, >10-bit: no decoder
 VIDEO_UNKNOWN = "unknown"
+
+# What a "supported codec" is not: a codec NAME. The G454V's decoders are
+# profile-limited. Google documents "H.264 High Profile" and "HEVC Main and
+# Main10" for this device family (developers.google.com/cast/docs/media), the
+# S805X2's decode block is 4:2:0 only, and no ARM hardware decoder exists for
+# H.264 High 10 ("Hi10P", the 10-bit encodes common in anime releases) -
+# Kodi's Android hardware page says so outright, and Plex users on this very
+# device report Hi10P playing corrupted or being transcoded. Jellyfin's
+# Android-TV client only offers the "high 10" profile when a decoder reports
+# it, so on this player Hi10P means a server transcode on every play.
+#: Deepest sample the decoders take, by codec (H.264 stops at 8-bit).
+_MAX_BIT_DEPTH = {"h264": 8, "hevc": 10, "vp9": 10, "av1": 10, "mpeg2video": 8, "mpeg1video": 8}
+_AVC_UNSUPPORTED_PROFILE_MARKERS = ("high 10", "high 4:2:2", "high 4:4:4", "cavlc 4:4:4")
+
+
+def unsupported_profile_reason(
+    codec_name: str,
+    *,
+    bit_depth: int | None = None,
+    pix_fmt: str = "",
+    profile: str = "",
+) -> str:
+    """Why this stream's PROFILE is outside the decoders' envelope, or ``""``.
+
+    Every input is optional and an absent one never condemns a file: unknown
+    bit depth, an empty ``pix_fmt`` or an empty ``profile`` say nothing, so a
+    caller that cannot read a field gets the old codec-name-only verdict
+    rather than a false alarm (the toolkit's fail-closed habit).
+    """
+    codec = (codec_name or "").lower()
+    if codec not in _MAX_BIT_DEPTH:
+        return ""
+    limit = _MAX_BIT_DEPTH[codec]
+    if bit_depth is not None and bit_depth > limit:
+        if codec == "h264":
+            return f"H.264 {bit_depth}-bit (High 10 / Hi10P)"
+        return f"{codec.upper()} {bit_depth}-bit (the decoders stop at {limit}-bit)"
+    prof = (profile or "").lower()
+    if codec == "h264" and any(marker in prof for marker in _AVC_UNSUPPORTED_PROFILE_MARKERS):
+        return f"H.264 {profile.strip()} (Google documents H.264 High Profile only)"
+    fmt = (pix_fmt or "").lower()
+    if any(token in fmt for token in ("422", "444", "440", "411", "410", "gbr", "rgb")):
+        return f"{codec.upper()} {pix_fmt.strip()} (the decoders take 4:2:0 only)"
+    return ""
 
 
 def classify_video(
@@ -461,11 +564,17 @@ def classify_video(
     height: int = 0,
     hdr_flavors: tuple[str, ...] | list[str] = (),
     dv_profile: str = "",
+    bit_depth: int | None = None,
+    pix_fmt: str = "",
+    profile: str = "",
 ) -> str:
     """Classify the video side of a movie against the chain.
 
     ``hdr_flavors`` and ``dv_profile`` accept exactly what bitdepth.py's HDR
     classifier already derives, so the two tools share one reading of a file.
+    ``bit_depth``, ``pix_fmt`` and ``profile`` are what the same probe says
+    about the stream's *profile*; leave them out and only the codec name,
+    resolution, Dolby Vision and HDR decide, as before.
     """
     codec = (codec_name or "").lower()
     flavors = {f.strip().lower() for f in hdr_flavors}
@@ -474,12 +583,16 @@ def classify_video(
     if dv:
         return VIDEO_DV_FLAG
     if width > PLAYER.max_resolution[0] or height > PLAYER.max_resolution[1]:
-        # A 4K HEVC stream is beyond the S805X2's decode block outright; the
-        # server transcodes every play. (Checked before codec support: an
-        # oversized file transcodes regardless.)
+        # Google: "Chromecast with Google TV (HD) doesn't support 4K
+        # playback", and the S805X2's decode block is specified at 1080p60;
+        # Jellyfin users report 4K files stuttering or refusing to play here,
+        # so the server transcodes every play. (Checked before codec
+        # support: an oversized file transcodes regardless.)
         return VIDEO_OVERSIZE
     if codec not in PLAYER.video_codecs:
         return VIDEO_UNSUPPORTED
+    if unsupported_profile_reason(codec, bit_depth=bit_depth, pix_fmt=pix_fmt, profile=profile):
+        return VIDEO_UNSUPPORTED_PROFILE
     if flavors and ("hdr10" in flavors or "hdr10+" in flavors or "hlg" in flavors
                     or any("hdr" in f or "hlg" in f or "pq" in f or "bt2020" in f
                            for f in flavors)):
@@ -489,7 +602,8 @@ def classify_video(
 
 def video_chain_note(verdict: str) -> str:
     return {
-        VIDEO_NATIVE: "Direct Plays: H.264/HEVC/VP9/AV1 at <=1080p on the G454V",
+        VIDEO_NATIVE: ("Direct Plays: 8-bit H.264 High, HEVC Main/Main10, VP9 or AV1 "
+                       "(4:2:0) at <=1080p on the G454V"),
         VIDEO_TONEMAPPED: ("Direct Plays: the Chromecast decodes HDR10/HDR10+/HLG "
                            "and tone-maps to SDR for the UN60F6350AF (never "
                            "auto-re-encoded - HDR masters stay protected)"),
@@ -500,6 +614,12 @@ def video_chain_note(verdict: str) -> str:
                          "every play transcodes; queue a 1080p downscale"),
         VIDEO_UNSUPPORTED: ("no hardware decoder on the G454V (and Jellyfin's "
                             "Android-TV profile will transcode it) - queue a re-encode"),
+        VIDEO_UNSUPPORTED_PROFILE: ("a profile the G454V's decoders do not offer - H.264 "
+                                    "High 10 (Hi10P), 4:2:2/4:4:4 chroma or more than 10-bit "
+                                    "(Google documents H.264 High and HEVC Main/Main10 only, "
+                                    "and no ARM hardware decoder exists for Hi10P): the server "
+                                    "transcodes every play, or playback corrupts - queue a "
+                                    "re-encode to 8-bit H.264 High or HEVC Main10 4:2:0"),
         VIDEO_UNKNOWN: "video properties unknown - fail-closed, review manually",
     }.get(verdict, verdict)
 
@@ -508,9 +628,11 @@ def video_chain_note(verdict: str) -> str:
 # WHOLE-CHAIN SUMMARY (doctor, reports, docs)
 # =============================================================================
 
-def chain_summary_lines(wiring: str | None = None) -> list[str]:
+def chain_summary_lines(wiring: str | None = None,
+                        dts_passthrough: bool | None = None) -> list[str]:
     """The chain as doctor prints it: devices, and what reaches each one."""
     wiring = resolve_wiring(wiring)
+    dts_ok = resolve_dts_passthrough(dts_passthrough)
     if wiring == WIRING_TV_ARC:
         wiring_line = (f"Wiring : Chromecast -> {DISPLAY.model} HDMI, TV --ARC/optical--> "
                        f"{SINK.model} (explicit alternative; this TV offers PCM for "
@@ -523,12 +645,21 @@ def chain_summary_lines(wiring: str | None = None) -> list[str]:
         f"         video  <= {PLAYER.max_resolution[0]}x{PLAYER.max_resolution[1]}p{PLAYER.max_fps}: "
         + "/".join(c.upper() for c in PLAYER.video_codecs[:4])
         + f"; HDR {('/'.join(PLAYER.hdr_formats))} tone-mapped to SDR here; Dolby Vision NOT supported",
+        "         decoder profiles: 8-bit H.264 High, HEVC Main/Main10, 4:2:0 only "
+        "(no H.264 Hi10P, no 4:2:2/4:4:4); no 4K playback at all",
         f"         audio  passthrough: {', '.join(PLAYER.passthrough_audio)} "
-        f"(+ {', '.join(PLAYER.passthrough_audio_unofficial)} unofficial); "
+        f"(+ {', '.join(PLAYER.passthrough_audio_unofficial)}: not on Google's list, "
+        "UNVERIFIED on this unit); "
         "decodes AAC/FLAC/Opus/MP3 to PCM; NEVER TrueHD / DTS-HD / DTS:X",
         f"Sink   : {SINK.model} {SINK.description} — decodes "
         "DD/DD+ Atmos/TrueHD/DTS/DTS-HD/multi-PCM",
         f"Display: {DISPLAY.model} ({DISPLAY.resolution[0]}x{DISPLAY.resolution[1]} SDR, "
         f"{DISPLAY.panel_hz} Hz panel, plain ARC — no eARC)",
         wiring_line,
+        ("DTS    : base DTS core is "
+         + ("accepted as-is" if dts_ok else "converted to AC-3 (ORGANIZE_DTS_PASSTHROUGH=0 / "
+                                              "--no-dts-passthrough)")
+         + " - Google lists no DTS passthrough for this Chromecast, so test it once: play a "
+           "DTS 5.1 file and read the soundbar's display (DTS = passed through, PCM = not); "
+           f"set {DTS_ENV_VAR}=0 if it says PCM (docs/hardware.md §1)"),
     ]

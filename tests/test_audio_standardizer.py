@@ -229,6 +229,49 @@ class RealTranscodeRunTests(ChainFixture):
         self.assertNotEqual(film.read_bytes(), before)
         self.assertEqual(self.payload_of(film)["streams"][-1]["codec_name"], "ac3")
 
+    def test_the_environment_declines_dts_core_without_any_flag(self) -> None:
+        # `organize run` passes the audio step no flags, so the environment is
+        # the only way the pipeline can carry the DTS decision - exactly as it
+        # is for the wiring. The plan must match what the flag produces.
+        film = self.movie("DTS Film (2004)", DTS_CORE)
+        before = film.read_bytes()
+        self.assertEqual(self._run("--dry-run", env={pc.DTS_ENV_VAR: "0"}), 0)
+        self.assertIn("DTS Film (2004).mkv", self.report_section("WOULD TRANSCODE"))
+        self.assertNotIn("DTS Film (2004).mkv", self.report_section("2. DTS CORE"))
+        self.assertIn("no (transcoded to AC-3", self.log.read_text(encoding="utf-8"))
+        self.assertEqual(film.read_bytes(), before, "a dry run never touches the movie")
+
+    def test_with_nothing_set_dts_core_is_still_accepted_and_the_log_says_it_is_unverified(self) -> None:
+        film = self.movie("DTS Film (2004)", DTS_CORE)
+        before = film.read_bytes()
+        self.assertEqual(self._run("--dry-run"), 0)
+        self.assertIn("DTS Film (2004).mkv", self.report_section("2. DTS CORE"))
+        self.assertNotIn("DTS Film (2004).mkv", self.report_section("WOULD TRANSCODE"))
+        log = self.log.read_text(encoding="utf-8")
+        self.assertIn("yes (unverified on this player", log)
+        # The report tells the reader how to settle it, in the section itself.
+        self.assertIn("soundbar's display", self.report_section("2. DTS CORE"))
+        self.assertEqual(film.read_bytes(), before, "a dry run never touches the movie")
+
+    def test_the_flag_beats_the_environment_in_both_directions(self) -> None:
+        self.movie("DTS Film (2004)", DTS_CORE)
+        # env says decline, the flag says accept -> accepted.
+        self.assertEqual(self._run("--dry-run", "--dts-passthrough",
+                                   env={pc.DTS_ENV_VAR: "0"}), 0)
+        self.assertIn("DTS Film (2004).mkv", self.report_section("2. DTS CORE"))
+        self.assertNotIn("DTS Film (2004).mkv", self.report_section("WOULD TRANSCODE"))
+        # env says nothing, the flag says decline -> transcode planned.
+        self.assertEqual(self._run("--dry-run", "--no-dts-passthrough"), 0)
+        self.assertIn("DTS Film (2004).mkv", self.report_section("WOULD TRANSCODE"))
+
+    def test_the_environment_variable_actually_converts_a_dts_movie(self) -> None:
+        film = self.movie("DTS Film (2004)", DTS_CORE)
+        code = self._run(env={pc.DTS_ENV_VAR: "0",
+                              "FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
+        self.assertEqual(code, 0)
+        self.assertEqual(self.payload_of(film)["streams"][-1]["codec_name"], "ac3")
+        self.assertEqual(len(self.ffmpeg_invocations()), 1)
+
     def test_the_default_hdmi_in_wiring_accepts_multichannel_flac(self) -> None:
         # The default wiring is the chain as cabled: the Chromecast feeds the
         # soundbar's HDMI IN, which carries multichannel PCM, so a 6-channel

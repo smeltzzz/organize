@@ -14,7 +14,7 @@ lossless track cleanup.**
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-1244%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-1276%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
 
@@ -37,9 +37,10 @@ the reference playback chain** (Chromecast with Google TV HD `G454V` →
 Hisense `AX3125H` soundbar (HDMI IN) → Samsung `UN60F6350AF`) with
 zero work from the server. Every codec default — which audio the cleaner
 keeps, what the audio standardizer bakes in, what the bit-depth inspector
-flags — derives from that chain's measured capabilities; the dossier with
-every spec and source is [docs/hardware.md](docs/hardware.md), and
-`organize.py doctor` prints the chain it is assuming:
+flags — derives from that chain's documented capabilities; the dossier with
+every spec and source is [docs/hardware.md](docs/hardware.md) (it marks what is
+still unverified on the actual unit — chiefly whether the Chromecast passes
+base DTS), and `organize.py doctor` prints the chain it is assuming:
 
 ```
 Title (Year)/
@@ -112,7 +113,7 @@ One file, one purpose. Nothing else.
 | `movie_standardizer.py` | Tool 6 — the torrent-completion hook: parse scene names, hardlink into `Title (Year)/` (movie plus a bundled English sidecar). |
 | `pipeline.py` | **The one runner.** Runs the maintenance tools in the one correct order: extract → audio → clean → 10-bit → audit. |
 | `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `playbackchain.py` — **the one hardware-truth table** the toolkit's codec decisions derive from (facts + sources in [docs/hardware.md](docs/hardware.md)) — `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock — and `live.py` is the overwritable status line every sweep draws on a terminal and never anywhere else. |
-| `tests/` | Fully offline unit tests (1,244), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus the stand-ins: `fake_mkvmerge.py` / `fake_ffprobe.py` / `fake_ffmpeg.py` (real executables, enough to drive an end-to-end remux, extraction, transcode and inspection), `fakebin.py` (puts them on a PATH), `fakeprovider.py` (canned OpenSubtitles answers) and `hermetic.py` (pins the host toolchain and the network out). |
+| `tests/` | Fully offline unit tests (1,276), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus the stand-ins: `fake_mkvmerge.py` / `fake_ffprobe.py` / `fake_ffmpeg.py` (real executables, enough to drive an end-to-end remux, extraction, transcode and inspection), `fakebin.py` (puts them on a PATH), `fakeprovider.py` (canned OpenSubtitles answers) and `hermetic.py` (pins the host toolchain and the network out). |
 | `docs/` | The long-form documentation this page links to: the [playback-chain dossier](docs/hardware.md), the [tool reference](docs/tools.md), [the pipeline](docs/pipeline.md), [configuration](docs/configuration.md), [testing & development](docs/development.md) and, for maintainers, [merging & releasing](docs/merge-and-release.md). |
 | `benchmarks/` | The scripts behind every speed claim in this repo — stdlib-only, offline, re-runnable. |
 | `.env.example` | Every supported environment variable, annotated. |
@@ -267,7 +268,7 @@ one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
 | Tool | What it does | Needs |
 | :--- | :--- | :--- |
 | [`subtitle_extractor.py`](docs/tools.md#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: the movie's own **text** track via `mkvextract` (MP4s through a temporary MKV bridge), or an exact-moviehash OpenSubtitles match for image-only movies. An existing sidecar is authoritative and never touched; no title search, no OCR. | `mkvmerge` + `mkvextract` |
-| [`audio_standardizer.py`](docs/tools.md#2--audio_standardizerpy--chain-native-audio) | Makes audio native to the G454V chain: `ffprobe` sweep; keeps what's native (AC-3/E-AC-3), accepts DTS core and client-decoded PCM, and synthesizes **AC-3 5.1 @ 640 kbps** from every TrueHD/DTS-HD/DTS:X master (video/subs untouched, verified publish). | `ffmpeg` + `ffprobe` |
+| [`audio_standardizer.py`](docs/tools.md#2--audio_standardizerpy--chain-native-audio) | Makes audio native to the G454V chain: `ffprobe` sweep; keeps what's native (AC-3/E-AC-3), accepts client-decoded PCM and — until you test it once — DTS core (`ORGANIZE_DTS_PASSTHROUGH=0` converts it), and synthesizes **AC-3 5.1 @ 640 kbps** from every TrueHD/DTS-HD/DTS:X master (video/subs untouched, verified publish). | `ffmpeg` + `ffprobe` |
 | [`mkv_track_cleaner.py`](docs/tools.md#3--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best **chain-playable** audio track (the movie's own language — native Dolby over lossless-HD), strip every dub, commentary track and embedded subtitle. Video untouched; seeding movies deferred; a broken `.eng.srt` skips the movie. | `mkvmerge` |
 | [`bitdepth.py`](docs/tools.md#4--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect native HDR10 / HDR10+ / Dolby Vision fail-closed, and report what each file does on the chain (tone-mapped Direct Play vs. replace/re-encode). | `ffprobe` |
 | [`library_auditor.py`](docs/tools.md#5--library_auditorpy--read-only-health-check) | Strictly read-only health check of layout, naming and subtitles, with gating exit codes for cron. | nothing |
