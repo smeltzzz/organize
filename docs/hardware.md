@@ -204,9 +204,9 @@ fix, because it removes the whole column from the equation by never asking the
 TV to carry sound.
 
 The keep-one-track tier table (`mkv_track_cleaner.py`) encodes exactly that
-matrix: **chain-native Dolby (100) > base DTS core (80) > decode-to-PCM
+matrix: **chain-native Dolby (100/95) > base DTS core (80) > decode-to-PCM
 (60–66) > lossless-HD masters kept only as transcode sources (30–34) >
-unknown (0)**. "Highest sample rate wins" is the wrong metric on this chain;
+unknown (10)**. "Highest sample rate wins" is the wrong metric on this chain;
 "plays without a server" is the right one.
 
 ### Why AC-3 5.1 @ 640 kbps (and not 448k, and not E-AC-3)?
@@ -236,10 +236,19 @@ unknown (0)**. "Highest sample rate wins" is the wrong metric on this chain;
   = **ARC**, and expect stereo PCM from HDMI sources — see §3.)*
 * **Samsung UN60F6350AF:** with the default wiring it only ever receives
   video, so its audio menu is irrelevant to the chain — leave Anynet+
-  (HDMI-CEC) **on** so the TV remote and CEC wake behaviour still work, and
-  TV speaker **off**. (Under the `tv-arc` alternative, *Settings → Sound →
-  Digital Audio Out* must be revisited: on this unit only PCM is offered
-  for HDMI sources, §3, so full surround there is not reachable.)
+  (HDMI-CEC) **on** (it is what lets the TV remote drive the bar's
+  volume/power) and keep the panel's own speaker **off** (*Speaker Select →
+  External Speaker*). Two wiring details matter more than any menu here:
+  put the bar's HDMI OUT in a **non-ARC** HDMI input — the toolkit never
+  asks the TV to return audio, and on the ARC port with Anynet+ on, the TV
+  can beam the Chromecast's audio straight back at the bar, so the same
+  track is decoded twice; and whether the TV remote can *wake the
+  Chromecast* through the bar's HDMI IN is the bar's CEC relay to provide,
+  not the TV's — if it does not forward it, the Chromecast's own remote is
+  the answer, and nothing in the toolkit depends on it. (Under the
+  `tv-arc` alternative, *Settings → Sound → Digital Audio Out* must be
+  revisited: on this unit only PCM is offered for HDMI sources, §3, so full
+  surround there is not reachable.)
 
 ---
 
