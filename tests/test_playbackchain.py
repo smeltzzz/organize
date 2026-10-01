@@ -329,6 +329,35 @@ class WiringTests(unittest.TestCase):
         # On the default wiring DTS core is simply accepted.
         self.assertNotIn("cannot be relied on", pc.audio_chain_note("DTS", 6))
 
+    def test_native_dolby_51_carries_the_arc_warning_too(self) -> None:
+        # AUDIO_NATIVE used to return before ever consulting `wiring`, so AC-3
+        # and E-AC-3 printed the identical "bitstreams end-to-end" sentence on
+        # the tv-arc alternative - where docs/hardware.md §3 says this TV
+        # downmixes *every* HDMI source to stereo PCM before ARC/optical,
+        # "whatever the source sent". A Dolby bitstream is not exempt from
+        # that, so the note has to carry the same caveat its two sibling
+        # branches already carried.
+        for blob in ("AC-3", "EAC3", "eac3 Dolby Digital Plus", "DOLBY DIGITAL"):
+            for ch in (6, 8):
+                tag = f"{blob} {ch}ch"
+                note_default = pc.audio_chain_note(blob, ch)
+                note_arc = pc.audio_chain_note(blob, ch, pc.WIRING_TV_ARC)
+                self.assertNotEqual(note_default, note_arc, tag)
+                self.assertTrue(note_default.startswith("bitstreams end-to-end"), tag)
+                self.assertIn("PCM only", note_arc, tag)
+                self.assertIn("cannot be relied on", note_arc, tag)
+
+    def test_stereo_native_dolby_is_not_warned_about_over_arc(self) -> None:
+        # The warning is channel-gated exactly like the decode-to-PCM branch:
+        # a stereo AC-3/DD+ track folded down to stereo PCM by the TV loses
+        # nothing, so warning about it would be a false alarm.
+        for blob in ("AC-3", "EAC3"):
+            self.assertEqual(pc.audio_chain_note(blob, 2),
+                             pc.audio_chain_note(blob, 2, pc.WIRING_TV_ARC), blob)
+            self.assertTrue(
+                pc.audio_chain_note(blob, 2, pc.WIRING_TV_ARC)
+                .startswith("bitstreams end-to-end"), blob)
+
 
 class SummaryTests(unittest.TestCase):
     def test_the_chain_summary_names_all_three_devices(self) -> None:

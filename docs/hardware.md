@@ -88,8 +88,12 @@ can pass through. The bar *can* decode TrueHD and DTS-HD MA, but it never
 gets the chance from this player: the Chromecast cannot emit them (see
 above), and the toolkit therefore *normalizes* lossless-HD into the
 native-to-every-hop formats instead of fantasizing a different player into
-the chain. **Dolby Digital (AC-3) and Dolby Digital Plus (E-AC-3)
-bitstream through the entire chain with zero conversions anywhere.**
+the chain. **On the default `soundbar-hdmi-in` wiring, Dolby Digital (AC-3)
+and Dolby Digital Plus (E-AC-3) bitstream through the entire chain with zero
+conversions anywhere** — player to bar, bar decodes, nothing in between. Under
+the explicit `tv-arc` alternative that claim does *not* hold: the bitstream
+goes to the 2013 TV first, and this TV offers PCM only for HDMI sources (§3),
+so the ARC path may deliver it as stereo. See §5.
 
 The HDMI IN port accepts multichannel PCM — that is what makes AAC 5.1 /
 FLAC 7.1 / PCM tracks "playable as-is": the Chromecast decodes them and
@@ -168,15 +172,36 @@ leaves the player — the server transcodes audio on **every** play.
 
 | Source track player | G454V player | over HDMI IN | over ARC/opt | verdict in the toolkit |
 | :--- | :--- | :--- | :--- | :--- |
-| Dolby Digital (AC-3) 5.1 | passthrough ✅ | ✅ decodes | ✅ | **goal format** — synthesized when missing |
-| Dolby Digital Plus (E-AC-3, incl. Atmos JOC) | passthrough ✅ | ✅ decodes | ✅ (lossy DD+ on 2013 ARC) | **goal format** — best possible track on this chain |
+| Dolby Digital (AC-3) 5.1 | passthrough ✅ | ✅ decodes | ⚠️ this TV offers PCM only for HDMI sources, so ARC/opt may deliver it as stereo (§3) | **goal format** — synthesized when missing |
+| Dolby Digital Plus (E-AC-3, incl. Atmos JOC) | passthrough ✅ | ✅ decodes | ⚠️ same PCM-only limit — DD+ Atmos does not survive this TV's ARC path (§3) | **goal format** — best possible track on this chain |
 | AAC 5.1 / stereo | decode → PCM ✅ | ✅ (multich. PCM) | ⚠️ stereo only on this TV | stereo = fine; 5.1+ native on the **default** HDMI-IN wiring, **AC-3 candidate only under `tv-arc`** |
 | FLAC / PCM / ALAC 7.1 | decode → PCM ✅ | ✅ multich. | ⚠️ stereo only on this TV | native multichannel on the **default** HDMI-IN wiring; **AC-3 candidate (5.1+) only under `tv-arc`** |
 | MP3 / Opus / Vorbis | decode → PCM ✅ | ✅ | ✅ stereo | fine |
-| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ | accepted by default; `--no-dts-passthrough` transcodes it |
+| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | accepted by default; `--no-dts-passthrough` transcodes it |
 | **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **AC-3 5.1 640k synthesized** from it by audio_standardizer |
 | **DTS-HD MA / HRA, DTS:X** | ❌ **cannot be emitted at all** | (same) | ❌ | **AC-3 5.1 640k synthesized** |
 | WMA Pro / unknown | ❌ | ❌ | ❌ | fail-closed: reported for a human, never auto-touched |
+
+**Read the "over ARC/opt" column as one limit, not nine.** Every ⚠️ in it has
+the same single cause: on this UN60F6350AF the digital audio output offers PCM
+only for HDMI sources (§3, user-confirmed 2026-09), and §3's wording is
+deliberate — the TV downmixes *every* HDMI source before ARC/optical,
+**whatever the source sent**. A Dolby bitstream is not obviously exempt from
+that, which is why AC-3 and DD+ Atmos are ⚠️ here rather than ✅. (ARC as a
+*standard* carries PCM 2.0 / Dolby Digital 5.1 / DTS 5.1 — see the Samsung
+article in Sources; what this TV's menu will offer for an HDMI input is the
+narrower thing.)
+
+One open question this matrix does not settle, stated plainly rather than
+papered over: §4 has the toolkit bake AC-3 into multichannel PCM-decoded
+movies under `tv-arc`, and that compensation only pays off if the TV *will*
+forward a Dolby bitstream it received on HDMI despite its menu offering PCM
+only. Whether the PCM-only limit applies to a received bitstream, or only to
+audio the TV decoded itself, has not been measured on this unit — so the ⚠️
+above is deliberately "cannot be relied on" and not "never works". Until it is
+measured, do not depend on ARC for surround here: the default wiring is the
+fix, because it removes the whole column from the equation by never asking the
+TV to carry sound.
 
 The keep-one-track tier table (`mkv_track_cleaner.py`) encodes exactly that
 matrix: **chain-native Dolby (100) > base DTS core (80) > decode-to-PCM
