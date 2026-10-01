@@ -240,12 +240,20 @@ unknown (10)**. "Highest sample rate wins" is the wrong metric on this chain;
   volume/power) and keep the panel's own speaker **off** (*Speaker Select →
   External Speaker*). Two wiring details matter more than any menu here:
   put the bar's HDMI OUT in a **non-ARC** HDMI input — the toolkit never
-  asks the TV to return audio, and on the ARC port with Anynet+ on, the TV
-  can beam the Chromecast's audio straight back at the bar, so the same
-  track is decoded twice; and whether the TV remote can *wake the
-  Chromecast* through the bar's HDMI IN is the bar's CEC relay to provide,
-  not the TV's — if it does not forward it, the Chromecast's own remote is
-  the answer, and nothing in the toolkit depends on it. (Under the
+  asks the TV to return audio, and on the ARC port with Sound Output set to
+  *Receiver* the TV sends the Chromecast's audio back to the bar as a second
+  copy of the same program (a bar plays one input at a time and cannot know
+  which you mean, so whether that is doubled audio or a silent swap onto the
+  TV's PCM-only path depends on its input arbitration — a non-ARC port makes
+  the return path physically impossible); and whether the TV remote can
+  *wake the Chromecast* through the bar's HDMI IN is the bar's CEC relay to
+  provide, not the TV's — if it does not forward it, the Chromecast's own
+  remote is the answer, and nothing in the toolkit depends on it. The price
+  of the non-ARC port is that the TV/Chromecast remotes no longer carry the
+  bar's volume (System Audio Control rides on ARC), so the bar's own remote
+  does that job, and TV-tuner audio needs the bar's optical input (where
+  broadcast Dolby Digital 5.1 does survive — the PCM-only limit in §3 is an
+  HDMI-*source* limit, not a tuner limit). (Under the
   `tv-arc` alternative, *Settings → Sound → Digital Audio Out* must be
   revisited: on this unit only PCM is offered for HDMI sources, §3, so full
   surround there is not reachable.)
