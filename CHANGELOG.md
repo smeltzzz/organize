@@ -6,6 +6,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`audio_chain_note()` no longer claims a Dolby bitstream survives the
+  `tv-arc` alternative.** The `AUDIO_NATIVE` branch returned before ever
+  consulting its `wiring` argument, so AC-3 and E-AC-3 printed the identical
+  "bitstreams end-to-end" sentence on both wirings — while `docs/hardware.md`
+  §3 records (user-confirmed 2026-09) that this UN60F6350AF offers PCM only
+  for HDMI sources and downmixes *every* HDMI source before ARC/optical,
+  "whatever the source sent". Its two sibling branches (`AUDIO_DTS_CORE` and
+  multichannel `AUDIO_DECODE_PCM`) already carried that caveat. Like the PCM
+  branch it is channel-gated: a stereo AC-3/DD+ track folded to stereo PCM
+  loses nothing, so it is not warned about. Reporting only — no
+  classification, tier or transcode decision changes, and the default
+  `soundbar-hdmi-in` wiring was already correct.
+- `docs/hardware.md` §5 brought in line with §3: AC-3, E-AC-3 and base DTS
+  core are ⚠️ in the "over ARC/opt" column rather than ✅, and the column now
+  reads as the single TV-side limit it actually is. §5 also names the one
+  thing still unmeasured — whether this TV's PCM-only limit applies to a Dolby
+  bitstream it merely *received*, which is what §4's AC-3 compensation assumes
+  — rather than settling it by assertion. §2's "bitstream through the entire
+  chain with zero conversions anywhere" is scoped to the default wiring.
+
+### Added
+- Two `WiringTests` pinning the above (suite 1242 → 1244).
+
 ## [8.0.2] - 2026-09-30
 
 Patch release hardening the core after 8.0.1 — two additional transaction/locking races closed, atomic-write edge fixed, hidden-file discovery unified, and missing export restored. All 18 CI checks green.

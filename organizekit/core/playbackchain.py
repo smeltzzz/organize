@@ -394,6 +394,27 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> 
     cls = classify_audio_blob(blob)
     ch = channels or 2
     if cls == AUDIO_NATIVE:
+        if ch > 2 and wiring == WIRING_TV_ARC:
+            # The Chromecast does pass a Dolby bitstream out over HDMI, but on
+            # this TV it passes it to the 2013 panel, not to the bar: the TV
+            # offers PCM only for HDMI sources (Display.arc, user-confirmed),
+            # and docs/hardware.md §3 says it downmixes every HDMI source
+            # before ARC/optical, whatever the source sent. Same hedged
+            # register and same `ch > 2` gate as the decode-to-PCM branch
+            # below - a stereo AC-3/DD+ track folded to stereo PCM loses
+            # nothing, so only a 5.1+ track is worth warning about. The limit
+            # is the TV's input-side behaviour, so the ARC path is unreliable
+            # rather than provably dead. Whether that PCM-only limit also
+            # applies to a Dolby bitstream the TV merely *received* (as opposed
+            # to audio it decoded itself) has not been measured on this unit -
+            # it is what §4's AC-3 compensation assumes, and §5 records it as
+            # an open question rather than settling it by assertion.
+            return ("Dolby bitstream (AC-3 / DD+ Atmos): the Chromecast passes it "
+                    "through, but it passes it to this TV, which offers PCM only "
+                    "for HDMI sources - the ARC/optical path cannot be relied on "
+                    "to carry it and this 5.1+ track may reach the bar as stereo "
+                    "PCM; the default wiring (Chromecast -> soundbar HDMI IN) "
+                    "bitstreams it end-to-end")
         return ("bitstreams end-to-end: Chromecast HDMI passthrough -> "
                 "AX3125H decodes (Dolby Digital / DD+ Atmos)")
     if cls == AUDIO_DTS_CORE:
