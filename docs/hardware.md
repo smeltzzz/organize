@@ -92,8 +92,8 @@ the chain. **On the default `soundbar-hdmi-in` wiring, Dolby Digital (AC-3)
 and Dolby Digital Plus (E-AC-3) bitstream through the entire chain with zero
 conversions anywhere** — player to bar, bar decodes, nothing in between. Under
 the explicit `tv-arc` alternative that claim does *not* hold: the bitstream
-goes to the 2013 TV first, and this TV offers PCM only for HDMI sources (§3),
-so the ARC path may deliver it as stereo. See §5.
+goes to the 2013 TV first, and this TV's SPDIF formats are input-dependent
+(§3), so the ARC path may deliver it as stereo. See §5.
 
 The HDMI IN port accepts multichannel PCM — that is what makes AAC 5.1 /
 FLAC 7.1 / PCM tracks "playable as-is": the Chromecast decodes them and
@@ -118,27 +118,37 @@ Three things decide the whole wiring story:
    but it cannot carry 5.1/7.1 PCM; the bar's multichannel-PCM capability is
    unreachable through it.
 2. **What the TV offers depends on the input source — and on this unit it
-   is PCM only.** The F-series e-manual says of Digital Audio Output
-   (SPDIF) that "the available Digital Audio Output (SPDIF) formats may
-   vary depending on the input source". With HDMI sources connected (the
-   Chromecast is the source here), **this UN60F6350AF offers PCM only** —
-   Dolby Digital/DTS are not selectable (**confirmed on this unit,
-   2026-09**; the greyed-out-for-HDMI-sources behaviour on 2013-era
-   Samsungs is widely reported). The TV therefore downmixes every HDMI
-   source to stereo PCM before ARC/optical, whatever the source sent. This
-   is an *input-side* limit, not a cable or soundbar problem: the same TV
-   will still bitstream Dolby Digital from its own tuner and apps, which is
-   why the menu is content/input dependent in the first place.
+   has been measured both ways.** The F-series e-manual says of Digital
+   Audio Output (SPDIF) that "the available Digital Audio Output (SPDIF)
+   formats may vary depending on the input source". Two measurements on
+   this unit bracket the behaviour: with HDMI sources connected and no
+   Dolby bitstream on the input, the menu offered **PCM only**
+   (**confirmed on this unit, 2026-09**; the greyed-out-for-HDMI-sources
+   behaviour on 2013-era Samsungs is widely reported); with Speaker Select
+   on *External Speaker* and the soundbar's HDMI passthrough feeding HDMI 1
+   — a Dolby bitstream on the input — the same menu offered **PCM, Dolby
+   Digital and DTS Neo 2:5** (observed **2026-10-01**). The offered set
+   therefore tracks the *input signal*, matching the widely-reported
+   pattern that Dolby Digital appears only once a Dolby bitstream is
+   actually detected. What has **not** been measured on this unit is the
+   other half: whether selecting *Dolby Digital* really puts that bitstream
+   on the ARC/optical output end-to-end, or whether the TV decodes and
+   re-emits. Until it is tested (bar on its optical input, format set to
+   Dolby Digital, a DD 5.1 movie), read "offered" as "offered", not
+   "verified".
 3. **Consequence for the wiring.** On ARC, 5.1+ content sourced from the
-   Chromecast reaches the AX3125H as **stereo PCM** — the one material
-   limit the toolkit used to *compensate* for by baking AC-3 5.1 into
-   multichannel-PCM movies (§5). Cabling the Chromecast through the
-   soundbar's HDMI IN instead removes the limit at the hardware level, and
-   that is the wiring this chain now uses and the toolkit assumes by
-   default. `tv-arc` remains supported (`--wiring tv-arc` /
-   `ORGANIZE_PLAYBACK_WIRING=tv-arc`) for anyone who re-cables the old
-   way, and re-enables the AC-3 compensation for multichannel
-   PCM-decoded sources.
+   Chromecast reaches the AX3125H as **stereo PCM whenever the TV
+   downmixes it** — the one material limit the toolkit used to
+   *compensate* for by baking AC-3 5.1 into multichannel-PCM movies (§5).
+   Whether a Dolby bitstream survives that return path is input- and
+   format-dependent (§2): the 2026-10-01 measurement says the TV is at
+   least *willing* to offer Dolby Digital when it sees one, but delivery is
+   unverified. Cabling the Chromecast through the soundbar's HDMI IN
+   removes the question at the hardware level, and that is the wiring this
+   chain now uses and the toolkit assumes by default. `tv-arc` remains
+   supported (`--wiring tv-arc` / `ORGANIZE_PLAYBACK_WIRING=tv-arc`) for
+   anyone who re-cables the old way, and re-enables the AC-3 compensation
+   for multichannel PCM-decoded sources.
 
 **The chain is wired through the soundbar's HDMI IN** (`soundbar-hdmi-in`):
 Chromecast → AX3125H HDMI IN, AX3125H HDMI OUT → TV. Everything in §5
@@ -150,7 +160,7 @@ flips if it is selected.
 | Wiring | Video limit | Audio reality on 5.1+ content |
 | :--- | :--- | :--- |
 | **Chromecast → AX3125H HDMI IN → TV (`soundbar-hdmi-in`, DEFAULT — how this chain is cabled)** | 1080p60 chain-wide | the bar decodes DD/DD+/Atmos/DTS/multichannel PCM itself; player passthrough or decode; **no server work** |
-| Chromecast → TV HDMI, TV --**ARC**→ AX3125H (`tv-arc`, explicit alternative) | 1080p60 | the TV offers PCM only for HDMI sources on this unit, so everything arrives as **stereo PCM** at the bar; multichannel PCM-decoded movies become AC-3 transcode candidates, and the toolkit bakes AC-3 for exactly those |
+| Chromecast → TV HDMI, TV --**ARC**→ AX3125H (`tv-arc`, explicit alternative) | 1080p60 | the TV's SPDIF formats are input-dependent (§3): PCM unless it sees a Dolby bitstream, in which case Dolby Digital is *offered* (2026-10-01, unverified end-to-end) — so multichannel content may still arrive as **stereo PCM** at the bar; multichannel PCM-decoded movies become AC-3 transcode candidates, and the toolkit bakes AC-3 for exactly those |
 | Chromecast → TV HDMI, TV --**optical**→ AX3125H | 1080p60 | same limits as ARC (no CEC, slightly worse UX) |
 
 The toolkit's default is **`soundbar-hdmi-in`**: Chromecast into the
@@ -159,7 +169,7 @@ soundbar's HDMI IN, audio decoded by the bar, video passed through to the TV.
 `ORGANIZE_PLAYBACK_WIRING=tv-arc`) and changes exactly one rule: a
 multichannel AAC/FLAC/PCM movie that plays natively over HDMI IN becomes an
 AC-3 transcode candidate on the TV's ARC/optical path, because that path
-delivers it as stereo PCM (§3).
+may deliver it as stereo PCM (§3).
 
 Nothing about the *video* side changes between the two: both pass the picture
 through at up to 1080p60, and the G454V's decode ceiling, HDR handling and
@@ -172,33 +182,37 @@ leaves the player — the server transcodes audio on **every** play.
 
 | Source track player | G454V player | over HDMI IN | over ARC/opt | verdict in the toolkit |
 | :--- | :--- | :--- | :--- | :--- |
-| Dolby Digital (AC-3) 5.1 | passthrough ✅ | ✅ decodes | ⚠️ this TV offers PCM only for HDMI sources, so ARC/opt may deliver it as stereo (§3) | **goal format** — synthesized when missing |
-| Dolby Digital Plus (E-AC-3, incl. Atmos JOC) | passthrough ✅ | ✅ decodes | ⚠️ same PCM-only limit — DD+ Atmos does not survive this TV's ARC path (§3) | **goal format** — best possible track on this chain |
+| Dolby Digital (AC-3) 5.1 | passthrough ✅ | ✅ decodes | ⚠️ input-dependent: PCM unless the TV sees a Dolby bitstream, then DD is *offered* (2026-10-01, unverified) — ARC/opt may deliver it as stereo (§3) | **goal format** — synthesized when missing |
+| Dolby Digital Plus (E-AC-3, incl. Atmos JOC) | passthrough ✅ | ✅ decodes | ⚠️ same input-dependent limit — and DD+ Atmos does not survive plain ARC in any case (§3) | **goal format** — best possible track on this chain |
 | AAC 5.1 / stereo | decode → PCM ✅ | ✅ (multich. PCM) | ⚠️ stereo only on this TV | stereo = fine; 5.1+ native on the **default** HDMI-IN wiring, **AC-3 candidate only under `tv-arc`** |
 | FLAC / PCM / ALAC 7.1 | decode → PCM ✅ | ✅ multich. | ⚠️ stereo only on this TV | native multichannel on the **default** HDMI-IN wiring; **AC-3 candidate (5.1+) only under `tv-arc`** |
 | MP3 / Opus / Vorbis | decode → PCM ✅ | ✅ | ✅ stereo | fine |
-| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | accepted by default; `--no-dts-passthrough` transcodes it |
+| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same input-dependent limit (§3) | accepted by default; `--no-dts-passthrough` transcodes it |
 | **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **AC-3 5.1 640k synthesized** from it by audio_standardizer |
 | **DTS-HD MA / HRA, DTS:X** | ❌ **cannot be emitted at all** | (same) | ❌ | **AC-3 5.1 640k synthesized** |
 | WMA Pro / unknown | ❌ | ❌ | ❌ | fail-closed: reported for a human, never auto-touched |
 
 **Read the "over ARC/opt" column as one limit, not nine.** Every ⚠️ in it has
-the same single cause: on this UN60F6350AF the digital audio output offers PCM
-only for HDMI sources (§3, user-confirmed 2026-09), and §3's wording is
-deliberate — the TV downmixes *every* HDMI source before ARC/optical,
-**whatever the source sent**. A Dolby bitstream is not obviously exempt from
-that, which is why AC-3 and DD+ Atmos are ⚠️ here rather than ✅. (ARC as a
+the same single cause: what this UN60F6350AF's digital audio output offers
+depends on the input signal (§3), and a downmix is always on the table —
+the TV downmixes HDMI sources to PCM whenever no bitstream is offered or
+selected. A Dolby bitstream is not obviously exempt (2026-09 measurement),
+yet the 2026-10-01 measurement shows Dolby Digital *is* offered once one is
+detected on the input — offered, not verified end-to-end. That is why AC-3
+and DD+ Atmos stay ⚠️ here rather than ✅. (ARC as a
 *standard* carries PCM 2.0 / Dolby Digital 5.1 / DTS 5.1 — see the Samsung
 article in Sources; what this TV's menu will offer for an HDMI input is the
 narrower thing.)
 
 One open question this matrix does not settle, stated plainly rather than
 papered over: §4 has the toolkit bake AC-3 into multichannel PCM-decoded
-movies under `tv-arc`, and that compensation only pays off if the TV *will*
-forward a Dolby bitstream it received on HDMI despite its menu offering PCM
-only. Whether the PCM-only limit applies to a received bitstream, or only to
-audio the TV decoded itself, has not been measured on this unit — so the ⚠️
-above is deliberately "cannot be relied on" and not "never works". Until it is
+movies under `tv-arc`, and that compensation only pays off if the TV will
+*not* forward a Dolby bitstream it received on HDMI. The 2026-10-01
+measurement (§3) shows the TV at least *offers* Dolby Digital as an SPDIF
+format when a Dolby bitstream is on the input — so "this TV never forwards a
+received bitstream" is no longer a safe assumption — but whether selecting it
+delivers the bitstream over ARC/optical has still not been measured
+end-to-end. So the ⚠️ above is "cannot be relied on", not "never works". Until it is
 measured, do not depend on ARC for surround here: the default wiring is the
 fix, because it removes the whole column from the equation by never asking the
 TV to carry sound.
@@ -231,32 +245,44 @@ unknown (10)**. "Highest sample rate wins" is the wrong metric on this chain;
 * **AX3125H (default HDMI-IN wiring):** the Chromecast sits on the bar's
   **HDMI IN** socket, and the bar's **HDMI OUT (TV eARC/ARC)** goes to a TV
   HDMI input; source = **HDMI In**; EQ mode Movie; night mode off;
-  subwoofer paired (auto). *(If you ever re-cable to the TV's ARC port
+  subwoofer paired (auto). **If audio ever dies after a cable or TV-menu
+  change, read the bar's display before touching the TV:** it must show
+  *HDMI In* — a bar plays one input at a time and will sit silently on ARC,
+  Optical, AUX or Bluetooth while video still passes through, and no TV
+  setting can revive it. *(If you ever re-cable to the TV's ARC port
   instead: TV's designated HDMI (ARC) lead into the bar's HDMI OUT, source
-  = **ARC**, and expect stereo PCM from HDMI sources — see §3.)*
+  = **ARC**, and expect stereo PCM from HDMI sources unless the TV sees a
+  Dolby bitstream — see §3.)*
 * **Samsung UN60F6350AF:** with the default wiring it only ever receives
-  video, so its audio menu is irrelevant to the chain — leave Anynet+
-  (HDMI-CEC) **on** (it is what lets the TV remote drive the bar's
-  volume/power) and keep the panel's own speaker **off** (*Speaker Select →
-  External Speaker*). Two wiring details matter more than any menu here:
+  video, so its audio menu cannot affect the bar — the bar decodes the
+  Chromecast's bitstream locally. Keep the panel silent (*Speaker Select →
+  External Speaker*, which routes audio to the unused optical jack; if
+  selecting it drops Anynet+ on this firmware, *TV Speaker* with the TV
+  volume at 0 is the equivalent) and set *Digital Audio Out → Audio Format*
+  to **Dolby Digital** — inert in this wiring, correct if the optical path
+  is ever used (§3). Two wiring details matter more than any menu here:
   put the bar's HDMI OUT in a **non-ARC** HDMI input — the toolkit never
   asks the TV to return audio, and on the ARC port with Sound Output set to
   *Receiver* the TV sends the Chromecast's audio back to the bar as a second
   copy of the same program (a bar plays one input at a time and cannot know
   which you mean, so whether that is doubled audio or a silent swap onto the
-  TV's PCM-only path depends on its input arbitration — a non-ARC port makes
+  TV's return path depends on its input arbitration — a non-ARC port makes
   the return path physically impossible); and whether the TV remote can
   *wake the Chromecast* through the bar's HDMI IN is the bar's CEC relay to
   provide, not the TV's — if it does not forward it, the Chromecast's own
-  remote is the answer, and nothing in the toolkit depends on it. The price
-  of the non-ARC port is that the TV/Chromecast remotes no longer carry the
-  bar's volume (System Audio Control rides on ARC), so the bar's own remote
-  does that job, and TV-tuner audio needs the bar's optical input (where
-  broadcast Dolby Digital 5.1 does survive — the PCM-only limit in §3 is an
-  HDMI-*source* limit, not a tuner limit). (Under the
-  `tv-arc` alternative, *Settings → Sound → Digital Audio Out* must be
-  revisited: on this unit only PCM is offered for HDMI sources, §3, so full
-  surround there is not reachable.)
+  remote is the answer, and nothing in the toolkit depends on it. Anynet+
+  itself is optional for sound (CEC rides on every port); it buys one-touch
+  play and power sync, and on this firmware it and the speaker selection
+  fight each other — if the Anynet+ toggle flips off when External Speaker
+  is chosen, that is the known interaction, not a fault. The price of the
+  non-ARC port is that the TV/Chromecast remotes no longer carry the bar's
+  volume (System Audio Control rides on ARC), so the bar's own remote does
+  that job, and TV-tuner audio needs the bar's optical input (where
+  broadcast Dolby Digital 5.1 does survive — the input-dependent limit in
+  §3 is about HDMI *sources*, not the tuner). (Under the `tv-arc`
+  alternative, *Settings → Sound → Digital Audio Out* must be revisited:
+  the offered formats depend on the input signal, §3, and only PCM is
+  guaranteed.)
 
 ---
 
@@ -335,12 +361,16 @@ Display:
   <https://www.avsforum.com/threads/getting-a-samsung-tv-to-output-dolby-digital-5-1-through-optical-out.1509865/> ·
   <https://www.reddit.com/r/hometheater/comments/pkz268/>
 * **USER-CONFIRMED (2026-09) on the actual UN60F6350AF in this chain:** with
-  HDMI sources connected, the TV's digital audio output offers **PCM only**
-  (Dolby Digital/DTS are not selectable). This is the direct observation the
-  default wiring change rests on; it is bounded to this unit, and the
-  sources above explain why it is expected behavior on this generation
-  rather than a fault. No claim is made here about other units or other
-  input types.
+  HDMI sources connected and no Dolby bitstream on the input, the TV's
+  digital audio output offers **PCM only** (Dolby Digital/DTS are not
+  selectable). **Refined (2026-10-01), same unit:** with Speaker Select on
+  *External Speaker* and a Dolby bitstream arriving on the input (the
+  soundbar's HDMI passthrough feeding HDMI 1), the same menu offered **PCM,
+  Dolby Digital and DTS Neo 2:5** — the offered set tracks the input signal,
+  so the 2026-09 "PCM only" reading describes one state, not a property of
+  the TV. Still unmeasured: whether selecting *Dolby Digital* delivers the
+  bitstream over ARC/optical end-to-end. The default wiring rests on none of
+  this — it removes the TV from the audio path entirely.
 
 Playback-chain mechanics:
 

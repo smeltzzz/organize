@@ -188,7 +188,7 @@ answer. For each movie it probes (`ffprobe`) and classifies:
 | :--- | :--- | :--- |
 | AC-3 / E-AC-3 on board | `native-ok` | nothing — already bitstreams end-to-end |
 | base 5.1 DTS core | `dts-core-ok` | accepted (the AX3125H has a DTS decoder and the player's Amlogic firmware passes core DTS — unofficial but real); `--no-dts-passthrough` transcodes these too |
-| AAC / FLAC / PCM / MP3 / Opus | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar takes multichannel PCM, while the explicit `--wiring tv-arc` (this TV offers PCM only for HDMI sources = stereo PCM) makes them transcode candidates |
+| AAC / FLAC / PCM / MP3 / Opus | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar takes multichannel PCM, while the explicit `--wiring tv-arc` (this TV's digital audio output is input-dependent and may deliver HDMI sources as stereo PCM) makes them transcode candidates |
 | TrueHD / DTS-HD MA / DTS-HD HRA / DTS:X | `transcoded-ac3` | **one AC-3 track is synthesized and appended, video untouched** |
 | unknown codec | `review-unknown` | fail-closed in the report; never auto-touched |
 | still hardlinked to a seed | `deferred-seeding` | untouched until seeding stops |

@@ -145,7 +145,7 @@ SOURCES: tuple[str, ...] = (
     "https://manuals.plus/hisense/ax3125h-3-1-2ch-440w-dolby-atmos-soundbar-with-wireless-subwoofer-manual (AX3125H user manual: HDMI IN socket for HDMI source devices; HDMI OUT (TV eARC/ARC); input-format table PCM / Dolby Digital / DD+ / TrueHD -> MPCM)",
     "https://www.manualowl.com/m/Samsung/UN60F6350AF/Manual/347300 (UN60F6350AF e-manual: 'ARC is only available through the HDMI (ARC) port'; Digital Audio Output (SPDIF) formats 'may vary depending on the input source')",
     "https://www.samsung.com/sg/support/tv-audio-video/how-to-use-the-hdmi-arc-port-on-a-samsung-tv/ (Samsung support: HDMI-ARC carries PCM 2ch, Dolby Digital up to 5.1 and DTS Digital Surround up to 5.1; 2013-2014 F/H-series sound-output path)",
-    "USER-CONFIRMED 2026-09 on the actual UN60F6350AF: with HDMI sources connected, the TV offers PCM only as its digital audio output format, so the ARC/optical path delivers multichannel content as stereo PCM",
+    "USER-CONFIRMED 2026-09 on the actual UN60F6350AF: with HDMI sources connected and no Dolby bitstream on the input, the TV offers PCM only as its digital audio output format; REFINED 2026-10-01 (same unit): with Speaker Select on External Speaker and a Dolby bitstream arriving on the input (the soundbar's HDMI passthrough), PCM / Dolby Digital / DTS Neo 2:5 are all offered - the offered set is input-signal-dependent, and whether selecting Dolby Digital delivers the bitstream end-to-end remains unverified",
     "https://jellyfin.org/docs/general/clients/codec-support/ (Jellyfin Android-TV codec support matrix: AAC/AC3/EAC3 direct)",
 )
 
@@ -158,9 +158,9 @@ SOURCES: tuple[str, ...] = (
 #: picture through. THE DEFAULT — this is how the chain is actually cabled.
 WIRING_SOUNDBAR_HDMI_IN = "soundbar-hdmi-in"
 #: Chromecast -> TV HDMI, TV --ARC/optical--> soundbar. Explicit alternative
-#: only: on this 2013 TV the digital audio output offers PCM for HDMI sources,
-#: so multichannel content arrives at the bar as stereo PCM (docs/hardware.md
-#: §3-§4). Kept supported and tested; never assumed.
+#: only: on this 2013 TV the digital audio output is input-dependent and may
+#: deliver multichannel content as stereo PCM (docs/hardware.md §3-§4). Kept
+#: supported and tested; never assumed.
 WIRING_TV_ARC = "tv-arc"
 
 WIRING_ENV_VAR = "ORGANIZE_PLAYBACK_WIRING"
@@ -396,42 +396,43 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> 
     if cls == AUDIO_NATIVE:
         if ch > 2 and wiring == WIRING_TV_ARC:
             # The Chromecast does pass a Dolby bitstream out over HDMI, but on
-            # this TV it passes it to the 2013 panel, not to the bar: the TV
-            # offers PCM only for HDMI sources (Display.arc, user-confirmed),
-            # and docs/hardware.md §3 says it downmixes every HDMI source
-            # before ARC/optical, whatever the source sent. Same hedged
-            # register and same `ch > 2` gate as the decode-to-PCM branch
-            # below - a stereo AC-3/DD+ track folded to stereo PCM loses
-            # nothing, so only a 5.1+ track is worth warning about. The limit
-            # is the TV's input-side behaviour, so the ARC path is unreliable
-            # rather than provably dead. Whether that PCM-only limit also
-            # applies to a Dolby bitstream the TV merely *received* (as opposed
-            # to audio it decoded itself) has not been measured on this unit -
-            # it is what §4's AC-3 compensation assumes, and §5 records it as
-            # an open question rather than settling it by assertion.
+            # this TV it passes it to the 2013 panel, not to the bar: what the
+            # TV's digital audio output offers is input-dependent
+            # (Display.arc), and docs/hardware.md §3 says a downmix is always
+            # on the table. Same hedged register and same `ch > 2` gate as the
+            # decode-to-PCM branch below - a stereo AC-3/DD+ track folded to
+            # stereo PCM loses nothing, so only a 5.1+ track is worth warning
+            # about. The limit is the TV's input-side behaviour, so the ARC
+            # path is unreliable rather than provably dead. The 2026-10-01
+            # measurement shows Dolby Digital is *offered* once a Dolby
+            # bitstream is on the input, but whether selecting it delivers the
+            # bitstream over ARC/optical is unverified - it is what §4's AC-3
+            # compensation assumes away, and §5 records it as an open question
+            # rather than settling it by assertion.
             return ("Dolby bitstream (AC-3 / DD+ Atmos): the Chromecast passes it "
-                    "through, but it passes it to this TV, which offers PCM only "
-                    "for HDMI sources - the ARC/optical path cannot be relied on "
-                    "to carry it and this 5.1+ track may reach the bar as stereo "
-                    "PCM; the default wiring (Chromecast -> soundbar HDMI IN) "
-                    "bitstreams it end-to-end")
+                    "through, but it passes it to this TV, whose digital audio "
+                    "output is input-dependent and may downmix it - the "
+                    "ARC/optical path cannot be relied on to carry it and this "
+                    "5.1+ track may reach the bar as stereo PCM; the default "
+                    "wiring (Chromecast -> soundbar HDMI IN) bitstreams it "
+                    "end-to-end")
         return ("bitstreams end-to-end: Chromecast HDMI passthrough -> "
                 "AX3125H decodes (Dolby Digital / DD+ Atmos)")
     if cls == AUDIO_DTS_CORE:
         if wiring == WIRING_TV_ARC:
-            return ("DTS core: the soundbar decodes it, but this TV offers PCM only "
-                    "for HDMI sources, so the ARC/optical path cannot be relied on "
-                    "to carry it - the default wiring (Chromecast -> soundbar "
-                    "HDMI IN) can")
+            return ("DTS core: the soundbar decodes it, but this TV's digital "
+                    "audio output is input-dependent and may downmix it, so the "
+                    "ARC/optical path cannot be relied on to carry it - the "
+                    "default wiring (Chromecast -> soundbar HDMI IN) can")
         return ("DTS core: chipset-level passthrough from the Chromecast "
                 "(works on Amlogic Android TV builds; not on Google's "
                 "official list) -> AX3125H DTS decoder")
     if cls == AUDIO_DECODE_PCM:
         if ch > 2 and wiring == WIRING_TV_ARC:
             return ("the Chromecast decodes this to PCM, but this TV's digital audio "
-                    "output offers PCM 2.0 for HDMI sources - over ARC/optical this "
-                    "5.1+ track arrives as stereo unless the Chromecast plugs into "
-                    "the soundbar's HDMI IN (the default wiring)")
+                    "output may deliver it as PCM 2.0 over ARC/optical - this "
+                    "5.1+ track arrives as stereo unless the Chromecast plugs "
+                    "into the soundbar's HDMI IN (the default wiring)")
         return ("decoded by the Chromecast to PCM " +
                 ("(multichannel; the bar accepts it over HDMI IN)" if ch > 2
                  else "(stereo)") )

@@ -332,11 +332,12 @@ class WiringTests(unittest.TestCase):
     def test_native_dolby_51_carries_the_arc_warning_too(self) -> None:
         # AUDIO_NATIVE used to return before ever consulting `wiring`, so AC-3
         # and E-AC-3 printed the identical "bitstreams end-to-end" sentence on
-        # the tv-arc alternative - where docs/hardware.md §3 says this TV
-        # downmixes *every* HDMI source to stereo PCM before ARC/optical,
-        # "whatever the source sent". A Dolby bitstream is not exempt from
-        # that, so the note has to carry the same caveat its two sibling
-        # branches already carried.
+        # the tv-arc alternative - where docs/hardware.md §3 says this TV's
+        # SPDIF formats are input-dependent and a downmix is always on the
+        # table. A Dolby bitstream is not exempt from that (the 2026-10-01
+        # measurement shows Dolby Digital is *offered* once one is on the
+        # input, but end-to-end delivery is unverified), so the note has to
+        # carry the same caveat its two sibling branches already carried.
         for blob in ("AC-3", "EAC3", "eac3 Dolby Digital Plus", "DOLBY DIGITAL"):
             for ch in (6, 8):
                 tag = f"{blob} {ch}ch"
@@ -344,7 +345,7 @@ class WiringTests(unittest.TestCase):
                 note_arc = pc.audio_chain_note(blob, ch, pc.WIRING_TV_ARC)
                 self.assertNotEqual(note_default, note_arc, tag)
                 self.assertTrue(note_default.startswith("bitstreams end-to-end"), tag)
-                self.assertIn("PCM only", note_arc, tag)
+                self.assertIn("input-dependent", note_arc, tag)
                 self.assertIn("cannot be relied on", note_arc, tag)
 
     def test_stereo_native_dolby_is_not_warned_about_over_arc(self) -> None:
