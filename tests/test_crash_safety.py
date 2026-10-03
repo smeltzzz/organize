@@ -116,7 +116,8 @@ class RemuxCrashTests(unittest.TestCase):
     def _stats(self) -> dict:
         return {"cleaned": [], "already_clean": [], "skipped_no_english": [],
                 "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
-                "remux_without_srt": [], "total_scanned": 0,
+                "remux_without_srt": [], "keeper_needs_audiofit": [],
+                "total_scanned": 0,
                 "total_space_saved_bytes": 0}
 
     def _process(self, expect_crash: bool = False) -> dict:

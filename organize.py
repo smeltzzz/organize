@@ -161,7 +161,7 @@ def print_dashboard() -> None:
     print(f"    {cyan('1. standardize')} {SYM_ARROW} qBittorrent completion hook: hardlinks & names into Title (Year)")
     print(f"    {cyan('2. extract')}     {SYM_ARROW} subtitle_extractor: text track -> <movie>.eng.srt; image-only movies by exact OpenSubtitles hash")
     print(f"    {cyan('3. audio')}       {SYM_ARROW} audio_standardizer: TrueHD/DTS-HD -> chain-native Dolby Digital Plus 640k on this wiring (video untouched)")
-    print(f"    {cyan('4. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps the best chain-native audio (surround before stereo), strips subs")
+    print(f"    {cyan('4. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps the best audio the chain can END UP with (surround before stereo), strips subs")
     print(f"    {cyan('5. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect HDR, check G454V fit")
     print(f"    {cyan('6. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
     print()
@@ -1315,7 +1315,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("audio", aliases=["audiofit", "ac3"], help="Bake chain-native Dolby audio in from TrueHD/DTS-HD tracks the G454V can never emit", add_help=False)
 
     # clean
-    subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep the best chain-native audio (surround before stereo), strip subs; MP4 converted to MKV", add_help=False)
+    subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep the best audio the chain can end up with (surround before stereo), strip subs; MP4 converted to MKV", add_help=False)
 
     # 10bit
     subparsers.add_parser("10bit", aliases=["probe"], help="FFprobe 8-bit vs 10-bit & native HDR compliance check", add_help=False)

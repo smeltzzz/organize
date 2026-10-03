@@ -439,12 +439,24 @@ class PlannerUnitTests(unittest.TestCase):
                                  if payload is EAC3_TITLED_TRUEHD else
                                  "EAC3 - DTS-HD MA 7.1")
 
-    def test_the_transcode_source_is_the_highest_tier_lossless_master(self) -> None:
-        # Two lossless masters, no native track: AC-3 comes from the
-        # highest-tier one (DTS-HD MA ranks above TrueHD in the chain's
-        # master-preference table — both decode losslessly, so this is about
-        # determinism, and the cleaner agrees with the same table).
+    def test_the_transcode_source_is_the_widest_lossless_master(self) -> None:
+        # Two lossless masters, no native track: the source is the one that
+        # reaches the widest layout, because the target preserves it. A TrueHD
+        # 7.1 becomes a DD+ 7.1; burning the DTS-HD MA 5.1 instead would cap
+        # the library at 5.1 forever. Same table the cleaner ranks with, so the
+        # two tools cannot disagree about which master to keep.
         payload = _payload({"codec_name": "truehd", "channels": 8},
+                           {"codec_name": "dts", "profile": "DTS-HD MA", "channels": 6})
+        v = aus.plan_for_payload("m.mkv", payload, self.cfg)
+        self.assertEqual(v.status, aus.STATUS_PLANNED)
+        self.assertEqual(v.source_stream, 1)
+        self.assertEqual(v.source_codec, "truehd")
+
+    def test_at_an_equal_layout_the_highest_tier_master_is_the_source(self) -> None:
+        # Determinism, not preference: both reach 5.1, so the chain's
+        # master-preference table breaks the tie (DTS-HD MA ranks above TrueHD
+        # — both decode losslessly) and picks the same source every run.
+        payload = _payload({"codec_name": "truehd", "channels": 6},
                            {"codec_name": "dts", "profile": "DTS-HD MA", "channels": 6})
         v = aus.plan_for_payload("m.mkv", payload, self.cfg)
         self.assertEqual(v.status, aus.STATUS_PLANNED)

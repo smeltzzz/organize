@@ -51,24 +51,34 @@ class LanguageAndCommentaryTests(unittest.TestCase):
 
 
 class AudioQualityTests(unittest.TestCase):
-    def test_chain_native_beats_lossless_hd(self) -> None:
-        """The chain's one scoring rule: playable-at-all beats higher-sample-rate.
+    def test_at_an_equal_layout_the_chain_native_track_wins(self) -> None:
+        """The band tiebreak: same destination, but one of them arrives for free.
 
-        The G454V can passthrough AC-3/E-AC-3 but can never emit TrueHD; AAC
-        it decodes to PCM. So on the chain this library is tuned for, every
-        one of those outranks a TrueHD 7.1 master (which the chain serves by
-        transcoding the audio on every play).
+        The G454V passthroughs AC-3/E-AC-3 and decodes AAC to PCM; TrueHD it can
+        never emit. Among tracks that all reach 5.1, that means the ones needing
+        no server re-encode outrank the master that does - a 5.1 AC-3 beats a 5.1
+        TrueHD. It does NOT mean a 2.0 AC-3 beats a 7.1 TrueHD: layout is the
+        primary key, because the remux is irreversible and audiofit can still
+        turn that master into a 7.1 DD+ track.
         """
-        truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
+        truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 6, "track_name": "Atmos"}}
         aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
         eac3 = {"codec": "E-AC-3", "properties": {"codec_id": "A_EAC3", "audio_channels": 6}}
         self.assertGreater(tc.get_audio_quality_score(eac3), tc.get_audio_quality_score(truehd))
         self.assertGreater(tc.get_audio_quality_score(aac), tc.get_audio_quality_score(truehd))
 
+    def test_a_wider_master_outranks_a_narrower_track_that_plays_today(self) -> None:
+        """The primary key, and the whole reason the ranking is what it is."""
+        truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
+        aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
+        eac3 = {"codec": "E-AC-3", "properties": {"codec_id": "A_EAC3", "audio_channels": 6}}
+        self.assertGreater(tc.get_audio_quality_score(truehd), tc.get_audio_quality_score(eac3))
+        self.assertGreater(tc.get_audio_quality_score(truehd), tc.get_audio_quality_score(aac))
+
     def test_lossless_hd_is_the_best_transcode_SOURCE(self) -> None:
         """Among unplayable tracks the better master still wins (it feeds audiofit)."""
         dtshd = {"codec": "DTS-HD MA", "properties": {"codec_id": "A_DTS/HD_MA", "audio_channels": 8}}
-        dtshr = {"codec": "DTS-HD HRA", "properties": {"codec_id": "A_DTS-HD HRA", "audio_channels": 6}}
+        dtshr = {"codec": "DTS-HD HRA", "properties": {"codec_id": "A_DTS-HD HRA", "audio_channels": 8}}
         self.assertGreater(tc.get_audio_quality_score(dtshd), tc.get_audio_quality_score(dtshr))
 
     def test_a_titled_eac3_track_is_still_chain_native(self) -> None:
@@ -81,7 +91,10 @@ class AudioQualityTests(unittest.TestCase):
         """
         eac3_titled = _audio(1, codec="E-AC-3", channels=6, name="TrueHD 7.1")
         dtshd_titled = _audio(2, codec="E-AC-3", channels=6, name="DTS-HD MA 7.1")
-        truehd = _audio(3, codec="TrueHD", channels=8, name="Atmos")
+        # Compared against a TrueHD of the SAME 5.1 layout, so this stays a test
+        # of the class rather than of the layout key: a wider master legitimately
+        # outranks a narrower native track, but a title cannot move either one.
+        truehd = _audio(3, codec="TrueHD", channels=6, name="Atmos")
         for track in (eac3_titled, dtshd_titled):
             with self.subTest(name=track["properties"]["track_name"]):
                 self.assertEqual(tc.playbackchain_classify(
@@ -112,7 +125,7 @@ def _empty_stats() -> dict:
         "skipped_layout": [],
         "deferred_hardlinked": [],
         "errors": [],
-        "remux_without_srt": [],
+        "remux_without_srt": [], "keeper_needs_audiofit": [],
         "diagnostics": [],
         "total_space_saved_bytes": 0,
     }
@@ -343,6 +356,137 @@ class RemuxWithoutSrtReportTests(unittest.TestCase):
         text = self._render(_empty_stats())
         self.assertNotIn("REMUXED WITHOUT AN EXTERNAL SRT", text)
         self.assertEqual(scorecard(text)["Cleaned without SRT"], 0)
+
+
+class KeeperNeedsAudiofitTests(unittest.TestCase):
+    """A convertible master is retained on purpose - and the run must say so.
+
+    Ranking by achievable layout means the cleaner can deliberately keep a
+    track the G454V cannot emit yet. That is correct, because the remux is
+    irreversible and `audio_standardizer.py` can still turn the master into a
+    chain-native Dolby track on any later run - but it is only correct if that
+    conversion actually happens. So the movie is counted, listed in the report
+    and warned about on the console, rather than quietly left to transcode its
+    audio on every play.
+    """
+
+    MASTER_INFO = {
+        "container": {"recognized": True, "supported": True,
+                      "properties": {"duration": 6_000_000_000_000}},
+        "tracks": [
+            {"id": 0, "type": "video", "codec": "AVC/H.264/MPEG-4", "properties": {
+                "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
+                "display_dimensions": "1920x1080", "flag_default": True}},
+            {"id": 1, "type": "audio", "codec": "TrueHD", "properties": {
+                "codec_id": "A_MLP", "language": "eng", "language_ietf": "eng",
+                "track_name": "Dolby TrueHD Atmos 7.1", "audio_channels": 8,
+                "audio_sampling_frequency": 48000, "flag_default": True}},
+            # The track the OLD band-first ranking kept: it plays today, and
+            # the remux would then have deleted the 7.1 master permanently.
+            {"id": 2, "type": "audio", "codec": "AC-3", "properties": {
+                "codec_id": "A_AC3", "language": "eng", "language_ietf": "eng",
+                "audio_channels": 2, "audio_sampling_frequency": 48000}},
+            {"id": 3, "type": "subtitles", "codec": "SubRip/SRT", "properties": {
+                "codec_id": "S_TEXT/UTF8", "language": "eng", "track_name": "ENG"}},
+        ],
+        "attachments": [], "chapters": [],
+    }
+
+    NATIVE_INFO = {
+        "container": {"recognized": True, "supported": True,
+                      "properties": {"duration": 6_000_000_000_000}},
+        "tracks": [
+            {"id": 0, "type": "video", "codec": "AVC/H.264/MPEG-4", "properties": {
+                "codec_id": "V_MPEG4/ISO/AVC", "pixel_dimensions": "1920x1080",
+                "display_dimensions": "1920x1080", "flag_default": True}},
+            {"id": 1, "type": "audio", "codec": "E-AC-3", "properties": {
+                "codec_id": "A_EAC3", "language": "eng", "language_ietf": "eng",
+                "audio_channels": 6, "audio_sampling_frequency": 48000,
+                "flag_default": True}},
+            {"id": 2, "type": "audio", "codec": "AC-3", "properties": {
+                "codec_id": "A_AC3", "language": "eng", "language_ietf": "eng",
+                "audio_channels": 2, "audio_sampling_frequency": 48000}},
+        ],
+        "attachments": [], "chapters": [],
+    }
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="cleaner_audiofit_")
+        self.root = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.folder = self.root / "Film (2019)"
+        self.folder.mkdir()
+        self.movie = self.folder / "Film (2019).mkv"
+        self.movie.write_bytes(b"x" * 4096)
+        self.info = self.MASTER_INFO
+
+        def fake_mkvmerge(cmd, on_progress=None):
+            if "-J" in cmd:
+                return 0, json.dumps(self.info), ""
+            return 1, "", "stub refuses to remux"
+
+        self._real = tc._run_mkvmerge
+        self._real_root = tc._target_root
+        tc._run_mkvmerge = fake_mkvmerge
+        tc._target_root = self.root
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        tc._run_mkvmerge = self._real
+        tc._target_root = self._real_root
+
+    def _run(self) -> tuple[dict, str]:
+        stats = _empty_stats()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=True, log_file_path=None)
+        return stats, buf.getvalue()
+
+    def test_a_retained_master_is_named_for_audiofit(self) -> None:
+        stats, out = self._run()
+        self.assertEqual(stats["keeper_needs_audiofit"], [self.movie.name])
+        # It is still a successful clean - the bucket is a note, not an outcome.
+        self.assertEqual(len(stats["cleaned"]), 1)
+        # The master survived and the stereo track did not - the whole point.
+        self.assertIn("TrueHD", stats["cleaned"][0]["kept_audio"])
+        self.assertEqual(stats["cleaned"][0]["removed_audio_count"], 1)
+        self.assertEqual(stats["errors"], [])
+        self.assertIn("audio_standardizer.py", out)
+        self.assertIn("can never emit", out)
+
+    def test_a_chain_native_keeper_is_not_flagged(self) -> None:
+        """The bucket must stay empty for the ordinary case, or it means nothing."""
+        self.info = self.NATIVE_INFO
+        stats, out = self._run()
+        self.assertEqual(stats["keeper_needs_audiofit"], [])
+        self.assertEqual(len(stats["cleaned"]), 1)
+        self.assertIn("E-AC-3", stats["cleaned"][0]["kept_audio"])
+        self.assertNotIn("can never emit", out)
+
+    def test_the_report_lists_it_and_counts_it_as_attention(self) -> None:
+        report_path = self.folder.parent / "report.txt"
+        stats = _empty_stats()
+        stats["keeper_needs_audiofit"] = ["Film (2019).mkv"]
+        stats["cleaned"].append({"name": "Film (2019).mkv", "kept_audio": "English"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            tc.generate_and_save_report(
+                stats, dry_run=True, report_file=str(report_path), log_file_path=None,
+            )
+        text = report_path.read_text(encoding="utf-8")
+        self.assertIn("RETAINED AUDIO STILL NEEDS AUDIOFIT", text)
+        self.assertIn("Film (2019).mkv", text)
+        self.assertIn("irreversible", text)
+        self.assertEqual(scorecard(text)["Kept audio needing audiofit"], 1)
+
+    def test_the_report_section_is_absent_when_nothing_needs_it(self) -> None:
+        report_path = self.folder.parent / "report.txt"
+        with contextlib.redirect_stdout(io.StringIO()):
+            tc.generate_and_save_report(
+                _empty_stats(), dry_run=True, report_file=str(report_path), log_file_path=None,
+            )
+        text = report_path.read_text(encoding="utf-8")
+        self.assertNotIn("RETAINED AUDIO STILL NEEDS AUDIOFIT", text)
+        self.assertEqual(scorecard(text)["Kept audio needing audiofit"], 0)
 
 
 class MetadataCacheWiringTests(unittest.TestCase):
@@ -663,7 +807,7 @@ class ProbeCacheAfterRemuxTests(unittest.TestCase):
     def _run(self) -> dict:
         stats = {"cleaned": [], "already_clean": [], "skipped_no_english": [],
                  "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
-                 "remux_without_srt": [], "total_scanned": 0,
+                 "remux_without_srt": [], "keeper_needs_audiofit": [], "total_scanned": 0,
                  "total_space_saved_bytes": 0}
         with contextlib.redirect_stdout(io.StringIO()):
             tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=False,
@@ -785,7 +929,7 @@ class ExternalSrtRecordPathTests(unittest.TestCase):
         self.addCleanup(self._restore_state, real, real_root)
         stats = {"cleaned": [], "already_clean": [], "skipped_no_english": [],
                  "skipped_layout": [], "deferred_hardlinked": [], "errors": [],
-                 "remux_without_srt": [], "total_scanned": 1, "total_space_saved_bytes": 0}
+                 "remux_without_srt": [], "keeper_needs_audiofit": [], "total_scanned": 1, "total_space_saved_bytes": 0}
         with contextlib.redirect_stdout(io.StringIO()):
             tc.process_mkv(self.movie, stats, "mkvmerge", dry_run=False, log_file_path=None)
         self.assertEqual(
@@ -906,16 +1050,34 @@ class ChainAudioRetentionTests(unittest.TestCase):
                 stereo = self._track(2, "AC-3", 2, codec_id="A_AC3")
                 self.assertEqual(self._keeper(surround, stereo), 1)
 
-    def test_a_lossless_master_still_loses_to_a_chain_native_track(self) -> None:
-        """The band rule is unchanged by the layout fix above.
+    def test_a_convertible_master_beats_a_narrower_track_that_plays_today(self) -> None:
+        """The keeper is the best track the movie can END UP with, not the one that
+        happens to be playable right now.
 
-        TrueHD cannot leave the G454V at all, so keeping it means the server
-        re-encodes the audio on every play; audio_standardizer runs first and
-        bakes a chain-native Dolby track in from exactly these masters.
+        The remux is irreversible: the AC-3 2.0 that wins today's ranking is gone
+        for good, while the TrueHD 7.1 can still become a chain-native DD+ 7.1 on
+        any later audio_standardizer run. Deleting surround to keep stereo cannot
+        be undone; converting surround can always be done. So the master is kept
+        and the stereo track goes.
         """
         truehd = self._track(1, "TrueHD", 8, codec_id="A_MLP", name="Atmos")
         stereo = self._track(2, "AC-3", 2, codec_id="A_AC3")
-        self.assertEqual(self._keeper(truehd, stereo), 2)
+        self.assertEqual(self._keeper(truehd, stereo), 1)
+        self.assertEqual(tc.get_audio_quality_score(truehd)[0], 8)
+        self.assertEqual(tc.get_audio_quality_score(stereo)[0], 2)
+
+    def test_a_convertible_master_loses_to_a_chain_native_track_of_the_same_layout(self) -> None:
+        """The band is the tiebreak, so Direct-Play-first survives the reversal.
+
+        Both tracks reach 5.1; one of them gets there with the server
+        re-encoding nothing. audio_standardizer runs first in the pipeline and
+        bakes a chain-native Dolby track in from exactly these masters, so by the
+        time the cleaner looks the master has usually already become the DD+
+        track that wins on layout outright.
+        """
+        truehd = self._track(1, "TrueHD", 6, codec_id="A_MLP", name="5.1")
+        surround = self._track(2, "AC-3", 6, codec_id="A_AC3")
+        self.assertEqual(self._keeper(truehd, surround), 2)
 
     def test_an_absent_codec_id_cannot_promote_a_dts_core_track(self) -> None:
         """Field 2 is the profile; a title must never slide into it.
@@ -932,7 +1094,7 @@ class ChainAudioRetentionTests(unittest.TestCase):
                 blob = pc.codec_blob("DTS", "", name)
                 self.assertEqual(blob, f"DTS - {name.upper()}")
                 self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_DTS_CORE)
-                self.assertEqual(tc.get_audio_quality_score(core_track)[0],
+                self.assertEqual(tc.get_audio_quality_score(core_track)[1],
                                  tc._BAND_CHAIN_NATIVE)
                 # And it is retained over a stereo bitstream, as core 5.1 should be.
                 stereo = self._track(2, "AC-3", 2, codec_id="A_AC3")
@@ -940,10 +1102,12 @@ class ChainAudioRetentionTests(unittest.TestCase):
 
     def test_a_real_profile_still_upgrades_a_bare_dts_name(self) -> None:
         """The fix is field STABILITY, not blindness to field 2."""
-        master = self._track(1, "DTS", 8, codec_id="A_DTS/HD_MA")
+        master = self._track(1, "DTS", 6, codec_id="A_DTS/HD_MA")
         stereo = self._track(2, "AC-3", 6, codec_id="A_AC3")
         self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "DTS-HD MA", "")),
                          pc.AUDIO_TRANSCODE_BOUND)
+        self.assertEqual(tc.get_audio_quality_score(master)[0],
+                         tc.get_audio_quality_score(stereo)[0])
         self.assertEqual(self._keeper(master, stereo), 2)
 
     def test_the_two_blob_builders_agree_about_the_same_track(self) -> None:
@@ -964,15 +1128,23 @@ class ChainAudioRetentionTests(unittest.TestCase):
         """
         lying = self._track(1, "AC-3", 2, codec_id="A_AC3", name="Dolby Atmos 5.1")
         real = self._track(2, "FLAC", 8, codec_id="A_FLAC")
-        self.assertEqual(tc.get_audio_quality_score(lying)[1], 0)
+        self.assertEqual(tc.get_audio_quality_score(lying)[2], 0)
         self.assertEqual(self._keeper(lying, real), 2)
 
-    def test_real_dolby_digital_plus_atmos_still_wins_the_band(self) -> None:
-        """The gate is about the codec, not about disbelieving Atmos."""
+    def test_real_dolby_digital_plus_atmos_wins_its_layout(self) -> None:
+        """The gate is about the codec, not about disbelieving Atmos.
+
+        Both tracks are chain-native 5.1, so layout and band tie and the Atmos
+        flag decides - which is what this 3.1.2 bar with up-firing drivers is
+        for. A genuine DD+ Atmos 5.1 no longer beats a 7.1 master, though:
+        layout leads, and that master converts to a 7.1 DD+ track.
+        """
         atmos = self._track(1, "E-AC-3", 6, codec_id="A_EAC3", name="DD+ Atmos")
-        flac = self._track(2, "FLAC", 8, codec_id="A_FLAC")
-        self.assertEqual(tc.get_audio_quality_score(atmos)[1], 1)
+        flac = self._track(2, "FLAC", 6, codec_id="A_FLAC")
+        self.assertEqual(tc.get_audio_quality_score(atmos)[2], 1)
         self.assertEqual(self._keeper(atmos, flac), 1)
+        wide = self._track(3, "FLAC", 8, codec_id="A_FLAC")
+        self.assertEqual(self._keeper(atmos, wide), 3)
 
     def test_within_one_layout_the_better_codec_still_wins(self) -> None:
         """Channels lead the band; the codec sub-tier refines it."""
@@ -1012,12 +1184,13 @@ class CleanupPlanTests(unittest.TestCase):
         plan, reason = tc.plan_cleanup(info)
         self.assertEqual(reason, "")
         assert plan is not None
-        # Chain policy: AAC decodes to PCM on the player, TrueHD can never be
-        # emitted by the G454V — so the playable AAC wins; commentary and dubs
-        # are dropped. (In the real pipeline audiofit has already baked an
-        # AC-3 5.1 in from that TrueHD before this tool runs.)
-        self.assertEqual(plan.best_audio_id, 1)
-        self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3, 4])
+        # Chain policy: the AAC 2.0 decodes to PCM today but can never become
+        # more than stereo, while the TrueHD 7.1 converts to a chain-native DD+
+        # 7.1 - so the master is kept and the stereo track goes. Commentary and
+        # dubs are dropped regardless. (In the real pipeline audiofit has
+        # usually already baked that DD+ track in before this tool runs.)
+        self.assertEqual(plan.best_audio_id, 2)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [1, 3, 4])
         # Every embedded subtitle goes, English (SDH/forced included) or not.
         self.assertEqual(plan.keep_sub_ids, [])
         self.assertEqual([t["id"] for t in plan.removed_subs], [5, 6, 7, 8])
@@ -1051,10 +1224,10 @@ class CleanupPlanTests(unittest.TestCase):
         self.assertEqual(reason, "")
         assert plan is not None
         self.assertTrue(plan.foreign_with_srt)
-        # Chain policy: the Spanish AAC (player decodes to PCM) beats the
-        # Spanish TrueHD (un-emittable on the G454V).
-        self.assertEqual(plan.best_audio_id, 2)
-        self.assertEqual([t["id"] for t in plan.removed_audio], [1, 3])
+        # Chain policy: the Spanish TrueHD 7.1 converts to a chain-native DD+
+        # 7.1; the Spanish AAC 2.0 can only ever be stereo. The master wins.
+        self.assertEqual(plan.best_audio_id, 1)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3])
         # The external sidecar is the sole subtitle option.
         self.assertEqual(plan.keep_sub_ids, [])
         self.assertEqual([t["id"] for t in plan.removed_subs], [4])
@@ -1070,9 +1243,10 @@ class CleanupPlanTests(unittest.TestCase):
         self.assertEqual(reason, "")
         assert plan is not None
         self.assertFalse(plan.foreign_with_srt)
-        # Chain policy again: playable AAC beats un-emittable TrueHD.
-        self.assertEqual(plan.best_audio_id, 2)
-        self.assertEqual([t["id"] for t in plan.removed_audio], [1, 3])
+        # Chain policy again: the convertible 7.1 master beats the AAC 2.0 that
+        # plays today, because the remux is irreversible.
+        self.assertEqual(plan.best_audio_id, 1)
+        self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3])
         # No sidecar, and the subs still go: extraction happens before this
         # tool in the pipeline, so retention buys nothing.
         self.assertEqual(plan.keep_sub_ids, [])
@@ -1487,11 +1661,12 @@ class RemuxVerdictTests(unittest.TestCase):
             for line in source.splitlines()
             if 'stats["' in line and "].append(" in line
         }
-        # `remux_without_srt` and `converted_mp4` are notes, not outcomes: a
-        # movie in either is always counted in `cleaned` too, so it already has
-        # a verdict and these two just annotate the report.
+        # `remux_without_srt`, `converted_mp4` and `keeper_needs_audiofit` are
+        # notes, not outcomes: a movie in any of them is always counted in
+        # `cleaned` too, so it already has a verdict and these just annotate the
+        # report.
         known = ({bucket for bucket, _ in tc.VERDICT_BUCKETS}
-                 | {"remux_without_srt", "converted_mp4"})
+                 | {"remux_without_srt", "converted_mp4", "keeper_needs_audiofit"})
         self.assertEqual(appended - known, set())
 
 

@@ -4,6 +4,88 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.2.0] - 2026-10-03
+
+One deliberate behaviour change, made because 8.1.1 shipped a ranking that was
+right about *playability* and wrong about *possibility*. The cleaner keeps
+exactly one audio track and mkvmerge remuxes the rest away for good, so the
+question it must answer is "which track can this movie END UP with?", not
+"which track plays right now?". A dropped track is gone; a track that merely
+needs converting can still be converted on any later run.
+
+### Changed
+- **The keeper is now the best track that is chain-compatible *or convertible
+  to* chain-compatible.** `get_audio_quality_score()` led with the playback
+  *band*, so a TrueHD Atmos 7.1 master the G454V can never emit lost to a
+  stereo AC-3 that plays today — and the remux then deleted the 7.1 master
+  permanently. Ranking by achievable quality instead means the master is kept:
+  `audio_standardizer.py` turns it into a chain-native Dolby Digital Plus 7.1,
+  while the stereo track could never have become anything at all.
+  - The score is now
+    `(achievable layout, band, atmos, codec sub-tier, bitrate, sample rate,
+    original flag)`. **Band survives as the tiebreak**, so Direct-Play-first is
+    unchanged where it still applies: a 5.1 AC-3 beats a 5.1 TrueHD, because
+    both land at 5.1 and only one gets there without the server re-encoding
+    anything. What changed is the case where the layouts differ —
+    FLAC 7.1 > AC-3 2.0 (8.1.1's fix, preserved), TrueHD 7.1 > E-AC-3 5.1,
+    DTS-HD MA 7.1 > AC-3 2.0 (all new).
+  - `wiring` is now a parameter, defaulting to
+    `playbackchain.resolve_wiring()`, so `ORGANIZE_PLAYBACK_WIRING` is honoured
+    by the cleaner exactly as it already was by `audio_standardizer.py`. It
+    moves only the first key, and only for a >=7.1 transcode-bound master
+    (7.1 folds to 5.1 under `tv-arc`).
+  - `audio_standardizer.py`'s `_pool_rank` delegates to this same function, so
+    its transcode SOURCE improves with it: a TrueHD 7.1 is now preferred over a
+    DTS-HD MA 5.1, because the synthesized target preserves 7.1 and burning the
+    narrower master would cap the library at 5.1 forever. At an equal layout the
+    master-preference table still decides (DTS-HD MA > TrueHD), so the pick
+    stays deterministic. The two tools cannot disagree about which master to
+    burn, or about which one to keep.
+  - Docs follow the code: `docs/hardware.md` §5 and `docs/tools.md` §3 both
+    rewrote their ranking sections around achievable layout, the dashboard and
+    `--list-steps` cleaner title now read "keeps the best audio the chain can
+    end up with", and README rule 2 says the same.
+
+### Added
+- **`playbackchain.achievable_channels(cls, channels, wiring=DEFAULT_WIRING)`**
+  — the single answer to "how many channels does this class reach on this
+  chain?". A native-passthrough, DTS-core or decode-to-PCM track achieves the
+  channels it carries; a transcode-bound master achieves the channels
+  `target_audio_for()` would bake into its replacement; an *unknown* track
+  achieves **nothing**, because the toolkit fail-closes and never auto-touches
+  one (`channels <= 0` also achieves nothing). Exported from
+  `organizekit.core` alongside the rest of the chain model.
+- **A `Kept audio needing audiofit` report bucket.** Keeping a master is only
+  correct if the conversion actually happens, so a movie whose retained audio is
+  still transcode-bound is appended to `stats["keeper_needs_audiofit"]`, counted
+  in the report's attention tally, listed in its own report subsection with the
+  reason and the remedy, and warned about on the console and in the log — mirroring
+  `remux_without_srt`. It is a *note*, not an outcome: the movie is always
+  counted in `cleaned` too, so it keeps that verdict and `organize status` is
+  unaffected. In the pipeline `audio_standardizer.py` runs before the cleaner, so
+  the master has usually already become the DD+ track that wins on layout
+  outright; a movie in this bucket means audiofit did not run or could not —
+  `ffmpeg` missing, or the cleaner run standalone instead of through
+  `organize run`.
+
+### Tests
+- Suite 1266 → 1273. Every test that pinned the old band-first ordering was
+  rewritten rather than reverted, and each one keeps covering the defect it was
+  originally written for: comparisons that were about the *class* now hold the
+  layout constant (E-AC-3 5.1 vs TrueHD 5.1, DTS-HD MA 5.1 vs AC-3 5.1, DD+
+  Atmos 5.1 vs FLAC 5.1, titled E-AC-3 5.1 vs TrueHD 5.1, DTS core vs AC-3),
+  and the tests that were about the *layout* now state the new primary key
+  (TrueHD 7.1 > AC-3 2.0, TrueHD 7.1 > E-AC-3 5.1). New: the wider-master rule,
+  the equal-layout band tiebreak, the equal-layout transcode-source
+  determinism, and a four-test `KeeperNeedsAudiofitTests` class covering the new
+  bucket end to end (a retained TrueHD Atmos 7.1 is named, the stereo track is
+  the one that goes, the console warning names `audio_standardizer.py`, a
+  chain-native keeper leaves the bucket empty, and the report section renders
+  only when it is non-empty). The bundled `mkv_track_cleaner`
+  self-tests assert both halves of the policy, and the property test's planted
+  best track became a DD+ Atmos **7.1** so it still outranks every track the
+  generator can produce.
+
 ## [8.1.1] - 2026-10-03
 
 A chain-fidelity sweep: five defects found by auditing every decision the

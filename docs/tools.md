@@ -230,34 +230,47 @@ Every movie ends up with exactly one audio track — the best-scoring one in
 the movie's own (native) language — and video is never re-encoded. Which
 track *is* best is the playback chain's table, not a golden-ear ranking: on
 the G454V → AX3125H chain ([hardware.md](hardware.md)) the keeper is the best
-track **the player can actually emit**, and among tracks that all emit, the
-one with the most channels surviving. The score is compared in this order:
+track the movie can **end up with** — already chain-native *or* convertible to
+chain-native — because the remux is irreversible. A dropped track is gone for
+good; a master that `audio_standardizer.py` can still convert is not. So a
+TrueHD Atmos 7.1 beats an AC-3 2.0 that plays today: the master becomes a DD+
+7.1, the stereo track can never become anything. The score is compared in this
+order:
 
-1. **Band.** *Chain-native* — Dolby Digital Plus (E-AC-3, Atmos included) and
+1. **Achievable layout** (`playbackchain.achievable_channels()`). A
+   chain-native track achieves the channels it carries; a transcode-bound master
+   achieves the channels the synthesized replacement would have (7.1 stays 7.1
+   on the default wiring, folds to 5.1 under `tv-arc`, never upmixed); an
+   *unknown* track achieves nothing, because the toolkit fail-closes and never
+   auto-touches one. This is also what keeps **FLAC 7.1 ahead of AC-3 2.0**, and
+   Hisense's per-port table confirms LPCM 5.1/7.1 on the bar's HDMI IN
+   ([hardware.md §2](hardware.md)).
+2. **Band.** *Chain-native* — Dolby Digital Plus (E-AC-3, Atmos included) and
    Dolby Digital (AC-3) bitstream end-to-end, base DTS is decoded by the
    soundbar, and client-decodable formats (AAC, FLAC/PCM, Opus, MP3) arrive as
    PCM — beats *transcode-bound* (TrueHD, DTS-HD MA, DTS-HD HRA, DTS:X, WMA
-   Pro), which beats *unknown*. The G454V can never emit the middle band, so
-   keeping one of those would commit the server to an audio transcode on every
-   play. `audio_standardizer.py` runs *before* this tool in the pipeline and
-   bakes the chain-native Dolby track in from exactly those masters, so nothing
-   of audible value is lost when they leave.
-2. **Atmos**, credited only to a Dolby Digital Plus stream — AC-3 has no Atmos
+   Pro), which beats *unknown*. At an **equal achievable layout** this is the
+   Direct-Play-first rule: a 5.1 AC-3 still beats a 5.1 TrueHD, because only one
+   of them gets to 5.1 without the server re-encoding anything.
+   `audio_standardizer.py` runs *before* this tool in the pipeline and bakes the
+   chain-native Dolby track in from exactly those masters, so by the time the
+   cleaner looks, the master has usually already become the DD+ track that wins
+   on key 1 outright.
+3. **Atmos**, credited only to a Dolby Digital Plus stream — AC-3 has no Atmos
    variant, so a title cannot claim one. A 3.1.2 bar with up-firing drivers is
    what DD+ Atmos exists for.
-3. **Channels**, inside the band. Everything in the band already Direct Plays,
-   so there is no transcoding argument left for preferring a narrower track:
-   **FLAC 7.1 beats AC-3 2.0**, never the reverse. This key is load-bearing
-   because the remux is destructive — the losing tracks are gone — and because
-   Hisense's per-port table confirms LPCM 5.1/7.1 on the bar's HDMI IN
-   ([hardware.md §2](hardware.md)).
 4. **Codec sub-tier**, refining a settled layout: DD+ (100) > DD (95) > base
-   DTS (80) > FLAC/PCM (66) > Opus (62) > other lossy (60). Below the band the
-   order reverses and the sub-tier leads, because nothing there plays and the
-   only question is which master makes the best *transcode source*: DTS-HD
-   MA / DTS:X (34) > DTS-HD HRA (32) > the rest (30). `audio_standardizer.py`
-   ranks its own source pool with this same function, so the two tools cannot
-   disagree about which master to burn.
+   DTS (80) > FLAC/PCM (66) > Opus (62) > other lossy (60). Below the band it is
+   DTS-HD MA / DTS:X (34) > DTS-HD HRA (32) > the rest (30), which is what picks
+   the best *transcode source*. `audio_standardizer.py` ranks its own source pool
+   with this same function, so the two tools cannot disagree about which master
+   to burn.
+
+Keeping a convertible master is only correct if it actually gets converted, so
+every movie whose retained audio is still transcode-bound is named in the report
+(`Kept audio needing audiofit`) and warned about on the console and in the log.
+A movie in that bucket means audiofit did not run or could not — usually a
+missing `ffmpeg`, or this tool run standalone instead of through `organize run`.
 
 The rest of the contract is unchanged: dubs, commentary and every other
 language go. The native language is decided by the file's own markers, in

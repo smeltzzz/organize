@@ -80,7 +80,7 @@ def _empty_stats() -> dict:
         "skipped_layout": [],
         "deferred_hardlinked": [],
         "errors": [],
-        "remux_without_srt": [],
+        "remux_without_srt": [], "keeper_needs_audiofit": [],
         "diagnostics": [],
         "total_space_saved_bytes": 0,
     }

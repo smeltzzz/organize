@@ -91,7 +91,7 @@ STEPS: dict[str, Step] = {
     ),
     "cleaner": Step(
         key="cleaner", script="mkv_track_cleaner.py",
-        title="Clean MKV tracks (remux; keeps the chain-native audio)",
+        title="Clean MKV tracks (remux; keeps the best audio the chain can end up with)",
         root_flag="--dir", supports_nice=True,
     ),
     "10bit": Step(

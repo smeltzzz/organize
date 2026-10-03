@@ -542,6 +542,34 @@ def synthesis_target_label(source_channels: int = 6,
     return DOLBY_SHORT_NAMES.get(codec, codec)
 
 
+def achievable_channels(cls: str, channels: int,
+                        wiring: str = DEFAULT_WIRING) -> int:
+    """The channel layout this track can END UP at on this chain.
+
+    The question ``mkv_track_cleaner`` has to answer is not "which track plays
+    today" but "which track can this movie end up with", because the remux is
+    irreversible: a track that is dropped is gone for good, while a track that
+    merely needs converting can still be converted later.
+
+    * A **chain-native** track is already at its final layout. Nothing converts
+      it and nothing improves it, so it achieves exactly what it carries.
+    * A **transcode-bound** track is not a dead end - it is precisely the input
+      ``audio_standardizer.py`` synthesizes a chain-native Dolby track from - so
+      it achieves that target's layout (a 7.1 master keeps 7.1 on the default
+      wiring and folds to 5.1 under ``tv-arc``, exactly as the target says).
+    * An **unknown** track achieves nothing, because the toolkit never
+      auto-touches one: fail closed, as everywhere else here.
+    """
+    ch = int(channels or 0)
+    if ch <= 0:
+        return 0
+    if cls in (AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DECODE_PCM):
+        return ch
+    if cls == AUDIO_TRANSCODE_BOUND:
+        return target_audio_for(ch, wiring).channels
+    return 0
+
+
 def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> str:
     """One human sentence describing where this track actually ends up."""
     cls = classify_audio_blob(blob)

@@ -236,7 +236,8 @@ leaves the player — the server transcodes audio on **every** play.
 | base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | accepted by default; `--no-dts-passthrough` transcodes it |
 | **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** from it by audio_standardizer (AC-3 under `tv-arc`) |
 | **DTS-HD MA / HRA, DTS:X** | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** (AC-3 under `tv-arc`) |
-| WMA Pro / unknown | ❌ | ❌ | ❌ | fail-closed: reported for a human, never auto-touched |
+| WMA Pro / WMA Lossless | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** — no ExoPlayer decoder, so `ffmpeg` converts it like any other master |
+| unknown / unclassifiable | ❌ | ❌ | ❌ | **fail-closed: reported for a human, never auto-touched** — and it achieves *zero* channels in the keeper ranking, so it can never outrank a track the toolkit does understand |
 
 **Read the "over ARC/opt" column as one limit, not nine.** Every ⚠️ in it has
 the same single cause: on this UN60F6350AF the digital audio output offers PCM
@@ -260,30 +261,51 @@ fix, because it removes the whole column from the equation by never asking the
 TV to carry sound.
 
 The keep-one-track ranking (`mkv_track_cleaner.py`) encodes exactly that
-matrix, as a **band first and a layout second**:
+matrix — but it asks **which track can this movie END UP with?**, not "which
+track plays right now?", and that question decides the order. The remux is
+**irreversible**: a dropped track is gone for good, while a track that merely
+needs converting can still be converted on any later run. Deleting a TrueHD
+Atmos 7.1 master to keep a stereo AC-3 that plays today cannot be undone;
+converting that master into a DD+ 7.1 can always be done. So:
 
-1. **band** — *plays with no server work* (AC-3 / DD+ / base DTS / anything
+1. **achievable layout** — how many channels the track reaches *on this chain*,
+   via `playbackchain.achievable_channels()`. A chain-native track achieves the
+   channels it carries; a transcode-bound master achieves the channels
+   `audio_standardizer.py` would bake into its replacement (7.1 stays 7.1 on the
+   default wiring, folds to 5.1 under `tv-arc` — never upmixed); an *unknown*
+   track achieves nothing, because the toolkit fail-closes and never auto-touches
+   one. This is the key that makes **TrueHD Atmos 7.1 worth more than an AC-3
+   2.0 that plays today**, and it is what keeps FLAC 7.1 ahead of AC-3 2.0.
+2. **band** — *plays with no server work* (AC-3 / DD+ / base DTS / anything
    decoded to PCM) beats *transcode-bound* (TrueHD / DTS-HD / DTS:X / WMA Pro)
-   beats *unknown*. This is the chain's one hard rule and it is why
-   "highest sample rate wins" is the wrong metric here: "plays without a
-   server" is the right one.
-2. **Atmos** — a real DD+ Atmos track wins inside the band, because a 3.1.2 bar
-   with up-firing drivers is what it exists for.
-3. **channels** — *inside the band only*. Once every candidate Direct Plays,
-   there is no transcoding argument left for preferring a narrower track, so
-   **FLAC 7.1 beats AC-3 2.0** and never the other way round. This matters
-   because the cleaner keeps exactly one audio track and remuxes the rest away:
-   the wrong order here permanently deletes surround sound to keep stereo. The
-   per-port table in §2 is what makes multichannel decoded audio first-class on
-   this wiring — LPCM 5.1/7.1 are supported on the bar's HDMI IN.
-4. **codec sub-tier** — the historical quality order refines the layout:
+   beats *unknown*. At an **equal achievable layout** this is the
+   Direct-Play-first rule and it is unchanged: a 5.1 AC-3 still beats a 5.1
+   TrueHD, because both land at 5.1 and only one of them gets there without the
+   server re-encoding anything. "Highest sample rate wins" is still the wrong
+   metric; "reaches the widest layout, with the least server work" is the right
+   one.
+3. **Atmos** — a real DD+ Atmos track wins among equal layouts, because a 3.1.2
+   bar with up-firing drivers is what it exists for.
+4. **codec sub-tier** — the historical quality order refines the rest:
    DD+ (100) > DD (95) > base DTS core (80) > lossless-decodable (66) >
-   Opus (62) > other lossy (60). Below the band the order reverses, because
-   nothing there plays at all and the only question is which master makes the
-   best *transcode source* for `audio_standardizer.py`: DTS-HD MA / DTS:X (34) >
-   DTS-HD HRA (32) > the rest (30). `audio_standardizer.py` ranks its own
-   source pool with this same function, so the two tools cannot disagree about
-   which master to burn.
+   Opus (62) > other lossy (60), and below the band DTS-HD MA / DTS:X (34) >
+   DTS-HD HRA (32) > the rest (30). That lower half is also what picks the best
+   *transcode source*: `audio_standardizer.py` ranks its own pool with this same
+   function, so the two tools cannot disagree about which master to burn — and
+   because key 1 leads, they agree that a TrueHD 7.1 is a better source than a
+   DTS-HD MA 5.1, since the target preserves 7.1.
+
+The per-port table in §2 is what makes multichannel decoded audio first-class on
+this wiring — LPCM 5.1/7.1 are supported on the bar's HDMI IN — which is why a
+convertible master is worth keeping rather than merely tolerating.
+
+**Keeping a master is only correct if it gets converted.** Because key 1 can
+retain a track the G454V cannot emit yet, the cleaner names every such movie in
+its report (`Kept audio needing audiofit`) and warns on the console and in the
+log. In the pipeline `audio_standardizer.py` runs *before* the cleaner, so the
+master has usually already become the DD+ track that wins on key 1 outright; a
+movie in that bucket means audiofit did not run or could not — `ffmpeg` missing,
+or the cleaner run standalone.
 
 ### Why Dolby Digital Plus (E-AC-3) @ 640 kbps — and AC-3 only under `tv-arc`?
 
