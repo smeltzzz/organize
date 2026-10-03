@@ -429,6 +429,43 @@ class RenderTests(unittest.TestCase):
         for line in ("line one", "line two", "line three"):
             self.assertIn(line, output)
 
+    def test_every_line_of_a_multiline_detail_is_indented(self) -> None:
+        """A detail is a block, and the remedy branch already knew that.
+
+        The playback-chain check prints six self-aligned lines (Player, its
+        video and audio continuations, Sink, Display, Wiring). Indenting the
+        joined string once left Sink/Display/Wiring flush against the left
+        margin while Player sat indented - the one diagnostic that names the
+        user's own three devices was the ragged one.
+        """
+        output = self.render(organize.DiagnosticCheck(
+            name="Playback chain", status="ok", message="fine",
+            detail="Player : G454V\n         video  <= 1080p\nSink   : AX3125H",
+        ))
+        rows = [line for line in output.splitlines()
+                if any(k in line for k in ("Player :", "video  <=", "Sink   :"))]
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            with self.subTest(row=row):
+                self.assertTrue(row.startswith("      "),
+                                f"detail line is not indented: {row!r}")
+        # The block's own alignment survives: the continuation lines up under
+        # the value that follows "Player : ".
+        self.assertEqual(rows[1].index("video"), rows[0].index("G454V"))
+
+    def test_the_real_chain_summary_renders_as_one_aligned_block(self) -> None:
+        from organizekit.core import playbackchain as pc
+
+        output = self.render(organize.check_playback_chain(None))
+        for label in ("Player :", "Sink   :", "Display:", "Wiring :"):
+            rows = [line for line in output.splitlines() if label in line]
+            with self.subTest(label=label):
+                self.assertEqual(len(rows), 1, f"{label} did not render once")
+                self.assertTrue(rows[0].startswith("      "), rows[0])
+        # All three of this install's devices, named in one block.
+        for device in (pc.PLAYER.model_id, pc.SINK.model, pc.DISPLAY.model):
+            self.assertIn(device, output)
+
     def test_an_unknown_status_renders_as_a_failure_rather_than_blank(self) -> None:
         output = self.render(organize.DiagnosticCheck(name="Thing", status="bogus", message="?"))
         self.assertIn(organize.SYM_FAIL, output)

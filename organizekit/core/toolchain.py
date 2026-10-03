@@ -26,6 +26,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import playbackchain
+
 # The tools are scripts next to the package, not modules inside it: they are
 # launched as subprocesses so each keeps its own locks, logs and reports.
 #
@@ -81,7 +83,10 @@ STEPS: dict[str, Step] = {
     ),
     "audiofit": Step(
         key="audiofit", script="audio_standardizer.py",
-        title="Normalize audio for the G454V chain (AC-3 5.1)",
+        # The codec is DERIVED from the chain table, not typed here, so this
+        # title cannot drift from what audio_standardizer actually synthesizes.
+        title=("Normalize audio for the G454V chain "
+               f"({playbackchain.synthesis_target_label()})"),
         root_flag="--source", supports_nice=True,
     ),
     "cleaner": Step(

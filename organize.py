@@ -161,7 +161,7 @@ def print_dashboard() -> None:
     print(f"    {cyan('1. standardize')} {SYM_ARROW} qBittorrent completion hook: hardlinks & names into Title (Year)")
     print(f"    {cyan('2. extract')}     {SYM_ARROW} subtitle_extractor: text track -> <movie>.eng.srt; image-only movies by exact OpenSubtitles hash")
     print(f"    {cyan('3. audio')}       {SYM_ARROW} audio_standardizer: TrueHD/DTS-HD -> chain-native Dolby Digital Plus 640k on this wiring (video untouched)")
-    print(f"    {cyan('4. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps the chain-native audio (E-AC-3/AC-3), strips subs")
+    print(f"    {cyan('4. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps the best chain-native audio (surround before stereo), strips subs")
     print(f"    {cyan('5. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect HDR, check G454V fit")
     print(f"    {cyan('6. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
     print()
@@ -700,7 +700,13 @@ def render_diagnostics(checks: Sequence[DiagnosticCheck]) -> None:
         symbol = symbols.get(check.status, SYM_FAIL)
         print(f"  {symbol} {bold(check.name):<28} {check.message}")
         if check.detail:
-            print(f"      {dim(check.detail)}")
+            # Per line, exactly like the remedy below: a detail can be a block
+            # (the playback-chain check prints six aligned lines), and f-string
+            # indentation only ever reaches the first of them, which left the
+            # chain's Sink/Display/Wiring rows flush against the left margin
+            # while Player sat indented.
+            for d_line in check.detail.splitlines():
+                print(f"      {dim(d_line)}")
         if check.remedy:
             for r_line in check.remedy.splitlines():
                 print(f"      {cyan('Fix:')} {r_line}")
@@ -1309,7 +1315,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("audio", aliases=["audiofit", "ac3"], help="Bake chain-native Dolby audio in from TrueHD/DTS-HD tracks the G454V can never emit", add_help=False)
 
     # clean
-    subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep 1 chain-native audio (E-AC-3/AC-3), strip subs; MP4 converted to MKV", add_help=False)
+    subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep the best chain-native audio (surround before stereo), strip subs; MP4 converted to MKV", add_help=False)
 
     # 10bit
     subparsers.add_parser("10bit", aliases=["probe"], help="FFprobe 8-bit vs 10-bit & native HDR compliance check", add_help=False)

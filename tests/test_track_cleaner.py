@@ -16,6 +16,7 @@ from reporttext import scorecard
 
 import mkv_track_cleaner as tc
 from organizekit import core
+from organizekit.core import playbackchain as pc
 
 MediaProbeCache = tc.MediaProbeCache
 
@@ -854,6 +855,133 @@ def _sub(track_id: int, language: str = "eng", *, name: str = "") -> dict:
 
 def _media_info(*tracks: dict) -> dict:
     return {"container": {"recognized": True, "supported": True}, "tracks": list(tracks)}
+
+
+class ChainAudioRetentionTests(unittest.TestCase):
+    """Which ONE audio track survives the remux, on the chain as cabled.
+
+    `plan_cleanup` keeps a single audio track and mkvmerge remuxes the rest
+    away, so a wrong ranking here is a permanent deletion rather than a bad
+    suggestion. Every test below states a retention decision the chain owns.
+    """
+
+    @staticmethod
+    def _track(track_id: int, codec: str, channels: int, *,
+               codec_id: str = "", name: str = "") -> dict:
+        """An audio track with an explicitly ABSENT codec_id.
+
+        mkvmerge omits `properties.codec_id` often enough that a blob builder
+        has to cope with it; `_audio` above always fills one in, so this helper
+        exists to test the shape that used to break field positions.
+        """
+        props: dict = {"language": "eng", "language_ietf": "en",
+                       "audio_channels": channels}
+        if codec_id:
+            props["codec_id"] = codec_id
+        if name:
+            props["track_name"] = name
+        return {"id": track_id, "type": "audio", "codec": codec, "properties": props}
+
+    def _keeper(self, *tracks: dict) -> int:
+        plan, reason = tc.plan_cleanup(_media_info(*tracks))
+        self.assertIsNotNone(plan, f"a perfectly good track was refused: {reason}")
+        assert plan is not None
+        return plan.best_audio_id
+
+    def test_surround_is_never_traded_for_a_stereo_bitstream(self) -> None:
+        """The destructive bug this class exists for.
+
+        All three chain-native classes are equally free at playback time, so
+        there is no transcoding argument for preferring a narrower one. The
+        codec sub-tier used to lead the sort, and AC-3 2.0 (95) therefore beat
+        FLAC 7.1 (66) - a 7.1 master deleted to keep stereo. Hisense's input
+        format table is why that is wrong on this wiring: LPCM 5.1 and LPCM
+        7.1 are both supported on the bar's HDMI IN.
+        """
+        for codec, codec_id, channels in (("FLAC", "A_FLAC", 8), ("PCM", "A_PCM", 6),
+                                          ("AAC", "A_AAC", 6), ("DTS", "A_DTS", 6),
+                                          ("Opus", "A_OPUS", 8)):
+            with self.subTest(codec=codec):
+                surround = self._track(1, codec, channels, codec_id=codec_id)
+                stereo = self._track(2, "AC-3", 2, codec_id="A_AC3")
+                self.assertEqual(self._keeper(surround, stereo), 1)
+
+    def test_a_lossless_master_still_loses_to_a_chain_native_track(self) -> None:
+        """The band rule is unchanged by the layout fix above.
+
+        TrueHD cannot leave the G454V at all, so keeping it means the server
+        re-encodes the audio on every play; audio_standardizer runs first and
+        bakes a chain-native Dolby track in from exactly these masters.
+        """
+        truehd = self._track(1, "TrueHD", 8, codec_id="A_MLP", name="Atmos")
+        stereo = self._track(2, "AC-3", 2, codec_id="A_AC3")
+        self.assertEqual(self._keeper(truehd, stereo), 2)
+
+    def test_an_absent_codec_id_cannot_promote_a_dts_core_track(self) -> None:
+        """Field 2 is the profile; a title must never slide into it.
+
+        With codec_id missing the old f-string blob was "DTS  DTS-HD MA 7.1",
+        which splits to ["DTS", "DTS-HD", ...] - the NAME occupied the profile
+        slot and a playable DTS core track became an unplayable HD master.
+        audio_standardizer read the same track as core, so the two tools
+        disagreed, which playbackchain exists to prevent.
+        """
+        for name in ("DTS-HD MA 7.1", "DTS:X 7.1", "DTS-HD High Resolution"):
+            with self.subTest(title=name):
+                core_track = self._track(1, "DTS", 6, name=name)
+                blob = pc.codec_blob("DTS", "", name)
+                self.assertEqual(blob, f"DTS - {name.upper()}")
+                self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_DTS_CORE)
+                self.assertEqual(tc.get_audio_quality_score(core_track)[0],
+                                 tc._BAND_CHAIN_NATIVE)
+                # And it is retained over a stereo bitstream, as core 5.1 should be.
+                stereo = self._track(2, "AC-3", 2, codec_id="A_AC3")
+                self.assertEqual(self._keeper(core_track, stereo), 1)
+
+    def test_a_real_profile_still_upgrades_a_bare_dts_name(self) -> None:
+        """The fix is field STABILITY, not blindness to field 2."""
+        master = self._track(1, "DTS", 8, codec_id="A_DTS/HD_MA")
+        stereo = self._track(2, "AC-3", 6, codec_id="A_AC3")
+        self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "DTS-HD MA", "")),
+                         pc.AUDIO_TRANSCODE_BOUND)
+        self.assertEqual(self._keeper(master, stereo), 2)
+
+    def test_the_two_blob_builders_agree_about_the_same_track(self) -> None:
+        """One track, one verdict - whatever tool read it."""
+        import audio_standardizer as aus
+
+        stream = {"codec_name": "dts", "profile": None, "tags": {"title": "DTS-HD MA 7.1"}}
+        self.assertEqual(aus._stream_blob(stream),
+                         pc.codec_blob("DTS", "", "DTS-HD MA 7.1"))
+        self.assertEqual(pc.classify_audio_blob(aus._stream_blob(stream)),
+                         pc.AUDIO_DTS_CORE)
+
+    def test_a_lying_atmos_title_does_not_outrank_real_surround(self) -> None:
+        """AC-3 has no Atmos variant, so the title cannot claim one.
+
+        Atmos used to be credited from the raw blob, which meant a stereo AC-3
+        titled "Dolby Atmos" scored atmos=1 and outranked a genuine 7.1 track.
+        """
+        lying = self._track(1, "AC-3", 2, codec_id="A_AC3", name="Dolby Atmos 5.1")
+        real = self._track(2, "FLAC", 8, codec_id="A_FLAC")
+        self.assertEqual(tc.get_audio_quality_score(lying)[1], 0)
+        self.assertEqual(self._keeper(lying, real), 2)
+
+    def test_real_dolby_digital_plus_atmos_still_wins_the_band(self) -> None:
+        """The gate is about the codec, not about disbelieving Atmos."""
+        atmos = self._track(1, "E-AC-3", 6, codec_id="A_EAC3", name="DD+ Atmos")
+        flac = self._track(2, "FLAC", 8, codec_id="A_FLAC")
+        self.assertEqual(tc.get_audio_quality_score(atmos)[1], 1)
+        self.assertEqual(self._keeper(atmos, flac), 1)
+
+    def test_within_one_layout_the_better_codec_still_wins(self) -> None:
+        """Channels lead the band; the codec sub-tier refines it."""
+        for better, worse in ((("E-AC-3", "A_EAC3"), ("AC-3", "A_AC3")),
+                              (("FLAC", "A_FLAC"), ("AAC", "A_AAC"))):
+            with self.subTest(better=better[0]):
+                a = self._track(1, better[0], 6, codec_id=better[1])
+                b = self._track(2, worse[0], 6, codec_id=worse[1])
+                self.assertEqual(self._keeper(a, b), 1)
 
 
 class CleanupPlanTests(unittest.TestCase):

@@ -49,6 +49,34 @@ class DeviceFactTests(unittest.TestCase):
         # THIS port, not into the TV.
         self.assertTrue(any("hdmi in" in p.lower() for p in pc.SINK.ports))
 
+    def test_the_per_port_matrix_is_what_makes_the_default_wiring_default(self) -> None:
+        """Hisense manual §1.3, read as data: the evidence for `soundbar-hdmi-in`.
+
+        The bar's supported-input table is per PORT, and the two rows that
+        decide the wiring are: multichannel LPCM is accepted on HDMI IN (so a
+        5.1/7.1 AAC/FLAC/PCM track the Chromecast decodes arrives intact) and
+        is NOT accepted on HDMI ARC or optical (so the same track over the
+        `tv-arc` alternative cannot).
+        """
+        for layout in ("LPCM 5.1ch", "LPCM 7.1ch"):
+            with self.subTest(layout=layout):
+                self.assertIn(layout, pc.SINK.hdmi_in_accepts)
+                self.assertIn(layout, pc.SINK.arc_cannot_carry)
+        # DD+ Atmos is the only Atmos variant the G454V can emit, and the bar
+        # takes it on HDMI IN - that is the whole default audio path.
+        self.assertIn("Dolby Atmos - Dolby Digital Plus", pc.SINK.hdmi_in_accepts)
+        self.assertNotIn("Dolby Atmos - Dolby Digital Plus", pc.SINK.arc_cannot_carry)
+        # Everything the player can actually emit, the bar accepts on HDMI IN.
+        for emitted in ("Dolby Digital", "Dolby Digital Plus", "DTS", "LPCM 2ch"):
+            with self.subTest(emitted=emitted):
+                self.assertIn(emitted, pc.SINK.hdmi_in_accepts)
+        # The load-bearing invariant: re-cabling through HDMI IN recovers every
+        # format the ARC/optical path refuses. If one of these were refused on
+        # BOTH paths, the default wiring would not actually be the better one.
+        for fmt in pc.SINK.arc_cannot_carry:
+            with self.subTest(fmt=fmt):
+                self.assertIn(fmt, pc.SINK.hdmi_in_accepts)
+
     def test_the_display_is_the_2013_sdr_panel(self) -> None:
         self.assertEqual(pc.DISPLAY.resolution, (1920, 1080))
         self.assertFalse(pc.DISPLAY.hdr)
@@ -294,6 +322,56 @@ class VideoClassificationTests(unittest.TestCase):
                     pc.VIDEO_UNSUPPORTED,
                 )
 
+    def test_the_coded_ceiling_tolerates_macroblock_padding(self) -> None:
+        """1080p is routinely STORED as 1920x1088, and that is not oversize.
+
+        1080 is not a multiple of 16, so an H.264 1080p stream carries 8 lines
+        of frame_crop_bottom_offset padding; depending on container and muxer,
+        ffprobe can report 1080 or 1088 for the same picture. Comparing the
+        stored height against 1080 branded ordinary 1080p movies oversize and
+        queued a downscale they do not need.
+        """
+        self.assertEqual(pc.PLAYER.max_resolution, (1920, 1080))
+        self.assertEqual(pc.PLAYER.max_coded_resolution, (1920, 1088))
+        for codec in ("h264", "hevc", "vp9", "av1"):
+            with self.subTest(codec=codec):
+                self.assertEqual(
+                    pc.classify_video(codec, width=1920, height=1088), pc.VIDEO_NATIVE)
+        # The tolerance is one macroblock, not a licence for anything bigger.
+        self.assertEqual(pc.classify_video("h264", width=1920, height=1090),
+                         pc.VIDEO_OVERSIZE)
+        self.assertEqual(pc.classify_video("h264", width=2048, height=858),
+                         pc.VIDEO_OVERSIZE)
+        self.assertEqual(pc.classify_video("hevc", width=3840, height=2160),
+                         pc.VIDEO_OVERSIZE)
+
+    def test_an_unmeasurable_picture_is_never_called_playable(self) -> None:
+        """Fail closed on the video side, exactly like AUDIO_UNKNOWN.
+
+        VIDEO_UNKNOWN was defined, exported and explained but unreachable, so
+        a stream with no readable dimensions was reported as direct-play.
+        """
+        for width, height in ((0, 0), (1920, 0), (0, 1080)):
+            with self.subTest(size=(width, height)):
+                self.assertEqual(pc.classify_video("h264", width=width, height=height),
+                                 pc.VIDEO_UNKNOWN)
+        # An empty codec name is unknown, not "no hardware decoder": that claim
+        # needs a codec to be about.
+        self.assertEqual(pc.classify_video("", width=1920, height=1080), pc.VIDEO_UNKNOWN)
+
+    def test_every_video_verdict_is_reachable(self) -> None:
+        reachable = {
+            pc.classify_video("h264", width=1920, height=1080),
+            pc.classify_video("hevc", width=1920, height=1080, hdr_flavors=["HDR10"]),
+            pc.classify_video("hevc", width=1920, height=1080, dv_profile="8.1"),
+            pc.classify_video("hevc", width=3840, height=2160),
+            pc.classify_video("vc1", width=1920, height=1080),
+            pc.classify_video("", width=1920, height=1080),
+        }
+        self.assertEqual(reachable, {pc.VIDEO_NATIVE, pc.VIDEO_TONEMAPPED,
+                                     pc.VIDEO_DV_FLAG, pc.VIDEO_OVERSIZE,
+                                     pc.VIDEO_UNSUPPORTED, pc.VIDEO_UNKNOWN})
+
     def test_every_verdict_has_an_explanation(self) -> None:
         for verdict in (pc.VIDEO_NATIVE, pc.VIDEO_TONEMAPPED, pc.VIDEO_DV_FLAG,
                         pc.VIDEO_OVERSIZE, pc.VIDEO_UNSUPPORTED, pc.VIDEO_UNKNOWN):
@@ -402,3 +480,37 @@ class SummaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BlobFieldTests(unittest.TestCase):
+    """The blob is positional, so its field positions are part of the contract."""
+
+    def test_an_absent_field_is_filled_not_collapsed(self) -> None:
+        self.assertEqual(pc.codec_blob("DTS", "", "DTS-HD MA 7.1"), "DTS - DTS-HD MA 7.1")
+        self.assertEqual(pc.codec_blob("DTS", None, "DTS-HD MA 7.1"), "DTS - DTS-HD MA 7.1")
+        self.assertEqual(pc.codec_blob("", "", ""), f"{pc.BLOB_FIELD_ABSENT} " * 2
+                         + pc.BLOB_FIELD_ABSENT)
+
+    def test_a_title_can_never_occupy_the_profile_slot(self) -> None:
+        for title in ("DTS-HD MA 7.1", "DTS:X 7.1", "DTS-HD High Resolution", "DTS-HD"):
+            with self.subTest(title=title):
+                self.assertEqual(
+                    pc.classify_audio_blob(pc.codec_blob("DTS", "", title)),
+                    pc.AUDIO_DTS_CORE)
+
+    def test_a_real_profile_field_still_upgrades_a_bare_dts_name(self) -> None:
+        self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "DTS-HD MA", "")),
+                         pc.AUDIO_TRANSCODE_BOUND)
+        self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "A_DTS/HD_MA", "")),
+                         pc.AUDIO_TRANSCODE_BOUND)
+        self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "A_DTS", "")),
+                         pc.AUDIO_DTS_CORE)
+
+    def test_atmos_belongs_to_dolby_digital_plus_only(self) -> None:
+        """Plain AC-3 has no Atmos variant, so a title cannot invent one."""
+        for blob in ("E-AC-3 A_EAC3 DD+ Atmos", "EAC3 - ", "DOLBY DIGITAL PLUS -"):
+            with self.subTest(blob=blob):
+                self.assertTrue(pc.is_dolby_digital_plus(blob))
+        for blob in ("AC-3 A_AC3 DOLBY ATMOS 5.1", "TRUEHD A_MLP ATMOS", "DTS A_DTS "):
+            with self.subTest(blob=blob):
+                self.assertFalse(pc.is_dolby_digital_plus(blob))

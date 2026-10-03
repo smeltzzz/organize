@@ -21,7 +21,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from organizekit.core import toolchain as tc  # noqa: E402  (needs the path bootstrap)
+from organizekit.core import playbackchain  # noqa: E402  (needs the path bootstrap)
+from organizekit.core import toolchain as tc  # noqa: E402
 
 
 class TheTableDescribesEveryTool(unittest.TestCase):
@@ -40,6 +41,24 @@ class TheTableDescribesEveryTool(unittest.TestCase):
         for key in ("extractor", "10bit", "auditor"):
             with self.subTest(step=key):
                 self.assertEqual(tc.STEPS[key].root_flag, "--source")
+
+    def test_the_audiofit_title_names_the_codec_the_chain_actually_bakes(self) -> None:
+        """The step title is DERIVED from the chain table, never typed beside it.
+
+        It read "Normalize audio for the G454V chain (AC-3 5.1)" for a whole
+        release after the default wiring moved the synthesis target to Dolby
+        Digital Plus and 7.1 sources started keeping their layout. The dashboard
+        and `pipeline.py --list-steps` are the first things a user reads, so a
+        stale codec there misinforms them about their own chain - and it is the
+        same failure mode this module exists to prevent, one level up: the same
+        fact written down twice.
+        """
+        self.assertEqual(
+            tc.STEPS["audiofit"].title,
+            f"Normalize audio for the G454V chain "
+            f"({playbackchain.synthesis_target_label()})",
+        )
+        self.assertNotIn("5.1", tc.STEPS["audiofit"].title)
 
     def test_every_step_has_a_title_and_a_script_name(self) -> None:
         for key in tc.STEP_ORDER:

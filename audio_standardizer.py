@@ -88,6 +88,7 @@ from organizekit.core import (
     AUDIO_NATIVE,
     AUDIO_TRANSCODE_BOUND,
     AUDIO_UNKNOWN,
+    BLOB_FIELD_ABSENT,
     CLASS_TIERS,
     DEFAULT_WIRING,
     KIND_AUDIOFIT,
@@ -104,6 +105,7 @@ from organizekit.core import (
     atomic_write_text,
     audio_chain_note,
     classify_audio_blob,
+    codec_blob,
     default_tool_dir,
     dolby_name,
     enable_utf8_stdio,
@@ -281,7 +283,10 @@ def _audio_streams(payload: dict[str, Any]) -> list[dict[str, Any]]:
 #: the codec name and field 2 as the profile, so an empty slot would shift a
 #: track title into the profile's place and could make a title decide the
 #: codec (the E-AC-3-vs-"TrueHD 7.1" false positive).
-_BLOB_FIELD_ABSENT = "-"
+#: Kept as a local name for the shared placeholder so the docstrings and
+#: tests that talk about "-" stay readable; the value is defined once, in
+#: organizekit.core.playbackchain.
+_BLOB_FIELD_ABSENT = BLOB_FIELD_ABSENT
 
 
 def _stream_blob(stream: dict[str, Any]) -> str:
@@ -294,10 +299,7 @@ def _stream_blob(stream: dict[str, Any]) -> str:
     position.
     """
     tags = stream.get("tags") if isinstance(stream.get("tags"), dict) else {}
-    fields = [stream.get("codec_name"), stream.get("profile"), tags.get("title")]
-    rendered = [str(field).strip() if str(field or "").strip() else _BLOB_FIELD_ABSENT
-                for field in fields]
-    return " ".join(rendered).upper()
+    return codec_blob(stream.get("codec_name"), stream.get("profile"), tags.get("title"))
 
 
 def _stream_language(stream: dict[str, Any]) -> str:

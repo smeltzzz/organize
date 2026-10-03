@@ -230,16 +230,34 @@ Every movie ends up with exactly one audio track — the best-scoring one in
 the movie's own (native) language — and video is never re-encoded. Which
 track *is* best is the playback chain's table, not a golden-ear ranking: on
 the G454V → AX3125H chain ([hardware.md](hardware.md)) the keeper is the best
-track **the player can actually emit**. Scores in descending order: Dolby
-Digital Plus (E-AC-3, Atmos included, 100) and Dolby Digital (AC-3, 95)
-bitstream end-to-end; base DTS (80) is decoded by the soundbar; client-
-decodable formats (AAC 60/62, FLAC/PCM 66) arrive as PCM; and the lossless-HD
-formalities — TrueHD, DTS-HD MA, DTS-HD HRA, DTS:X — sit **below all of
-them** (30–34) because the G454V can never emit them, so keeping one would
-commit the server to an audio transcode on every play. `audio_standardizer.py`
-runs *before* this tool in the pipeline and bakes the chain-native Dolby track in
-from exactly those masters, so nothing of audible value is lost when they
-leave.
+track **the player can actually emit**, and among tracks that all emit, the
+one with the most channels surviving. The score is compared in this order:
+
+1. **Band.** *Chain-native* — Dolby Digital Plus (E-AC-3, Atmos included) and
+   Dolby Digital (AC-3) bitstream end-to-end, base DTS is decoded by the
+   soundbar, and client-decodable formats (AAC, FLAC/PCM, Opus, MP3) arrive as
+   PCM — beats *transcode-bound* (TrueHD, DTS-HD MA, DTS-HD HRA, DTS:X, WMA
+   Pro), which beats *unknown*. The G454V can never emit the middle band, so
+   keeping one of those would commit the server to an audio transcode on every
+   play. `audio_standardizer.py` runs *before* this tool in the pipeline and
+   bakes the chain-native Dolby track in from exactly those masters, so nothing
+   of audible value is lost when they leave.
+2. **Atmos**, credited only to a Dolby Digital Plus stream — AC-3 has no Atmos
+   variant, so a title cannot claim one. A 3.1.2 bar with up-firing drivers is
+   what DD+ Atmos exists for.
+3. **Channels**, inside the band. Everything in the band already Direct Plays,
+   so there is no transcoding argument left for preferring a narrower track:
+   **FLAC 7.1 beats AC-3 2.0**, never the reverse. This key is load-bearing
+   because the remux is destructive — the losing tracks are gone — and because
+   Hisense's per-port table confirms LPCM 5.1/7.1 on the bar's HDMI IN
+   ([hardware.md §2](hardware.md)).
+4. **Codec sub-tier**, refining a settled layout: DD+ (100) > DD (95) > base
+   DTS (80) > FLAC/PCM (66) > Opus (62) > other lossy (60). Below the band the
+   order reverses and the sub-tier leads, because nothing there plays and the
+   only question is which master makes the best *transcode source*: DTS-HD
+   MA / DTS:X (34) > DTS-HD HRA (32) > the rest (30). `audio_standardizer.py`
+   ranks its own source pool with this same function, so the two tools cannot
+   disagree about which master to burn.
 
 The rest of the contract is unchanged: dubs, commentary and every other
 language go. The native language is decided by the file's own markers, in

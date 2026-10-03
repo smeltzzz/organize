@@ -4,6 +4,94 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.1.1] - 2026-10-03
+
+A chain-fidelity sweep: five defects found by auditing every decision the
+toolkit makes against the hardware it is tuned for (Chromecast G454V → Hisense
+AX3125H HDMI IN → Samsung UN60F6350AF), re-verified against the manufacturers'
+own documents. The hardware *profile* was already correct and well sourced; all
+five bugs were in how the tools applied it. Two of them could permanently
+delete audio or queue a pointless re-encode.
+
+### Fixed
+- **The track cleaner could delete surround sound to keep stereo.**
+  `get_audio_quality_score()` led with the codec sub-tier, so inside the set of
+  tracks that all Direct Play, AC-3 2.0 (95) outranked FLAC 7.1 (66) — and
+  because `plan_cleanup()` keeps exactly ONE audio track and mkvmerge remuxes
+  the rest away, a 7.1 master was **permanently destroyed** to keep a stereo
+  one. Same for PCM 5.1, AAC 5.1, base DTS 5.1 and Opus 7.1. The score is now
+  banded: *plays with no server work* > *transcode-bound* > *unknown*, with
+  **Atmos then channel count** leading inside the chain-native band and the
+  codec sub-tier refining it. Hisense's per-port input table (§2 of
+  `docs/hardware.md`) is why this is right rather than merely nicer: LPCM 5.1
+  and LPCM 7.1 are supported on the bar's HDMI IN. Below the band the order
+  deliberately reverses — nothing there plays, so the sub-tier still picks the
+  best *transcode source* (DTS-HD MA/DTS:X > DTS-HD HRA > rest), which is what
+  `audio_standardizer._pool_rank()` delegates to this function for.
+- **An absent `codec_id` let a track's NAME be read as its profile.**
+  `mkv_track_cleaner` joined its blob with an f-string, so when mkvmerge omitted
+  `properties.codec_id` the fields collapsed: `"DTS  DTS-HD MA 7.1"` splits to
+  `["DTS", "DTS-HD", …]` and a perfectly playable **DTS core** track was
+  promoted to an unplayable HD master — then dropped. This is the exact hazard
+  `classify_audio_blob()`'s docstring warns about and `audio_standardizer`
+  already guarded against, so the two tools **disagreed about the same track**,
+  which `playbackchain.py` exists to prevent. Both builders now go through a
+  new shared `codec_blob(*fields)` that fills an absent field with `-`; the
+  contract is structural instead of a convention each caller must remember.
+- **"Atmos" was credited from the track title, so a lie could win.** AC-3 has
+  no Atmos variant at all, yet a stereo AC-3 titled "Dolby Atmos 5.1" scored
+  `atmos=1` and outranked genuine surround. Atmos is now credited only to a
+  Dolby Digital Plus stream (new `is_dolby_digital_plus()`), which is the only
+  carrier the G454V can emit it in. Real DD+ Atmos still wins its band.
+- **1920×1088 was called oversize.** 1080 is not a multiple of 16, so 1080p
+  H.264 is routinely *stored* as 1920×1088 with 8 lines of crop padding, and
+  ffprobe can report either number for the same picture. `classify_video()`
+  compared the stored height against 1080 and told the reader to "queue a 1080p
+  downscale" for a file that already Direct Plays — a pointless re-encode, in a
+  toolkit whose whole goal is zero server work. The check now uses
+  `Player.max_coded_resolution` = (1920, 1088), the ceiling rounded up to the
+  macroblock grid; 1920×1090, 2048×858 and 3840×2160 remain oversize.
+- **`VIDEO_UNKNOWN` was unreachable, and the video side failed OPEN.** The
+  verdict was defined, exported, explained and tested for an explanation — but
+  no input could ever produce it, so a stream with no readable dimensions or no
+  codec name was confidently reported as `direct-play`. It now fails closed to
+  `unknown` ("review manually"), matching `AUDIO_UNKNOWN` on the audio side.
+- **The audiofit step title advertised a target the chain stopped using.**
+  `toolchain.STEPS["audiofit"].title` still read "Normalize audio for the G454V
+  chain (AC-3 5.1)" a full release after 8.1.0 moved the default-wiring target
+  to Dolby Digital Plus and started keeping 7.1 layouts — and that title is what
+  the dashboard and `pipeline.py --list-steps` print, i.e. the first thing a
+  user reads about their own chain. It is now **derived** from the chain table
+  (new `playbackchain.synthesis_target_label()`), so it cannot drift again; the
+  dashboard and `--help` lines for the remux step were likewise still naming
+  only "(E-AC-3/AC-3)" as chain-native, which the layout fix above makes
+  incomplete.
+- **`organize doctor` rendered its own chain summary ragged.**
+  `render_diagnostics()` indented a multi-line `detail` once, so the playback
+  chain's `Player` row sat indented while `Sink`, `Display` and `Wiring` went
+  flush to the left margin — the one diagnostic that names the user's three
+  devices was the misaligned one. Details are now printed per line, exactly as
+  the `remedy` branch beside it already did.
+- **`docs/tools.md` documented the ordering that caused the deletion bug.** Its
+  flat "scores in descending order: DD+ 100, DD 95, DTS 80, AAC 60/62,
+  FLAC/PCM 66, lossless-HD 30–34" list *is* the buggy ranking (it puts AC-3 95
+  above FLAC 7.1 66), so following the doc reproduced the defect. §3 now states
+  the band → Atmos → channels → sub-tier order, and `docs/hardware.md` §5 says
+  the same thing once, in full.
+
+### Added
+- `playbackchain`: `codec_blob()`, `BLOB_FIELD_ABSENT`,
+  `is_dolby_digital_plus()`, `synthesis_target_label()`, `DOLBY_SHORT_NAMES`,
+  `Player.max_coded_resolution`, and
+  `Sink.hdmi_in_accepts` / `Sink.arc_cannot_carry` — Hisense's per-port input
+  matrix as data, with a test for the invariant the default wiring rests on
+  (**every format ARC refuses, HDMI IN accepts**).
+- `ChainAudioRetentionTests` and `BlobFieldTests`, plus coded-ceiling,
+  fail-closed, verdict-reachability, per-port-matrix, step-title-drift and
+  multi-line-detail-indentation tests (suite 1247 → 1266).
+- `docs/hardware.md` §2 now quotes the per-port table verbatim with its source;
+  §1 documents the coded ceiling; §5 documents the band-then-layout ranking.
+
 ## [8.1.0] - 2026-10-03
 
 ### Changed

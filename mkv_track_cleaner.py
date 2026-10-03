@@ -809,30 +809,67 @@ def is_forced_subtitle(track: dict[str, Any]) -> bool:
     name = str(props.get("track_name") or "")
     return bool(re.search(r"\b(forced|foreign only|signs?/?songs?)\b", name.lower()))
 
-def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, int, int]:
-    """(codec tier, atmos, channels, bitrate, sample-rate, original-flag).
+#: Sort bands for :func:`get_audio_quality_score`. The band is the coarsest
+#: key, and it is the chain's one hard rule: a track that needs NO server work
+#: always beats one that does.
+_BAND_CHAIN_NATIVE = 2   # AC-3 / DD+ / base DTS / anything decoded to PCM
+_BAND_TRANSCODE_BOUND = 1  # TrueHD / DTS-HD / DTS:X / WMA Pro: transcodes per play
+_BAND_UNKNOWN = 0        # fail-closed: reported, never chosen if anything else exists
 
-    The codec tier is the ONE playback chain's table
+
+def get_audio_quality_score(
+    track: dict[str, Any],
+) -> tuple[int, int, int, int, int, int, int]:
+    """(band, atmos, layout, codec-pref, bitrate, sample-rate, original).
+
+    The classes come from the ONE playback chain's table
     (``organizekit.core.playbackchain``): this library is engineered for a
     Chromecast with Google TV (HD) G454V feeding a Hisense AX3125H over the
     soundbar's HDMI IN, and on that chain the "best" track is the best one
-    that plays natively. Dolby Digital Plus (E-AC-3, Atmos included) and
-    Dolby Digital (AC-3) top the table because the player bitstreams them
-    end-to-end; base DTS follows (the bar decodes it and the player's
-    firmware passes it); client-decodable formats (AAC/FLAC/PCM/Opus/...)
-    sit mid-table because they arrive as PCM; and lossless-HD formats sit
-    BELOW all of them: the G454V can never emit TrueHD / DTS-HD / DTS:X, so
-    keeping one would force the Jellyfin server to transcode the audio on
-    every single play. ``audio_standardizer.py`` runs before this tool and
-    bakes a chain-native Dolby track in (Dolby Digital Plus on the default
-    soundbar-hdmi-in wiring) from exactly those lossless masters, so nothing
-    of audible value is lost when they leave.
+    that plays natively.
+
+    Key order, and why it is that order:
+
+    1. **band** — the chain's hard rule. Anything that plays with zero server
+       work (bitstreamed Dolby, base DTS, or decoded to PCM) beats a lossless
+       master the G454V can never emit, because keeping that master means the
+       Jellyfin server re-encodes the audio on *every single play*.
+       ``audio_standardizer.py`` runs before this tool and bakes a chain-native
+       Dolby track in (Dolby Digital Plus on the default soundbar-hdmi-in
+       wiring) from exactly those masters, so nothing of audible value is lost
+       when they leave.
+    2. **atmos** — a real DD+ Atmos track is the one thing this 3.1.2 bar with
+       up-firing drivers exists for, so it wins inside the band.
+    3/4. **layout and codec sub-tier — in an order that depends on the band.**
+       Inside the chain-native band the LAYOUT leads: all three native classes
+       are equally free at playback time (that is what ``band`` just said), so
+       there is no transcoding argument left for preferring a narrower track.
+       It used to be the other way round, and that ordering was destructive —
+       AC-3 2.0 at sub-tier 95 outranked FLAC 7.1 at 66, and since this tool
+       keeps exactly ONE audio track and remuxes the rest away, a 7.1 master
+       was permanently deleted to keep stereo. Hisense's own input-format table
+       is why that is simply wrong on this chain: LPCM 5.1 and LPCM 7.1 are both
+       supported on the bar's HDMI IN (and are NOT supported on its ARC input),
+       so multichannel decoded audio is a first-class citizen on the default
+       wiring, not a consolation prize. With the layout settled, the sub-tier
+       refines it — DD+ (100) over DD (95) over base DTS (80) over
+       lossless-decodable (66) over Opus (62) over other lossy (60).
+       Below the band the order is reversed: nothing there plays at all, so the
+       sub-tier picks the best transcode SOURCE (DTS-HD MA / DTS:X 34 over
+       DTS-HD HRA 32 over the rest 30) and the layout only breaks a tie inside
+       it. ``audio_standardizer.py`` ranks its source pool with this very
+       function, so the two tools cannot disagree about which master to burn.
+    5. **bitrate, sample-rate, original-flag** — the historical tie-breaks.
     """
     props = track.get("properties") or {}
-    codec_id = str(props.get("codec_id") or "").upper()
-    codec = str(track.get("codec") or "").upper()
-    name = str(props.get("track_name") or "").upper()
-    blob = f"{codec} {codec_id} {name}"
+    # codec_blob, not an f-string: the classifier reads field 2 as the codec
+    # ID/profile, and mkvmerge omits codec_id often enough that a hand-joined
+    # blob lets the track NAME slide into that slot - "DTS  DTS-HD MA 7.1"
+    # promoted a plain DTS core track to an unplayable HD master, and this tool
+    # then threw the playable track away. The shared builder fills the gap.
+    blob = pc.codec_blob(track.get("codec"), props.get("codec_id"),
+                         props.get("track_name"))
+    cls = playbackchain_classify(blob)
 
     tier = chain_audio_tier(blob)
 
@@ -840,7 +877,12 @@ def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, 
         channels = int(props.get("audio_channels") or 2)
     except (ValueError, TypeError):
         channels = 2
-    atmos_flag = 1 if any(k in blob for k in ("ATMOS", "JOC")) else 0
+    # Atmos only exists inside Dolby Digital Plus (as JOC) on anything this
+    # player can emit - plain AC-3 has no Atmos variant, so an "Atmos" in the
+    # track name is a release-group flourish. Crediting it used to make a
+    # stereo AC-3 titled "Dolby Atmos" outrank a real surround track.
+    atmos_flag = 1 if (cls == pc.AUDIO_NATIVE and pc.is_dolby_digital_plus(blob)
+                       and any(k in blob for k in ("ATMOS", "JOC"))) else 0
     try:
         bitrate = int(props.get("tag_bps") or props.get("bps") or props.get("tag_bitrate") or props.get("bitrate") or 0)
     except (ValueError, TypeError):
@@ -850,7 +892,27 @@ def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, 
     except (ValueError, TypeError):
         sampling_freq = 48000
     original = 1 if props.get("flag_original") else 0
-    return (tier, atmos_flag, channels, bitrate, sampling_freq, original)
+    if cls in (pc.AUDIO_NATIVE, pc.AUDIO_DTS_CORE, pc.AUDIO_DECODE_PCM):
+        band = _BAND_CHAIN_NATIVE
+    elif cls == pc.AUDIO_TRANSCODE_BOUND:
+        band = _BAND_TRANSCODE_BOUND
+    else:
+        band = _BAND_UNKNOWN
+    # Positions 3 and 4 swap meaning with the band, because the question the
+    # sub-tier answers is different on each side of it. The band is the first
+    # key, so these two are only ever compared *within* one band.
+    if band == _BAND_CHAIN_NATIVE:
+        # Everything here already Direct Plays, so there is no transcoding
+        # argument left to make: the layout is the quality signal and the codec
+        # sub-tier only refines it (DD+ over DD over base DTS over decoded PCM).
+        layout, codec_pref = channels, tier
+    else:
+        # Nothing here plays at all. The only question is which master makes
+        # the best SOURCE for audio_standardizer to synthesize from, and that
+        # is the sub-tier's answer (DTS-HD MA / DTS:X over DTS-HD HRA over the
+        # rest); the layout breaks a tie inside it.
+        layout, codec_pref = tier, channels
+    return (band, atmos_flag, layout, codec_pref, bitrate, sampling_freq, original)
 
 
 def chain_audio_tier(blob: str) -> int:
@@ -867,11 +929,9 @@ def chain_audio_tier(blob: str) -> int:
     cls = playbackchain_classify(b)
     if cls == pc.AUDIO_NATIVE:
         # Both are Dolby-native to the chain; E-AC-3 (DD+/Atmos-capable)
-        # edges out plain AC-3 inside the class.
-        if any(k in b for k in ("E-AC-3", "EAC3", "E_AC3", "EC-3", "EC3",
-                                "DOLBY DIGITAL PLUS", "DD+", "DDPLUS")):
-            return 100
-        return 95
+        # edges out plain AC-3 inside the class. The marker list lives in
+        # playbackchain so this and the Atmos gate cannot drift apart.
+        return 100 if pc.is_dolby_digital_plus(b) else 95
     if cls == pc.AUDIO_DTS_CORE:
         return 80
     if cls == pc.AUDIO_DECODE_PCM:
