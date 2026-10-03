@@ -48,7 +48,9 @@ Two subtleties the research surfaced and the code encodes:
    Amlogic Android TV firmware passes plain 5.1 DTS core through the HDMI
    layer in practice (widely reported; see sources). The toolkit treats base
    DTS as *acceptable but unofficial*: it is left alone by default, and
-   `--no-dts-passthrough` converts it to AC-3 for anyone who distrusts it.
+   `--no-dts-passthrough` converts it to the wiring's chain-native Dolby
+   codec (Dolby Digital Plus on the default wiring) for anyone who
+   distrusts it.
 2. **HDR10/HDR10+/HLG "play" here means tone-mapped to SDR.** The panel is a
    1080p SDR display, so the Chromecast outputs SDR after tone-mapping.
    That is a picture-preserving operation done at playback time, with zero
@@ -76,7 +78,7 @@ From Hisense's product page and spec sheet (sources at the end):
 | Property | Value |
 | :--- | :--- |
 | Configuration | 3.1.2 channels, 440 W, wireless 6.5" subwoofer, up-firing height drivers |
-| HDMI | **1× HDMI IN (4K@60 passthrough) + 1× HDMI OUT with ARC** |
+| HDMI | **1× HDMI IN (4K/HDMI 3D passthrough) + 1× HDMI OUT (eARC/ARC + CEC)** |
 | Audio decoding | **Dolby Digital, Dolby Digital Plus / Atmos (DD+ JOC), TrueHD, DTS, DTS-HD**, Multichannel PCM |
 | Other inputs | optical (TOSLINK), Bluetooth 5.3, USB, 3.5 mm AUX |
 
@@ -172,14 +174,14 @@ leaves the player — the server transcodes audio on **every** play.
 
 | Source track player | G454V player | over HDMI IN | over ARC/opt | verdict in the toolkit |
 | :--- | :--- | :--- | :--- | :--- |
-| Dolby Digital (AC-3) 5.1 | passthrough ✅ | ✅ decodes | ⚠️ this TV offers PCM only for HDMI sources, so ARC/opt may deliver it as stereo (§3) | **goal format** — synthesized when missing |
-| Dolby Digital Plus (E-AC-3, incl. Atmos JOC) | passthrough ✅ | ✅ decodes | ⚠️ same PCM-only limit — DD+ Atmos does not survive this TV's ARC path (§3) | **goal format** — best possible track on this chain |
+| Dolby Digital (AC-3) 5.1 | passthrough ✅ | ✅ decodes | ⚠️ this TV offers PCM only for HDMI sources, so ARC/opt may deliver it as stereo (§3) | kept as-is; the synthesis target only under `tv-arc` |
+| Dolby Digital Plus (E-AC-3, incl. Atmos JOC) | passthrough ✅ | ✅ decodes | ⚠️ same PCM-only limit — DD+ Atmos does not survive this TV's ARC path (§3) | **goal format** — best possible track on this chain; what audio_standardizer synthesizes on the default wiring |
 | AAC 5.1 / stereo | decode → PCM ✅ | ✅ (multich. PCM) | ⚠️ stereo only on this TV | stereo = fine; 5.1+ native on the **default** HDMI-IN wiring, **AC-3 candidate only under `tv-arc`** |
 | FLAC / PCM / ALAC 7.1 | decode → PCM ✅ | ✅ multich. | ⚠️ stereo only on this TV | native multichannel on the **default** HDMI-IN wiring; **AC-3 candidate (5.1+) only under `tv-arc`** |
 | MP3 / Opus / Vorbis | decode → PCM ✅ | ✅ | ✅ stereo | fine |
 | base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | accepted by default; `--no-dts-passthrough` transcodes it |
-| **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **AC-3 5.1 640k synthesized** from it by audio_standardizer |
-| **DTS-HD MA / HRA, DTS:X** | ❌ **cannot be emitted at all** | (same) | ❌ | **AC-3 5.1 640k synthesized** |
+| **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** from it by audio_standardizer (AC-3 under `tv-arc`) |
+| **DTS-HD MA / HRA, DTS:X** | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** (AC-3 under `tv-arc`) |
 | WMA Pro / unknown | ❌ | ❌ | ❌ | fail-closed: reported for a human, never auto-touched |
 
 **Read the "over ARC/opt" column as one limit, not nine.** Every ⚠️ in it has
@@ -209,18 +211,30 @@ matrix: **chain-native Dolby (100) > base DTS core (80) > decode-to-PCM
 unknown (0)**. "Highest sample rate wins" is the wrong metric on this chain;
 "plays without a server" is the right one.
 
-### Why AC-3 5.1 @ 640 kbps (and not 448k, and not E-AC-3)?
+### Why Dolby Digital Plus (E-AC-3) @ 640 kbps — and AC-3 only under `tv-arc`?
 
-* 640 kbps is the AC-3 maximum and the bitrate every sink in this chain
-  handles; the transcode source is usually a lossless master with plenty of
-  headroom, so the ceiling is the honest choice.
-* The output **stays AC-3 rather than E-AC-3** on purpose: AC-3 is the one
-  format licensed-and-supported at **every single hop forever** (ARC and
-  optical included), and the 5.1 @ 640k mix is well within its design
-  envelope. Re-muxing an existing E-AC-3 track is of course *kept* as-is —
-  it is native too, and Atmos carries through.
-* A 7.1/6.1 source folds down to 5.1 by ffmpeg's standard downmix (LFE
-  kept); stereo sources stay stereo at 192 kbps — never upmixed.
+* This chain is cabled `soundbar-hdmi-in`, and on that wiring audio crosses
+  exactly two hops: the G454V's HDMI out and the AX3125H's HDMI IN. Dolby
+  Digital Plus is **official** on both — it is on Google's published
+  passthrough list for this player (Dolby Digital, Dolby Digital Plus,
+  Dolby Atmos via HDMI pass-through) and on Hisense's decoder list for the
+  bar. Nothing else about the target is hedged.
+* E-AC-3 is strictly the better codec of the two Dolby bitstreams: a more
+  efficient encode than AC-3 at any given bitrate, and it can carry **7.1**
+  where AC-3 caps at 5.1 — so a lossless 7.1 master keeps its full layout
+  (the bar's upmixer uses every channel), instead of being folded. 5.1 and
+  6.1 sources normalize to 5.1; stereo stays stereo (192 kbps), mono mono —
+  nothing is ever upmixed.
+* 640 kbps is the bitrate every sink in this chain handles with headroom
+  and the ceiling these mixes need; the transcode source is usually a
+  lossless master with plenty of headroom, so the ceiling is the honest
+  choice.
+* **Under the explicit `tv-arc` alternative** the synthesized target stays
+  AC-3 (Dolby Digital) and 7.1 folds to 5.1: that path routes sound through
+  the 2013 TV, and AC-3 is the one format licensed-and-supported at every
+  hop of it (ARC and optical included). Re-muxing an existing E-AC-3 (or
+  AC-3) track is of course *kept* as-is on either wiring — it is native
+  too, and Atmos carries through.
 
 ## 6 · The settings checklist (the human half of the chain)
 
@@ -259,10 +273,10 @@ Player:
 * Google, *Chromecast with Google TV (HD) — "G454V" regulatory and user
   manual* (documents the model id "G454V").
   <https://support.google.com/chromecast/answer/11236184>
-* AFTVnews, *Google's new 1080p Chromecast with Google TV (HD), model G454V* —
-  confirms codename "boreal", S805X2, 1.5 GB RAM, AV1 decode as the HD
-  model's distinguishing feature.
-  <https://www.aftvnews.com/googles-new-1080p-chromecast-with-google-tv-hd-model-g454v-is-now-official-for-30/>
+* AFTVnews, *Google releases Chromecast HD as its 1080p streaming device for
+  $29.99* — launch coverage confirming 1080p60, HDR10/HDR10+/HLG, 1.5 GB RAM,
+  8 GB storage on the HD model.
+  <https://www.aftvnews.com/google-releases-chromecast-hd-as-its-1080p-streaming-device-for-29-99/>
 * GSMArena device sheet (S805X2 / Mali-G31 / 1.5 GB / AV1+VP9+HEVC decode).
   <https://www.gsmarena.com/google_chromecast_with_google_tv_%28hd%29-11907.php>
 * Rtings senior review of the HD model: measured HDR behavior, no Dolby

@@ -685,7 +685,7 @@ def chain_fit(payload: dict[str, Any], video_stream: dict[str, Any],
     note_bits = [pc.video_chain_note(video)]
     if best_audio == pc.AUDIO_TRANSCODE_BOUND:
         note_bits.append("audio cannot leave the G454V either — audio_standardizer.py "
-                         "synthesizes a chain-native AC-3 track")
+                         "synthesizes a chain-native Dolby track")
     return video, best_audio, " · ".join(note_bits)
 
 # =============================================================================
@@ -848,7 +848,7 @@ ACTION_GROUPS: tuple[ActionGroup, ...] = (
         "8-bit SDR (QUEUE)",
         "re-encode these to 10-bit",
         "Re-encode in HandBrake for the G454V chain: H.265 Main10 10-bit at <=1080p "
-        "(or H.264 High@L4.1 8-bit), audio mixdown Dolby Digital (AC-3) 5.1 @ 640 kbps — "
+        "(or H.264 High@L4.1 8-bit), audio Dolby Digital Plus 5.1 @ 640 kbps — "
         "both Direct Play end-to-end on the Chromecast HD.",
     ),
     ActionGroup(
@@ -979,7 +979,7 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
         if audio_bound:
             chain_rows.append((audio_bound, pc.AUDIO_TRANSCODE_BOUND,
                                "best audio cannot leave the G454V — audio_standardizer.py "
-                               "synthesizes a chain-native AC-3 track"))
+                               "synthesizes a chain-native Dolby track"))
         report.scorecard(chain_rows)
         report.paragraph(
             "These rows change no bit-depth verdict — they say what each file does on "
@@ -991,7 +991,7 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
 
     report.footer([
         "QUEUE = 8-bit SDR. Re-encode for the chain: H.265 10-bit (or H.264 High) at "
-        "<=1080p + AC-3 5.1 640k audio in HandBrake.",
+        "<=1080p + Dolby Digital Plus 5.1 640k audio in HandBrake.",
         "SKIP = already 10-bit or better SDR. Re-encoding only loses quality.",
         "KEEP = HDR10 / HDR10+ / Dolby Vision / HLG. HandBrake tone-maps or strips "
         "dynamic metadata; the G454V tone-maps HDR10/HDR10+/HLG to SDR for this TV at "

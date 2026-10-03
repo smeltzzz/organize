@@ -6,6 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The synthesis target is now tuned to the wiring the chain actually runs.**
+  On the default `soundbar-hdmi-in` wiring — Chromecast G454V → Hisense
+  AX3125H HDMI IN → Samsung UN60F6350AF — audio crosses exactly two hops,
+  and Dolby Digital Plus (E-AC-3) is official on both (Google's published
+  passthrough list for the player; Hisense's decoder list for the bar's
+  HDMI IN). `audio_standardizer.py` therefore now bakes **Dolby Digital
+  Plus @ 640 kbps** from TrueHD/DTS-HD/DTS:X/WMA-Pro masters instead of
+  AC-3: a more efficient encode at the same bitrate, and the first target
+  that can carry **7.1 — a lossless 7.1 master keeps its full layout**
+  instead of folding to 5.1 (5.1/6.1 still normalize to 5.1; stereo/mono
+  keep their layouts; nothing is ever upmixed). The explicit `--wiring
+  tv-arc` alternative keeps the previous AC-3 5.1 @ 640k target, since that
+  path routes sound through the 2013 TV where AC-3 is the every-hop format.
+  `target_audio_for()` gains a `wiring` parameter (default:
+  `DEFAULT_WIRING`); the stored verdict vocabulary renames
+  `transcoded-ac3` → `transcoded-dolby` (state cache is rebuildable, so old
+  rows simply re-derive on the next run). Post-transcode verification, the
+  report and the fake-ffmpeg test double all follow the target codec
+  instead of assuming `ac3`. Docs (`docs/hardware.md` §5 incl. the "why"
+  section, `docs/tools.md`, `docs/pipeline.md`, README) rewritten to match.
+
+### Added
+- Wiring-aware `TargetAudioTests` and a planner test pinning the
+  Dolby-Digital-Plus/7.1 default against the AC-3 `tv-arc` alternative
+  (suite 1244 → 1247).
+
 ### Fixed
 - **`audio_chain_note()` no longer claims a Dolby bitstream survives the
   `tv-arc` alternative.** The `AUDIO_NATIVE` branch returned before ever

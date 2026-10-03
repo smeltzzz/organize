@@ -37,10 +37,13 @@ def run_self_tests() -> int:
     truehd_only = _payload({"codec_name": "truehd", "channels": 8})
     v = plan_for_payload("m.mkv", truehd_only, base_cfg)
     _assert(v.status == STATUS_PLANNED, f"TrueHD-only plans a transcode, got {v.status}", errors)
-    _assert(v.target is not None and v.target.codec == "ac3" and v.target.channels == 6,
-            "a 7.1 TrueHD normalizes to AC-3 5.1", errors)
+    _assert(v.target is not None and v.target.codec == "eac3" and v.target.channels == 8,
+            "a 7.1 TrueHD keeps its layout as Dolby Digital Plus on the default wiring", errors)
     _assert(v.target is not None and v.target.bitrate == "640k",
-            "the AC-3 ceiling is 640 kbps", errors)
+            "the synthesis ceiling is 640 kbps", errors)
+    v_arc = plan_for_payload("m.mkv", truehd_only, Config(dry_run=True, wiring=WIRING_TV_ARC))
+    _assert(v_arc.target is not None and v_arc.target.codec == "ac3" and v_arc.target.channels == 6,
+            "the tv-arc alternative still targets AC-3 5.1", errors)
     _assert(v.source_stream == 1, "the transcode reads the TrueHD stream", errors)
 
     eac3 = _payload({"codec_name": "eac3", "channels": 6})
@@ -113,13 +116,13 @@ def run_self_tests() -> int:
     cmd = build_ffmpeg_command(Config(ffmpeg="ffmpeg"), Path("/lib/M/m.mkv"),
                              Path("/lib/M/.m.audiofit-1.tmp.mkv"), v, total_audio_streams=1)
     _assert("-map" in cmd and "0:1" in cmd, "the command maps the TrueHD source stream", errors)
-    _assert("ac3" in cmd, "the command encodes AC-3", errors)
-    _assert("640k" in cmd, "the command uses the AC-3 ceiling bitrate", errors)
+    _assert("eac3" in cmd, "the command encodes Dolby Digital Plus on the default wiring", errors)
+    _assert("640k" in cmd, "the command uses the 640 kbps ceiling bitrate", errors)
     _assert(cmd[-1].endswith(".tmp.mkv"), "the command writes the temp file", errors)
     _assert("language=eng" in cmd, "the appended track keeps the source language tag", errors)
 
     # -- verification: only a strict superset may publish --------------------
-    added = {"index": 2, "codec_type": "audio", "codec_name": "ac3", "channels": 6}
+    added = {"index": 2, "codec_type": "audio", "codec_name": "eac3", "channels": 8}
     good_new = dict(truehd_only)
     good_new["streams"] = list(truehd_only["streams"]) + [added]
     # patch the probe of the produced file: the verifier reads run_ffprobe
@@ -140,7 +143,7 @@ def run_self_tests() -> int:
         wrong["streams"] = list(truehd_only["streams"]) + [dict(added, codec_name="dts")]
         globals()["run_ffprobe"] = lambda b, p, c: wrong
         ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)
-        _assert(not ok, "a non-AC-3 appended track is refused", errors)
+        _assert(not ok, "an appended track of the wrong codec is refused", errors)
 
         drifted = dict(truehd_only)
         drifted["streams"] = list(truehd_only["streams"]) + [added]
