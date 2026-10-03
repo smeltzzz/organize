@@ -65,6 +65,19 @@ class Player:
     storage: str = "8 GB"
     os: str = "Google TV (Android 12, upgradeable to 14)"
     max_resolution: tuple[int, int] = (1920, 1080)
+    # The CODED ceiling, which is what a resolution check has to compare
+    # against. 1080 is not a multiple of 16, so a 1080p H.264 stream is
+    # routinely *stored* as 1920x1088 with the extra 8 lines carried as
+    # frame_crop_bottom_offset padding (MediaInfo calls these Stored_Height
+    # 1088 / Sampled_Height 1080). Depending on the container, the muxer and
+    # whether the crop rectangle survived, ffprobe can report either 1080 or
+    # 1088 for the very same picture - so comparing the stored height against
+    # 1080 brands ordinary 1080p movies "oversize" and queues a downscale they
+    # do not need. Rounded up to the macroblock grid the ceiling is
+    # ceil(1920/16)*16 = 1920 by ceil(1080/16)*16 = 1088, and 1920x1088 is
+    # inside the S805X2's decode block (H.264 level 4.2 covers 2048x1088@60)
+    # as well as inside the TV's, which scales it to its 1920x1080 panel.
+    max_coded_resolution: tuple[int, int] = (1920, 1088)
     max_fps: int = 60
     # Hardware video decoders (Amlogic S805X2 media block). AV1 decode is the
     # one silicon advantage the HD model holds over the 2020 4K model.
@@ -106,6 +119,31 @@ class Sink:
         "picture to the TV, so the 2013 TV never has to carry audio. This is "
         "the wiring this toolkit assumes by default (soundbar-hdmi-in)."
     )
+    #: Hisense's own PER-PORT input matrix (user manual §1.3, "Supported Input
+    #: Audio Formats"), which is the hard evidence the default wiring rests on.
+    #: Two rows are load-bearing: multichannel LPCM is accepted on HDMI IN
+    #: (so a 5.1/7.1 AAC/FLAC/PCM track the Chromecast decodes arrives intact),
+    #: and it is NOT accepted on HDMI ARC or optical (so the same track over
+    #: the tv-arc alternative cannot). Verified against the manufacturer PDF
+    #: 2026-10; see SOURCES.
+    hdmi_in_accepts: tuple[str, ...] = (
+        "LPCM 2ch", "LPCM 5.1ch", "LPCM 7.1ch",
+        "Dolby Digital", "Dolby Digital Plus",
+        "Dolby Atmos - Dolby Digital Plus",
+        "Dolby TrueHD", "Dolby Atmos - Dolby TrueHD",
+        "DTS", "DTS-ES Discrete 6.1", "DTS-ES Matrix 6.1", "DTS 96/24",
+        "DTS-HD High Resolution Audio", "DTS-HD Master Audio",
+        "DTS-HD LBR", "DTS:X",
+    )
+    #: The same matrix, read the other way: formats the bar's ARC/optical path
+    #: does NOT take, which is why ``tv-arc`` is the degraded alternative and
+    #: never the default.
+    arc_cannot_carry: tuple[str, ...] = (
+        "LPCM 5.1ch", "LPCM 7.1ch",
+        "Dolby TrueHD", "Dolby Atmos - Dolby TrueHD",
+        "DTS-HD High Resolution Audio", "DTS-HD Master Audio",
+        "DTS-HD LBR", "DTS:X",
+    )
 
 @dataclass(frozen=True)
 class Display:
@@ -143,6 +181,7 @@ SOURCES: tuple[str, ...] = (
     "https://www.reddit.com/r/googlehome/comments/j2ggur/ (Amlogic Android TV >= 8.1 passthrough: 5.1 DTS, DD, DD+, DD+/Atmos; NO TrueHD/DTS-HD)",
     "https://files.hisense-usa.com/download/f25648883914883a (AX3125H official spec sheet: 1x HDMI IN + 1x HDMI OUT eARC, Dolby Atmos/TrueHD/DD+/DD, DTS:X/DTS-HD/DTS decoders, PCM and Multich PCM)",
     "https://manuals.plus/hisense/ax3125h-3-1-2ch-440w-dolby-atmos-soundbar-with-wireless-subwoofer-manual (AX3125H user manual: HDMI IN socket for HDMI source devices; HDMI OUT (TV eARC/ARC); input-format table PCM / Dolby Digital / DD+ / TrueHD -> MPCM)",
+    "https://files.hisense-usa.com/download/f25642eeb4a386bb (Hisense 3.1.2ch manual, section 1.3 'Supported Input Audio Formats' - the PER-PORT matrix that decides the default wiring: LPCM 5.1ch and LPCM 7.1ch are supported on HDMI IN and HDMI eARC but NOT on HDMI ARC or OPTICAL; 'Dolby Atmos - Dolby Digital Plus' is supported on HDMI ARC, eARC and HDMI IN; 'Dolby Atmos - Dolby TrueHD', Dolby TrueHD, DTS-HD HR/MA/LBR and DTS:X are eARC and HDMI IN only. Verified 2026-10)",
     "https://www.manualowl.com/m/Samsung/UN60F6350AF/Manual/347300 (UN60F6350AF e-manual: 'ARC is only available through the HDMI (ARC) port'; Digital Audio Output (SPDIF) formats 'may vary depending on the input source')",
     "https://www.samsung.com/sg/support/tv-audio-video/how-to-use-the-hdmi-arc-port-on-a-samsung-tv/ (Samsung support: HDMI-ARC carries PCM 2ch, Dolby Digital up to 5.1 and DTS Digital Surround up to 5.1; 2013-2014 F/H-series sound-output path)",
     "USER-CONFIRMED 2026-09 on the actual UN60F6350AF: with HDMI sources connected, the TV offers PCM only as its digital audio output format, so the ARC/optical path delivers multichannel content as stereo PCM",
@@ -211,6 +250,60 @@ CLASS_TIERS: dict[str, int] = {
 }
 
 
+#: Placeholder rendered for an ABSENT field of a classification blob.
+#: ``classify_audio_blob`` reads field 2 as the codec's profile/ID, so a blob
+#: whose field 2 is simply missing hands the title the profile's position -
+#: "DTS  DTS-HD MA 7.1" (empty codec ID) splits to ["DTS", "DTS-HD", ...] and a
+#: plain DTS core track gets promoted to an HD master by its own name. Every
+#: blob builder must therefore go through :func:`codec_blob`, which fills the
+#: gap instead of collapsing it.
+BLOB_FIELD_ABSENT = "-"
+
+
+def codec_blob(*fields: object) -> str:
+    """Build an upper-cased classification blob with STABLE field positions.
+
+    ``classify_audio_blob`` is positional: field 1 is the codec name (the only
+    authoritative one), field 2 may refine a bare DTS name into an HD/DTS:X
+    master, and everything after that is a title that must never decide. That
+    contract only holds if the fields cannot slide, so an absent field is
+    rendered as :data:`BLOB_FIELD_ABSENT` rather than dropped::
+
+        codec_blob("DTS", "", "DTS-HD MA 7.1")  ->  "DTS - DTS-HD MA 7.1"
+
+    Two tools reading the same track must reach the same verdict, and building
+    the blob here is what makes that structural instead of a convention each
+    caller has to remember (``audio_standardizer._stream_blob`` and
+    ``mkv_track_cleaner.get_audio_quality_score`` both call this).
+    """
+    rendered = [
+        str(field).strip() if str(field if field is not None else "").strip()
+        else BLOB_FIELD_ABSENT
+        for field in fields
+    ]
+    return " ".join(rendered).upper()
+
+
+#: Codec-NAME spellings of Dolby Digital Plus. Kept in one place because three
+#: decisions depend on it: the class table, the cleaner's sub-tier inside
+#: AUDIO_NATIVE, and whether a track may carry Atmos at all.
+_DOLBY_DIGITAL_PLUS_MARKERS = (
+    "E-AC-3", "EAC3", "E_AC3", "EC-3", "EC3",
+    "DOLBY DIGITAL PLUS", "DD+", "DDPLUS",
+)
+
+
+def is_dolby_digital_plus(blob: str) -> bool:
+    """True when this blob names a Dolby Digital Plus (E-AC-3) stream.
+
+    The Dolby family's two bitstreams are both chain-native, but only DD+ can
+    carry Atmos (as JOC) - plain AC-3 has no Atmos variant at all, so an
+    "Atmos" title on an AC-3 track is a release-group flourish and must never
+    be credited as height audio.
+    """
+    return any(marker in blob.upper() for marker in _DOLBY_DIGITAL_PLUS_MARKERS)
+
+
 def _classify_audio_segment(b: str) -> str | None:
     """Classify authoritative codec text (never a free-form title), or None.
 
@@ -229,8 +322,7 @@ def _classify_audio_segment(b: str) -> str | None:
     if any(k in b for k in ("WMAPRO", "WMA PRO", "WMA_LOSSLESS", "WMALOSSLESS")):
         # Android/ExoPlayer has no WMA Pro decoder; server transcodes.
         return AUDIO_TRANSCODE_BOUND
-    if any(k in b for k in ("E-AC-3", "EAC3", "E_AC3", "EC-3", "EC3",
-                            "DOLBY DIGITAL PLUS", "DD+", "DDPLUS")):
+    if is_dolby_digital_plus(b):
         return AUDIO_NATIVE
     if any(k in b for k in ("AC-3", "AC3", "A_AC3", "DOLBY DIGITAL", "DD ")):
         return AUDIO_NATIVE
@@ -381,6 +473,14 @@ DOLBY_CODEC_NAMES: dict[str, str] = {
     "eac3": "Dolby Digital Plus (E-AC-3)",
 }
 
+#: Short display names, without the parenthetical codec id — for one-line
+#: summaries and pipeline step titles where "Dolby Digital Plus (E-AC-3)" is
+#: too long to read.
+DOLBY_SHORT_NAMES: dict[str, str] = {
+    "ac3": "Dolby Digital",
+    "eac3": "Dolby Digital Plus",
+}
+
 def dolby_name(codec: str) -> str:
     """Display name of a synthesized Dolby codec ('eac3' / 'ac3')."""
     return DOLBY_CODEC_NAMES.get(codec, codec)
@@ -426,6 +526,48 @@ def target_audio_for(source_channels: int, wiring: str = DEFAULT_WIRING) -> Targ
     if ch == 2:
         return TargetAudio(codec="ac3", bitrate="192k", channels=2, channel_name="2.0")
     return TargetAudio(codec="ac3", bitrate="96k", channels=1, channel_name="1.0")
+
+
+def synthesis_target_label(source_channels: int = 6,
+                           wiring: str = DEFAULT_WIRING) -> str:
+    """What ``audio_standardizer.py`` bakes in, named for a one-line summary.
+
+    Derived from :func:`target_audio_for` and written down nowhere else, so a
+    step title, a dashboard row or a report header cannot keep advertising a
+    codec the chain stopped synthesizing. (The audiofit step said "AC-3 5.1"
+    for a whole release after the default wiring moved the target to Dolby
+    Digital Plus, and 5.1 after 7.1 sources started keeping their layout.)
+    """
+    codec = target_audio_for(source_channels, wiring).codec
+    return DOLBY_SHORT_NAMES.get(codec, codec)
+
+
+def achievable_channels(cls: str, channels: int,
+                        wiring: str = DEFAULT_WIRING) -> int:
+    """The channel layout this track can END UP at on this chain.
+
+    The question ``mkv_track_cleaner`` has to answer is not "which track plays
+    today" but "which track can this movie end up with", because the remux is
+    irreversible: a track that is dropped is gone for good, while a track that
+    merely needs converting can still be converted later.
+
+    * A **chain-native** track is already at its final layout. Nothing converts
+      it and nothing improves it, so it achieves exactly what it carries.
+    * A **transcode-bound** track is not a dead end - it is precisely the input
+      ``audio_standardizer.py`` synthesizes a chain-native Dolby track from - so
+      it achieves that target's layout (a 7.1 master keeps 7.1 on the default
+      wiring and folds to 5.1 under ``tv-arc``, exactly as the target says).
+    * An **unknown** track achieves nothing, because the toolkit never
+      auto-touches one: fail closed, as everywhere else here.
+    """
+    ch = int(channels or 0)
+    if ch <= 0:
+        return 0
+    if cls in (AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DECODE_PCM):
+        return ch
+    if cls == AUDIO_TRANSCODE_BOUND:
+        return target_audio_for(ch, wiring).channels
+    return 0
 
 
 def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> str:
@@ -506,6 +648,12 @@ def classify_video(
 
     ``hdr_flavors`` and ``dv_profile`` accept exactly what bitdepth.py's HDR
     classifier already derives, so the two tools share one reading of a file.
+
+    Fail-closed like the audio side: a missing resolution or a missing codec
+    name yields :data:`VIDEO_UNKNOWN` ("review manually"), never a confident
+    ``direct-play``. The size check runs against the CODED ceiling
+    (:attr:`Player.max_coded_resolution`), so a 1080p movie stored as
+    1920x1088 of macroblock padding is not accused of being oversize.
     """
     codec = (codec_name or "").lower()
     flavors = {f.strip().lower() for f in hdr_flavors}
@@ -513,13 +661,21 @@ def classify_video(
 
     if dv:
         return VIDEO_DV_FLAG
-    if width > PLAYER.max_resolution[0] or height > PLAYER.max_resolution[1]:
+    if width <= 0 or height <= 0:
+        # No resolution means nothing here can be checked against the 1080p
+        # ceiling. Reporting "direct-play" would be a guess in the unsafe
+        # direction, so this is the video analogue of AUDIO_UNKNOWN.
+        return VIDEO_UNKNOWN
+    if (width > PLAYER.max_coded_resolution[0]
+            or height > PLAYER.max_coded_resolution[1]):
         # A 4K HEVC stream is beyond the S805X2's decode block outright; the
         # server transcodes every play. (Checked before codec support: an
         # oversized file transcodes regardless.)
         return VIDEO_OVERSIZE
-    if codec not in PLAYER.video_codecs:
-        return VIDEO_UNSUPPORTED
+    if not codec or codec not in PLAYER.video_codecs:
+        # An empty codec name is unknown, not unsupported: "no hardware
+        # decoder" is a factual claim that needs a codec to be about.
+        return VIDEO_UNKNOWN if not codec else VIDEO_UNSUPPORTED
     if flavors and ("hdr10" in flavors or "hdr10+" in flavors or "hlg" in flavors
                     or any("hdr" in f or "hlg" in f or "pq" in f or "bt2020" in f
                            for f in flavors)):

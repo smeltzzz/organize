@@ -84,7 +84,8 @@ class _SampleReports(unittest.TestCase):
                          "removed_audio_desc": ["Track 2: Commentary"], "kept_subs_count": 0,
                          "kept_subs_desc": [], "removed_subs_count": 0, "removed_subs_desc": []}],
             "already_clean": ["Dune (2021).mkv"], "skipped_no_english": [], "skipped_layout": [],
-            "deferred_hardlinked": [], "errors": [], "remux_without_srt": [], "diagnostics": [],
+            "deferred_hardlinked": [], "errors": [], "remux_without_srt": [],
+            "keeper_needs_audiofit": [], "diagnostics": [],
             "total_space_saved_bytes": 0,
         }
         with contextlib.redirect_stdout(io.StringIO()):

@@ -65,20 +65,29 @@ def run_self_tests() -> int:
     check(native_audio_language([jpn]) == "ja", "a single language needs no marker")
     check(audio_language_token(jpn) == "ja", "language tokens are normalized")
 
-    # The chain tiers: on the G454V -> AX3125H chain, a track the player can
-    # actually emit always outranks a lossless one it cannot. TrueHD/DTS-HD
-    # are demoted below every chain-native format because playing one means
+    # The chain policy: the keeper is the best track the movie can END UP with,
+    # not the one that plays right now, because the remux is irreversible. A
+    # TrueHD 7.1 master converts to a chain-native DD+ 7.1; a 2.0 track that
+    # plays today can never become anything. Layout therefore leads. At an
+    # EQUAL layout the old rule still holds - a track the G454V can emit
+    # outright outranks a master it cannot, because playing the master means
     # the Jellyfin server transcodes the audio on every single play.
     truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
+    truehd51 = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 6}}
     aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
     eac3 = {"codec": "E-AC-3", "properties": {"codec_id": "A_EAC3", "audio_channels": 6}}
     ac3 = {"codec": "AC-3", "properties": {"codec_id": "A_AC3", "audio_channels": 6}}
-    check(get_audio_quality_score(eac3) > get_audio_quality_score(truehd),
-          "chain policy: E-AC-3 5.1 (player passthrough) > TrueHD 7.1 (cannot leave the G454V)")
-    check(get_audio_quality_score(ac3) > get_audio_quality_score(truehd),
-          "chain policy: AC-3 5.1 (player passthrough) > TrueHD 7.1")
-    check(get_audio_quality_score(aac) > get_audio_quality_score(truehd),
-          "chain policy: AAC (decoded to PCM by the player) > TrueHD 7.1")
+    stereo = {"codec": "AC-3", "properties": {"codec_id": "A_AC3", "audio_channels": 2}}
+    check(get_audio_quality_score(truehd) > get_audio_quality_score(stereo),
+          "chain policy: a convertible TrueHD 7.1 > a 2.0 track that plays today")
+    check(get_audio_quality_score(truehd) > get_audio_quality_score(eac3),
+          "chain policy: TrueHD 7.1 (becomes DD+ 7.1) > chain-native E-AC-3 5.1")
+    check(get_audio_quality_score(eac3) > get_audio_quality_score(truehd51),
+          "chain policy: at an equal 5.1 layout, E-AC-3 (player passthrough) > TrueHD")
+    check(get_audio_quality_score(ac3) > get_audio_quality_score(truehd51),
+          "chain policy: at an equal 5.1 layout, AC-3 (player passthrough) > TrueHD")
+    check(get_audio_quality_score(aac) > get_audio_quality_score(truehd51),
+          "chain policy: at an equal 5.1 layout, AAC (decoded to PCM) > TrueHD")
     check(get_audio_quality_score(eac3) > get_audio_quality_score(ac3),
           "within the native class, DD+ edges DD")
 

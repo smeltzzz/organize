@@ -809,30 +809,76 @@ def is_forced_subtitle(track: dict[str, Any]) -> bool:
     name = str(props.get("track_name") or "")
     return bool(re.search(r"\b(forced|foreign only|signs?/?songs?)\b", name.lower()))
 
-def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, int, int]:
-    """(codec tier, atmos, channels, bitrate, sample-rate, original-flag).
+#: Sort bands for :func:`get_audio_quality_score`. The band is the chain's
+#: Direct-Play-first rule: at an equal achievable layout, a track that needs NO
+#: server work beats one that does. It is the second key rather than the first
+#: because the remux is irreversible - see that function's docstring.
+_BAND_CHAIN_NATIVE = 2   # AC-3 / DD+ / base DTS / anything decoded to PCM
+_BAND_TRANSCODE_BOUND = 1  # TrueHD / DTS-HD / DTS:X / WMA Pro: convertible by audiofit
+_BAND_UNKNOWN = 0        # fail-closed: reported, never chosen if anything else exists
 
-    The codec tier is the ONE playback chain's table
+
+def get_audio_quality_score(
+    track: dict[str, Any],
+    wiring: str | None = None,
+) -> tuple[int, int, int, int, int, int, int]:
+    """(achievable layout, band, atmos, codec-pref, bitrate, sample-rate, original).
+
+    The classes come from the ONE playback chain's table
     (``organizekit.core.playbackchain``): this library is engineered for a
     Chromecast with Google TV (HD) G454V feeding a Hisense AX3125H over the
-    soundbar's HDMI IN, and on that chain the "best" track is the best one
-    that plays natively. Dolby Digital Plus (E-AC-3, Atmos included) and
-    Dolby Digital (AC-3) top the table because the player bitstreams them
-    end-to-end; base DTS follows (the bar decodes it and the player's
-    firmware passes it); client-decodable formats (AAC/FLAC/PCM/Opus/...)
-    sit mid-table because they arrive as PCM; and lossless-HD formats sit
-    BELOW all of them: the G454V can never emit TrueHD / DTS-HD / DTS:X, so
-    keeping one would force the Jellyfin server to transcode the audio on
-    every single play. ``audio_standardizer.py`` runs before this tool and
-    bakes a chain-native Dolby track in (Dolby Digital Plus on the default
-    soundbar-hdmi-in wiring) from exactly those lossless masters, so nothing
-    of audible value is lost when they leave.
+    soundbar's HDMI IN.
+
+    The question this answers is **"which track can this movie END UP with?"**,
+    not "which track plays right now" — because the remux is irreversible. A
+    track that is dropped is gone for good; a track that merely needs converting
+    can still be converted on any later run. So the keeper is the best track
+    that is *either* already chain-native *or* convertible to chain-native,
+    ranked by the layout it can reach:
+
+    1. **achievable layout** (:func:`playbackchain.achievable_channels`) — a
+       chain-native track achieves the channels it carries; a transcode-bound
+       master achieves the channels ``audio_standardizer.py`` would bake into
+       its replacement (7.1 stays 7.1 on the default wiring, folds to 5.1 under
+       ``tv-arc``); an unknown track achieves nothing, because the toolkit never
+       auto-touches one. This is the key that makes a TrueHD Atmos 7.1 worth
+       more than an AC-3 2.0 that plays today: the master becomes DD+ 7.1, the
+       stereo track can never become anything.
+    2. **band** — *plays with no server work* (bitstreamed Dolby, base DTS, or
+       decoded to PCM) beats *transcode-bound* beats *unknown*. At an equal
+       achievable layout this is the Direct-Play-first rule, and it is what
+       keeps a 5.1 AC-3 ahead of a 5.1 TrueHD: same destination, but one of
+       them gets there without the server ever re-encoding anything.
+       ``audio_standardizer.py`` runs before this tool in the pipeline and bakes
+       the chain-native Dolby track in from exactly those masters, so by the
+       time the cleaner looks, the master has usually already become the DD+
+       track that wins on key 1 outright.
+    3. **atmos** — a real DD+ Atmos track is what this 3.1.2 bar with up-firing
+       drivers exists for, so it wins among equal layouts. Credited only to
+       Dolby Digital Plus: AC-3 has no Atmos variant, so a title cannot claim
+       one.
+    4. **codec sub-tier** — DD+ (100) over DD (95) over base DTS (80) over
+       lossless-decodable (66) over Opus (62) over other lossy (60); below the
+       band, DTS-HD MA / DTS:X (34) over DTS-HD HRA (32) over the rest (30),
+       which is also what picks the best transcode SOURCE —
+       ``audio_standardizer._pool_rank`` delegates to this very function, so the
+       two tools cannot disagree about which master to burn.
+    5. **bitrate, sample-rate, original-flag** — the historical tie-breaks.
+
+    ``wiring`` defaults to :func:`playbackchain.resolve_wiring`, so
+    ``ORGANIZE_PLAYBACK_WIRING`` is honoured here exactly as it is in
+    ``audio_standardizer.py``; it only moves key 1, and only for a >=7.1
+    transcode-bound master.
     """
     props = track.get("properties") or {}
-    codec_id = str(props.get("codec_id") or "").upper()
-    codec = str(track.get("codec") or "").upper()
-    name = str(props.get("track_name") or "").upper()
-    blob = f"{codec} {codec_id} {name}"
+    # codec_blob, not an f-string: the classifier reads field 2 as the codec
+    # ID/profile, and mkvmerge omits codec_id often enough that a hand-joined
+    # blob lets the track NAME slide into that slot - "DTS  DTS-HD MA 7.1"
+    # promoted a plain DTS core track to an unplayable HD master, and this tool
+    # then threw the playable track away. The shared builder fills the gap.
+    blob = pc.codec_blob(track.get("codec"), props.get("codec_id"),
+                         props.get("track_name"))
+    cls = playbackchain_classify(blob)
 
     tier = chain_audio_tier(blob)
 
@@ -840,7 +886,12 @@ def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, 
         channels = int(props.get("audio_channels") or 2)
     except (ValueError, TypeError):
         channels = 2
-    atmos_flag = 1 if any(k in blob for k in ("ATMOS", "JOC")) else 0
+    # Atmos only exists inside Dolby Digital Plus (as JOC) on anything this
+    # player can emit - plain AC-3 has no Atmos variant, so an "Atmos" in the
+    # track name is a release-group flourish. Crediting it used to make a
+    # stereo AC-3 titled "Dolby Atmos" outrank a real surround track.
+    atmos_flag = 1 if (cls == pc.AUDIO_NATIVE and pc.is_dolby_digital_plus(blob)
+                       and any(k in blob for k in ("ATMOS", "JOC"))) else 0
     try:
         bitrate = int(props.get("tag_bps") or props.get("bps") or props.get("tag_bitrate") or props.get("bitrate") or 0)
     except (ValueError, TypeError):
@@ -850,7 +901,14 @@ def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, 
     except (ValueError, TypeError):
         sampling_freq = 48000
     original = 1 if props.get("flag_original") else 0
-    return (tier, atmos_flag, channels, bitrate, sampling_freq, original)
+    if cls in (pc.AUDIO_NATIVE, pc.AUDIO_DTS_CORE, pc.AUDIO_DECODE_PCM):
+        band = _BAND_CHAIN_NATIVE
+    elif cls == pc.AUDIO_TRANSCODE_BOUND:
+        band = _BAND_TRANSCODE_BOUND
+    else:
+        band = _BAND_UNKNOWN
+    achievable = pc.achievable_channels(cls, channels, pc.resolve_wiring(wiring))
+    return (achievable, band, atmos_flag, tier, bitrate, sampling_freq, original)
 
 
 def chain_audio_tier(blob: str) -> int:
@@ -867,11 +925,9 @@ def chain_audio_tier(blob: str) -> int:
     cls = playbackchain_classify(b)
     if cls == pc.AUDIO_NATIVE:
         # Both are Dolby-native to the chain; E-AC-3 (DD+/Atmos-capable)
-        # edges out plain AC-3 inside the class.
-        if any(k in b for k in ("E-AC-3", "EAC3", "E_AC3", "EC-3", "EC3",
-                                "DOLBY DIGITAL PLUS", "DD+", "DDPLUS")):
-            return 100
-        return 95
+        # edges out plain AC-3 inside the class. The marker list lives in
+        # playbackchain so this and the Atmos gate cannot drift apart.
+        return 100 if pc.is_dolby_digital_plus(b) else 95
     if cls == pc.AUDIO_DTS_CORE:
         return 80
     if cls == pc.AUDIO_DECODE_PCM:
@@ -2082,8 +2138,10 @@ STATUS_FAILED = "failed"
 SETTLED_REMUX = frozenset({STATUS_CLEANED, STATUS_ALREADY_CLEAN, STATUS_SKIPPED})
 
 # Bucket -> verdict, in priority order. A remux that lands without a validated
-# sidecar is appended to `remux_without_srt` *as well as* `cleaned`; that bucket
-# is a note about library coverage, not an outcome, so it is not listed here.
+# sidecar is appended to `remux_without_srt` *as well as* `cleaned`, and a movie
+# whose retained master still needs audiofit is appended to
+# `keeper_needs_audiofit` *as well as* `cleaned`; those buckets are notes about
+# library coverage and pending work, not outcomes, so neither is listed here.
 # `errors` comes first because a movie that failed after being counted anywhere
 # else is a failure.
 VERDICT_BUCKETS: tuple[tuple[str, str], ...] = (
@@ -2466,6 +2524,29 @@ def process_mkv(
             level="WARNING", to_console=_console is None, log_file_path=log_file_path,
         )
 
+    # The keeper is the best track this movie can END UP with, and under the
+    # chain's ranking that can be a lossless master the G454V cannot emit yet.
+    # Keeping it is correct - the remux is irreversible, so a master that
+    # audio_standardizer can still convert beats a narrower track that plays
+    # today - but it is only correct if that conversion actually happens. Named
+    # here, loudly, so a library cannot quietly fill up with movies that
+    # transcode their audio on every play.
+    keeper_props = best_audio.get("properties") or {}
+    keeper_blob = pc.codec_blob(best_audio.get("codec"), keeper_props.get("codec_id"),
+                                keeper_props.get("track_name"))
+    if playbackchain_classify(keeper_blob) == pc.AUDIO_TRANSCODE_BOUND:
+        stats.setdefault("keeper_needs_audiofit", []).append(movie_name)
+        log(
+            f"{tag}The retained audio for '{display_name}' is "
+            f"{describe_track(best_audio)}, which the G454V can never emit. It is kept "
+            "because a convertible master beats the narrower track that would otherwise "
+            "survive an irreversible remux - but it only becomes chain-native once "
+            "audio_standardizer.py converts it. Run `organize audio` (or `organize run`, "
+            "which orders the steps for you); until then this movie transcodes its audio "
+            "on every play.",
+            level="WARNING", to_console=_console is None, log_file_path=log_file_path,
+        )
+
     best_audio_desc = describe_track(best_audio)
     removed_audio_descs = [describe_track(t) for t in removed_audio]
     kept_subs_descs = [describe_track(t) for t in keep_subtitles]
@@ -2740,14 +2821,15 @@ def generate_and_save_report(
     cleaned: list[dict[str, Any]] = list(stats.get("cleaned") or [])
     already_clean: list[Any] = list(stats.get("already_clean") or [])
     remux_without_srt: list[Any] = list(stats.get("remux_without_srt") or [])
+    keeper_needs_audiofit: list[Any] = list(stats.get("keeper_needs_audiofit") or [])
     converted: list[dict[str, Any]] = list(stats.get("converted_mp4") or [])
     deferred: list[Any] = list(stats.get("deferred_hardlinked") or [])
     skipped_english: list[Any] = list(stats.get("skipped_no_english") or [])
     skipped_layout: list[Any] = list(stats.get("skipped_layout") or [])
     skipped_sidecar: list[Any] = list(stats.get("skipped_sidecar") or [])
     errors: list[dict[str, Any]] = list(stats.get("errors") or [])
-    attention = (len(remux_without_srt) + len(deferred) + len(skipped_layout)
-                 + len(skipped_sidecar) + len(errors))
+    attention = (len(remux_without_srt) + len(keeper_needs_audiofit) + len(deferred)
+                 + len(skipped_layout) + len(skipped_sidecar) + len(errors))
     total = int(stats.get("total_scanned") or 0)
 
     report = Report(
@@ -2793,6 +2875,7 @@ def generate_and_save_report(
         (len(already_clean), "Already clean", "no writes needed"),
         (len(errors), "Errors", "unreadable or failed"),
         (len(remux_without_srt), "Cleaned without SRT", "no external .eng.srt; every embedded subtitle removed"),
+        (len(keeper_needs_audiofit), "Kept audio needing audiofit", "the retained master cannot leave the G454V until audio_standardizer converts it"),
         (len(deferred), "Deferred (hardlinked)", "still being seeded"),
         (len(skipped_layout), "Skipped (layout)", "folder is not canonical"),
         (len(skipped_sidecar), "Skipped (broken .eng.srt)", "a sidecar exists but is unusable; movie untouched"),
@@ -2851,6 +2934,24 @@ def generate_and_save_report(
             report.blank()
             report.entries([(str(name), "no external English SRT; embedded subtitles removed")
                             for name in remux_without_srt])
+        if keeper_needs_audiofit:
+            report.subsection("RETAINED AUDIO STILL NEEDS AUDIOFIT", count=len(keeper_needs_audiofit))
+            report.paragraph(
+                "The best track these movies could end up with is a lossless master "
+                "(TrueHD / DTS-HD / DTS:X / WMA Pro) that the G454V can never emit. It was "
+                "kept on purpose: the remux is irreversible, so a master "
+                "audio_standardizer.py can still convert into chain-native Dolby Digital "
+                "Plus beats a narrower track that plays today - deleting a 7.1 Atmos master "
+                "to keep a stereo AC-3 cannot be undone, while converting it can be done on "
+                "any later run. audio_standardizer.py runs BEFORE this tool in the pipeline "
+                "(`organize run` enforces the order), so a movie listed here means audiofit "
+                "did not run or could not: ffmpeg is usually missing, or this tool was run "
+                "standalone. Until it converts, these movies transcode their audio on every "
+                "play."
+            )
+            report.blank()
+            report.entries([(str(name), "run audio_standardizer.py to bake in Dolby Digital Plus")
+                            for name in keeper_needs_audiofit])
         if deferred:
             report.subsection("DEFERRED (STILL HARDLINKED / SEEDED)", count=len(deferred))
             report.paragraph(
@@ -3154,7 +3255,8 @@ def main(argv: list[str] | None = None) -> int:
         "start_time": datetime.now(), "total_scanned": 0, "cleaned": [],
         "already_clean": [], "skipped_no_english": [], "skipped_layout": [],
         "skipped_sidecar": [], "deferred_hardlinked": [], "errors": [],
-        "remux_without_srt": [], "diagnostics": [], "total_space_saved_bytes": 0,
+        "remux_without_srt": [], "keeper_needs_audiofit": [], "diagnostics": [],
+        "total_space_saved_bytes": 0,
     }
     report_meta: dict[str, Any] = {
         "target_dir": str(target_path), "report_file": args.report, "mkvmerge": mkvmerge_bin,

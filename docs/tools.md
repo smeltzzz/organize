@@ -230,16 +230,47 @@ Every movie ends up with exactly one audio track — the best-scoring one in
 the movie's own (native) language — and video is never re-encoded. Which
 track *is* best is the playback chain's table, not a golden-ear ranking: on
 the G454V → AX3125H chain ([hardware.md](hardware.md)) the keeper is the best
-track **the player can actually emit**. Scores in descending order: Dolby
-Digital Plus (E-AC-3, Atmos included, 100) and Dolby Digital (AC-3, 95)
-bitstream end-to-end; base DTS (80) is decoded by the soundbar; client-
-decodable formats (AAC 60/62, FLAC/PCM 66) arrive as PCM; and the lossless-HD
-formalities — TrueHD, DTS-HD MA, DTS-HD HRA, DTS:X — sit **below all of
-them** (30–34) because the G454V can never emit them, so keeping one would
-commit the server to an audio transcode on every play. `audio_standardizer.py`
-runs *before* this tool in the pipeline and bakes the chain-native Dolby track in
-from exactly those masters, so nothing of audible value is lost when they
-leave.
+track the movie can **end up with** — already chain-native *or* convertible to
+chain-native — because the remux is irreversible. A dropped track is gone for
+good; a master that `audio_standardizer.py` can still convert is not. So a
+TrueHD Atmos 7.1 beats an AC-3 2.0 that plays today: the master becomes a DD+
+7.1, the stereo track can never become anything. The score is compared in this
+order:
+
+1. **Achievable layout** (`playbackchain.achievable_channels()`). A
+   chain-native track achieves the channels it carries; a transcode-bound master
+   achieves the channels the synthesized replacement would have (7.1 stays 7.1
+   on the default wiring, folds to 5.1 under `tv-arc`, never upmixed); an
+   *unknown* track achieves nothing, because the toolkit fail-closes and never
+   auto-touches one. This is also what keeps **FLAC 7.1 ahead of AC-3 2.0**, and
+   Hisense's per-port table confirms LPCM 5.1/7.1 on the bar's HDMI IN
+   ([hardware.md §2](hardware.md)).
+2. **Band.** *Chain-native* — Dolby Digital Plus (E-AC-3, Atmos included) and
+   Dolby Digital (AC-3) bitstream end-to-end, base DTS is decoded by the
+   soundbar, and client-decodable formats (AAC, FLAC/PCM, Opus, MP3) arrive as
+   PCM — beats *transcode-bound* (TrueHD, DTS-HD MA, DTS-HD HRA, DTS:X, WMA
+   Pro), which beats *unknown*. At an **equal achievable layout** this is the
+   Direct-Play-first rule: a 5.1 AC-3 still beats a 5.1 TrueHD, because only one
+   of them gets to 5.1 without the server re-encoding anything.
+   `audio_standardizer.py` runs *before* this tool in the pipeline and bakes the
+   chain-native Dolby track in from exactly those masters, so by the time the
+   cleaner looks, the master has usually already become the DD+ track that wins
+   on key 1 outright.
+3. **Atmos**, credited only to a Dolby Digital Plus stream — AC-3 has no Atmos
+   variant, so a title cannot claim one. A 3.1.2 bar with up-firing drivers is
+   what DD+ Atmos exists for.
+4. **Codec sub-tier**, refining a settled layout: DD+ (100) > DD (95) > base
+   DTS (80) > FLAC/PCM (66) > Opus (62) > other lossy (60). Below the band it is
+   DTS-HD MA / DTS:X (34) > DTS-HD HRA (32) > the rest (30), which is what picks
+   the best *transcode source*. `audio_standardizer.py` ranks its own source pool
+   with this same function, so the two tools cannot disagree about which master
+   to burn.
+
+Keeping a convertible master is only correct if it actually gets converted, so
+every movie whose retained audio is still transcode-bound is named in the report
+(`Kept audio needing audiofit`) and warned about on the console and in the log.
+A movie in that bucket means audiofit did not run or could not — usually a
+missing `ffmpeg`, or this tool run standalone instead of through `organize run`.
 
 The rest of the contract is unchanged: dubs, commentary and every other
 language go. The native language is decided by the file's own markers, in
@@ -327,22 +358,41 @@ Parses scene release names and places one hardlinked movie file (plus any
 validated subtitle) per `Title (Year)/` folder. Hardlink-only: the download
 folder keeps seeding, the library uses 0 extra bytes. Skips TV, disc rips,
 and splits. Also finds duplicate folders of the same movie on request
-(`--deduplicate`, non-destructive by default).
+(`--deduplicate`, non-destructive by default) — and since edition is not part of
+a movie's identity, two folders holding different cuts of one title are
+duplicates of that title, which is what makes the sweep agree with the
+replacement rule above.
 
 **MKV and MP4 are both placed; MKV wins within a single release.** Nothing is
 transcoded: an MP4 lands as `Title (Year)/Title (Year).mp4`. Other containers
 (`.avi`, `.m4v`, `.ts`, disc images, …) stay in the download folder. When a
-*later* download has the same parsed title and year (and any edition/version
-marker matches the canonical name), its hardlink replaces the library movie,
-even if it is smaller or has a different container. No `ffprobe` or quality
-score is used; the latest incoming release wins (`--ffprobe` is accepted but
-ignored for compatibility with older hooks). The old file is not removed
+*later* download has the same parsed title and year, its hardlink replaces the
+library movie — even if it is smaller, a different cut, a 3D version, a
+different resolution or a different container.
+
+**Every cut of a title is that title.** Extended, Theatrical, Director's Cut,
+Final Cut, Unrated, Uncut, IMAX, Criterion, anniversary and special/collector's
+editions, and 3D presentations are all one movie, filed once under the
+canonical `Title (Year)/Title (Year).mkv` with no edition tag, and the newest
+download is the copy the library keeps. Whoever queued the download chose that
+cut, so no quality judgement is made on their behalf: no `ffprobe`, no size
+comparison and no quality score (`--ffprobe` is accepted but ignored for
+compatibility with older hooks). Swapping back is just another replace — the
+name never changes, so re-downloading the theatrical cut after the extended one
+puts the theatrical bytes back under the same filename.
+
+The one marker that must still agree is a multipart stack's *position*: part 1
+replaces part 1, because a split movie is one film across several files and a
+mismatched part would cost the library a reel. The old file is not removed
 until the new link is published and verified. If the container changed, the old
 extension is removed afterwards, keeping one feature in the folder. The
 download remains untouched, and existing `.eng.srt` sidecars remain
-unchanged. Unmarked alternate cuts cannot be distinguished by filename alone;
-a release marked with an edition is *not* allowed to overwrite an unmarked
-canonical movie. The torrent-completion hook treats the incoming download as
+unchanged. Because edition is not part of a movie's identity, a single release
+folder holding two cuts is **one** movie rather than a two-title box set: the
+files group together and the deterministic pick wins (canonical container, then
+largest), logged as such. Previously the two were "distinct movies" that both
+mapped to the same canonical destination, so one silently overwrote the other.
+The torrent-completion hook treats the incoming download as
 the latest; batch scans process source items by modification time, oldest
 first, so the newest source wins. The optional `--deduplicate` sweep is a
 separate maintenance operation, not this incoming replacement rule.

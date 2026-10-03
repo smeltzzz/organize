@@ -61,6 +61,21 @@ Practical consequences (all encoded in the code):
 
 * `> 1080p` video ⇒ the server transcodes on every play. A 2160p rip in this
   library is a replacement candidate, not a "maybe someday" file.
+* **"1080p" is measured against the CODED ceiling, not 1080 exactly.** 1080 is
+  not a multiple of 16, so an H.264 1080p stream is routinely *stored* as
+  **1920×1088** with 8 lines of `frame_crop_bottom_offset` padding (MediaInfo
+  shows `Stored_Height 1088` / `Sampled_Height 1080`). Depending on container
+  and muxer, `ffprobe` can report either number for the same picture — so
+  `classify_video()` compares against `Player.max_coded_resolution` =
+  **(1920, 1088)** = the 1080p ceiling rounded up to the macroblock grid.
+  1920×1088 Direct Plays (it is inside the S805X2's decode block *and* the
+  TV's panel, which scales it); 1920×1090, 2048×858 and 3840×2160 are still
+  oversize. Without the tolerance, ordinary 1080p movies were being flagged
+  "queue a 1080p downscale" — a pointless re-encode of a file that already
+  plays.
+* A picture whose dimensions or codec cannot be read is **never** called
+  playable: `classify_video()` fails closed to `unknown` ("review manually"),
+  matching the audio side's `AUDIO_UNKNOWN`.
 * **Dolby Vision video** ⇒ same: the player has no DV license; the server
   re-encodes. DV files are flagged, not kept silently.
 * TrueHD/DTS-HD/DTS:X audio ⇒ the server re-encodes the audio on every
@@ -97,9 +112,48 @@ the explicit `tv-arc` alternative that claim does *not* hold: the bitstream
 goes to the 2013 TV first, and this TV offers PCM only for HDMI sources (§3),
 so the ARC path may deliver it as stereo. See §5.
 
-The HDMI IN port accepts multichannel PCM — that is what makes AAC 5.1 /
-FLAC 7.1 / PCM tracks "playable as-is": the Chromecast decodes them and
-sends PCM to the bar.
+### The per-port input matrix — the evidence the default wiring rests on
+
+Hisense's manual §1.3 ("Supported Input Audio Formats") lists support **per
+port**, not per device, and the two ports this chain could use disagree. This
+is the single most load-bearing table in the document, verified against the
+manufacturer PDF (see Sources):
+
+| Format | OPTICAL | HDMI ARC | HDMI eARC | **HDMI IN** ← default wiring |
+| :--- | :---: | :---: | :---: | :---: |
+| LPCM 2ch | ● | ● | ● | **●** |
+| **LPCM 5.1ch** | — | **—** | ● | **●** |
+| **LPCM 7.1ch** | — | **—** | ● | **●** |
+| Dolby Digital | ● | ● | ● | **●** |
+| Dolby Digital Plus | — | ● | ● | **●** |
+| **Dolby Atmos – Dolby Digital Plus** | — | ● | ● | **●** |
+| Dolby TrueHD | — | — | ● | **●** |
+| Dolby Atmos – Dolby TrueHD | — | — | ● | **●** |
+| DTS / DTS-ES / DTS 96/24 | ● | ● | ● | **●** |
+| DTS-HD HR / DTS-HD MA / DTS-HD LBR / DTS:X | — | — | ● | **●** |
+
+Read the two bold rows as the whole wiring decision. **Multichannel LPCM is
+supported on HDMI IN and is *not* supported on HDMI ARC or optical.** That is
+precisely why:
+
+* on the default `soundbar-hdmi-in` wiring a 5.1/7.1 AAC, FLAC, Opus or PCM
+  track is genuinely "playable as-is" — the Chromecast decodes it and the bar
+  takes multichannel PCM on its HDMI IN, with no server work at all; and
+* on the `tv-arc` alternative the same track cannot arrive as surround even in
+  principle, independently of what the 2013 Samsung's menu offers (§3). Two
+  separate limits point the same way.
+
+Note also that "Dolby Atmos – Dolby Digital Plus" is supported on HDMI IN, so
+DD+ Atmos (the only Atmos variant the G454V can emit) reaches the bar's
+up-firing drivers intact on the default wiring. The bar's TrueHD / DTS-HD /
+DTS:X rows are real but unreachable from *this* player — the Chromecast can
+never emit those formats, which is why `audio_standardizer.py` normalizes them
+into DD+ rather than pretending a different player is in the chain.
+
+`Sink.hdmi_in_accepts` and `Sink.arc_cannot_carry` in
+`organizekit/core/playbackchain.py` are this table as data, with a test
+asserting the invariant that matters: **every format ARC refuses, HDMI IN
+accepts** — so re-cabling through the bar really does recover the whole column.
 
 ## 3 · The display — Samsung UN60F6350AF (60" 1080p, ~2013)
 
@@ -182,7 +236,8 @@ leaves the player — the server transcodes audio on **every** play.
 | base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | accepted by default; `--no-dts-passthrough` transcodes it |
 | **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** from it by audio_standardizer (AC-3 under `tv-arc`) |
 | **DTS-HD MA / HRA, DTS:X** | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** (AC-3 under `tv-arc`) |
-| WMA Pro / unknown | ❌ | ❌ | ❌ | fail-closed: reported for a human, never auto-touched |
+| WMA Pro / WMA Lossless | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** — no ExoPlayer decoder, so `ffmpeg` converts it like any other master |
+| unknown / unclassifiable | ❌ | ❌ | ❌ | **fail-closed: reported for a human, never auto-touched** — and it achieves *zero* channels in the keeper ranking, so it can never outrank a track the toolkit does understand |
 
 **Read the "over ARC/opt" column as one limit, not nine.** Every ⚠️ in it has
 the same single cause: on this UN60F6350AF the digital audio output offers PCM
@@ -205,11 +260,52 @@ measured, do not depend on ARC for surround here: the default wiring is the
 fix, because it removes the whole column from the equation by never asking the
 TV to carry sound.
 
-The keep-one-track tier table (`mkv_track_cleaner.py`) encodes exactly that
-matrix: **chain-native Dolby (100) > base DTS core (80) > decode-to-PCM
-(60–66) > lossless-HD masters kept only as transcode sources (30–34) >
-unknown (0)**. "Highest sample rate wins" is the wrong metric on this chain;
-"plays without a server" is the right one.
+The keep-one-track ranking (`mkv_track_cleaner.py`) encodes exactly that
+matrix — but it asks **which track can this movie END UP with?**, not "which
+track plays right now?", and that question decides the order. The remux is
+**irreversible**: a dropped track is gone for good, while a track that merely
+needs converting can still be converted on any later run. Deleting a TrueHD
+Atmos 7.1 master to keep a stereo AC-3 that plays today cannot be undone;
+converting that master into a DD+ 7.1 can always be done. So:
+
+1. **achievable layout** — how many channels the track reaches *on this chain*,
+   via `playbackchain.achievable_channels()`. A chain-native track achieves the
+   channels it carries; a transcode-bound master achieves the channels
+   `audio_standardizer.py` would bake into its replacement (7.1 stays 7.1 on the
+   default wiring, folds to 5.1 under `tv-arc` — never upmixed); an *unknown*
+   track achieves nothing, because the toolkit fail-closes and never auto-touches
+   one. This is the key that makes **TrueHD Atmos 7.1 worth more than an AC-3
+   2.0 that plays today**, and it is what keeps FLAC 7.1 ahead of AC-3 2.0.
+2. **band** — *plays with no server work* (AC-3 / DD+ / base DTS / anything
+   decoded to PCM) beats *transcode-bound* (TrueHD / DTS-HD / DTS:X / WMA Pro)
+   beats *unknown*. At an **equal achievable layout** this is the
+   Direct-Play-first rule and it is unchanged: a 5.1 AC-3 still beats a 5.1
+   TrueHD, because both land at 5.1 and only one of them gets there without the
+   server re-encoding anything. "Highest sample rate wins" is still the wrong
+   metric; "reaches the widest layout, with the least server work" is the right
+   one.
+3. **Atmos** — a real DD+ Atmos track wins among equal layouts, because a 3.1.2
+   bar with up-firing drivers is what it exists for.
+4. **codec sub-tier** — the historical quality order refines the rest:
+   DD+ (100) > DD (95) > base DTS core (80) > lossless-decodable (66) >
+   Opus (62) > other lossy (60), and below the band DTS-HD MA / DTS:X (34) >
+   DTS-HD HRA (32) > the rest (30). That lower half is also what picks the best
+   *transcode source*: `audio_standardizer.py` ranks its own pool with this same
+   function, so the two tools cannot disagree about which master to burn — and
+   because key 1 leads, they agree that a TrueHD 7.1 is a better source than a
+   DTS-HD MA 5.1, since the target preserves 7.1.
+
+The per-port table in §2 is what makes multichannel decoded audio first-class on
+this wiring — LPCM 5.1/7.1 are supported on the bar's HDMI IN — which is why a
+convertible master is worth keeping rather than merely tolerating.
+
+**Keeping a master is only correct if it gets converted.** Because key 1 can
+retain a track the G454V cannot emit yet, the cleaner names every such movie in
+its report (`Kept audio needing audiofit`) and warns on the console and in the
+log. In the pipeline `audio_standardizer.py` runs *before* the cleaner, so the
+master has usually already become the DD+ track that wins on key 1 outright; a
+movie in that bucket means audiofit did not run or could not — `ffmpeg` missing,
+or the cleaner run standalone.
 
 ### Why Dolby Digital Plus (E-AC-3) @ 640 kbps — and AC-3 only under `tv-arc`?
 
@@ -297,6 +393,12 @@ Soundbar:
   Plus / Dolby Digital / DTS:X / DTS-HD Master / DTS / PCM / **Multich PCM**.
   <https://files.hisense-usa.com/download/f25648883914883a> ·
   <https://files.hisense-usa.com/storage/hisense/asset/images/66406cbb29a362.pdf>
+* **Hisense 3.1.2ch soundbar manual, §1.3 "Supported Input Audio Formats" —
+  the PER-PORT matrix quoted in §2 above** (LPCM 5.1ch/7.1ch: HDMI eARC ● and
+  HDMI IN ●, but HDMI ARC — and OPTICAL —; "Dolby Atmos – Dolby Digital Plus":
+  ARC/eARC/HDMI IN all ●; TrueHD, DTS-HD HR/MA/LBR and DTS:X: eARC and HDMI IN
+  only). This is the evidence the `soundbar-hdmi-in` default rests on.
+  <https://files.hisense-usa.com/download/f25642eeb4a386bb>
 * Hisense AX3125H user manual — "HDMI IN Socket: For connecting HDMI source
   devices, such as a DVD player, Blu-ray Disc™ player, or gaming console";
   "HDMI OUT (TV eARC/ARC) Socket: The port for connecting a TV"; input

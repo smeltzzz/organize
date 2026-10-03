@@ -4,6 +4,234 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.3.0] - 2026-10-03
+
+One behaviour change, requested: **every cut of a movie is the same movie.**
+Downloading the Extended cut of a film you already have in the Theatrical cut
+used to be declined as a conflict, because the canonical filename carries no
+edition tag and the tool would not guess that an unmarked file and an
+`Extended` file were the same film. It now replaces it, under the same name.
+
+### Changed
+- **A new download of any cut replaces the library's copy of that title.**
+  `_movie_replacement_decision()` compared `edition`, `three_d` *and* `part`
+  between the incoming release and the canonical filename, and refused on any
+  difference with `conflict: alternate-cut/version markers differ`. Since the
+  canonical name deliberately omits the edition tag (`INCLUDE_EDITION_TAG =
+  False`), an edition-marked download could never match an unmarked library
+  file — so a second cut was always declined, however much the person
+  downloading wanted it. Title and year now decide identity on their own:
+  Extended, Theatrical, Director's Cut, Final Cut, Unrated, Uncut, IMAX,
+  Criterion, anniversary and special/collector's editions, 3D presentations and
+  any resolution all replace the existing copy, which keeps its canonical
+  `Title (Year)/Title (Year).mkv` name. Whoever queued the download chose that
+  cut, so no size, quality or `ffprobe` judgement is made on their behalf —
+  swapping back to the theatrical cut later is simply another replace.
+- **`part` is the one marker that still has to agree.** A multipart stack is a
+  single film split across several files, so part 1 must replace part 1; a
+  mismatch now declines with `conflict: multipart position differs (part 1
+  cannot replace part 2)` instead of silently costing the library a reel. The
+  cut is free to differ — an `Extended.cd2` replaces a plain `-cd2`.
+- **`ParsedName.identity` no longer carries the edition**, unconditionally
+  rather than only under `jellyfin_mode`. The third tuple slot stays (always
+  empty) so every grouping keyed on it is unchanged in shape. This also fixes a
+  latent bug: a single release folder holding two cuts was **two** "distinct
+  movies", but `folder_name` omits the edition tag, so both mapped to the same
+  canonical destination — one silently overwrote the other by iteration order
+  and the run logged a box set that does not exist. The two now group as one
+  movie and the existing deterministic pick (canonical container, then largest)
+  decides, and says so in the log.
+- **`--deduplicate` now agrees with the replacement rule.** Two folders holding
+  different cuts of one title group as duplicates of that title, instead of
+  counting as two unrelated movies. Still non-destructive by default
+  (`MAINTENANCE_MODE = "REPORT"`).
+- `INCLUDE_EDITION_TAG` is documented as "leave this False": tagging a folder
+  with its edition would file two copies of one movie under two names the
+  toolkit considers identical.
+- `docs/tools.md` §1 rewrote its replacement paragraph around the new rule.
+
+### Tests
+- Suite 1273 → 1278. The four tests that pinned the old refusal were rewritten
+  to pin the new replacement (including one proving an edition-tagged library
+  copy is still replaced by a plain download, and one that the canonical name
+  never gains an edition tag for any of eight cut/3D/4K/IMAX/Criterion
+  releases). New: `AlternateCutTests` — two cuts in one release place one
+  canonical movie, the newest cut replaces the older one under the same name,
+  and going back to the theatrical cut works too (a *smaller* file replacing a
+  larger one, which is the point of making no size comparison); plus a
+  multipart test that part 1 cannot take part 2's place while the cut is free
+  to differ.
+
+## [8.2.0] - 2026-10-03
+
+One deliberate behaviour change, made because 8.1.1 shipped a ranking that was
+right about *playability* and wrong about *possibility*. The cleaner keeps
+exactly one audio track and mkvmerge remuxes the rest away for good, so the
+question it must answer is "which track can this movie END UP with?", not
+"which track plays right now?". A dropped track is gone; a track that merely
+needs converting can still be converted on any later run.
+
+### Changed
+- **The keeper is now the best track that is chain-compatible *or convertible
+  to* chain-compatible.** `get_audio_quality_score()` led with the playback
+  *band*, so a TrueHD Atmos 7.1 master the G454V can never emit lost to a
+  stereo AC-3 that plays today — and the remux then deleted the 7.1 master
+  permanently. Ranking by achievable quality instead means the master is kept:
+  `audio_standardizer.py` turns it into a chain-native Dolby Digital Plus 7.1,
+  while the stereo track could never have become anything at all.
+  - The score is now
+    `(achievable layout, band, atmos, codec sub-tier, bitrate, sample rate,
+    original flag)`. **Band survives as the tiebreak**, so Direct-Play-first is
+    unchanged where it still applies: a 5.1 AC-3 beats a 5.1 TrueHD, because
+    both land at 5.1 and only one gets there without the server re-encoding
+    anything. What changed is the case where the layouts differ —
+    FLAC 7.1 > AC-3 2.0 (8.1.1's fix, preserved), TrueHD 7.1 > E-AC-3 5.1,
+    DTS-HD MA 7.1 > AC-3 2.0 (all new).
+  - `wiring` is now a parameter, defaulting to
+    `playbackchain.resolve_wiring()`, so `ORGANIZE_PLAYBACK_WIRING` is honoured
+    by the cleaner exactly as it already was by `audio_standardizer.py`. It
+    moves only the first key, and only for a >=7.1 transcode-bound master
+    (7.1 folds to 5.1 under `tv-arc`).
+  - `audio_standardizer.py`'s `_pool_rank` delegates to this same function, so
+    its transcode SOURCE improves with it: a TrueHD 7.1 is now preferred over a
+    DTS-HD MA 5.1, because the synthesized target preserves 7.1 and burning the
+    narrower master would cap the library at 5.1 forever. At an equal layout the
+    master-preference table still decides (DTS-HD MA > TrueHD), so the pick
+    stays deterministic. The two tools cannot disagree about which master to
+    burn, or about which one to keep.
+  - Docs follow the code: `docs/hardware.md` §5 and `docs/tools.md` §3 both
+    rewrote their ranking sections around achievable layout, the dashboard and
+    `--list-steps` cleaner title now read "keeps the best audio the chain can
+    end up with", and README rule 2 says the same.
+
+### Added
+- **`playbackchain.achievable_channels(cls, channels, wiring=DEFAULT_WIRING)`**
+  — the single answer to "how many channels does this class reach on this
+  chain?". A native-passthrough, DTS-core or decode-to-PCM track achieves the
+  channels it carries; a transcode-bound master achieves the channels
+  `target_audio_for()` would bake into its replacement; an *unknown* track
+  achieves **nothing**, because the toolkit fail-closes and never auto-touches
+  one (`channels <= 0` also achieves nothing). Exported from
+  `organizekit.core` alongside the rest of the chain model.
+- **A `Kept audio needing audiofit` report bucket.** Keeping a master is only
+  correct if the conversion actually happens, so a movie whose retained audio is
+  still transcode-bound is appended to `stats["keeper_needs_audiofit"]`, counted
+  in the report's attention tally, listed in its own report subsection with the
+  reason and the remedy, and warned about on the console and in the log — mirroring
+  `remux_without_srt`. It is a *note*, not an outcome: the movie is always
+  counted in `cleaned` too, so it keeps that verdict and `organize status` is
+  unaffected. In the pipeline `audio_standardizer.py` runs before the cleaner, so
+  the master has usually already become the DD+ track that wins on layout
+  outright; a movie in this bucket means audiofit did not run or could not —
+  `ffmpeg` missing, or the cleaner run standalone instead of through
+  `organize run`.
+
+### Tests
+- Suite 1266 → 1273. Every test that pinned the old band-first ordering was
+  rewritten rather than reverted, and each one keeps covering the defect it was
+  originally written for: comparisons that were about the *class* now hold the
+  layout constant (E-AC-3 5.1 vs TrueHD 5.1, DTS-HD MA 5.1 vs AC-3 5.1, DD+
+  Atmos 5.1 vs FLAC 5.1, titled E-AC-3 5.1 vs TrueHD 5.1, DTS core vs AC-3),
+  and the tests that were about the *layout* now state the new primary key
+  (TrueHD 7.1 > AC-3 2.0, TrueHD 7.1 > E-AC-3 5.1). New: the wider-master rule,
+  the equal-layout band tiebreak, the equal-layout transcode-source
+  determinism, and a four-test `KeeperNeedsAudiofitTests` class covering the new
+  bucket end to end (a retained TrueHD Atmos 7.1 is named, the stereo track is
+  the one that goes, the console warning names `audio_standardizer.py`, a
+  chain-native keeper leaves the bucket empty, and the report section renders
+  only when it is non-empty). The bundled `mkv_track_cleaner`
+  self-tests assert both halves of the policy, and the property test's planted
+  best track became a DD+ Atmos **7.1** so it still outranks every track the
+  generator can produce.
+
+## [8.1.1] - 2026-10-03
+
+A chain-fidelity sweep: five defects found by auditing every decision the
+toolkit makes against the hardware it is tuned for (Chromecast G454V → Hisense
+AX3125H HDMI IN → Samsung UN60F6350AF), re-verified against the manufacturers'
+own documents. The hardware *profile* was already correct and well sourced; all
+five bugs were in how the tools applied it. Two of them could permanently
+delete audio or queue a pointless re-encode.
+
+### Fixed
+- **The track cleaner could delete surround sound to keep stereo.**
+  `get_audio_quality_score()` led with the codec sub-tier, so inside the set of
+  tracks that all Direct Play, AC-3 2.0 (95) outranked FLAC 7.1 (66) — and
+  because `plan_cleanup()` keeps exactly ONE audio track and mkvmerge remuxes
+  the rest away, a 7.1 master was **permanently destroyed** to keep a stereo
+  one. Same for PCM 5.1, AAC 5.1, base DTS 5.1 and Opus 7.1. The score is now
+  banded: *plays with no server work* > *transcode-bound* > *unknown*, with
+  **Atmos then channel count** leading inside the chain-native band and the
+  codec sub-tier refining it. Hisense's per-port input table (§2 of
+  `docs/hardware.md`) is why this is right rather than merely nicer: LPCM 5.1
+  and LPCM 7.1 are supported on the bar's HDMI IN. Below the band the order
+  deliberately reverses — nothing there plays, so the sub-tier still picks the
+  best *transcode source* (DTS-HD MA/DTS:X > DTS-HD HRA > rest), which is what
+  `audio_standardizer._pool_rank()` delegates to this function for.
+- **An absent `codec_id` let a track's NAME be read as its profile.**
+  `mkv_track_cleaner` joined its blob with an f-string, so when mkvmerge omitted
+  `properties.codec_id` the fields collapsed: `"DTS  DTS-HD MA 7.1"` splits to
+  `["DTS", "DTS-HD", …]` and a perfectly playable **DTS core** track was
+  promoted to an unplayable HD master — then dropped. This is the exact hazard
+  `classify_audio_blob()`'s docstring warns about and `audio_standardizer`
+  already guarded against, so the two tools **disagreed about the same track**,
+  which `playbackchain.py` exists to prevent. Both builders now go through a
+  new shared `codec_blob(*fields)` that fills an absent field with `-`; the
+  contract is structural instead of a convention each caller must remember.
+- **"Atmos" was credited from the track title, so a lie could win.** AC-3 has
+  no Atmos variant at all, yet a stereo AC-3 titled "Dolby Atmos 5.1" scored
+  `atmos=1` and outranked genuine surround. Atmos is now credited only to a
+  Dolby Digital Plus stream (new `is_dolby_digital_plus()`), which is the only
+  carrier the G454V can emit it in. Real DD+ Atmos still wins its band.
+- **1920×1088 was called oversize.** 1080 is not a multiple of 16, so 1080p
+  H.264 is routinely *stored* as 1920×1088 with 8 lines of crop padding, and
+  ffprobe can report either number for the same picture. `classify_video()`
+  compared the stored height against 1080 and told the reader to "queue a 1080p
+  downscale" for a file that already Direct Plays — a pointless re-encode, in a
+  toolkit whose whole goal is zero server work. The check now uses
+  `Player.max_coded_resolution` = (1920, 1088), the ceiling rounded up to the
+  macroblock grid; 1920×1090, 2048×858 and 3840×2160 remain oversize.
+- **`VIDEO_UNKNOWN` was unreachable, and the video side failed OPEN.** The
+  verdict was defined, exported, explained and tested for an explanation — but
+  no input could ever produce it, so a stream with no readable dimensions or no
+  codec name was confidently reported as `direct-play`. It now fails closed to
+  `unknown` ("review manually"), matching `AUDIO_UNKNOWN` on the audio side.
+- **The audiofit step title advertised a target the chain stopped using.**
+  `toolchain.STEPS["audiofit"].title` still read "Normalize audio for the G454V
+  chain (AC-3 5.1)" a full release after 8.1.0 moved the default-wiring target
+  to Dolby Digital Plus and started keeping 7.1 layouts — and that title is what
+  the dashboard and `pipeline.py --list-steps` print, i.e. the first thing a
+  user reads about their own chain. It is now **derived** from the chain table
+  (new `playbackchain.synthesis_target_label()`), so it cannot drift again; the
+  dashboard and `--help` lines for the remux step were likewise still naming
+  only "(E-AC-3/AC-3)" as chain-native, which the layout fix above makes
+  incomplete.
+- **`organize doctor` rendered its own chain summary ragged.**
+  `render_diagnostics()` indented a multi-line `detail` once, so the playback
+  chain's `Player` row sat indented while `Sink`, `Display` and `Wiring` went
+  flush to the left margin — the one diagnostic that names the user's three
+  devices was the misaligned one. Details are now printed per line, exactly as
+  the `remedy` branch beside it already did.
+- **`docs/tools.md` documented the ordering that caused the deletion bug.** Its
+  flat "scores in descending order: DD+ 100, DD 95, DTS 80, AAC 60/62,
+  FLAC/PCM 66, lossless-HD 30–34" list *is* the buggy ranking (it puts AC-3 95
+  above FLAC 7.1 66), so following the doc reproduced the defect. §3 now states
+  the band → Atmos → channels → sub-tier order, and `docs/hardware.md` §5 says
+  the same thing once, in full.
+
+### Added
+- `playbackchain`: `codec_blob()`, `BLOB_FIELD_ABSENT`,
+  `is_dolby_digital_plus()`, `synthesis_target_label()`, `DOLBY_SHORT_NAMES`,
+  `Player.max_coded_resolution`, and
+  `Sink.hdmi_in_accepts` / `Sink.arc_cannot_carry` — Hisense's per-port input
+  matrix as data, with a test for the invariant the default wiring rests on
+  (**every format ARC refuses, HDMI IN accepts**).
+- `ChainAudioRetentionTests` and `BlobFieldTests`, plus coded-ceiling,
+  fail-closed, verdict-reachability, per-port-matrix, step-title-drift and
+  multi-line-detail-indentation tests (suite 1247 → 1266).
+- `docs/hardware.md` §2 now quotes the per-port table verbatim with its source;
+  §1 documents the coded ceiling; §5 documents the band-then-layout ranking.
+
 ## [8.1.0] - 2026-10-03
 
 ### Changed
