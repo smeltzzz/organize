@@ -6,11 +6,13 @@ buffering all get exercised exactly as in the field.
 
 What it does with a real transcode invocation: it reads the *input* fake
 movie (the JSON-header format ``fake_ffprobe.write_movie`` writes), appends
-one AC-3 audio stream built from the ``-c:a:N ac3`` / ``-ac:a:N`` /
-``-b:a:N`` output options it was handed, and writes the *output* fake movie
-in the same format. The tool's own verification pass then ffprobes that
-output (through the fake ffprobe) and sees exactly what a real ffmpeg would
-have produced: every original stream, plus the appended AC-3.
+one Dolby audio stream built from the ``-c:a:N <codec>`` / ``-ac:a:N`` /
+``-b:a:N`` output options it was handed (``ac3`` under the tv-arc wiring,
+``eac3`` on the default soundbar-hdmi-in wiring), and writes the *output*
+fake movie in the same format. The tool's own verification pass then
+ffprobes that output (through the fake ffprobe) and sees exactly what a
+real ffmpeg would have produced: every original stream, plus the appended
+Dolby track.
 
 Environment knobs for the failure branches:
 
@@ -18,8 +20,8 @@ Environment knobs for the failure branches:
   (``-version`` keeps working; the tool refuses an ffmpeg that will not run
   at all earlier than that).
 * ``FAKE_FFMPEG_NO_OUTPUT`` — exit 0 but write nothing (interrupted encode).
-* ``FAKE_FFMPEG_WRONG_TRACK`` — append a non-AC-3 track (verification must
-  refuse the publish).
+* ``FAKE_FFMPEG_WRONG_TRACK`` — append a track of a different codec than
+  asked for (verification must refuse the publish).
 * ``FAKE_FFMPEG_LOG`` — append every full argv as one JSON line to this file,
   so tests can assert the exact command the tool built.
 """
@@ -35,9 +37,14 @@ VERSION_BANNER = "ffmpeg version 7.1 Copyright (c) 2000-2025 the FFmpeg develope
 
 
 def _output_option(args: list[str], prefix: str) -> str | None:
-    for arg in args:
+    """The value of an output option, joined ("-b:a:1640k") or split ("-b:a:1", "640k")."""
+    for i, arg in enumerate(args):
         if arg.startswith(prefix):
-            return arg[len(prefix):]
+            rest = arg[len(prefix):]
+            if rest:
+                return rest
+            if i + 1 < len(args):
+                return args[i + 1]
     return None
 
 
@@ -84,13 +91,15 @@ def main(argv: list[str] | None = None) -> int:
         print("encoded 0 bytes (simulated abort)")
         return 0
 
-    # Find which output audio index the AC-3 options target: -c:a:N.
+    # Find which output audio index the Dolby options target: -c:a:N <codec>.
+    wanted_codec = None
     ac3_index = None
-    for arg in args:
-        if arg.startswith("-c:a:"):
+    for i, arg in enumerate(args):
+        if arg.startswith("-c:a:") and i + 1 < len(args):
             ac3_index = arg.rsplit(":", 1)[-1]
-    if ac3_index is None:
-        print("expected -c:a:N ac3 options in the fake transcode", file=sys.stderr)
+            wanted_codec = args[i + 1]
+    if ac3_index is None or wanted_codec not in ("ac3", "eac3"):
+        print("expected -c:a:N ac3|eac3 options in the fake transcode", file=sys.stderr)
         return 2
     suffix = f"a:{ac3_index}"
     bitrate = _output_option(args, f"-b:{suffix}") or "640k"
@@ -111,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     appended = {
         "index": next_index,
         "codec_type": "audio",
-        "codec_name": "dts" if wrong else "ac3",
+        "codec_name": "dts" if wrong else wanted_codec,
         "channels": channels,
         "sample_rate": sample_rate,
         "bit_rate": bitrate.rstrip("k") + "000" if bitrate.endswith("k") else bitrate,

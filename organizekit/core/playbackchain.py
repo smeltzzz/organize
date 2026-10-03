@@ -356,15 +356,34 @@ def is_chain_native(blob: str) -> bool:
 
 # =============================================================================
 # TARGET SPEC: what audio_standardizer.py synthesizes when a track is
-# transcode-bound. AC-3 (Dolby Digital) is chosen deliberately:
-#   * the G454V passes it through on every firmware (official Google list);
-#   * the AX3125H decodes it on every input (HDMI IN, ARC, and even optical
-#     fallback — the bar's only guaranteed surround path if the wiring ever
-#     regresses to the 2013 TV);
-#   * 5.1 @ 640 kbps is the AC-3 ceiling and the maximum the ETSI/ATSC spec
-#     allows — indistinguishable here from any lossy deliverable this chain
-#     could play, and stereo fold-downs stay exact.
+# transcode-bound — tuned for the wiring this chain actually runs.
+#
+# soundbar-hdmi-in (the DEFAULT — Chromecast -> AX3125H HDMI IN -> TV):
+# the target is E-AC-3 (Dolby Digital Plus). It is one of the two Dolby
+# bitstreams on the G454V's OFFICIAL passthrough list, and the AX3125H
+# decodes it on its HDMI IN — the only two hops audio crosses on this
+# wiring. E-AC-3 is strictly the better codec here: at the same bitrate it
+# is a more efficient encode than AC-3, and it carries 7.1 (AC-3 caps at
+# 5.1), so a lossless 7.1 master keeps its full layout instead of folding.
+# 640 kbps is the bitrate every sink in this chain handles with headroom;
+# nothing below is needed and nothing above buys anything audible.
+#
+# tv-arc (the explicit alternative): the target stays AC-3 (Dolby Digital),
+# because that path routes sound through the 2013 TV, and AC-3 is the one
+# format licensed-and-supported at every hop of it (ARC and optical
+# included) should the wiring ever regress further.
 # =============================================================================
+
+#: Human names for the two Dolby codecs this chain synthesizes (reports,
+#: track titles, docs). Keyed by the ffmpeg codec name.
+DOLBY_CODEC_NAMES: dict[str, str] = {
+    "ac3": "Dolby Digital (AC-3)",
+    "eac3": "Dolby Digital Plus (E-AC-3)",
+}
+
+def dolby_name(codec: str) -> str:
+    """Display name of a synthesized Dolby codec ('eac3' / 'ac3')."""
+    return DOLBY_CODEC_NAMES.get(codec, codec)
 
 @dataclass(frozen=True)
 class TargetAudio:
@@ -375,12 +394,32 @@ class TargetAudio:
     sample_rate: int = 48000  # the Chromecast's HDMI output rate; no resample
 
 
-def target_audio_for(source_channels: int) -> TargetAudio:
-    """The AC-3 variant this chain should get for a source channel count."""
+def target_audio_for(source_channels: int, wiring: str = DEFAULT_WIRING) -> TargetAudio:
+    """The Dolby variant this chain should get for a source channel count.
+
+    Wiring-aware: the default ``soundbar-hdmi-in`` chain (the one this
+    install runs) gets Dolby Digital Plus, which both of its two audio hops
+    handle natively and which can carry 7.1; the explicit ``tv-arc``
+    alternative keeps the everywhere-compatible AC-3 target, where 7.1/6.1
+    fold to 5.1 because that path's ceiling is the 2013 TV's return channel.
+    """
     ch = max(1, int(source_channels or 6))
+    if wiring == WIRING_SOUNDBAR_HDMI_IN:
+        if ch >= 8:
+            # Keep the 7.1 layout: E-AC-3 carries it, the G454V bitstreams
+            # it, and the bar's upmixer uses every channel. Never upmixed —
+            # a 7.1 target is only ever kept from a >=7.1 source.
+            return TargetAudio(codec="eac3", bitrate="640k", channels=8, channel_name="7.1")
+        if ch >= 5:
+            # 5.1 and 6.1 normalize to 5.1 (a 6.1 fold keeps the LFE).
+            return TargetAudio(codec="eac3", bitrate="640k", channels=6, channel_name="5.1")
+        if ch in (3, 4):
+            return TargetAudio(codec="eac3", bitrate="448k", channels=ch, channel_name=f"{ch}ch")
+        if ch == 2:
+            return TargetAudio(codec="eac3", bitrate="192k", channels=2, channel_name="2.0")
+        return TargetAudio(codec="eac3", bitrate="128k", channels=1, channel_name="1.0")
+    # tv-arc: AC-3, licensed-and-supported on every hop of the old path.
     if ch >= 5:
-        # 5.1, 6.1 and 7.1 all normalize to 5.1: the bar is a 3.1.2 and the
-        # back channels carry nothing here anyway.
         return TargetAudio(codec="ac3", bitrate="640k", channels=6, channel_name="5.1")
     if ch in (3, 4):
         return TargetAudio(codec="ac3", bitrate="448k", channels=ch, channel_name=f"{ch}ch")
@@ -436,9 +475,10 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> 
                 ("(multichannel; the bar accepts it over HDMI IN)" if ch > 2
                  else "(stereo)") )
     if cls == AUDIO_TRANSCODE_BOUND:
+        target = dolby_name(target_audio_for(ch, wiring).codec)
         return ("cannot leave the G454V (no TrueHD/DTS-HD/WMA-Pro passthrough "
                 "on Android TV) - Jellyfin re-encodes this audio on every "
-                "play; run audio_standardizer.py to bake in native AC-3")
+                f"play; run audio_standardizer.py to bake in native {target}")
     return "unrecognized audio format - reported, never auto-touched"
 
 

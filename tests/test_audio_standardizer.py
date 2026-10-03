@@ -165,7 +165,7 @@ class DryRunPlansTheWholeLibraryTests(ChainFixture):
 
 @unittest.skipIf(WINDOWS, "the fakes are launched through a POSIX shebang")
 class RealTranscodeRunTests(ChainFixture):
-    def test_truehd_and_dtshd_gain_an_ac3_track_that_passes_verification(self) -> None:
+    def test_truehd_and_dtshd_gain_a_dolby_digital_plus_track_that_passes_verification(self) -> None:
         truehd = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
         dtshd = self.movie("DTS HD Film (2002)", DTSHD_ONLY)
         done = self.movie("Ready Film (2003)", EAC3_DONE)
@@ -175,13 +175,15 @@ class RealTranscodeRunTests(ChainFixture):
         code = self._run(env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
         self.assertEqual(code, 0)
 
-        # The two lossless files were replaced by a verified superset.
+        # The two lossless files were replaced by a verified superset. On the
+        # default wiring the synthesized track is Dolby Digital Plus, which
+        # keeps the 7.1 layout of these 8-channel masters.
         for path, before_streams in ((truehd, TRUEHD_ONLY), (dtshd, DTSHD_ONLY)):
             streams = self.payload_of(path)["streams"]
             with self.subTest(movie=path.name):
                 self.assertEqual(len(streams), len(before_streams["streams"]) + 1)
-                self.assertEqual(streams[-1]["codec_name"], "ac3")
-                self.assertEqual(streams[-1]["channels"], 6)
+                self.assertEqual(streams[-1]["codec_name"], "eac3")
+                self.assertEqual(streams[-1]["channels"], 8)
                 self.assertEqual(streams[0]["codec_name"], "hevc")
         # The already-native file and the reviewable one were never opened.
         self.assertEqual(done.read_bytes(), timestamp_before)
@@ -192,7 +194,7 @@ class RealTranscodeRunTests(ChainFixture):
         self.assertEqual(len(calls), 2)
         for args in calls:
             self.assertIn("-c:a:1", args)
-            self.assertIn("ac3", args)
+            self.assertIn("eac3", args)
             self.assertIn("640k", args)
             self.assertIn("0:1", args)  # '-map 0:1' input-side
         # State remembers what was done.
@@ -221,13 +223,14 @@ class RealTranscodeRunTests(ChainFixture):
         film = self.movie("DTS Film (2004)", DTS_CORE)
         self.assertEqual(self._run(), 0)
         self.assertEqual(self.payload_of(film)["streams"][1]["codec_name"], "dts")
-        # With passthrough refused, the same file is transcoded.
+        # With passthrough refused, the same file is transcoded — to the
+        # default wiring's Dolby Digital Plus target.
         before = film.read_bytes()
         code = self._run("--no-dts-passthrough",
                         env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
         self.assertEqual(code, 0)
         self.assertNotEqual(film.read_bytes(), before)
-        self.assertEqual(self.payload_of(film)["streams"][-1]["codec_name"], "ac3")
+        self.assertEqual(self.payload_of(film)["streams"][-1]["codec_name"], "eac3")
 
     def test_the_default_hdmi_in_wiring_accepts_multichannel_flac(self) -> None:
         # The default wiring is the chain as cabled: the Chromecast feeds the
@@ -403,6 +406,23 @@ class PlannerUnitTests(unittest.TestCase):
                 self.assertEqual(v.status, aus.STATUS_PLANNED)
                 assert v.target is not None
                 self.assertEqual(v.target.codec, "ac3")
+
+    def test_the_default_wiring_targets_dolby_digital_plus_and_keeps_71(self) -> None:
+        # A lossless 7.1 master on the chain as cabled: the synthesized track
+        # is Dolby Digital Plus (official G454V passthrough, decoded by the
+        # AX3125H's HDMI IN) and keeps the master's full 7.1 layout.
+        v = aus.plan_for_payload("m.mkv", TRUEHD_ONLY, self.cfg)
+        self.assertEqual(v.status, aus.STATUS_PLANNED)
+        assert v.target is not None
+        self.assertEqual(v.target.codec, "eac3")
+        self.assertEqual(v.target.channels, 8)
+        self.assertEqual(v.target.bitrate, "640k")
+        # The tv-arc alternative keeps the every-hop AC-3 target, folded.
+        cfg = aus.Config(dry_run=True, wiring=pc.WIRING_TV_ARC)
+        v = aus.plan_for_payload("m.mkv", TRUEHD_ONLY, cfg)
+        assert v.target is not None
+        self.assertEqual(v.target.codec, "ac3")
+        self.assertEqual(v.target.channels, 6)
 
     def test_a_titled_eac3_stream_is_native_from_the_ffprobe_fields(self) -> None:
         """The classifier reads codec_name/profile; the title never decides."""

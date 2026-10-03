@@ -824,8 +824,9 @@ def get_audio_quality_score(track: dict[str, Any]) -> tuple[int, int, int, int, 
     BELOW all of them: the G454V can never emit TrueHD / DTS-HD / DTS:X, so
     keeping one would force the Jellyfin server to transcode the audio on
     every single play. ``audio_standardizer.py`` runs before this tool and
-    bakes a chain-native AC-3 track in from exactly those lossless masters,
-    so nothing of audible value is lost when they leave.
+    bakes a chain-native Dolby track in (Dolby Digital Plus on the default
+    soundbar-hdmi-in wiring) from exactly those lossless masters, so nothing
+    of audible value is lost when they leave.
     """
     props = track.get("properties") or {}
     codec_id = str(props.get("codec_id") or "").upper()

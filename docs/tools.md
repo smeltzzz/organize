@@ -10,7 +10,7 @@ For the order they run in and why that order is load-bearing, see
 | Tool | One line | Needs |
 | :--- | :--- | :--- |
 | [`subtitle_extractor.py`](#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: from the movie's own text track, or an exact-hash OpenSubtitles match when only bitmaps exist | `mkvmerge` + `mkvextract` (an OpenSubtitles API key for image-only movies) |
-| [`audio_standardizer.py`](#2--audio_standardizerpy--chain-native-audio) | Chain-native audio for the G454V: bake one AC-3 5.1 @ 640 kbps in from every TrueHD/DTS-HD master, or report what's already native | `ffprobe` (+ `ffmpeg` when something needs the new track) |
+| [`audio_standardizer.py`](#2--audio_standardizerpy--chain-native-audio) | Chain-native audio for the G454V: bake one Dolby Digital Plus track @ 640 kbps (default wiring) in from every TrueHD/DTS-HD master, or report what's already native | `ffprobe` (+ `ffmpeg` when something needs the new track) |
 | [`mkv_track_cleaner.py`](#3--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best chain-playable audio, strip commentary, dubs and embedded subtitles | `mkvmerge` |
 | [`bitdepth.py`](#4--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed, report each file's chain fit | `ffprobe` |
 | [`library_auditor.py`](#5--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
@@ -189,22 +189,28 @@ answer. For each movie it probes (`ffprobe`) and classifies:
 | AC-3 / E-AC-3 on board | `native-ok` | nothing — already bitstreams end-to-end |
 | base 5.1 DTS core | `dts-core-ok` | accepted (the AX3125H has a DTS decoder and the player's Amlogic firmware passes core DTS — unofficial but real); `--no-dts-passthrough` transcodes these too |
 | AAC / FLAC / PCM / MP3 / Opus | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar takes multichannel PCM, while the explicit `--wiring tv-arc` (this TV offers PCM only for HDMI sources = stereo PCM) makes them transcode candidates |
-| TrueHD / DTS-HD MA / DTS-HD HRA / DTS:X | `transcoded-ac3` | **one AC-3 track is synthesized and appended, video untouched** |
+| TrueHD / DTS-HD MA / DTS-HD HRA / DTS:X | `transcoded-dolby` | **one chain-native Dolby track is synthesized and appended (Dolby Digital Plus on the default wiring), video untouched** |
 | unknown codec | `review-unknown` | fail-closed in the report; never auto-touched |
 | still hardlinked to a seed | `deferred-seeding` | untouched until seeding stops |
 
-The AC-3 bake-in is exactly one ffmpeg invocation per movie:
-`ffmpeg -i movie.mkv -map 0 -c copy … -c:a:N ac3 -b:a 640k -ac 6 -ar 48000`.
-Every original stream is copied; the new track is **appended, marked
-default, and titled with its provenance** ("Dolby Digital 5.1 (from TrueHD)").
-7.1 folds to 5.1 at 640 kbps; stereo sources stay stereo at 192 kbps, never
-upmixed. The **source is the best track in the movie's own language** —
+The bake-in is exactly one ffmpeg invocation per movie — on the default
+`soundbar-hdmi-in` wiring the codec is Dolby Digital Plus, which both audio
+hops carry natively:
+`ffmpeg -i movie.mkv -map 0 -c copy … -c:a:N eac3 -b:a 640k -ac 8 -ar 48000`
+(`-ac 6` for a 5.1 source). Every original stream is copied; the new track
+is **appended, marked default, and titled with its provenance**
+("Dolby Digital Plus 7.1 (from TrueHD)"). A 7.1 source keeps its layout —
+E-AC-3 carries it; 5.1/6.1 normalize to 5.1 at 640 kbps; stereo sources
+stay stereo at 192 kbps, never upmixed. Under the explicit `--wiring
+tv-arc` the same step targets AC-3 (`-c:a:N ac3`) with 7.1 folded to 5.1.
+
+The **source is the best track in the movie's own language** —
 using `mkv_track_cleaner`'s own commentary/dub/native-language rules, so a
 Japanese film is transcoded from its Japanese TrueHD even when an English
 DTS dub sits next to it. Video streams are never re-encoded.
 
 Publishing is fail-closed: the output is **re-probed** before the swap —
-every original stream identical, the appended track AC-3 with the right
+every original stream identical, the appended Dolby track with the right
 channel count, duration drift ≤ 3 s — and dropped otherwise. The temp file
 carries the tool's marker name (`.*.audiofit-PID.tmp.mkv`), a stale one is
 swept the next run, and `os.replace` publishes atomically. A movie hardlinked
@@ -231,7 +237,7 @@ decodable formats (AAC 60/62, FLAC/PCM 66) arrive as PCM; and the lossless-HD
 formalities — TrueHD, DTS-HD MA, DTS-HD HRA, DTS:X — sit **below all of
 them** (30–34) because the G454V can never emit them, so keeping one would
 commit the server to an audio transcode on every play. `audio_standardizer.py`
-runs *before* this tool in the pipeline and bakes the chain-native AC-3 in
+runs *before* this tool in the pipeline and bakes the chain-native Dolby track in
 from exactly those masters, so nothing of audible value is lost when they
 leave.
 
@@ -287,7 +293,7 @@ informational, never an override of the fail-closed status above:
 | VC-1 / ProRes / unknown codecs | never work → replace |
 
 The HandBrake guidance for anything queued is chain-shaped: H.265 Main10
-10-bit at ≤1080p (or H.264 High@L4.1 8-bit) + AC-3 5.1 @ 640 kbps audio —
+10-bit at ≤1080p (or H.264 High@L4.1 8-bit) + Dolby Digital Plus 5.1 @ 640 kbps audio —
 both Direct Play end-to-end.
 
 ```bash

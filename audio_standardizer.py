@@ -37,8 +37,12 @@ What this tool does, per movie:
        transcode-bound      TrueHD/DTS-HD/DTS:X/WMA  -> FIX, offline, now
 
   3. The fix: ffmpeg copies EVERY stream losslessly and appends one track,
-     transcoded from the best source, to AC-3 5.1 @ 640 kbps 48 kHz (video is
-     never re-encoded; subtitles are never touched). The new track becomes
+     transcoded from the best source, to the wiring's chain-native Dolby
+     codec at 48 kHz — Dolby Digital Plus (E-AC-3) on the default
+     soundbar-hdmi-in wiring (both of its two audio hops carry it natively,
+     and it keeps a 7.1 master's layout; 5.1 @ 640 kbps otherwise), AC-3 on
+     the explicit tv-arc alternative. Video is never re-encoded; subtitles
+     are never touched. The new track becomes
      the default, and mkv_track_cleaner.py — which the pipeline always runs
      right after this tool — then keeps exactly one audio track: the
      chain-native one, per the chain's track-tier table. Losing the lossless
@@ -51,7 +55,7 @@ Safety, mirroring the cleaner's invariants:
     the plan instead;
   * a movie still hardlinked to its seeding source is ALWAYS deferred;
   * the transcode lands in a temp file beside the movie, is verified by a
-    second ffprobe (video streams identical, the new AC-3 present with the
+    second ffprobe (video streams identical, the new Dolby track present with the
     right channel count, durations within 3 s), and only then atomically
     replaces the original — a crash mid-run leaves a stray temp file and an
     untouched original, never a half-written movie;
@@ -101,6 +105,7 @@ from organizekit.core import (
     audio_chain_note,
     classify_audio_blob,
     default_tool_dir,
+    dolby_name,
     enable_utf8_stdio,
     iter_completed,
     open_probe_cache,
@@ -147,8 +152,8 @@ SKIP_DIR_NAMES = frozenset({
 STATUS_NATIVE = "native-ok"
 STATUS_DTS = "dts-core-ok"
 STATUS_PCM = "pcm-decode-ok"
-STATUS_TRANSCODED = "transcoded-ac3"
-STATUS_PLANNED = "would-transcode-ac3"   # dry-run only
+STATUS_TRANSCODED = "transcoded-dolby"
+STATUS_PLANNED = "would-transcode-dolby"   # dry-run only
 STATUS_REVIEW = "review-unknown"
 STATUS_DEFERRED = "deferred-seeding"
 STATUS_ERROR = "error"
@@ -161,7 +166,7 @@ CATEGORY_LABELS = {
     STATUS_NATIVE: "1. CHAIN-NATIVE  —  AC-3 / E-AC-3 already present",
     STATUS_DTS: "2. DTS CORE  —  OK (bar decodes; chipset passthrough)",
     STATUS_PCM: "3. DECODE-TO-PCM  —  OK (Chromecast decodes to PCM)",
-    STATUS_TRANSCODED: "4. TRANSCODED  —  AC-3 baked in from a lossless track",
+    STATUS_TRANSCODED: "4. TRANSCODED  —  chain-native Dolby baked in from a lossless track",
     STATUS_PLANNED: "4. WOULD TRANSCODE  —  dry-run plan only",
     STATUS_REVIEW: "5. REVIEW  —  unknown audio, fail-closed, untouched",
     STATUS_DEFERRED: "6. DEFERRED  —  still seeding, untouched",
@@ -208,7 +213,7 @@ class AudioVerdict:
     category: str
     info: str
     audio_class: str = AUDIO_UNKNOWN
-    source_stream: int = -1          # ffprobe stream index the AC-3 comes from
+    source_stream: int = -1          # ffprobe stream index the new Dolby track comes from
     source_codec: str = ""
     source_channels: int = 0
     source_lang: str = "eng"
@@ -396,8 +401,10 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
        multichannel ones become transcode candidates (this TV's digital
        audio output offers PCM 2.0 for HDMI sources, so ARC/optical would
        deliver them as stereo);
-    4. lossless-HD / WMA-Pro tracks get an AC-3 synthesized from the pool's
-       best track, preferring a lossless source over a lossy one;
+    4. lossless-HD / WMA-Pro tracks get the wiring's chain-native Dolby
+       codec synthesized from the pool's best track (Dolby Digital Plus on
+       the default soundbar-hdmi-in wiring, AC-3 under tv-arc), preferring
+       a lossless source over a lossy one;
     5. unknown codecs are reported, never touched (fail-closed).
     """
     is_commentary, is_named_dub, native_lang_fn, lang_token = _cleaner_helpers()
@@ -461,15 +468,16 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
     # Transcode candidates: transcode-bound, plus DTS/decode-to-pcm when the
     # configuration declined them above. Prefer a lossless source track: the
     # pool is quality-ranked, and a DTS-HD MA source transcodes to better
-    # AC-3 than the fallback to a lossy core would.
+    # Dolby than the fallback to a lossy core would.
     src_stream, _src_track, src_cls = classified[0]
     for s, t, cls in classified:
         if cls == AUDIO_TRANSCODE_BOUND:
             src_stream, _src_track, src_cls = s, t, cls
             break
-    target = target_audio_for(channels_of(src_stream))
+    target = target_audio_for(channels_of(src_stream), cfg.wiring)
     status = STATUS_PLANNED if cfg.dry_run else STATUS_TRANSCODED
-    info = (f"{describe_stream(src_stream)} -> AC-3 {target.channel_name} @ {target.bitrate} "
+    info = (f"{describe_stream(src_stream)} -> {dolby_name(target.codec)} "
+            f"{target.channel_name} @ {target.bitrate} "
             f"(video/subs untouched; {audio_chain_note(_stream_blob(src_stream), channels_of(src_stream), cfg.wiring)})")
     return _v(status, info, src_cls,
               source_stream=int(src_stream.get("index") or 0),
@@ -505,19 +513,22 @@ def build_ffmpeg_command(cfg: Config, src: Path, dst: Path, verdict: AudioVerdic
     """The one ffmpeg invocation per movie.
 
     Every stream is copied losslessly; the chosen source is ADDITIONALLY
-    transcoded to a new AC-3 track appended after the existing audio (its
-    per-stream audio index is ``total_audio_streams``), and made the
-    container's default audio so players pick it immediately.
+    transcoded to a new chain-native Dolby track appended after the existing
+    audio (its per-stream audio index is ``total_audio_streams``) — the
+    codec comes from the wiring-aware target table: Dolby Digital Plus
+    (E-AC-3) on the default soundbar-hdmi-in wiring, AC-3 under tv-arc —
+    and made the container's default audio so players pick it immediately.
     """
     target = verdict.target
     out_a = total_audio_streams
     src_lang = verdict.source_lang or "eng"
+    family = "Dolby Digital Plus" if target.codec == "eac3" else "Dolby Digital"
     return [
         cfg.ffmpeg, "-hide_banner", "-nostdin", "-v", "error", "-y",
         "-i", str(src),
         "-map", "0", "-c", "copy",
         "-map", f"0:{verdict.source_stream}",
-        f"-c:a:{out_a}", "ac3",
+        f"-c:a:{out_a}", target.codec,
         f"-b:a:{out_a}", target.bitrate,
         f"-ac:a:{out_a}", str(target.channels),
         f"-ar:a:{out_a}", str(target.sample_rate),
@@ -525,7 +536,7 @@ def build_ffmpeg_command(cfg: Config, src: Path, dst: Path, verdict: AudioVerdic
         f"-disposition:a:{out_a}", "default",
         f"-metadata:s:a:{out_a}", f"language={src_lang}",
         f"-metadata:s:a:{out_a}",
-        f"title=Dolby Digital {target.channel_name} {target.bitrate} "
+        f"title={family} {target.channel_name} {target.bitrate} "
         f"(from {verdict.source_codec or 'source'}; G454V chain)",
         str(dst),
     ]
@@ -536,9 +547,9 @@ def verify_output(produced: Path, verdict: AudioVerdict, cfg: Config,
     """Prove the new file is a strict superset before it may replace the old.
 
     Video streams must be description-identical (same codecs, same count),
-    the appended audio track must be the AC-3 that was asked for with the
-    right channel count, and the duration may only drift within tolerance —
-    the same contract the cleaner verifies on a remux.
+    the appended audio track must be the Dolby codec that was asked for with
+    the right channel count, and the duration may only drift within
+    tolerance — the same contract the cleaner verifies on a remux.
     """
     try:
         new_payload = run_ffprobe(cfg.ffprobe, produced, cfg)
@@ -556,10 +567,11 @@ def verify_output(produced: Path, verdict: AudioVerdict, cfg: Config,
         if len(new_audio) != len(old_audio) + 1:
             return False, f"audio count {len(old_audio)} -> {len(new_audio)}, expected +1"
         added = new_audio[-1]
-        if str(added.get("codec_name")) != "ac3":
-            return False, f"appended track is {added.get('codec_name')}, not ac3"
+        wanted = verdict.target.codec
+        if str(added.get("codec_name")) != wanted:
+            return False, f"appended track is {added.get('codec_name')}, not {wanted}"
         if channels_of(added) != verdict.target.channels:
-            return False, (f"appended AC-3 is {channels_of(added)}ch, "
+            return False, (f"appended {wanted} track is {channels_of(added)}ch, "
                            f"expected {verdict.target.channels}ch")
         old_dur = float((old_payload.get("format") or {}).get("duration") or 0)
         new_dur = float((new_payload.get("format") or {}).get("duration") or 0)
@@ -734,14 +746,15 @@ def evaluate_file(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -
             verdict.category = CATEGORY_LABELS[STATUS_DEFERRED]
             verdict.info = (f"{links} hardlinks — still hardlinked to a seeding source, so the "
                             "replace step is deferred until seeding stops (plan kept: "
-                            f"{verdict.source_codec} -> AC-3 {verdict.target.channel_name if verdict.target else ''})")
+                            f"{verdict.source_codec} -> {dolby_name(verdict.target.codec) if verdict.target else 'Dolby'} "
+                            f"{verdict.target.channel_name if verdict.target else ''})")
             return verdict, None
     return verdict, payload
 
 
 def scan(cfg: Config) -> int:
     log("=" * 79)
-    log("AUDIO STANDARDIZER — chain-native AC-3 for the Chromecast HD (G454V) chain")
+    log("AUDIO STANDARDIZER — chain-native Dolby audio for the Chromecast HD (G454V) chain")
     log("=" * 79)
     log(f"Library                : {cfg.source_dir}")
     log(f"Wiring                 : {cfg.wiring}"
@@ -822,7 +835,8 @@ def scan(cfg: Config) -> int:
             if not Path(verdict.path).is_file():
                 continue
             log(f"  [{index}/{len(plans)}] {Path(verdict.path).name}: "
-                f"{verdict.source_codec} {verdict.source_channels}ch -> AC-3 "
+                f"{verdict.source_codec} {verdict.source_channels}ch -> "
+                f"{dolby_name(verdict.target.codec)} "
                 f"{verdict.target.channel_name} @ {verdict.target.bitrate}")
             result = transcode_movie(verdict, payload, cfg)
             for i, row in enumerate(results):
@@ -846,11 +860,12 @@ def scan(cfg: Config) -> int:
     log(f"  Chain-native already     : {by[STATUS_NATIVE]}")
     log(f"  DTS core (OK here)       : {by[STATUS_DTS]}")
     log(f"  Decode-to-PCM (OK here)  : {by[STATUS_PCM]}")
+    dolby_label = dolby_name(target_audio_for(6, cfg.wiring).codec)
     if cfg.dry_run:
-        log(f"  Would transcode to AC-3  : {by[STATUS_PLANNED]}")
+        log(f"  Would transcode to Dolby : {by[STATUS_PLANNED]} ({dolby_label})")
     else:
         failed = [r for r in applied if r.error]
-        log(f"  Transcoded to AC-3       : {len(applied) - len(failed)} done, {len(failed)} failed")
+        log(f"  Transcoded to Dolby      : {len(applied) - len(failed)} done, {len(failed)} failed ({dolby_label})")
     log(f"  Review (unknown audio)   : {by[STATUS_REVIEW]}")
     log(f"  Deferred (still seeding) : {by[STATUS_DEFERRED]}")
     log(f"  Errors                   : {by[STATUS_ERROR]}")
@@ -890,9 +905,10 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
 
     by = {s: len(groups[s]) for s in CATEGORY_LABELS}
     report.blank()
+    synth = dolby_name(target_audio_for(6, cfg.wiring).codec)
     report.scorecard([
         ((by[STATUS_PLANNED] if cfg.dry_run else sum(1 for r in applied if not r.error)),
-         "AC-3 transcodes", "planned (dry-run)" if cfg.dry_run else "completed this run"),
+         f"{synth} transcodes", "planned (dry-run)" if cfg.dry_run else "completed this run"),
         (by[STATUS_NATIVE], "Already chain-native", "AC-3/E-AC-3: bitstreams as-is"),
         (by[STATUS_DTS] + by[STATUS_PCM], "Native via decode/DTS", "no action on this chain"),
         (by[STATUS_REVIEW], "Human review", "unknown audio — fail-closed, untouched"),
@@ -905,18 +921,18 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         "Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3, Atmos included), base "
         "5.1 DTS (unofficial) and decoded PCM — never TrueHD, DTS-HD, DTS:X or "
         "WMA Pro. A movie whose best track is lossless-HD is audio-transcoded by "
-        "the Jellyfin server on every play, which is why one AC-3 5.1 @ 640 kbps "
-        "track is synthesized here, once, from the best lossless source (video "
-        "copied untouched, subtitles untouched). mkv_track_cleaner.py runs next "
-        "and keeps exactly that chain-native track; the foreign-language dubs, "
-        "commentary and the lossless master leave the file there."
+        "the Jellyfin server on every play, which is why one "
+        f"{synth} track is synthesized here, once, from the best lossless "
+        "source (video copied untouched, subtitles untouched). mkv_track_cleaner.py "
+        "runs next and keeps exactly that chain-native track; the foreign-language "
+        "dubs, commentary and the lossless master leave the file there."
     )
 
     ordered = [STATUS_PLANNED if cfg.dry_run else STATUS_TRANSCODED,
                STATUS_REVIEW, STATUS_DEFERRED, STATUS_ERROR,
                STATUS_NATIVE, STATUS_DTS, STATUS_PCM]
     intros = {
-        STATUS_TRANSCODED: "Action: none left — the AC-3 track is in the file now; "
+        STATUS_TRANSCODED: "Action: none left — the chain-native Dolby track is in the file now; "
                            "the cleaner will keep it and drop the lossless master.",
         STATUS_PLANNED: "Action: run without --dry-run to bake these in, then let the cleaner keep the new track.",
         STATUS_REVIEW: "Action: inspect by hand. Unknown audio is never auto-touched.",
@@ -924,7 +940,8 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         STATUS_ERROR: "Action: read the error lines; no listed file was modified.",
         STATUS_NATIVE: "Action: none. Dolby Digital / Digital Plus already bitstreams end-to-end.",
         STATUS_DTS: "Action: none on this chain. Distrust the unofficial DTS passthrough? "
-                    "Rerun with --no-dts-passthrough to transcode these to AC-3 too.",
+                    "Rerun with --no-dts-passthrough to transcode these to the "
+                    "chain-native Dolby codec too.",
         STATUS_PCM: "Action: none. The Chromecast decodes these to PCM; over the soundbar's "
                     "HDMI IN even multichannel PCM plays.",
     }
@@ -942,7 +959,8 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
             ]
             if item.source_codec:
                 fields.append(("Source", f"{item.source_codec} {item.source_channels}ch"
-                                         + (f" -> AC-3 {item.target.channel_name} @ {item.target.bitrate}"
+                                         + (f" -> {dolby_name(item.target.codec)} "
+                                            f"{item.target.channel_name} @ {item.target.bitrate}"
                                             if item.target else "")))
             if item.elapsed_seconds:
                 fields.append(("Transcode", f"{item.elapsed_seconds:.1f}s"))
@@ -954,7 +972,7 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         "native-ok = AC-3/E-AC-3 on board: Dolby licenses every hop of this chain (official G454V passthrough).",
         "dts-core-ok = base 5.1 DTS: Amlogic firmware passes it, the AX3125H decodes it; unofficial but real.",
         "pcm-decode-ok = AAC/FLAC/MP3/Opus/PCM: the Chromecast decodes; HDMI IN accepts multichannel PCM.",
-        "transcoded-ac3 = TrueHD/DTS-HD/DTS:X/WMA Pro can never leave the G454V, so AC-3 5.1 @ 640 kbps was synthesized.",
+        f"transcoded-dolby = TrueHD/DTS-HD/DTS:X/WMA Pro can never leave the G454V, so {synth} was synthesized (@ 640 kbps surround).",
         "review-unknown = unrecognized audio; fail-closed, untouched. deferred-seeding = still hardlinked to a seed.",
         "Facts and wiring: organizekit/core/playbackchain.py · full write-up: docs/hardware.md.",
     ]
@@ -1036,7 +1054,9 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Make every movie's audio playable end-to-end on the Chromecast with "
             "Google TV (HD) G454V -> Hisense AX3125H chain: synthesize a native "
-            "AC-3 track from the TrueHD/DTS-HD sources the player can never emit."
+            "Dolby track (Dolby Digital Plus on the default soundbar-hdmi-in "
+            "wiring, AC-3 under tv-arc) from the TrueHD/DTS-HD sources the "
+            "player can never emit."
         ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
@@ -1199,9 +1219,13 @@ def run_self_tests() -> int:
         ("AAC/FLAC decode to PCM (still native on this chain)",
          lambda: classify_audio_blob("AAC") == AUDIO_DECODE_PCM
          and classify_audio_blob("FLAC") == AUDIO_DECODE_PCM),
-        ("the AC-3 target for 7.1 is 5.1 @ 640k",
-         lambda: (lambda t: t.channels == 6 and t.bitrate == "640k")(target_audio_for(8))),
-        ("a TrueHD movie plans an AC-3 transcode",
+        ("the default wiring keeps a 7.1 master as Dolby Digital Plus @ 640k",
+         lambda: (lambda t: t.codec == "eac3" and t.channels == 8
+                  and t.bitrate == "640k")(target_audio_for(8))),
+        ("the tv-arc alternative still targets AC-3 5.1 @ 640k",
+         lambda: (lambda t: t.codec == "ac3" and t.channels == 6
+                  and t.bitrate == "640k")(target_audio_for(8, WIRING_TV_ARC))),
+        ("a TrueHD movie plans a chain-native Dolby transcode",
          _smoke_truehd_plans_transcode),
         ("unknown audio is reviewed, never touched",
          _smoke_unknown_is_reviewed),
@@ -1223,8 +1247,10 @@ def _smoke_truehd_plans_transcode() -> bool:
         ],
         "format": {"duration": "7200.0"},
     }, STATUS_PLANNED)
+    # Default wiring (soundbar-hdmi-in): the target is Dolby Digital Plus,
+    # which keeps the 7.1 layout of the fixture's 8-channel master.
     return (verdict.status == STATUS_PLANNED and verdict.target is not None
-            and verdict.target.codec == "ac3" and verdict.target.channels == 6
+            and verdict.target.codec == "eac3" and verdict.target.channels == 8
             and verdict.source_stream == 1)
 
 

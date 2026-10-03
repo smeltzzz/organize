@@ -207,21 +207,46 @@ class AudioClassificationTests(unittest.TestCase):
 
 
 class TargetAudioTests(unittest.TestCase):
-    """What gets synthesized, per source channel count."""
+    """What gets synthesized, per source channel count and wiring.
 
-    def test_surround_sources_normalize_to_51_at_the_ac3_ceiling(self) -> None:
-        for ch in (6, 7, 8, 9):
+    The default ``soundbar-hdmi-in`` wiring (Chromecast -> AX3125H HDMI IN
+    -> TV) targets Dolby Digital Plus: both of its two audio hops carry it
+    natively, and it can hold a 7.1 master's layout. The explicit ``tv-arc``
+    alternative keeps the everywhere-compatible AC-3, folding to 5.1.
+    """
+
+    def test_default_wiring_keeps_a_71_master_as_dolby_digital_plus(self) -> None:
+        target = pc.target_audio_for(8)
+        self.assertEqual(target.codec, "eac3")
+        self.assertEqual(target.channels, 8)
+        self.assertEqual(target.channel_name, "7.1")
+        self.assertEqual(target.bitrate, "640k")
+        self.assertEqual(target.sample_rate, 48000)
+
+    def test_default_wiring_normalizes_51_and_61_to_51_dolby_digital_plus(self) -> None:
+        for ch in (5, 6, 7):
             with self.subTest(ch=ch):
                 target = pc.target_audio_for(ch)
+                self.assertEqual(target.codec, "eac3")
+                self.assertEqual(target.channels, 6)
+                self.assertEqual(target.bitrate, "640k")
+
+    def test_default_wiring_stereo_and_mono_keep_their_layout(self) -> None:
+        self.assertEqual(pc.target_audio_for(2).codec, "eac3")
+        self.assertEqual(pc.target_audio_for(2).channels, 2)
+        self.assertEqual(pc.target_audio_for(2).bitrate, "192k")
+        self.assertEqual(pc.target_audio_for(1).channels, 1)
+
+    def test_the_tv_arc_alternative_targets_ac3_folded_to_51(self) -> None:
+        for ch in (6, 7, 8, 9):
+            with self.subTest(ch=ch):
+                target = pc.target_audio_for(ch, pc.WIRING_TV_ARC)
                 self.assertEqual(target.codec, "ac3")
                 self.assertEqual(target.channels, 6)
                 self.assertEqual(target.bitrate, "640k")
                 self.assertEqual(target.sample_rate, 48000)
-
-    def test_stereo_and_mono_keep_their_layout(self) -> None:
-        self.assertEqual(pc.target_audio_for(2).channels, 2)
-        self.assertEqual(pc.target_audio_for(2).bitrate, "192k")
-        self.assertEqual(pc.target_audio_for(1).channels, 1)
+        self.assertEqual(pc.target_audio_for(2, pc.WIRING_TV_ARC).bitrate, "192k")
+        self.assertEqual(pc.target_audio_for(1, pc.WIRING_TV_ARC).channels, 1)
 
 
 class VideoClassificationTests(unittest.TestCase):

@@ -45,11 +45,12 @@ Five maintenance tools, one fixed order. Two orderings are load-bearing:
    track is still in the container*; after the remux, a subtitle that was
    already in the file is gone for good.
 2. **Audio-fit before remux.** The audio standardizer bakes a chain-native
-   AC-3 5.1 track in from any TrueHD/DTS-HD master the G454V can never
-   emit; the cleaner's chain tiers then keep exactly that new track and a
-   remux can retire the lossless master **without ever leaving a movie with
-   no playable audio**. Reversed, the cleaner would keep a playable-but-lossy
-   survivor and discard a 7.1 master that could have become a 5.1 AC-3.
+   Dolby track in (Dolby Digital Plus on the default wiring) from any
+   TrueHD/DTS-HD master the G454V can never emit; the cleaner's chain tiers
+   then keep exactly that new track and a remux can retire the lossless
+   master **without ever leaving a movie with no playable audio**. Reversed,
+   the cleaner would keep a playable-but-lossy survivor and discard a 7.1
+   master that could have become chain-native Dolby surround.
 
 The **audit** closes the sweep on purpose: it is read-only, so it can only
 report the library the other four steps just finished writing. (Subtitles
@@ -76,12 +77,12 @@ wrong.
 │ 2 · subtitles         │   <movie>.eng.srt (MP4 via the bridge); image-only
 └───────────┬───────────┘   movies: exact-moviehash OpenSubtitles match
             ▼
-┌───────────────────────┐   ffprobe sweep; AC-3 5.1 @ 640k baked in from any
-│ 3 · audio             │   TrueHD/DTS-HD master (video untouched, verified),
-└───────────┬───────────┘   chain-native tracks reported as done
+┌───────────────────────┐   ffprobe sweep; Dolby Digital Plus @ 640k baked in
+│ 3 · audio             │   from any TrueHD/DTS-HD master (video untouched,
+└───────────┬───────────┘   verified), chain-native tracks reported as done
             ▼
 ┌───────────────────────┐   lossless mkvmerge remux: 1 best chain-playable
-│ 4 · clean             │   audio (the AC-3 just created wins), strip
+│ 4 · clean             │   audio (the Dolby track just created wins), strip
 └───────────┬───────────┘   commentary / dubs / embedded subs; MP4 → MKV
             ▼
 ┌───────────────────────┐   ffprobe sweep: QUEUE 8-bit SDR, KEEP native HDR,
@@ -100,7 +101,7 @@ cleanly (with the reason printed) when its prerequisite is missing.
 A brand-new MP4 is the one case that takes two sweeps (by design — the order
 above is load-bearing and cannot be bent for it): the MP4 is converted to a
 canonical MKV by step 4 in sweep one, and step 3 only ever sees MKVs, so its
-AC-3 sweetening lands in sweep two. The movie Direct-Plays in between; the
+Dolby sweetening lands in sweep two. The movie Direct-Plays in between; the
 second pass is what removes the server's last audio transcode.
 
 ```bash

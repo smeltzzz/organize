@@ -12,14 +12,14 @@ five separate commands, and the order between the first three is load-bearing:
 
 ``subtitle_extractor.py`` builds each movie's English sidecar from the
 movie's own embedded subtitle track. ``audio_standardizer.py`` then bakes a
-chain-native AC-3 5.1 track in (from TrueHD/DTS-HD masters the Chromecast HD
+chain-native Dolby track in (from TrueHD/DTS-HD masters the Chromecast HD
 G454V can never emit) while every original track is still in the file.
 ``mkv_track_cleaner.py`` strips every embedded subtitle once a validated
 sidecar exists and keeps exactly one audio track — under the chain's tiers it
 always keeps the chain-native Dolby track audiofit just created, and drops the
 lossless master it came from. So a movie cleaned before its track was
 extracted has lost that track for good, and a movie cleaned before audiofit
-ran has lost its lossless master with no native AC-3 to show for it.
+ran has lost its lossless master with no native Dolby track to show for it.
 ``library_auditor.py`` runs last: it is read-only, and it must see the
 sidecars the extractor finished writing. Running the five scripts by hand
 makes that easy to get wrong on a busy day; this script cannot get it wrong.
