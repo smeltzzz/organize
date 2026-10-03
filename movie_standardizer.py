@@ -290,6 +290,9 @@ MAINTENANCE_MODE = "REPORT"
 # (likely different encodes / unmarked cuts — do not guess).
 DEDUP_SIZE_MARGIN_PCT = 15.0
 # Canonical names omit edition/version markers and provider IDs.
+# Leave this False: every cut of a title is treated as that title (see
+# ParsedName.identity), so tagging a folder with its edition would file two
+# copies of one movie under two names that the toolkit considers identical.
 INCLUDE_EDITION_TAG = False
 JELLYFIN_MODE = False
 # Cross-device placement is rejected: copying would defeat the seeding and
@@ -302,8 +305,11 @@ JELLYFIN_MODE = False
 MIN_YEAR = 1880
 LOCK_NAME = ".movie_standardizer.lock"
 
-# A new download replaces an older movie only when the parsed title/year and
-# any edition label agree. No size or technical-quality comparison is made.
+# A new download replaces the older copy of the same movie. Title and year
+# decide identity; every cut, 3D version and resolution of that title is the
+# same movie, so the newest download wins. No size or technical-quality
+# comparison is made, and only a multipart stack's position (cd1/cd2) has to
+# agree - part 1 must replace part 1.
 
 # Plex / Jellyfin extra directory names (compared case-insensitively).
 EXTRA_FOLDER_NAMES = frozenset({
@@ -938,8 +944,12 @@ class ParsedName:
 
     @property
     def identity(self) -> tuple[str, int | None, str]:
-        edition_identity = "" if CFG.jellyfin_mode else (self.edition or "").casefold()
-        return (self.title.casefold(), self.year, edition_identity)
+        # The edition is deliberately NOT part of a movie's identity: every cut
+        # of a title *is* that title. The third slot stays so the tuple's shape
+        # — and every grouping keyed on it — is unchanged, but it is always
+        # empty. Filing cuts as separate movies is how a library ends up with
+        # two copies of one film and Jellyfin guessing which to show.
+        return (self.title.casefold(), self.year, "")
 
     @property
     def version_label(self) -> str | None:
@@ -1823,19 +1833,28 @@ def _create_hardlink(src: Path, dest: Path) -> None:
     os.link(str(src), str(dest))
 
 def _movie_replacement_decision(src: Path, dest: Path) -> tuple[bool, str]:
-    """Replace only the same named movie/cut, not a different title or edition.
+    """Replace the same movie, whatever cut or version the new download is.
 
-    A torrent-completion run makes ``src`` the newest download. The canonical
-    filename stores the title and year (and an edition only when configured);
-    it does not store technical quality. Unrepresented edition, 3D and split
-    markers therefore cannot be safely matched to an existing plain filename.
+    One movie is one title and one year. Edition markers (Extended, Theatrical,
+    Director's Cut, Unrated, IMAX, Criterion...), 3D and resolution describe
+    *which copy* of that movie arrived, not *which movie* it is — and the
+    library keeps exactly one copy, named ``Title (Year).mkv`` with no edition
+    tag. Whoever queued the download chose that cut, so the newest one wins and
+    becomes the library's copy; the file it replaces was another cut of the same
+    film, not a different film. No size or technical-quality comparison is made,
+    and the canonical name never changes — so re-downloading the theatrical cut
+    after the extended one simply swaps the bytes back.
+
+    ``part`` is the one marker that still has to agree, because a multipart
+    stack is a single movie split across several files: part 1 must replace
+    part 1, or the movie loses a reel.
     """
     incoming = parse_video_identity(src, fallback=src.parent)
     existing = parse_movie_name(dest.name)
     if (incoming.title.casefold(), incoming.year) != (existing.title.casefold(), existing.year):
         return False, "conflict: source and canonical title/year identities differ"
-    if (incoming.edition, incoming.three_d, incoming.part) != (existing.edition, existing.three_d, existing.part):
-        return False, "conflict: alternate-cut/version markers differ or are absent from the canonical name"
+    if incoming.part != existing.part:
+        return False, "conflict: multipart position differs (part 1 cannot replace part 2)"
     return True, "matching movie; latest download replaces existing movie"
 
 def should_replace(src: Path, dest: Path) -> tuple[bool, str]:

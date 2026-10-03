@@ -93,21 +93,51 @@ class ShouldReplaceTests(ReplacementFixture):
         src = self.file("final/Film.2020.1080p/movie.mkv", b"new")
         self.assertTrue(ms.should_replace(src, dest)[0])
 
-    def test_a_distinct_edition_or_3d_version_cannot_replace_a_plain_movie(self) -> None:
-        _, dest = self.pair()
-        for name in ("Film.2020.Directors.Cut.mkv", "Film.2020.3D_HSBS.mkv"):
-            with self.subTest(name=name):
-                src = self.file(f"final/{name}", b"different version")
-                allowed, reason = ms.should_replace(src, dest)
-                self.assertFalse(allowed)
-                self.assertIn("alternate-cut/version", reason)
+    def test_any_cut_or_3d_version_replaces_the_plain_movie(self) -> None:
+        """Edition, 3D and resolution say which COPY arrived, not which MOVIE.
 
-    def test_a_named_edition_can_replace_the_same_named_edition(self) -> None:
+        Whoever queued the download chose that cut, so the newest one wins and
+        becomes the library's single copy of the title.
+        """
+        _, dest = self.pair()
+        for name in ("Film.2020.Directors.Cut.mkv", "Film.2020.3D_HSBS.mkv",
+                     "Film.2020.Extended.mkv", "Film.2020.Theatrical.mkv",
+                     "Film.2020.Unrated.mkv", "Film.2020.IMAX.mkv",
+                     "Film.2020.Criterion.mkv", "Film.2020.2160p.UHD.BluRay.mkv"):
+            with self.subTest(name=name):
+                src = self.file(f"final/{name}", b"the cut I downloaded")
+                allowed, reason = ms.should_replace(src, dest)
+                self.assertTrue(allowed, reason)
+                self.assertIn("latest download", reason)
+
+    def test_the_canonical_name_never_gains_an_edition_tag(self) -> None:
+        """One movie, one file, one name - whichever cut happens to be newest."""
+        for name in ("Film.2020.Extended.mkv", "Film.2020.Directors.Cut.mkv",
+                     "Film.2020.3D_HSBS.mkv", "Film.2020.1080p.BluRay.mkv"):
+            with self.subTest(name=name):
+                parsed = ms.parse_movie_name(name)
+                self.assertEqual(parsed.folder_name, "Film (2020)")
+                self.assertEqual(parsed.file_stem(), "Film (2020)")
+                self.assertEqual(parsed.identity, ("film", 2020, ""))
+
+    def test_a_plain_download_replaces_an_edition_tagged_library_copy(self) -> None:
+        """An older library that tagged editions still gets one copy per title."""
         src = self.file("final/Film.2020.Extended.mkv", b"new extended")
         dest = self.file("Movies/Film (2020) {edition-Extended}/Film (2020) {edition-Extended}.mkv", b"old extended")
         self.assertTrue(ms.should_replace(src, dest)[0])
         plain = self.file("final/Film.2020.mkv", b"theatrical")
-        self.assertFalse(ms.should_replace(plain, dest)[0])
+        self.assertTrue(ms.should_replace(plain, dest)[0])
+
+    def test_a_multipart_stack_still_replaces_part_for_part(self) -> None:
+        """The one marker that must agree: a split movie is one film in two files."""
+        dest = self.file("Movies/Film (2020)/Film (2020)-cd2.mkv", b"old part 2")
+        part1 = self.file("final/Film.2020.Extended.cd1.mkv", b"new part 1")
+        part2 = self.file("final/Film.2020.Extended.cd2.mkv", b"new part 2")
+        allowed, reason = ms.should_replace(part1, dest)
+        self.assertFalse(allowed)
+        self.assertIn("multipart", reason)
+        # The cut is free to differ; the position in the stack is not.
+        self.assertTrue(ms.should_replace(part2, dest)[0])
 
     def test_a_matching_movie_in_another_container_is_still_the_same_movie(self) -> None:
         src, _ = self.pair(extension=".mp4")

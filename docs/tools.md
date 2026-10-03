@@ -358,22 +358,41 @@ Parses scene release names and places one hardlinked movie file (plus any
 validated subtitle) per `Title (Year)/` folder. Hardlink-only: the download
 folder keeps seeding, the library uses 0 extra bytes. Skips TV, disc rips,
 and splits. Also finds duplicate folders of the same movie on request
-(`--deduplicate`, non-destructive by default).
+(`--deduplicate`, non-destructive by default) — and since edition is not part of
+a movie's identity, two folders holding different cuts of one title are
+duplicates of that title, which is what makes the sweep agree with the
+replacement rule above.
 
 **MKV and MP4 are both placed; MKV wins within a single release.** Nothing is
 transcoded: an MP4 lands as `Title (Year)/Title (Year).mp4`. Other containers
 (`.avi`, `.m4v`, `.ts`, disc images, …) stay in the download folder. When a
-*later* download has the same parsed title and year (and any edition/version
-marker matches the canonical name), its hardlink replaces the library movie,
-even if it is smaller or has a different container. No `ffprobe` or quality
-score is used; the latest incoming release wins (`--ffprobe` is accepted but
-ignored for compatibility with older hooks). The old file is not removed
+*later* download has the same parsed title and year, its hardlink replaces the
+library movie — even if it is smaller, a different cut, a 3D version, a
+different resolution or a different container.
+
+**Every cut of a title is that title.** Extended, Theatrical, Director's Cut,
+Final Cut, Unrated, Uncut, IMAX, Criterion, anniversary and special/collector's
+editions, and 3D presentations are all one movie, filed once under the
+canonical `Title (Year)/Title (Year).mkv` with no edition tag, and the newest
+download is the copy the library keeps. Whoever queued the download chose that
+cut, so no quality judgement is made on their behalf: no `ffprobe`, no size
+comparison and no quality score (`--ffprobe` is accepted but ignored for
+compatibility with older hooks). Swapping back is just another replace — the
+name never changes, so re-downloading the theatrical cut after the extended one
+puts the theatrical bytes back under the same filename.
+
+The one marker that must still agree is a multipart stack's *position*: part 1
+replaces part 1, because a split movie is one film across several files and a
+mismatched part would cost the library a reel. The old file is not removed
 until the new link is published and verified. If the container changed, the old
 extension is removed afterwards, keeping one feature in the folder. The
 download remains untouched, and existing `.eng.srt` sidecars remain
-unchanged. Unmarked alternate cuts cannot be distinguished by filename alone;
-a release marked with an edition is *not* allowed to overwrite an unmarked
-canonical movie. The torrent-completion hook treats the incoming download as
+unchanged. Because edition is not part of a movie's identity, a single release
+folder holding two cuts is **one** movie rather than a two-title box set: the
+files group together and the deterministic pick wins (canonical container, then
+largest), logged as such. Previously the two were "distinct movies" that both
+mapped to the same canonical destination, so one silently overwrote the other.
+The torrent-completion hook treats the incoming download as
 the latest; batch scans process source items by modification time, oldest
 first, so the newest source wins. The optional `--deduplicate` sweep is a
 separate maintenance operation, not this incoming replacement rule.

@@ -4,6 +4,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.3.0] - 2026-10-03
+
+One behaviour change, requested: **every cut of a movie is the same movie.**
+Downloading the Extended cut of a film you already have in the Theatrical cut
+used to be declined as a conflict, because the canonical filename carries no
+edition tag and the tool would not guess that an unmarked file and an
+`Extended` file were the same film. It now replaces it, under the same name.
+
+### Changed
+- **A new download of any cut replaces the library's copy of that title.**
+  `_movie_replacement_decision()` compared `edition`, `three_d` *and* `part`
+  between the incoming release and the canonical filename, and refused on any
+  difference with `conflict: alternate-cut/version markers differ`. Since the
+  canonical name deliberately omits the edition tag (`INCLUDE_EDITION_TAG =
+  False`), an edition-marked download could never match an unmarked library
+  file — so a second cut was always declined, however much the person
+  downloading wanted it. Title and year now decide identity on their own:
+  Extended, Theatrical, Director's Cut, Final Cut, Unrated, Uncut, IMAX,
+  Criterion, anniversary and special/collector's editions, 3D presentations and
+  any resolution all replace the existing copy, which keeps its canonical
+  `Title (Year)/Title (Year).mkv` name. Whoever queued the download chose that
+  cut, so no size, quality or `ffprobe` judgement is made on their behalf —
+  swapping back to the theatrical cut later is simply another replace.
+- **`part` is the one marker that still has to agree.** A multipart stack is a
+  single film split across several files, so part 1 must replace part 1; a
+  mismatch now declines with `conflict: multipart position differs (part 1
+  cannot replace part 2)` instead of silently costing the library a reel. The
+  cut is free to differ — an `Extended.cd2` replaces a plain `-cd2`.
+- **`ParsedName.identity` no longer carries the edition**, unconditionally
+  rather than only under `jellyfin_mode`. The third tuple slot stays (always
+  empty) so every grouping keyed on it is unchanged in shape. This also fixes a
+  latent bug: a single release folder holding two cuts was **two** "distinct
+  movies", but `folder_name` omits the edition tag, so both mapped to the same
+  canonical destination — one silently overwrote the other by iteration order
+  and the run logged a box set that does not exist. The two now group as one
+  movie and the existing deterministic pick (canonical container, then largest)
+  decides, and says so in the log.
+- **`--deduplicate` now agrees with the replacement rule.** Two folders holding
+  different cuts of one title group as duplicates of that title, instead of
+  counting as two unrelated movies. Still non-destructive by default
+  (`MAINTENANCE_MODE = "REPORT"`).
+- `INCLUDE_EDITION_TAG` is documented as "leave this False": tagging a folder
+  with its edition would file two copies of one movie under two names the
+  toolkit considers identical.
+- `docs/tools.md` §1 rewrote its replacement paragraph around the new rule.
+
+### Tests
+- Suite 1273 → 1278. The four tests that pinned the old refusal were rewritten
+  to pin the new replacement (including one proving an edition-tagged library
+  copy is still replaced by a plain download, and one that the canonical name
+  never gains an edition tag for any of eight cut/3D/4K/IMAX/Criterion
+  releases). New: `AlternateCutTests` — two cuts in one release place one
+  canonical movie, the newest cut replaces the older one under the same name,
+  and going back to the theatrical cut works too (a *smaller* file replacing a
+  larger one, which is the point of making no size comparison); plus a
+  multipart test that part 1 cannot take part 2's place while the cut is free
+  to differ.
+
 ## [8.2.0] - 2026-10-03
 
 One deliberate behaviour change, made because 8.1.1 shipped a ranking that was

@@ -202,6 +202,52 @@ class HardlinkIngestTests(StandardizerRunFixture):
         self.assertIn("Insomnia (2002)/Insomnia (2002).mkv", self.library_tree())
 
 
+class AlternateCutTests(StandardizerRunFixture):
+    """Every cut of a title is that title, so the newest download is the copy."""
+
+    def test_two_cuts_in_one_release_place_one_canonical_movie(self) -> None:
+        """A release holding two cuts is ONE movie, not a box set.
+
+        Edition is no longer part of a movie's identity, so the two files group
+        together and the deterministic pick wins (canonical container, then
+        largest). Before, they were two "distinct movies" that both mapped to
+        the same canonical destination - so one silently overwrote the other
+        and the run logged a box set that does not exist.
+        """
+        extended = self.release("Film.2020.COMPLETE", "Film.2020.Extended.mkv", size=BIG)
+        theatrical = self.release("Film.2020.COMPLETE", "Film.2020.Theatrical.mkv", size=BIG // 4)
+        self.assertEqual(self.run_main(), 0)
+        self.assertEqual(self.library_tree(), ["Film (2020)/Film (2020).mkv"])
+        placed = self.library / "Film (2020)" / "Film (2020).mkv"
+        self.assertTrue(placed.samefile(extended), "the larger MKV is the keeper")
+        self.assertTrue(theatrical.is_file(), "the download folder keeps seeding")
+        self.assertNotIn("distinct movies", self.stdout)
+
+    def test_the_newest_cut_replaces_the_older_one_under_the_same_name(self) -> None:
+        """Two separate downloads of two cuts, run one after the other."""
+        theatrical = self.release("Film.2020.Theatrical", "Film.2020.Theatrical.mkv", size=BIG // 4)
+        self.assertEqual(self.run_main(paths=(str(theatrical.parent),)), 0)
+        placed = self.library / "Film (2020)" / "Film (2020).mkv"
+        self.assertTrue(placed.samefile(theatrical))
+
+        extended = self.release("Film.2020.Extended", "Film.2020.Extended.mkv", size=BIG)
+        self.assertEqual(self.run_main(paths=(str(extended.parent),)), 0)
+        self.assertTrue(placed.samefile(extended), "the Extended cut took its place")
+        self.assertEqual(self.library_tree(), ["Film (2020)/Film (2020).mkv"])
+        self.assertTrue(theatrical.is_file(), "neither download was removed")
+
+    def test_going_back_to_the_theatrical_cut_works_too(self) -> None:
+        """The name never changes, so swapping cuts back is just another replace."""
+        extended = self.release("Film.2020.Extended", "Film.2020.Extended.mkv", size=BIG)
+        self.assertEqual(self.run_main(paths=(str(extended.parent),)), 0)
+        theatrical = self.release("Film.2020.Theatrical", "Film.2020.Theatrical.mkv", size=BIG // 4)
+        self.assertEqual(self.run_main(paths=(str(theatrical.parent),)), 0)
+        placed = self.library / "Film (2020)" / "Film (2020).mkv"
+        self.assertTrue(placed.samefile(theatrical))
+        self.assertEqual(placed.name, "Film (2020).mkv")
+        self.assertIn("replaced", self.reasons())
+
+
 class BundledSidecarRescueTests(StandardizerRunFixture):
     """A loose torrent's English SRT is rescued even when its stem is not the
     video's — exactly one valid candidate, never a guess."""
@@ -382,14 +428,27 @@ class ExistingLibraryTests(hermetic.HermeticToolsMixin, StandardizerRunFixture):
         self.assertTrue(self.incoming.is_file(), "neither download was removed")
         self.assertIn("replaced", self.reasons())
 
-    def test_a_different_edition_does_not_replace_the_movie_or_place_its_sidecar(self) -> None:
+    def test_a_different_cut_replaces_the_movie_and_places_its_sidecar(self) -> None:
+        """Every cut of a title is that title, so the newest download wins.
+
+        The library keeps exactly one copy under the canonical name, so the
+        Extended cut takes the existing file's place and its sidecar takes the
+        canonical sidecar's name: Jellyfin sees one movie, in the cut the person
+        downloading chose, and the torrent's own file keeps seeding untouched.
+        """
         alternate = self.release("The.Great.Escape.1963.Extended",
                                  "The.Great.Escape.1963.Extended.mkv")
         write_srt(alternate.with_suffix(".eng.srt"))
         self.assertEqual(self.run_main(paths=(str(alternate),)), 0)
-        self.assertFalse(self.existing.samefile(alternate))
-        self.assertFalse(self.existing.with_suffix(".eng.srt").exists())
-        self.assertIn("alternate-cut/version", self.reasons())
+        self.assertTrue(self.existing.samefile(alternate))
+        # The event names the canonical file it overwrote, not the cut's name.
+        self.assertIn("replaced The Great Escape (1963).mkv", self.reasons())
+        self.assertTrue(self.existing.with_suffix(".eng.srt").exists())
+        self.assertTrue(alternate.is_file(), "neither download was removed")
+        # No second folder, and no edition tag crept into the canonical name.
+        self.assertEqual(sorted(p.name for p in self.library.iterdir()),
+                         ["The Great Escape (1963)"])
+        self.assertEqual(self.existing.name, "The Great Escape (1963).mkv")
 
     def test_an_existing_sidecar_is_never_overwritten(self) -> None:
         canonical = self.existing.with_name("The Great Escape (1963).eng.srt")
