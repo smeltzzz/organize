@@ -613,6 +613,12 @@ class AudiofitCrashTests(unittest.TestCase):
         """
         stray = self.folder / ".Film (2020).audiofit-424242.tmp.mkv"
         stray.write_bytes(b"PARTIAL")
+        # Aged past ORPHAN_MIN_AGE_SECONDS: this is a corpse from a run that
+        # died, which is what the sweep exists to reclaim. A temp young enough
+        # to be mid-encode is deliberately left alone - see
+        # test_a_temp_a_nested_run_is_still_writing_survives_the_sweep.
+        aged = time.time() - 3600
+        os.utime(stray, (aged, aged))
         cfg = self.aus.Config(source_dir=self.library, min_file_size_mb=0)
         found = self.aus.discover_videos(self.library, cfg)
         self.assertNotIn(stray, found, "audiofit must not probe its own debris")
@@ -687,6 +693,58 @@ class AudiofitCrashTests(unittest.TestCase):
             self.assertTrue(core.try_file_lock(handle, strict_non_contention=False),
                             "the crashed run must have released its lock")
         self.assertEqual(self._run(), 0, "and the next run starts normally")
+
+    # -- the stray-temp sweep ------------------------------------------------
+
+    def test_a_temp_a_nested_run_is_still_writing_survives_the_sweep(self) -> None:
+        """The run lock is keyed by library path, so nested libraries overlap.
+
+        ``run_lock_path`` hashes ``source_dir.resolve()``, so a run on
+        ``/movies`` and a run on ``/movies/incoming`` hold DIFFERENT locks and
+        are both allowed to be in flight - and the outer run's ``rglob``
+        descends into the inner library. The sweep had no minimum age, so the
+        outer run unlinked the staging file the inner run's ffmpeg was still
+        writing. POSIX lets that writer carry on into the unlinked inode, so no
+        movie was corrupted; but the inner run's verification then found no
+        output, reported a failure, and threw away an hour of encoding for a
+        movie that was never in trouble. The original survives - which is why
+        nothing else caught this - and the failure looks like a broken encode.
+
+        ``mkv_track_cleaner.cleanup_orphan_temps`` gates its own sweep on
+        ``ORPHAN_MIN_AGE_SECONDS`` for exactly this reason, and audiofit has no
+        journal to lean on instead, so its housekeeping has to be at least as
+        careful as the sibling it is measured against. A temp old enough to be
+        a corpse is still swept - next test - so this costs a minute of
+        patience and nothing else. The tool never sweeps its OWN staging file:
+        ``transcode_one`` unlinks it in a ``finally``, so the age gate can only
+        ever delay the removal of something whose writer is already dead.
+        """
+        incoming = self.library / "Incoming" / "Other Film (2021)"
+        incoming.mkdir(parents=True)
+        in_flight = incoming / ".Other Film (2021).audiofit-31337.tmp.mkv"
+        in_flight.write_bytes(b"PARTIAL")  # mtime is now: a live encode
+
+        self._run("--dry-run")
+
+        self.assertTrue(in_flight.is_file(),
+                        "the sweep deleted a staging file young enough to be in use")
+
+    def test_an_aged_temp_from_a_dead_run_is_still_swept(self) -> None:
+        """The age gate must not turn the housekeeping off.
+
+        Debris from a power cut is dot-prefixed and marker-named, so it can
+        never be mistaken for a movie - but it is a movie-sized hole in the
+        disk that nobody will reclaim, and the whole point of the sweep is that
+        the next run reclaims it.
+        """
+        corpse = self.folder / ".Film (2020).audiofit-424242.tmp.mkv"
+        corpse.write_bytes(b"PARTIAL")
+        aged = time.time() - 3600
+        os.utime(corpse, (aged, aged))
+
+        self._run("--dry-run")
+
+        self.assertFalse(corpse.exists(), "an abandoned temp must not accumulate")
 
 
 if __name__ == "__main__":

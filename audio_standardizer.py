@@ -98,6 +98,7 @@ from organizekit.core import (
     DEFAULT_WIRING,
     FFMPEG_DOLBY_ENCODE_MAX_CHANNELS,
     KIND_AUDIOFIT,
+    ORPHAN_MIN_AGE_SECONDS,
     PLAYER,
     SINK,
     WIRING_ENV_VAR,
@@ -972,8 +973,24 @@ def scan(cfg: Config) -> int:
 
     # Housekeeping: temp files from a run that died mid-transcode must never
     # masquerade as movies; they always carry this tool's marker name.
+    #
+    # The age gate is not decoration, and the run lock does not supply it. The
+    # lock is keyed by a hash of THIS library's path, so a run here and a run on
+    # a library nested inside it hold different locks and overlap - and rglob
+    # from the outer root descends into the inner one. Sweeping unconditionally
+    # unlinked the staging file the inner run's ffmpeg was still writing: POSIX
+    # let that writer carry on into the unlinked inode, so no movie was
+    # corrupted, but the inner verification then found no output and reported a
+    # failed encode - the whole transcode wasted on a file that was never in
+    # trouble. ``mkv_track_cleaner.cleanup_orphan_temps`` gates on the same
+    # shared constant, and this tool has no journal to lean on instead. Waiting
+    # costs nothing: ``transcode_one`` unlinks its OWN staging file in a
+    # finally, so anything this loop finds already has a dead writer.
+    now = time.time()
     for stray in cfg.source_dir.rglob("*.audiofit-*.tmp.mkv"):
         try:
+            if now - stray.stat().st_mtime < ORPHAN_MIN_AGE_SECONDS:
+                continue
             stray.unlink()
             log(f"Removed stale temp file: {stray.name}")
         except OSError:

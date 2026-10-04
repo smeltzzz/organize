@@ -33,6 +33,7 @@ from .console import (
 )
 from .events import EventStream
 from .fsio import (
+    ORPHAN_MIN_AGE_SECONDS,
     atomic_write_text,
     path_is_within,
     path_norm,
@@ -237,6 +238,7 @@ __all__ = [
     "probe_cache_path",
     "Report",
     "RunLog",
+    "ORPHAN_MIN_AGE_SECONDS",
     "atomic_write_text",
     "child_cwd",
     "clip_text",

@@ -89,6 +89,7 @@ from organizekit.core import (
     EXTERNAL_SRT_MAX_BYTES,
     EXTERNAL_SRT_SUFFIX,
     KIND_REMUX,
+    ORPHAN_MIN_AGE_SECONDS,
     Ansi,
     CoordinationLock,
     LiveLine,
@@ -171,7 +172,9 @@ TRANSACTION_JOURNAL_SUFFIX = ".json"
 TRANSACTION_SCHEMA_VERSION = 1
 LOCK_FILENAME = ".track_cleaner.lock"
 STANDARDIZER_LOCK_TIMEOUT_SECONDS = 60.0
-ORPHAN_MIN_AGE_SECONDS = 60.0
+# ORPHAN_MIN_AGE_SECONDS moved to shared core: audio_standardizer sweeps for
+# the same debris under the same nested-library race, and it has no journal to
+# lean on instead of an age gate.
 MIN_OUTPUT_RATIO = 0.50  # remux smaller than 50% of source → reject (likely truncated)
 # Hardlinked movies are always deferred. Replacing one would break the seed
 # link and consume another full movie-sized allocation until seeding ends.

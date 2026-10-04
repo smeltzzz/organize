@@ -8,6 +8,24 @@ import os
 from pathlib import Path
 from typing import Any
 
+#: How old a staging file must be before a run may reclaim it as a corpse.
+#:
+#: Both tools that stage a movie-sized temporary sweep the library for debris
+#: left by a run that died mid-write, and neither sweep may delete a file
+#: another live process is still writing. The run lock does NOT make that
+#: impossible: it is keyed by a hash of the library path, so a run on
+#: ``/movies`` and a run on ``/movies/incoming`` hold different locks and
+#: overlap, while ``rglob`` from the outer root descends into the inner one.
+#: On POSIX the writer carries on into the unlinked inode, so no movie is
+#: corrupted - the victim's verification just finds no output and reports a
+#: failed encode, wasting the whole transcode.
+#:
+#: One minute is longer than the gap between two staging writes and shorter
+#: than any transcode, so a corpse is reclaimed on the next run and a live
+#: staging file is never touched. Shared because it is the same argument for
+#: both tools and ``audio_standardizer`` has no journal to lean on instead.
+ORPHAN_MIN_AGE_SECONDS = 60.0
+
 
 def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
     r"""Publish ``text`` to ``dest`` atomically and durably.
