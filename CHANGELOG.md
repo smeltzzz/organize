@@ -31,8 +31,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   differ between them", which is now true of this one. A file that cannot be
   statted is not abandoned: "I could not read it" is not evidence nobody owns
   it.
-
+- **`verify_output()` now proves the subtitle streams survived too.** README's
+  safety invariant 8 promises a transcode publishes only when "every original
+  stream must still be there", and the guard compared video codec-for-codec and
+  counted audio — subtitles were unwatched, so an output that had shed the
+  movie's embedded subtitle tracks still published over its only copy of the
+  lossless master. `audio_standardizer.py` opens an MKV and writes an MKV with
+  `-map 0 -c copy`, so there is nothing a missing subtitle can legitimately
+  mean: it was lost, not converted. Both stream classes now go through one
+  `_stream_codecs()` comparison.
 ### Tests
+- **The publish proof's geometry half is tested.** `verify_output()` has always
+  refused an appended track of the wrong channel count, but the only knob the
+  fake ffmpeg had was a wrong *codec*, so the check that keeps a stereo track
+  from being published as a movie's new default audio could have been deleted
+  with the suite still green. `FAKE_FFMPEG_WRONG_CHANNELS` joins
+  `FAKE_FFMPEG_NO_OUTPUT` — the "ffmpeg exits 0 and writes nothing" shape that
+  8.4.0 was released for, and a knob no test had ever used.
+- New `VerificationGuardTests` (11 tests, no child processes, so they run on
+  Windows too): every clause of invariant 8 asserted on the guard itself —
+  right codec, right width, video present, subtitles present, audio count +1,
+  duration drift refused beyond ~3 s and accepted inside it, an unreadable
+  duration refused rather than crashed, an unrunnable verification probe
+  refused, and the `tv-arc` wiring verified against *its* target (AC-3) rather
+  than the default wiring's (DD+).
 - New `StaleTempSweepTests`: a dry run leaves the library file-for-file
   unchanged and says what it would sweep; a live run removes debris old enough
   to be abandoned; a fresh temp is left to whoever is writing it; the age it

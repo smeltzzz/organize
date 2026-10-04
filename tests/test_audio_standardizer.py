@@ -351,6 +351,48 @@ class RealTranscodeRunTests(ChainFixture):
         self.assertEqual(code, 1)
         self.assertEqual(film.read_bytes(), before)
 
+    def test_an_appended_track_of_the_wrong_width_is_refused(self) -> None:
+        """The *geometry* half of the publish proof, which nothing had tested.
+
+        README's safety invariant 8 promises "the appended track must be the
+        requested Dolby codec with the promised geometry", and `verify_output`
+        checks both — but only the codec half had a knob and a test. Dropping
+        the channel comparison would have left the suite green while a stereo
+        track was published as a movie's new default audio, over the lossless
+        master it was made from. A wrong width is not a hypothetical: it is
+        what an encoder that cannot honour `-ac` produces, which is the shape
+        of the failure 8.4.0 was released for.
+        """
+        film = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
+        before = film.read_bytes()
+        code = self._run(env={"FAKE_FFMPEG_WRONG_CHANNELS": "2"})
+        self.assertEqual(code, 1)
+        self.assertEqual(film.read_bytes(), before,
+                         "a refused publish must leave the original alone")
+        self.assertFalse(list(self.library.rglob("*.audiofit-*.tmp.mkv")),
+                         "and must sweep its own staging file")
+        report = self.report_text()
+        self.assertIn(aus.STATUS_ERROR, report)
+        self.assertIn("verification refused the transcode", report)
+        self.assertIn("expected 6ch", report)
+
+    def test_an_encode_that_reported_success_having_written_nothing_is_refused(self) -> None:
+        """ffmpeg exiting 0 with no output file is the 8.4.0 failure, verbatim.
+
+        Its E-AC-3 encoder does not downmix a 7.1 request; it fails and leaves
+        no file at all. The tool's guard for that is `not tmp.is_file()` beside
+        the return code, and the fake's `FAKE_FFMPEG_NO_OUTPUT` knob had never
+        been used — so the branch that catches "success with nothing to show
+        for it" was the one branch of the publish path with no test.
+        """
+        film = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
+        before = film.read_bytes()
+        code = self._run(env={"FAKE_FFMPEG_NO_OUTPUT": "1"})
+        self.assertEqual(code, 1)
+        self.assertEqual(film.read_bytes(), before)
+        self.assertFalse(list(self.library.rglob("*.audiofit-*.tmp.mkv")))
+        self.assertIn(aus.STATUS_ERROR, self.report_text())
+
     def test_empty_and_junk_only_libraries_are_clean_runs(self) -> None:
         stray = self.library / "sample-clip.mkv"
         stray.write_bytes(b"not a movie")
@@ -479,6 +521,146 @@ class StaleTempSweepTests(unittest.TestCase):
         before = self._listing()
         self.assertEqual(self._scan(), 0)
         self.assertEqual(self._listing(), before)
+
+
+class VerificationGuardTests(unittest.TestCase):
+    """Every clause of the publish proof, asserted on the guard itself.
+
+    README's safety invariant 8: "the audio standardizer re-probes its own
+    output before swapping: every original stream must still be there, the
+    appended track must be the requested Dolby codec with the promised
+    geometry, and duration drift over ~3 s refuses the publish." The
+    end-to-end tests above drive that through a real child process, but only
+    on POSIX (the fakes are launched through a shebang), and only for the two
+    refusals a fake binary can simulate. These run everywhere and cover the
+    clauses nothing else reaches: a stream that vanished, a wrong audio count,
+    a probe that cannot be read, and a probe that cannot be run.
+
+    The swap this guard protects is irreversible — it publishes over a movie's
+    only copy of its lossless master — so a clause that is merely untested is
+    a clause that can be dropped in a refactor without anything going red.
+    """
+
+    OLD = {
+        "streams": [
+            {"index": 0, "codec_type": "video", "codec_name": "hevc"},
+            {"index": 1, "codec_type": "audio", "codec_name": "truehd", "channels": 8},
+            {"index": 2, "codec_type": "subtitle", "codec_name": "subrip"},
+        ],
+        "format": {"duration": "7200.0"},
+    }
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="affix_verify_")
+        self.addCleanup(self._td.cleanup)
+        self.produced = Path(self._td.name) / "out.mkv"
+        self.produced.write_bytes(b"not read by the guard; the probe is stubbed")
+        self.cfg = aus.Config(dry_run=False)
+
+    def _verdict(self, channels: int = 8) -> aus.AudioVerdict:
+        return aus.AudioVerdict(
+            path=str(self.produced), status=aus.STATUS_TRANSCODED,
+            category=aus.CATEGORY_LABELS[aus.STATUS_TRANSCODED], info="",
+            source_stream=1, source_codec="truehd", source_channels=channels,
+            target=pc.target_audio_for(channels),
+        )
+
+    def _check(self, new_payload: dict, verdict: aus.AudioVerdict | None = None):
+        verdict = verdict or self._verdict()
+        with mock.patch.object(aus, "run_ffprobe", return_value=new_payload):
+            return aus.verify_output(self.produced, verdict, self.cfg, self.OLD)
+
+    @staticmethod
+    def _superset(**changes) -> dict:
+        """The OLD payload plus the Dolby track ffmpeg was asked to append."""
+        payload = json.loads(json.dumps(VerificationGuardTests.OLD))
+        appended = {"index": len(payload["streams"]), "codec_type": "audio",
+                    "codec_name": "eac3", "channels": 6}
+        appended.update(changes.pop("appended", {}))
+        payload["streams"].append(appended)
+        for key, value in changes.items():
+            payload.setdefault("format", {})[key] = value
+        return payload
+
+    def test_a_faithful_superset_is_accepted(self) -> None:
+        self.assertEqual(self._check(self._superset()), (True, ""))
+
+    def test_the_appended_track_must_be_the_codec_that_was_asked_for(self) -> None:
+        ok, why = self._check(self._superset(appended={"codec_name": "dts"}))
+        self.assertFalse(ok)
+        self.assertIn("not eac3", why)
+
+    def test_the_appended_track_must_have_the_promised_geometry(self) -> None:
+        ok, why = self._check(self._superset(appended={"channels": 2}))
+        self.assertFalse(ok)
+        self.assertIn("expected 6ch", why)
+
+    def test_a_vanished_video_stream_refuses_the_publish(self) -> None:
+        payload = self._superset()
+        payload["streams"] = [s for s in payload["streams"] if s["codec_type"] != "video"]
+        ok, why = self._check(payload)
+        self.assertFalse(ok)
+        self.assertIn("video stream set changed", why)
+
+    def test_a_vanished_subtitle_stream_refuses_the_publish(self) -> None:
+        """Invariant 8 says *every* original stream, and subtitles are streams.
+
+        audiofit only ever opens an MKV and writes an MKV with `-map 0 -c
+        copy`, so a subtitle that is missing from the output is not a
+        container difference - something dropped a track the movie had. The
+        guard used to compare video and count audio, leaving the third class
+        of stream unwatched.
+        """
+        payload = self._superset()
+        payload["streams"] = [s for s in payload["streams"] if s["codec_type"] != "subtitle"]
+        ok, why = self._check(payload)
+        self.assertFalse(ok)
+        self.assertIn("subtitle stream set changed", why)
+
+    def test_an_audio_track_lost_on_the_way_out_refuses_the_publish(self) -> None:
+        payload = self._superset()
+        payload["streams"] = [s for s in payload["streams"]
+                              if not (s["codec_type"] == "audio" and s["codec_name"] == "truehd")]
+        ok, why = self._check(payload)
+        self.assertFalse(ok)
+        self.assertIn("expected +1", why)
+
+    def test_duration_drift_beyond_the_tolerance_refuses_the_publish(self) -> None:
+        ok, why = self._check(self._superset(duration="7204.5"))
+        self.assertFalse(ok)
+        self.assertIn("duration drifted", why)
+
+    def test_drift_inside_the_tolerance_is_not_a_refusal(self) -> None:
+        self.assertEqual(self._check(self._superset(duration="7202.0")), (True, ""))
+
+    def test_a_duration_the_probe_cannot_read_is_a_refusal_not_a_crash(self) -> None:
+        ok, why = self._check(self._superset(duration="not-a-number"))
+        self.assertFalse(ok)
+        self.assertIn("could not read probes", why)
+
+    def test_a_verification_probe_that_will_not_run_refuses_the_publish(self) -> None:
+        verdict = self._verdict()
+        with mock.patch.object(aus, "run_ffprobe", side_effect=RuntimeError("ffprobe died")):
+            ok, why = aus.verify_output(self.produced, verdict, self.cfg, self.OLD)
+        self.assertFalse(ok)
+        self.assertIn("verification ffprobe failed", why)
+
+    def test_the_tv_arc_wiring_is_verified_against_its_own_target(self) -> None:
+        """The proof follows the wiring: AC-3 5.1, not the default wiring's DD+."""
+        verdict = aus.AudioVerdict(
+            path=str(self.produced), status=aus.STATUS_TRANSCODED,
+            category=aus.CATEGORY_LABELS[aus.STATUS_TRANSCODED], info="",
+            source_stream=1, source_codec="truehd", source_channels=8,
+            target=pc.target_audio_for(8, pc.WIRING_TV_ARC),
+        )
+        payload = json.loads(json.dumps(self.OLD))
+        payload["streams"].append({"index": 3, "codec_type": "audio",
+                                   "codec_name": "eac3", "channels": 6})
+        ok, why = self._check(payload, verdict)
+        self.assertFalse(ok)
+        self.assertIn("not ac3", why)
+        payload["streams"][-1]["codec_name"] = "ac3"
+        self.assertEqual(self._check(payload, verdict), (True, ""))
 
 
 class PlannerUnitTests(unittest.TestCase):

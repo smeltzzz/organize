@@ -285,6 +285,18 @@ def _audio_streams(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [s for s in (payload.get("streams") or []) if s.get("codec_type") == "audio"]
 
 
+def _stream_codecs(payload: dict[str, Any], kind: str) -> list[Any]:
+    """The codec names of one stream class, in the order ffprobe listed them.
+
+    What :func:`verify_output` compares a transcode's output against: the
+    classes of stream it copies but does not count (video, subtitles) are
+    proved by their codec list, which pins both the count and the identity in
+    one comparison.
+    """
+    return [s.get("codec_name") for s in (payload.get("streams") or [])
+            if s.get("codec_type") == kind]
+
+
 #: Placeholder for an absent ffprobe field in the classification blob. It
 #: keeps the blob's field POSITIONS stable — the classifier reads field 1 as
 #: the codec name and field 2 as the profile, so an empty slot would shift a
@@ -565,22 +577,34 @@ def verify_output(produced: Path, verdict: AudioVerdict, cfg: Config,
                   old_payload: dict[str, Any]) -> tuple[bool, str]:
     """Prove the new file is a strict superset before it may replace the old.
 
-    Video streams must be description-identical (same codecs, same count),
-    the appended audio track must be the Dolby codec that was asked for with
-    the right channel count, and the duration may only drift within
-    tolerance — the same contract the cleaner verifies on a remux.
+    Every original stream must still be there — video and subtitles compared
+    codec-for-codec in order, audio by count — the appended audio track must
+    be the Dolby codec that was asked for with the right channel count, and
+    the duration may only drift within tolerance. The same contract the
+    cleaner verifies on a remux, and the only thing standing between an
+    encode that half-worked and an irreversible publish over the movie's only
+    copy of its master.
+
+    Subtitles are compared as well as counted because ``-map 0 -c copy`` from
+    an MKV to an MKV has nothing to legitimately drop: a sidecar track that is
+    missing from the output was lost, not converted. The guard used to watch
+    video and audio only, so an output that had shed the movie's embedded
+    subtitles still published — while README's invariant promised "every
+    original stream must still be there".
     """
     try:
         new_payload = run_ffprobe(cfg.ffprobe, produced, cfg)
     except RuntimeError as exc:
         return False, f"verification ffprobe failed: {exc}"
     try:
-        old_video = [s.get("codec_name") for s in old_payload.get("streams") or []
-                     if s.get("codec_type") == "video"]
-        new_video = [s.get("codec_name") for s in new_payload.get("streams") or []
-                     if s.get("codec_type") == "video"]
+        old_video = _stream_codecs(old_payload, "video")
+        new_video = _stream_codecs(new_payload, "video")
         if old_video != new_video:
             return False, f"video stream set changed ({old_video} -> {new_video})"
+        old_subs = _stream_codecs(old_payload, "subtitle")
+        new_subs = _stream_codecs(new_payload, "subtitle")
+        if old_subs != new_subs:
+            return False, f"subtitle stream set changed ({old_subs} -> {new_subs})"
         old_audio = _audio_streams(old_payload)
         new_audio = _audio_streams(new_payload)
         if len(new_audio) != len(old_audio) + 1:

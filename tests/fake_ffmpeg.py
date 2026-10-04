@@ -22,6 +22,10 @@ Environment knobs for the failure branches:
 * ``FAKE_FFMPEG_NO_OUTPUT`` — exit 0 but write nothing (interrupted encode).
 * ``FAKE_FFMPEG_WRONG_TRACK`` — append a track of a different codec than
   asked for (verification must refuse the publish).
+* ``FAKE_FFMPEG_WRONG_CHANNELS`` — append the right codec at this channel
+  count instead of the one ``-ac:a:N`` asked for. The geometry is the other
+  half of the same proof, and a real encoder that cannot honour ``-ac`` is the
+  failure this simulates.
 * ``FAKE_FFMPEG_LOG`` — append every full argv as one JSON line to this file,
   so tests can assert the exact command the tool built.
 """
@@ -104,6 +108,8 @@ def main(argv: list[str] | None = None) -> int:
     suffix = f"a:{ac3_index}"
     bitrate = _output_option(args, f"-b:{suffix}") or "640k"
     channels = int(_output_option(args, f"-ac:{suffix}") or "6")
+    if os.environ.get("FAKE_FFMPEG_WRONG_CHANNELS"):
+        channels = int(os.environ["FAKE_FFMPEG_WRONG_CHANNELS"])
     sample_rate = int(_output_option(args, f"-ar:{suffix}") or "48000")
     language = "eng"
     title = ""
