@@ -521,5 +521,46 @@ class PlannerUnitTests(unittest.TestCase):
         self.assertEqual(v.target.bitrate, "192k")
 
 
+class ChannelParsingTests(unittest.TestCase):
+    """``channels_of`` must be defensive about every weird shape ffprobe returns.
+
+    ffprobe renders channels as an integer, but the value can be missing, the
+    string "0", or garbage for exotic codecs and image attachments mislabeled
+    as audio. The planner must never take those at face value and promise a
+    5.1 Dolby bed from nothing.
+    """
+
+    def test_zero_and_string_zero_default_to_stereo(self) -> None:
+        for bogus in ({}, {"channels": None}, {"channels": 0}, {"channels": "0"},
+                      {"channels": ""}, {"channels": "bogus"}):
+            with self.subTest(bogus=bogus):
+                self.assertEqual(aus.channels_of(bogus), 2)
+
+    def test_positive_channels_pass_through(self) -> None:
+        for ch in (1, 2, 6, 8, "6", "8"):
+            with self.subTest(ch=ch):
+                self.assertEqual(aus.channels_of({"channels": ch}), int(ch))
+
+    def test_the_pool_rank_fallback_tuple_has_full_arity(self) -> None:
+        """A degraded import must return a tuple that compares safely.
+
+        Python's tuple comparison stops at the first differing position; a
+        2-tuple ranked against a 7-tuple from the real scorer can declare a
+        track the winner purely because it ran out of elements. The fallback
+        must match the scorer's shape so the comparison is honest.
+        """
+        import mkv_track_cleaner as tc
+        real = tc.get_audio_quality_score(
+            {"codec": "AC-3", "properties": {"audio_channels": 2}})
+        stream = {"codec_name": "ac3", "channels": 2}
+        track = aus.to_cleaner_track(stream, 0)
+        with mock.patch.dict("sys.modules", {"mkv_track_cleaner": None}), \
+             mock.patch("builtins.__import__",
+                        side_effect=ImportError("no sibling")):
+            rank = aus._pool_rank((stream, track))
+        self.assertEqual(len(rank), len(real),
+                         "fallback rank must match the real scorer's arity")
+
+
 if __name__ == "__main__":
     unittest.main()

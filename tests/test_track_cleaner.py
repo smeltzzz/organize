@@ -1783,5 +1783,30 @@ class PublishRemuxVerdictTests(unittest.TestCase):
                                                   self.stats, self.before, None))
 
 
+class ChannelParsingTests(unittest.TestCase):
+    """``get_audio_quality_score`` must treat zero-channel tracks defensively.
+
+    mkvmerge reports ``audio_channels`` as the string ``"0"`` for exotic
+    codecs or attachments masquerading as audio; ``int("0" or 2)`` silently
+    produced 0 because the string is truthy, and the scorer then credited
+    that zero-channel track with an achievable layout of 0 (ranking it
+    below everything, but also not matching the "stereo default" contract
+    every other zero/missing field uses). Match ``audio_standardizer``'s
+    defensive parser.
+    """
+
+    def test_zero_and_string_zero_default_to_stereo(self) -> None:
+        for bogus in (None, 0, "0", "", "bogus"):
+            with self.subTest(bogus=bogus):
+                track = {"codec": "AC-3", "properties": {"language": "eng",
+                                                         "audio_channels": bogus}}
+                score = tc.get_audio_quality_score(track)
+                self.assertEqual(
+                    score[0], 2,
+                    f"zero/absent audio_channels={bogus!r} achieved {score[0]}ch, "
+                    "expected safe stereo default",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

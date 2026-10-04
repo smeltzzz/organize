@@ -314,10 +314,19 @@ def _stream_language(stream: dict[str, Any]) -> str:
 
 
 def channels_of(stream: dict[str, Any]) -> int:
+    """Return the channel count for an ffprobe audio stream; stereo on nonsense.
+
+    ffprobe occasionally reports channels as the string ``"0"`` for data
+    streams masquerading as audio or for exotic codecs the demuxer cannot
+    describe; ``int("0" or 2)`` silently produced 0 and let the planner
+    promise a 5.1 synthesis from nothing. Treat zero and unparseable the
+    same way: fall back to stereo, which is the safe conservative layout.
+    """
     try:
-        return int(stream.get("channels") or 2)
+        ch = int(stream.get("channels"))
     except (ValueError, TypeError):
         return 2
+    return ch if ch > 0 else 2
 
 
 def to_cleaner_track(stream: dict[str, Any], audio_ordinal: int) -> dict[str, Any]:
@@ -505,15 +514,25 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
 
 
 def _pool_rank(pair: tuple[dict[str, Any], dict[str, Any]]) -> Any:
-    """Order the pool the way the cleaner would: its own score tuple first."""
+    """Order the pool the way the cleaner would: its own score tuple first.
+
+    The primary path delegates to ``mkv_track_cleaner.get_audio_quality_score``
+    so the two tools cannot disagree about which track wins. The fallback path
+    is only exercised when the sibling module cannot be imported (a zipapp
+    built without it, or a damaged checkout); in that degraded mode the
+    returned tuple must have the SAME arity and ordering conventions as the
+    scorer it is standing in for, otherwise a Python 3 tuple comparison can
+    rank a track "higher" by accident because it ran out of elements earlier.
+    """
     stream, track = pair
     try:
         import mkv_track_cleaner as tc
         return tc.get_audio_quality_score(track)
     except Exception:  # noqa: BLE001
-        props = track.get("properties") or {}
-        return (CLASS_TIERS.get(classify_audio_blob(_stream_blob(stream)), 0),
-                props.get("audio_channels") or 2)
+        ch = channels_of(stream)
+        return (ch,
+                CLASS_TIERS.get(classify_audio_blob(_stream_blob(stream)), 0),
+                0, 0, 0, 0, 0)
 
 
 def describe_stream(stream: dict[str, Any]) -> str:

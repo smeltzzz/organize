@@ -528,7 +528,17 @@ def target_audio_for(source_channels: int, wiring: str = DEFAULT_WIRING) -> Targ
     :data:`FFMPEG_DOLBY_ENCODE_MAX_CHANNELS` channels, and asking for 7.1 is
     not a downmix request — it is a failed encode that writes nothing.
     """
-    ch = max(1, int(source_channels or 6))
+    try:
+        ch = int(source_channels)
+    except (ValueError, TypeError):
+        ch = 0
+    if ch <= 0:
+        # An unparseable or zero-channel source cannot encode to anything
+        # meaningful; default to a safe stereo Dolby bed rather than
+        # accidentally promising a 5.1 bitstream a silent/absent track
+        # cannot produce. `channels_of` in audio_standardizer also clamps
+        # nonsense to stereo for the same reason.
+        ch = 2
     if wiring == WIRING_SOUNDBAR_HDMI_IN:
         if ch >= 5:
             # 5.1, 6.1 and 7.1+ all land at 5.1 (a 6.1 fold keeps the LFE):
@@ -588,7 +598,10 @@ def achievable_channels(cls: str, channels: int,
     * An **unknown** track achieves nothing, because the toolkit never
       auto-touches one: fail closed, as everywhere else here.
     """
-    ch = int(channels or 0)
+    try:
+        ch = int(channels)
+    except (ValueError, TypeError):
+        ch = 0
     if ch <= 0:
         return 0
     if cls in (AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DECODE_PCM):
