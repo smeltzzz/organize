@@ -350,6 +350,84 @@ class RealTranscodeRunTests(ChainFixture):
         self.assertEqual(code, 1)
         self.assertEqual(film.read_bytes(), before)
 
+    def test_the_bake_in_command_is_exactly_what_the_docs_promise(self) -> None:
+        """Pin every output option, not just the codec.
+
+        ``docs/tools.md`` prints this command line and README invariant 8 says
+        the appended track must carry "the promised geometry". Only the codec,
+        the channel count and the language were pinned before; ``-ar``, the
+        bitrate, both ``-disposition`` options and the provenance title could
+        all have been dropped from ``build_ffmpeg_command`` without a single
+        test noticing - and two of those (the sample rate and the default flag)
+        are the ones whose loss is invisible in the report.
+        """
+        self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
+        self.assertEqual(
+            self._run(env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")}), 0)
+        (args,) = self.ffmpeg_invocations()
+        for option, value in (
+            ("-c:a:1", "eac3"),                 # Dolby Digital Plus on the default wiring
+            ("-b:a:1", "640k"),                 # the bitrate the docs quote
+            ("-ac:a:1", "6"),                   # the encoder ceiling, folded from 8
+            ("-ar:a:1", "48000"),               # the chain's rate; no resample
+            ("-disposition:a", "0"),            # clear every original default
+            ("-disposition:a:1", "default"),    # the new track is the one picked
+            ("-metadata:s:a:1", "language=eng"),
+        ):
+            with self.subTest(option=option):
+                self.assertIn(option, args)
+                self.assertEqual(args[args.index(option) + 1], value)
+        self.assertLess(args.index("-disposition:a"), args.index("-disposition:a:1"),
+                        "order is load-bearing: the last match per stream wins in ffmpeg")
+        title = next(a for a in args if a.startswith("title="))
+        self.assertIn("Dolby Digital Plus 5.1 640k", title)
+        self.assertIn("from truehd", title, "titled with its provenance")
+
+    def test_the_bake_in_leaves_exactly_one_default_audio_track(self) -> None:
+        """The point of the appended track is that a player picks IT.
+
+        The lossless master must lose its default flag in the same invocation,
+        or the movie keeps transcoding its audio on every play while the report
+        says the bake-in succeeded.
+        """
+        film = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
+        self.assertEqual(self._run(), 0)
+        audio = [s for s in self.payload_of(film)["streams"]
+                 if s.get("codec_type") == "audio"]
+        defaults = [s.get("codec_name") for s in audio if aus.is_default_audio(s)]
+        self.assertEqual(defaults, ["eac3"],
+                         "the appended Dolby track is the container's only default")
+
+    def test_an_appended_track_at_the_wrong_sample_rate_is_refused(self) -> None:
+        film = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
+        before = film.read_bytes()
+        code = self._run(env={"FAKE_FFMPEG_WRONG_RATE": "1"})
+        self.assertEqual(code, 1)
+        self.assertEqual(film.read_bytes(), before, "the original is untouched")
+        # The report wraps long lines, so compare against the unwrapped text.
+        unwrapped = " ".join(self.report_text().split())
+        self.assertIn("appended eac3 track is 44100 Hz, expected the chain's 48000 Hz",
+                      unwrapped)
+        self.assertFalse(list(self.library.rglob("*.audiofit-*.tmp.mkv")))
+
+    def test_an_appended_track_the_player_would_not_pick_is_refused(self) -> None:
+        """An ffmpeg that silently dropped the -disposition options.
+
+        Everything else about the output is perfect - right codec, right
+        channel count, right rate - and the movie would still transcode on
+        every play, because the player picks the default track and the TrueHD
+        master is still the default.
+        """
+        film = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
+        before = film.read_bytes()
+        code = self._run(env={"FAKE_FFMPEG_IGNORING_DISPOSITION": "1"})
+        self.assertEqual(code, 1)
+        self.assertEqual(film.read_bytes(), before, "the original is untouched")
+        report = " ".join(self.report_text().split())
+        self.assertIn("the appended eac3 track is not the container's only default audio "
+                      "(default-flagged positions: [0] of 2)", report)
+        self.assertFalse(list(self.library.rglob("*.audiofit-*.tmp.mkv")))
+
     def test_empty_and_junk_only_libraries_are_clean_runs(self) -> None:
         stray = self.library / "sample-clip.mkv"
         stray.write_bytes(b"not a movie")

@@ -32,8 +32,13 @@ sys.path.insert(0, str(REPO))
 
 from organizekit import core  # noqa: E402  (needs the path bootstrap above)
 
-# Every module that used to vendor helpers, plus the two orchestrators.
+# Every shipped tool, including the two orchestrators. This list is the rule,
+# so a tool missing from it is a rule that does not apply to it: audiofit was
+# absent, and nothing would have caught it re-vendoring `atomic_write_text` or
+# `source_snapshot` — the two helpers it most plausibly needs a copy of, being
+# the other tool that replaces a movie file.
 TOOLS = (
+    "audio_standardizer.py",
     "bitdepth.py",
     "library_auditor.py",
     "mkv_track_cleaner.py",

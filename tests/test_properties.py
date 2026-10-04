@@ -25,6 +25,7 @@ purpose here.
 from __future__ import annotations
 
 import contextlib
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -200,6 +201,388 @@ class HdrIsFailClosedTests(PropertyTestCase):
             payload["streams"].append(cover)
             return payload
         self.for_all(with_cover, prop)
+
+
+# ---------------------------------------------------------------------------
+# The audio chain: two tools reading one track must reach one answer
+# ---------------------------------------------------------------------------
+#
+# `audio_standardizer.py` probes with ffprobe and `mkv_track_cleaner.py` probes
+# with mkvmerge, but they decide *together*: audiofit ranks the pool with the
+# cleaner's own scorer so that "settled" always means "the track the remux will
+# KEEP is one this chain can emit". That handshake rests on an adapter
+# (`to_cleaner_track`) turning an ffprobe stream into an mkvmerge-shaped track,
+# and on both spellings of an unknown number reading the same. Neither was
+# property-tested; both were the site of the 8.4.1 channels bug and of the
+# sample-rate twin fixed alongside it.
+
+# Every spelling a real tool has been seen to emit for the same fact, plus the
+# hostile ones: Matroska codec IDs (``A_DTS``), ffprobe's older DTS name
+# (``dca`` - which ``_DTS_CODEC_NAME_TOKENS`` exists to accept), names with a
+# trailing space, a one-letter name, and a name that IS a word the classifier
+# looks for. A generator that only produces tidy inputs cannot find the bugs
+# that live in the gaps between two tools' vocabularies.
+FFPROBE_AUDIO_CODECS = (
+    "ac3", "eac3", "truehd", "dts", "dca", "dts-hd", "aac", "flac", "mp3",
+    "opus", "vorbis", "alac", "wmapro", "wmav2", "wmalossless", "pcm_s16le",
+    "pcm_s24le", "pcm_bluray", "pcm_dvd", "wavpack", "atrac3", "mlp", "gsm_ms",
+    "cook", "mp2", "mp1", "tta", "tak", "sipr", "nellymoser",
+    "A_DTS", "A_AC3", "A_TRUEHD", "e-ac-3", "dd+", "dts ",
+    "", "w", "unknown", "bogus",
+)
+FFPROBE_PROFILES = (
+    "", "Dolby Digital", "Dolby Digital Plus", "Dolby TrueHD",
+    "Dolby TrueHD + Atmos", "DTS-HD MA", "DTS-HD Master Audio", "DTS-HD HRA",
+    "DTS:X", "DTS-ES", "DTS 96/24", "LC", "HE-AAC", "E-AC-3 JOC", "LPCM",
+    "DTS", "DTS ", "(DTS)", "TrueHD", "AC-3", "PCM", "Layer 2", "Layer 3",
+    "unknown", "w",
+)
+#: Absurd, hostile and merely unusual channel counts - including the two
+#: spellings of "no idea", which must not read differently.
+REPORTED_CHANNELS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 40, -1, "0", "6", "", None, "bogus")
+REPORTED_RATES = (0, 48000, 44100, 96000, "0", "48000", "", None, "bogus", 44100.0)
+REPORTED_BITRATES = (0, "0", "640000", 640000, "", None, "bogus")
+LANGUAGE_TAGS = ("eng", "en", "und", "", None, "jpn", "en-US", "ENG", " eng ", "xxx", "qaa")
+# Titles that LIE about the codec are the interesting ones: the classifier must
+# never let field 3 decide what a track is, and a title is the only field a
+# release group controls.
+TRACK_TITLES = ("", "Dolby Atmos", "TrueHD 7.1", "TrueHD", "DTS-HD MA 7.1",
+                "DTS", "(DTS)", "W DTS", "AC3", "AC-3", "E-AC-3", "Surround 5.1",
+                "Director Commentary", "Audio Description", "English", None,
+                "5.1", "JOC", "-")
+
+STREAM_SHAPE = fixed_dict({
+    "index": integers(0, 12),
+    "codec_type": sampled(("audio",)),
+    "codec_name": sampled(FFPROBE_AUDIO_CODECS),
+    "profile": sampled(FFPROBE_PROFILES),
+    "channels": sampled(REPORTED_CHANNELS),
+    "sample_rate": sampled(REPORTED_RATES),
+    "bit_rate": sampled(REPORTED_BITRATES),
+    "tags": fixed_dict({"language": sampled(LANGUAGE_TAGS), "title": sampled(TRACK_TITLES)},
+                       optional=("language", "title")),
+    "disposition": fixed_dict({
+        "default": booleans(), "original": booleans(), "comment": booleans(),
+        "visual_impaired": booleans(), "hearing_impaired": booleans(),
+    }, optional=("comment", "visual_impaired", "hearing_impaired")),
+}, optional=("profile", "sample_rate", "bit_rate", "disposition", "tags"))
+
+FORMAT_SHAPE = fixed_dict({
+    "duration": sampled(("7200.000000", "0", "", None, "bogus", 7200.0, "-1", "NaN")),
+    "size": sampled(("8388608", "0", None, "")),
+}, optional=("duration", "size"))
+
+
+def ffprobe_audio_stream(rng: Any) -> dict[str, Any]:
+    return STREAM_SHAPE(rng)
+
+
+class AudioChainAgreementTests(PropertyTestCase):
+    """ffprobe's spelling and mkvmerge's spelling are two names for one fact."""
+
+    def test_the_two_tools_classify_one_stream_identically(self) -> None:
+        """The adapter must not change what a track IS.
+
+        `audio_standardizer` classifies a stream from `_stream_blob` (ffprobe's
+        codec_name + profile + title) and then hands the SAME stream to the
+        cleaner's scorer through `to_cleaner_track`, which re-renders it as
+        codec + codec_id + track_name. Two blobs, one answer required - or the
+        pool audiofit ranks is not the pool the remux keeps from, which is the
+        8.3.0 bug in a new costume.
+        """
+        import audio_standardizer as aus
+
+        def prop(stream: dict[str, Any]) -> None:
+            track = aus.to_cleaner_track(stream, 0)
+            props = track.get("properties") or {}
+            through_the_adapter = core.classify_audio_blob(core.codec_blob(
+                track.get("codec"), props.get("codec_id"), props.get("track_name")))
+            straight_from_ffprobe = core.classify_audio_blob(aus._stream_blob(stream))
+            self.assertEqual(
+                through_the_adapter, straight_from_ffprobe,
+                f"the adapter turned {straight_from_ffprobe} into {through_the_adapter}")
+        self.for_all(ffprobe_audio_stream, prop, cases=400)
+
+    def test_every_codec_profile_and_title_spelling_classifies_identically(self) -> None:
+        """The sweep, not a sample: EVERY spelling pair, both tools, one answer.
+
+        ``test_the_two_tools_classify_one_stream_identically`` generates streams
+        at random, and random sampling is what let a bug hide here twice: the
+        generator's codec list did not contain ``dca``, ffprobe's older spelling
+        of DTS, so ``codec_id = f"{codec_name} {profile}"`` went unnoticed even
+        though it shifted every profile word one token to the right and put the
+        DTS-HD refinement out of ``classify_audio_blob``'s reach. A DTS-HD
+        master spelled ``dca`` was dts-core-passthrough to the cleaner and
+        transcode-bound to audiofit - audiofit baked in a Dolby bed the scorer
+        then ranked BELOW the master it cannot play, and the remux deleted it.
+
+        Only three fields feed the blob, so this is enumerable rather than
+        probabilistic: the cross product runs in well under a second and leaves
+        no spelling unexamined. The random property stays, because it also
+        varies the fields this one holds still.
+        """
+        import itertools
+
+        import audio_standardizer as aus
+
+        disagreements = []
+        for codec_name, profile, title in itertools.product(
+                FFPROBE_AUDIO_CODECS, FFPROBE_PROFILES, TRACK_TITLES):
+            stream = {"codec_type": "audio", "codec_name": codec_name,
+                      "profile": profile, "channels": 6, "sample_rate": 48000,
+                      "tags": {"language": "eng", "title": title}}
+            track = aus.to_cleaner_track(stream, 0)
+            props = track.get("properties") or {}
+            through_the_adapter = core.classify_audio_blob(core.codec_blob(
+                track.get("codec"), props.get("codec_id"), props.get("track_name")))
+            straight_from_ffprobe = core.classify_audio_blob(aus._stream_blob(stream))
+            if through_the_adapter != straight_from_ffprobe:
+                disagreements.append(
+                    f"{codec_name!r} + {profile!r} + {title!r}: ffprobe says "
+                    f"{straight_from_ffprobe}, the adapter says {through_the_adapter}")
+        self.assertEqual([], disagreements[:12],
+                         f"{len(disagreements)} spelling(s) classified differently "
+                         "in the two tools (first 12 shown)")
+
+    def test_the_scorer_and_the_planner_read_one_channel_count(self) -> None:
+        """`channels_of` and the cleaner's parse must not disagree.
+
+        The 8.4.1 fix: both mkvmerge and ffprobe spell "unknown" as the string
+        "0", and `int("0" or 2)` is 0 - which let a zero-channel track be
+        credited with achieving stereo. Both readers now clamp to the same
+        conservative answer, and the adapter must carry that clamp across.
+        """
+        import audio_standardizer as aus
+        import mkv_track_cleaner as mtc
+
+        def prop(stream: dict[str, Any]) -> None:
+            channels = aus.channels_of(stream)
+            self.assertGreaterEqual(channels, 1, "a channel count of 0 is not a layout")
+            track = aus.to_cleaner_track(stream, 0)
+            self.assertEqual((track["properties"] or {})["audio_channels"], channels,
+                             "the adapter must carry the clamped count, not the raw one")
+            # And the scorer, reading that track, must reach the same number.
+            props = track["properties"]
+            achievable = core.achievable_channels(
+                core.classify_audio_blob(core.codec_blob(
+                    track["codec"], props["codec_id"], props["track_name"])),
+                props["audio_channels"])
+            self.assertGreaterEqual(achievable, 0)
+            self.assertIsInstance(mtc.get_audio_quality_score(track), tuple)
+        self.for_all(ffprobe_audio_stream, prop, cases=400)
+
+    def test_one_reported_sample_rate_reads_the_same_however_it_is_spelled(self) -> None:
+        """The scar: an int 0 and the string "0" used to rank a track differently.
+
+        Sample rate is the LAST tie-break in `get_audio_quality_score`, so the
+        two spellings of one fact could decide which audio track survives an
+        irreversible remux.
+        """
+        def prop(reported: Any) -> None:
+            self.assertGreater(core.sample_rate_of(reported), 0,
+                               "a sample rate of 0 is not a rate")
+            if isinstance(reported, int) and reported > 0:
+                # The one spelling pair that must agree: mkvmerge reports an
+                # int, ffprobe reports a string, and the cleaner reads both.
+                self.assertEqual(core.sample_rate_of(reported),
+                                 core.sample_rate_of(str(reported)),
+                                 f"{reported!r} reads differently as a string")
+        self.for_all(sampled(REPORTED_RATES), prop)
+
+    def test_audiofit_and_the_cleaner_keep_the_same_track(self) -> None:
+        """The handshake the whole two-tool plan rests on.
+
+        audiofit calls a movie settled when its RANKED-BEST track is one this
+        chain can emit, and the cleaner then keeps exactly one track - so both
+        must rank the pool identically or audiofit settles a movie the remux is
+        about to strip of its only playable audio (the 8.3.0 bug). This pins the
+        agreement structurally: whatever the streams, the winner is the same.
+        """
+        import audio_standardizer as aus
+        import mkv_track_cleaner as mtc
+
+        def prop(streams: list[dict[str, Any]]) -> None:
+            tracks = [aus.to_cleaner_track(s, i) for i, s in enumerate(streams)]
+            if not tracks:
+                return
+            audiofit_pick = max(zip(streams, tracks, strict=True), key=aus._pool_rank)[1]
+            cleaner_pick = max(tracks, key=mtc.get_audio_quality_score)
+            self.assertEqual(audiofit_pick["id"], cleaner_pick["id"],
+                             "audiofit ranked a different keeper than the remux will keep")
+            self.assertEqual(len(mtc.get_audio_quality_score(cleaner_pick)), 7,
+                             "the score tuple's arity is the fallback's contract too")
+        self.for_all(lists(ffprobe_audio_stream, min_size=1, max_size=5), prop, cases=300)
+
+    def test_the_degraded_rank_fallback_keeps_the_scorers_ordering_conventions(self) -> None:
+        """``_pool_rank``'s ImportError branch must order a pool like the scorer.
+
+        That branch only runs when ``mkv_track_cleaner`` cannot be imported - a
+        zipapp built without it, a damaged checkout - and its docstring promises
+        "the SAME arity and ordering conventions as the scorer it is standing in
+        for". 8.4.1 fixed the arity and left the conventions broken: it returned
+        ``(channels_of(stream), CLASS_TIERS[cls], 0, 0, 0, 0, 0)``, so position 0
+        held the RAW channel count where the scorer holds the chain-achievable
+        layout, and position 1 held a codec TIER where the scorer holds the
+        fail-closed BAND. Both slots are load-bearing for safety, not for
+        niceness. ``achievable_channels`` maps AUDIO_UNKNOWN to 0 precisely so an
+        unrecognised track can never be chosen, and the band is what puts "plays
+        with no server work" above "transcode-bound" above "unknown" - the whole
+        point of the 8.4.0 rebalance. With a tier sitting in the band's slot an
+        unknown-codec 7.1 stream ranked ABOVE a chain-native AC-3 mono track:
+        ``(8, 10, ...)`` beat ``(1, 100, ...)``. audiofit would then have called
+        a movie settled on the strength of a track this chain can never emit,
+        and the remux would have kept it because the cleaner was the module that
+        failed to import.
+
+        Only positions 0-2 are compared. Positions 3+ are within-class
+        refinements the degraded path cannot see (it has no
+        ``chain_audio_tier`` and none of mkvmerge's ``tag_bps`` spellings), so
+        they are allowed to be coarser - but coarser may only ever break a tie
+        the first three positions already made, never overturn one.
+        """
+        import audio_standardizer as aus
+
+        def eligible(score: tuple[Any, ...]) -> tuple[Any, ...]:
+            return tuple(score[:3])
+
+        def prop(streams: list[dict[str, Any]]) -> None:
+            tracks = [aus.to_cleaner_track(s, i) for i, s in enumerate(streams)]
+            scored = [eligible(mtc.get_audio_quality_score(t)) for t in tracks]
+            saved = sys.modules.get("mkv_track_cleaner")
+            sys.modules["mkv_track_cleaner"] = None  # `import` then raises ImportError
+            try:
+                degraded = [eligible(aus._pool_rank((s, t)))
+                            for s, t in zip(streams, tracks, strict=True)]
+            finally:
+                if saved is None:
+                    del sys.modules["mkv_track_cleaner"]
+                else:
+                    sys.modules["mkv_track_cleaner"] = saved
+            for i in range(len(scored)):
+                for j in range(i + 1, len(scored)):
+                    if scored[i] == scored[j] or degraded[i] == degraded[j]:
+                        continue  # a genuine tie; either may be named the winner
+                    self.assertEqual(scored[i] > scored[j], degraded[i] > degraded[j],
+                                     f"degraded mode ranked {streams[i]!r} against "
+                                     f"{streams[j]!r} the other way round: "
+                                     f"{scored[i]} vs {scored[j]} became "
+                                     f"{degraded[i]} vs {degraded[j]}")
+        self.for_all(lists(ffprobe_audio_stream, min_size=2, max_size=4), prop, cases=250)
+
+
+class AudiofitPlannerTests(PropertyTestCase):
+    """Whatever ffprobe says, the planner answers with a verdict and a promise
+    no encoder has to break."""
+
+    def payload(self, case: dict[str, Any]) -> dict[str, Any]:
+        video = {"index": 0, "codec_type": "video", "codec_name": "hevc"}
+        return {"streams": [video, *case["audio"]], "format": case["format"]}
+
+    def test_no_target_is_ever_wider_than_the_encoders_can_write(self) -> None:
+        """For every source width, on either wiring, absurd ones included.
+
+        The 8.4.0 bug: a 7.1 master was promised a 7.1 target, and ffmpeg's
+        Dolby encoders do not downmix - `-ac 8` fails and writes no file at all,
+        so every >=7.1 lossless master's audiofit silently produced nothing.
+        """
+        import audio_standardizer as aus
+
+        cfgs = {w: aus.Config(wiring=w, dry_run=True)
+                for w in (core.WIRING_SOUNDBAR_HDMI_IN, core.WIRING_TV_ARC)}
+
+        def prop(case: dict[str, Any]) -> None:
+            payload = self.payload(case)
+            for wiring, cfg in cfgs.items():
+                verdict = aus.plan_for_payload("m.mkv", payload, cfg)
+                self.assertIn(verdict.status, set(aus.CATEGORY_LABELS))
+                target = verdict.target
+                if target is None:
+                    continue
+                self.assertLessEqual(
+                    target.channels, core.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS,
+                    f"{wiring} promised {target.channels}ch - the encode would fail")
+                self.assertGreater(target.channels, 0, "a target of 0 channels encodes nothing")
+                self.assertEqual(target.sample_rate, core.CHAIN_AUDIO_SAMPLE_RATE)
+                self.assertTrue(target.bitrate.endswith("k"))
+        self.for_all(fixed_dict({
+            "audio": lists(ffprobe_audio_stream, max_size=4),
+            "format": FORMAT_SHAPE,
+        }), prop, cases=300)
+
+    def test_a_movie_with_no_audio_at_all_is_an_error_never_a_plan(self) -> None:
+        """Zero-audio files: nothing to synthesize from, so nothing promised."""
+        import audio_standardizer as aus
+
+        def prop(case: dict[str, Any]) -> None:
+            payload = {"streams": [{"index": 0, "codec_type": "video", "codec_name": "hevc"}],
+                       "format": case}
+            verdict = aus.plan_for_payload("m.mkv", payload, aus.Config(dry_run=True))
+            self.assertEqual(verdict.status, aus.STATUS_ERROR)
+            self.assertIsNone(verdict.target)
+            self.assertTrue(verdict.error)
+        self.for_all(FORMAT_SHAPE, prop)
+
+    def test_a_non_numeric_duration_is_reported_and_never_acted_on(self) -> None:
+        """`format.duration` is a string in real ffprobe output and a lie in bad files.
+
+        The duration is decoration - it appears in the report and in no
+        decision - so the invariant is only that a hostile one cannot crash the
+        planner, leak a NaN into the report, or change the verdict.
+        """
+        import audio_standardizer as aus
+
+        def prop(fmt: dict[str, Any]) -> None:
+            payload = {"streams": [{"index": 0, "codec_type": "video", "codec_name": "hevc"},
+                                   {"index": 1, "codec_type": "audio", "codec_name": "truehd",
+                                    "channels": 8, "tags": {"language": "eng"},
+                                    "disposition": {"default": 1}}],
+                       "format": fmt}
+            verdict = aus.plan_for_payload("m.mkv", payload, aus.Config(dry_run=True))
+            self.assertEqual(verdict.status, aus.STATUS_PLANNED,
+                             "a bad duration must not change what happens to the movie")
+            self.assertIsNotNone(verdict.target)
+            # ffprobe spells a missing duration "N/A", which is a ValueError and
+            # lands on None; only a synthetic "NaN" survives as a float, and
+            # nothing reads duration_sec, so it cannot reach a report or a
+            # JSON document. Asserted as the invariant it is: no crash, and the
+            # value is either absent or a plain float.
+            self.assertTrue(verdict.duration_sec is None
+                            or isinstance(verdict.duration_sec, float))
+        self.for_all(FORMAT_SHAPE, prop)
+
+
+class TargetAudioCeilingTests(PropertyTestCase):
+    """`target_audio_for` for source widths nobody would write down."""
+
+    def test_every_source_width_folds_inside_the_ceiling_on_both_wirings(self) -> None:
+        def prop(case: dict[str, Any]) -> None:
+            for wiring in (core.WIRING_SOUNDBAR_HDMI_IN, core.WIRING_TV_ARC):
+                target = core.target_audio_for(case, wiring)
+                self.assertLessEqual(target.channels, core.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS)
+                self.assertGreater(target.channels, 0)
+                self.assertEqual(target.sample_rate, core.CHAIN_AUDIO_SAMPLE_RATE)
+                self.assertIn(target.codec, core.DOLBY_CODEC_NAMES)
+                self.assertTrue(target.channel_name)
+        self.for_all(one_of(
+            sampled((0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 40, 64, -1, -8, "0", "6", "", None,
+                     "bogus", True, 8.0, 1e9)),
+            integers(-1000, 1000),
+        ), prop, cases=300)
+
+    def test_an_unknown_track_never_achieves_a_layout(self) -> None:
+        """Fail closed: the toolkit never auto-touches a codec it cannot name."""
+        def prop(case: dict[str, Any]) -> None:
+            channels, wiring = case["channels"], case["wiring"]
+            self.assertEqual(
+                core.achievable_channels(core.AUDIO_UNKNOWN, channels, wiring), 0)
+            self.assertEqual(core.achievable_channels("not-a-class", channels, wiring), 0)
+            achieved = core.achievable_channels(core.AUDIO_TRANSCODE_BOUND, channels, wiring)
+            self.assertLessEqual(achieved, core.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS)
+            self.assertGreaterEqual(achieved, 0)
+        self.for_all(fixed_dict({
+            "channels": sampled(REPORTED_CHANNELS),
+            "wiring": sampled((core.WIRING_SOUNDBAR_HDMI_IN, core.WIRING_TV_ARC)),
+        }), prop, cases=200)
 
 
 # ---------------------------------------------------------------------------
@@ -734,6 +1117,26 @@ class MutationTests(unittest.TestCase):
         self.assert_property_notices(
             NamingTests, "test_sanitising_a_name_is_idempotent_and_always_usable",
             (ms, "sanitize_filename", lambda name: original(name) + " "),
+        )
+
+    def test_it_notices_when_the_degraded_fallback_ranks_by_codec_tier(self) -> None:
+        """Put the pre-fix fallback back and the property above must catch it.
+
+        The broken behaviour lived inside an ImportError branch, so it cannot be
+        provoked by patching anything the branch calls - the whole function is
+        replaced with the tuple it used to build, positions and all.
+        """
+        import audio_standardizer as aus
+
+        def broken(pair: tuple[dict[str, Any], dict[str, Any]]) -> Any:
+            stream, _track = pair
+            cls = core.classify_audio_blob(aus._stream_blob(stream))
+            return (aus.channels_of(stream), core.CLASS_TIERS.get(cls, 0), 0, 0, 0, 0, 0)
+
+        self.assert_property_notices(
+            AudioChainAgreementTests,
+            "test_the_degraded_rank_fallback_keeps_the_scorers_ordering_conventions",
+            (aus, "_pool_rank", broken),
         )
 
     def test_it_notices_when_cover_art_can_win_the_stream_pick(self) -> None:

@@ -507,13 +507,43 @@ def dolby_name(codec: str) -> str:
     """Display name of a synthesized Dolby codec ('eac3' / 'ac3')."""
     return DOLBY_CODEC_NAMES.get(codec, codec)
 
+#: The chain's audio sample rate: the Chromecast's HDMI output rate, so a
+#: synthesized track is written at it and never resampled. Recorded as data
+#: because two decisions read it — the target table below and the fallback in
+#: :func:`sample_rate_of` — and they must not drift apart.
+CHAIN_AUDIO_SAMPLE_RATE = 48000
+
+
+def sample_rate_of(value: object, default: int = CHAIN_AUDIO_SAMPLE_RATE) -> int:
+    """Parse a reported sample rate, falling back to ``default`` on nonsense.
+
+    The same trap 8.4.1 closed for channel counts, on the field next to it.
+    Both mkvmerge and ffprobe report an *unknown* rate as the string ``"0"``,
+    and ``int(float("0" or 48000))`` is 0 — the ``or`` never fires, because a
+    non-empty string is truthy whatever it spells. The result was that one and
+    the same fact ranked a track two different ways depending on which tool
+    reported it: an int ``0`` hit the ``or`` and became 48000, a string ``"0"``
+    did not and stayed 0, which is the LAST tie-break in
+    ``get_audio_quality_score`` and can therefore decide which audio track
+    survives an irreversible remux.
+
+    Zero and unparseable are treated identically, as they are for channels:
+    neither is a rate, so both fall back to the chain's.
+    """
+    try:
+        rate = int(float(value))  # type: ignore[arg-type]
+    except (ValueError, TypeError, OverflowError):
+        return default
+    return rate if rate > 0 else default
+
+
 @dataclass(frozen=True)
 class TargetAudio:
     codec: str
     bitrate: str
     channels: int
     channel_name: str
-    sample_rate: int = 48000  # the Chromecast's HDMI output rate; no resample
+    sample_rate: int = CHAIN_AUDIO_SAMPLE_RATE  # no resample on this chain
 
 
 def target_audio_for(source_channels: int, wiring: str = DEFAULT_WIRING) -> TargetAudio:
@@ -609,6 +639,60 @@ def achievable_channels(cls: str, channels: int,
     if cls == AUDIO_TRANSCODE_BOUND:
         return target_audio_for(ch, wiring).channels
     return 0
+
+
+# The coarsest thing this chain knows about an audio track, and the first
+# thing every ranking decision compares. Three bands, not a continuum: either
+# it plays with no server work at all, or it can be converted into something
+# that does, or the toolkit does not recognise it and refuses to choose it.
+CHAIN_BAND_NATIVE = 2            # AC-3 / DD+ / base DTS / anything decoded to PCM
+CHAIN_BAND_TRANSCODE_BOUND = 1   # TrueHD / DTS-HD / DTS:X / WMA Pro: convertible by audiofit
+CHAIN_BAND_UNKNOWN = 0           # fail closed: reported, never chosen if anything else exists
+
+_ATMOS_MARKERS = ("ATMOS", "JOC")
+
+
+def chain_band_for(cls: str) -> int:
+    """Which band of this chain a classified audio class lands in.
+
+    The band leads every ranking decision the toolkit makes about audio:
+    *plays with no server work* beats *transcode-bound* beats *unknown*,
+    whatever a codec's prestige inside its own band. That is the 8.4.0
+    rebalance - before it, a codec sub-tier led, so AC-3 2.0 (tier 95)
+    outranked FLAC 7.1 (tier 66) and, because the remux keeps exactly ONE
+    audio track, a 7.1 master was permanently destroyed to keep a stereo one.
+
+    It lives here rather than in either tool because two tools rank audio
+    pools: :func:`mkv_track_cleaner.get_audio_quality_score` for the remux and
+    :func:`audio_standardizer._pool_rank` for the transcode planner, whose
+    degraded branch cannot import the scorer and has to reproduce its ordering
+    conventions from shared parts. A track that sits in one band for one tool
+    and another band for the other is how a movie gets settled by a track the
+    remux is about to delete.
+    """
+    if cls in (AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DECODE_PCM):
+        return CHAIN_BAND_NATIVE
+    if cls == AUDIO_TRANSCODE_BOUND:
+        return CHAIN_BAND_TRANSCODE_BOUND
+    return CHAIN_BAND_UNKNOWN
+
+
+def atmos_credit_for(cls: str, blob: str) -> int:
+    """1 when this blob is a Dolby Digital Plus stream actually claiming Atmos.
+
+    Atmos only exists inside DD+ (as JOC) on anything this player can emit -
+    plain AC-3 has no Atmos variant at all, so an "Atmos" in a track's title is
+    a release-group flourish. Crediting the word alone used to let a stereo
+    AC-3 titled "Dolby Atmos 5.1" outrank genuine surround, so the credit is
+    gated on the classification first and the wording second.
+
+    Expects a blob from :func:`codec_blob` (upper-cased, positions stable);
+    upper-cases again so a hand-built blob cannot silently lose the credit.
+    """
+    if cls != AUDIO_NATIVE or not is_dolby_digital_plus(blob):
+        return 0
+    upper = blob.upper()
+    return 1 if any(marker in upper for marker in _ATMOS_MARKERS) else 0
 
 
 def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> str:

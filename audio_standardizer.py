@@ -98,6 +98,7 @@ from organizekit.core import (
     DEFAULT_WIRING,
     FFMPEG_DOLBY_ENCODE_MAX_CHANNELS,
     KIND_AUDIOFIT,
+    ORPHAN_MIN_AGE_SECONDS,
     PLAYER,
     SINK,
     WIRING_ENV_VAR,
@@ -108,8 +109,11 @@ from organizekit.core import (
     MediaProbeCache,
     Report,
     RunLog,
+    achievable_channels,
+    atmos_credit_for,
     atomic_write_text,
     audio_chain_note,
+    chain_band_for,
     classify_audio_blob,
     codec_blob,
     default_tool_dir,
@@ -124,6 +128,9 @@ from organizekit.core import (
     resolve_wiring,
     resolve_workers,
     run_field_smoke_test,
+    sample_rate_of,
+    source_snapshot,
+    source_snapshot_matches,
     target_audio_for,
     tools_home,
 )
@@ -346,11 +353,32 @@ def to_cleaner_track(stream: dict[str, Any], audio_ordinal: int) -> dict[str, An
         "dts": f"DTS ({profile})" if profile else "DTS",
         "aac": "AAC", "flac": "FLAC", "mp3": "MP3", "opus": "Opus",
         "vorbis": "Vorbis", "alac": "ALAC",
-    }.get(codec_name, (profile or codec_name or "unknown"))
-    try:
-        sample_rate = int(float(stream.get("sample_rate") or 48000))
-    except (ValueError, TypeError):
-        sample_rate = 48000
+    }.get(codec_name) or codec_name or "unknown"
+    # Field 1 of the classification blob is the codec NAME and it is the only
+    # authoritative one, so for a codec outside that table the profile must not
+    # be rendered into it. The fallback used to be ``profile or codec_name``,
+    # which handed field 1 to the profile outright: ffprobe's ``pcm_bluray``
+    # carrying a ``DTS:X`` profile became a track NAMED "DTS:X", the cleaner
+    # classified it transcode-bound, and this tool - reading its own
+    # ``_stream_blob``, where the name still came first - called the very same
+    # stream decode-to-pcm. ``wmapro`` with a ``PCM`` profile disagreed the
+    # other way, which is the worse direction: one tool settles a movie the
+    # other is about to strip of its only playable audio.
+    #
+    # Nor may it be appended in parentheses. ``"w (DTS )"`` glues the profile
+    # to a token the classifier's widening step cannot see ("(DTS" is not
+    # "DTS"), so the codec fields appear to say nothing and the fall-through
+    # reaches the TITLE - and a track titled "TrueHD" then decided what a WMA
+    # stream is. The profile already travels in ``codec_id`` below, which is
+    # blob field 2: exactly the one place ``classify_audio_blob`` documents as
+    # allowed to refine a codec name.
+    # ``sample_rate_of``, not ``int(float(x or 48000))``: ffprobe reports an
+    # unknown rate as the STRING "0", which is truthy, so the ``or`` never
+    # fired and the adapter handed the cleaner a 0 where its own parse of the
+    # same fact (an int 0) would have produced 48000. Both tools must read one
+    # reported rate as one number — the shared helper is what makes that
+    # structural rather than a convention.
+    sample_rate = sample_rate_of(stream.get("sample_rate"))
     return {
         # position among audio tracks (not the ffprobe stream index) so the
         # cleaner's helpers see the same shape mkvmerge gives them
@@ -358,7 +386,20 @@ def to_cleaner_track(stream: dict[str, Any], audio_ordinal: int) -> dict[str, An
         "type": "audio",
         "codec": friendly,
         "properties": {
-            "codec_id": (f"{codec_name} {profile}").strip(),
+            # And ``codec_id`` must be the profile ALONE, never
+            # ``f"{codec_name} {profile}"``. Prefixing the name shifted every profile
+            # word one token to the right, and ``classify_audio_blob``'s DTS
+            # refinement reads only token[1] — the first word of field 2. For a codec
+            # the table above does not rewrite, that word was the codec name again, so
+            # the profile became invisible: ffprobe's ``dca`` spelling of DTS with a
+            # ``DTS-HD MA`` profile classified dts-core-passthrough in the cleaner and
+            # transcode-bound here. audiofit then baked in a chain-native Dolby bed
+            # that ``get_audio_quality_score`` ranked BELOW the unplayable master
+            # (achievable 8 in the native band beats achievable 6), so the cleaner
+            # deleted the track just appended and the movie went back to transcoding
+            # on every play. Field 2 has to mirror ``_stream_blob`` exactly or the two
+            # tools are reading different facts about one file.
+            "codec_id": profile,
             "language": _stream_language(stream),
             "language_ietf": _stream_language(stream),
             "track_name": str(tags.get("title") or ""),
@@ -529,10 +570,39 @@ def _pool_rank(pair: tuple[dict[str, Any], dict[str, Any]]) -> Any:
         import mkv_track_cleaner as tc
         return tc.get_audio_quality_score(track)
     except Exception:  # noqa: BLE001
-        ch = channels_of(stream)
-        return (ch,
-                CLASS_TIERS.get(classify_audio_blob(_stream_blob(stream)), 0),
-                0, 0, 0, 0, 0)
+        # Degraded mode: the scorer is unreachable, so its ordering has to be
+        # rebuilt from shared parts. Every position holds the SAME KIND of
+        # quantity in the SAME slot as ``get_audio_quality_score`` returns,
+        # because the two decide which track survives an irreversible remux.
+        # The version this replaced returned ``(channels_of(stream),
+        # CLASS_TIERS[cls], 0, 0, 0, 0, 0)`` - the raw channel count in the
+        # chain-achievable slot and a codec TIER in the fail-closed BAND slot.
+        # Both are safety positions: ``achievable_channels`` maps AUDIO_UNKNOWN
+        # to 0 exactly so an unrecognised track can never be chosen, and the
+        # band is what keeps "plays with no server work" above "unknown". With
+        # a tier there instead, an unknown-codec 7.1 stream ranked ``(6, 10,
+        # ...)`` against a chain-native ALAC stereo track's ``(2, 65, ...)``
+        # and WON - audiofit would have called a movie settled on the strength
+        # of a track this chain can never emit. Positions 3-6 stay coarser
+        # (there is no ``chain_audio_tier`` and none of mkvmerge's ``tag_bps``
+        # spellings available here); coarser may only break a tie the first
+        # three positions already made, which
+        # ``test_the_degraded_rank_fallback_keeps_the_scorers_ordering_conventions``
+        # is what asserts.
+        blob = _stream_blob(stream)
+        cls = classify_audio_blob(blob)
+        disposition = stream.get("disposition") if isinstance(stream.get("disposition"), dict) else {}
+        try:
+            bitrate = int(stream.get("bit_rate") or 0)
+        except (ValueError, TypeError):
+            bitrate = 0
+        return (achievable_channels(cls, channels_of(stream), resolve_wiring(DEFAULT_WIRING)),
+                chain_band_for(cls),
+                atmos_credit_for(cls, blob),
+                CLASS_TIERS.get(cls, 0),
+                bitrate,
+                sample_rate_of(stream.get("sample_rate")),
+                1 if disposition.get("original") else 0)
 
 
 def describe_stream(stream: dict[str, Any]) -> str:
@@ -579,14 +649,40 @@ def build_ffmpeg_command(cfg: Config, src: Path, dst: Path, verdict: AudioVerdic
     ]
 
 
+def is_default_audio(stream: dict[str, Any]) -> bool:
+    """True when ffprobe says this stream is a container default."""
+    disposition = stream.get("disposition")
+    if not isinstance(disposition, dict):
+        return False
+    return bool(disposition.get("default"))
+
+
 def verify_output(produced: Path, verdict: AudioVerdict, cfg: Config,
                   old_payload: dict[str, Any]) -> tuple[bool, str]:
     """Prove the new file is a strict superset before it may replace the old.
 
-    Video streams must be description-identical (same codecs, same count),
-    the appended audio track must be the Dolby codec that was asked for with
-    the right channel count, and the duration may only drift within
-    tolerance — the same contract the cleaner verifies on a remux.
+    Video streams must be description-identical (same codecs, same count), the
+    appended audio track must be the Dolby codec that was asked for with the
+    right channel count and sample rate, it must be the container's ONLY
+    default audio track, and the duration may only drift within tolerance — the
+    same contract the cleaner verifies on a remux.
+
+    Sample rate and the default flag are checked because they are the two
+    output options whose loss would not be visible any other way. ``-ar:a:N``
+    dropped means the new track inherits the master's rate rather than the
+    chain's 48 kHz; ``-disposition:a 0`` / ``-disposition:a:N default`` dropped
+    means the lossless master stays the track a player picks — so the movie
+    keeps transcoding its audio on every play, which is the exact failure this
+    tool exists to end, and it would have been reported as a success. ffmpeg's
+    command line is never trusted as the definition of success (README, safety
+    invariant 8); ffprobe of the result is.
+
+    Bitrate, the language tag and the title are NOT re-read here, deliberately:
+    they are pinned on the command line by
+    ``test_the_bake_in_command_is_exactly_what_the_docs_promise``, and a
+    reported ``bit_rate`` is a container estimate that a real encode may round,
+    so refusing a publish over it would trade a silent quality drift for a
+    library of untouched movies.
     """
     try:
         new_payload = run_ffprobe(cfg.ffprobe, produced, cfg)
@@ -610,6 +706,16 @@ def verify_output(produced: Path, verdict: AudioVerdict, cfg: Config,
         if channels_of(added) != verdict.target.channels:
             return False, (f"appended {wanted} track is {channels_of(added)}ch, "
                            f"expected {verdict.target.channels}ch")
+        rate = sample_rate_of(added.get("sample_rate"))
+        if rate != verdict.target.sample_rate:
+            return False, (f"appended {wanted} track is {rate} Hz, "
+                           f"expected the chain's {verdict.target.sample_rate} Hz")
+        defaults = [position for position, stream in enumerate(new_audio)
+                    if is_default_audio(stream)]
+        if defaults != [len(new_audio) - 1]:
+            return False, (f"the appended {wanted} track is not the container's only "
+                           f"default audio (default-flagged positions: "
+                           f"{defaults or 'none'} of {len(new_audio)})")
         old_dur = float((old_payload.get("format") or {}).get("duration") or 0)
         new_dur = float((new_payload.get("format") or {}).get("duration") or 0)
         if old_dur and abs(new_dur - old_dur) > 3.0:
@@ -627,8 +733,21 @@ def hardlink_count(path: Path) -> int:
         return 1
 
 
-def transcode_movie(verdict: AudioVerdict, old_payload: dict[str, Any], cfg: Config) -> AudioVerdict:
-    """Apply one planned transcode with the toolkit's safety invariants."""
+def transcode_movie(verdict: AudioVerdict, old_payload: dict[str, Any], cfg: Config,
+                    *, snapshot: dict[str, Any] | None = None) -> AudioVerdict:
+    """Apply one planned transcode with the toolkit's safety invariants.
+
+    ``snapshot`` is the source's identity as ``evaluate_file`` saw it, and it is
+    re-checked immediately before the publish. Planning and applying are two
+    phases of one run, hours apart on a big library, and the ingest hook
+    (``movie_standardizer.py``) runs from the torrent client whenever a
+    download completes — so a better release can land on this exact path while
+    the encode of the old one is still running. ``os.replace`` would then
+    destroy the freshly ingested movie and publish a track built from the bytes
+    it replaced, and report success. The remuxer has always refused that swap
+    (``source_snapshot_matches`` before its own ``safe_replace``); this tool
+    claimed to mirror the remuxer's invariants and did not.
+    """
     started = time.monotonic()
     src = Path(verdict.path)
     tmp = src.with_name(f".{src.stem}.audiofit-{os.getpid()}.tmp.mkv")
@@ -656,6 +775,34 @@ def transcode_movie(verdict: AudioVerdict, old_payload: dict[str, Any], cfg: Con
         ok, why = verify_output(tmp, verdict, cfg, old_payload)
         if not ok:
             verdict.error = f"verification refused the transcode: {why}"
+            verdict.status = STATUS_ERROR
+            verdict.category = CATEGORY_LABELS[STATUS_ERROR]
+            return verdict
+        # The publish is the only destructive act this tool performs, and it
+        # happens long after the two facts below were last true. Both are
+        # re-established here, immediately before the swap, or not at all.
+        links = hardlink_count(src)
+        if links > 1:
+            # "A movie still hardlinked to its seeding source is ALWAYS
+            # deferred" - ALWAYS includes the instant of the publish, not only
+            # the probe. The ingest hook links a new release into the library
+            # from the torrent client, whenever a download completes, so a
+            # movie that was single-linked at plan time can be seeded by the
+            # time its encode finishes. os.replace would not corrupt the seed
+            # (that name keeps the old inode) but it would silently fork the
+            # library copy from the copy still being served, which is the state
+            # the deferral exists to prevent. No error: nothing was lost.
+            verdict.status = STATUS_DEFERRED
+            verdict.category = CATEGORY_LABELS[STATUS_DEFERRED]
+            verdict.info = (f"{links} hardlinks at publish time - the movie became hardlinked "
+                            "to a seeding source after it was planned, so the replace is "
+                            "deferred until seeding stops")
+            verdict.elapsed_seconds = round(time.monotonic() - started, 2)
+            return verdict
+        if snapshot is not None and not source_snapshot_matches(src, snapshot):
+            verdict.error = ("source changed while transcoding; refusing to replace it "
+                             "(the movie on disk is no longer the one this plan was made "
+                             "from - re-run to plan against the new file)")
             verdict.status = STATUS_ERROR
             verdict.category = CATEGORY_LABELS[STATUS_ERROR]
             return verdict
@@ -747,9 +894,16 @@ def run_ffprobe(binary: str, file_path: Path, cfg: Config) -> dict[str, Any]:
     return payload
 
 
-def probe_payload(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -> dict[str, Any]:
-    """ffprobe JSON for one file, through the shared probe cache."""
-    stat = file_path.stat()
+def probe_payload(file_path: Path, cfg: Config, cache: MediaProbeCache | None,
+                  stat: os.stat_result | None = None) -> dict[str, Any]:
+    """ffprobe JSON for one file, through the shared probe cache.
+
+    ``stat`` lets the caller pass the snapshot it already took, so the cached
+    key, the reported size and the identity the publish step is checked against
+    all come from ONE ``stat`` rather than three that could straddle a change.
+    """
+    if stat is None:
+        stat = file_path.stat()
     payload = cache.get(file_path, stat.st_size, stat.st_mtime_ns) if cache is not None else None
     if payload is None:
         payload = run_ffprobe(cfg.ffprobe, file_path, cfg)
@@ -761,20 +915,32 @@ def probe_payload(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -
 # SCAN DRIVER
 # =============================================================================
 
-def evaluate_file(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -> tuple[AudioVerdict, dict[str, Any] | None]:
-    """Probe + plan one movie. Transcodes happen in the caller, serially."""
+def evaluate_file(
+    file_path: Path, cfg: Config, cache: MediaProbeCache | None,
+) -> tuple[AudioVerdict, dict[str, Any] | None, dict[str, Any] | None]:
+    """Probe + plan one movie. Transcodes happen in the caller, serially.
+
+    Returns ``(verdict, payload, snapshot)``. The third element is the source's
+    identity as it was when the plan was made, and it exists because the two
+    halves of a run are separated in time: every movie is probed first (in
+    parallel), and the transcodes are applied afterwards, one at a time, so on
+    a large library the last plan can be hours older than the probe it came
+    from. ``transcode_movie`` re-checks this snapshot before it publishes.
+    """
     try:
-        size = file_path.stat().st_size
+        stat = file_path.stat()
     except OSError as exc:
         return (AudioVerdict(path=str(file_path), status=STATUS_ERROR,
                              category=CATEGORY_LABELS[STATUS_ERROR], info=str(exc),
-                             error=str(exc)), None)
+                             error=str(exc)), None, None)
+    size = stat.st_size
+    snapshot = source_snapshot(file_path, stat)
     try:
-        payload = probe_payload(file_path, cfg, cache)
+        payload = probe_payload(file_path, cfg, cache, stat=stat)
     except Exception as exc:  # noqa: BLE001 - one unreadable file is a report row, not a crash
         return (AudioVerdict(path=str(file_path), status=STATUS_ERROR,
                              category=CATEGORY_LABELS[STATUS_ERROR], info=str(exc),
-                             size_bytes=size, error=str(exc)), None)
+                             size_bytes=size, error=str(exc)), None, None)
     verdict = plan_for_payload(str(file_path), payload, cfg, size_bytes=size)
     if verdict.status in (STATUS_PLANNED, STATUS_TRANSCODED):
         links = hardlink_count(file_path)
@@ -785,8 +951,8 @@ def evaluate_file(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -
                             "replace step is deferred until seeding stops (plan kept: "
                             f"{verdict.source_codec} -> {dolby_name(verdict.target.codec) if verdict.target else 'Dolby'} "
                             f"{verdict.target.channel_name if verdict.target else ''})")
-            return verdict, None
-    return verdict, payload
+            return verdict, None, None
+    return verdict, payload, snapshot
 
 
 def scan(cfg: Config) -> int:
@@ -807,8 +973,24 @@ def scan(cfg: Config) -> int:
 
     # Housekeeping: temp files from a run that died mid-transcode must never
     # masquerade as movies; they always carry this tool's marker name.
+    #
+    # The age gate is not decoration, and the run lock does not supply it. The
+    # lock is keyed by a hash of THIS library's path, so a run here and a run on
+    # a library nested inside it hold different locks and overlap - and rglob
+    # from the outer root descends into the inner one. Sweeping unconditionally
+    # unlinked the staging file the inner run's ffmpeg was still writing: POSIX
+    # let that writer carry on into the unlinked inode, so no movie was
+    # corrupted, but the inner verification then found no output and reported a
+    # failed encode - the whole transcode wasted on a file that was never in
+    # trouble. ``mkv_track_cleaner.cleanup_orphan_temps`` gates on the same
+    # shared constant, and this tool has no journal to lean on instead. Waiting
+    # costs nothing: ``transcode_one`` unlinks its OWN staging file in a
+    # finally, so anything this loop finds already has a dead writer.
+    now = time.time()
     for stray in cfg.source_dir.rglob("*.audiofit-*.tmp.mkv"):
         try:
+            if now - stray.stat().st_mtime < ORPHAN_MIN_AGE_SECONDS:
+                continue
             stray.unlink()
             log(f"Removed stale temp file: {stray.name}")
         except OSError:
@@ -828,7 +1010,7 @@ def scan(cfg: Config) -> int:
         log(f"Probe cache: {cache.path} ({len(cache)} entries loaded)")
 
     results: list[AudioVerdict] = []
-    plans: list[tuple[AudioVerdict, dict[str, Any]]] = []
+    plans: list[tuple[AudioVerdict, dict[str, Any], dict[str, Any]]] = []
     started = time.perf_counter()
     total = len(files)
     workers = resolve_workers(cfg.workers, items=len(files), cap=MAX_CPU_WORKERS)
@@ -845,10 +1027,11 @@ def scan(cfg: Config) -> int:
                                             category=CATEGORY_LABELS[STATUS_ERROR],
                                             info=str(outcome.error), error=str(outcome.error)))
             else:
-                verdict, payload = outcome.value
+                verdict, payload, snapshot = outcome.value
                 results.append(verdict)
-                if verdict.status in (STATUS_PLANNED, STATUS_TRANSCODED) and payload is not None:
-                    plans.append((verdict, payload))
+                if (verdict.status in (STATUS_PLANNED, STATUS_TRANSCODED)
+                        and payload is not None and snapshot is not None):
+                    plans.append((verdict, payload, snapshot))
             tag = {STATUS_NATIVE: "NATIVE", STATUS_DTS: "DTS", STATUS_PCM: "PCM",
                    STATUS_PLANNED: "PLAN", STATUS_TRANSCODED: "JOB", STATUS_REVIEW: "REVIEW",
                    STATUS_DEFERRED: "SEEDING", STATUS_ERROR: "ERROR"}.get(results[-1].status, "?")
@@ -868,14 +1051,14 @@ def scan(cfg: Config) -> int:
     if plans and not cfg.dry_run:
         log("")
         log(f"Applying {len(plans)} transcode(s) (video is copied, never re-encoded):")
-        for index, (verdict, payload) in enumerate(plans, 1):
+        for index, (verdict, payload, snapshot) in enumerate(plans, 1):
             if not Path(verdict.path).is_file():
                 continue
             log(f"  [{index}/{len(plans)}] {Path(verdict.path).name}: "
                 f"{verdict.source_codec} {verdict.source_channels}ch -> "
                 f"{dolby_name(verdict.target.codec)} "
                 f"{verdict.target.channel_name} @ {verdict.target.bitrate}")
-            result = transcode_movie(verdict, payload, cfg)
+            result = transcode_movie(verdict, payload, cfg, snapshot=snapshot)
             for i, row in enumerate(results):
                 if row.path == result.path:
                     results[i] = result

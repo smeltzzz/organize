@@ -89,6 +89,7 @@ from organizekit.core import (
     EXTERNAL_SRT_MAX_BYTES,
     EXTERNAL_SRT_SUFFIX,
     KIND_REMUX,
+    ORPHAN_MIN_AGE_SECONDS,
     Ansi,
     CoordinationLock,
     LiveLine,
@@ -106,6 +107,8 @@ from organizekit.core import (
     promote_legacy_external_english_srt,
     resolve_library,
     run_field_smoke_test,
+    source_snapshot,
+    source_snapshot_matches,
     strip_ansi,
     write_raw,
 )
@@ -169,7 +172,9 @@ TRANSACTION_JOURNAL_SUFFIX = ".json"
 TRANSACTION_SCHEMA_VERSION = 1
 LOCK_FILENAME = ".track_cleaner.lock"
 STANDARDIZER_LOCK_TIMEOUT_SECONDS = 60.0
-ORPHAN_MIN_AGE_SECONDS = 60.0
+# ORPHAN_MIN_AGE_SECONDS moved to shared core: audio_standardizer sweeps for
+# the same debris under the same nested-library race, and it has no journal to
+# lean on instead of an age gate.
 MIN_OUTPUT_RATIO = 0.50  # remux smaller than 50% of source → reject (likely truncated)
 # Hardlinked movies are always deferred. Replacing one would break the seed
 # link and consume another full movie-sized allocation until seeding ends.
@@ -813,9 +818,15 @@ def is_forced_subtitle(track: dict[str, Any]) -> bool:
 #: Direct-Play-first rule: at an equal achievable layout, a track that needs NO
 #: server work beats one that does. It is the second key rather than the first
 #: because the remux is irreversible - see that function's docstring.
-_BAND_CHAIN_NATIVE = 2   # AC-3 / DD+ / base DTS / anything decoded to PCM
-_BAND_TRANSCODE_BOUND = 1  # TrueHD / DTS-HD / DTS:X / WMA Pro: convertible by audiofit
-_BAND_UNKNOWN = 0        # fail-closed: reported, never chosen if anything else exists
+#:
+#: Aliases, not a second definition: the bands are shared core because
+#: ``audio_standardizer._pool_rank`` has to reproduce this scorer's ordering
+#: conventions in its degraded branch, where this module is the thing that
+#: failed to import. ``tests/test_shared_core.py`` is what makes a copy here
+#: unrepresentable.
+_BAND_CHAIN_NATIVE = pc.CHAIN_BAND_NATIVE
+_BAND_TRANSCODE_BOUND = pc.CHAIN_BAND_TRANSCODE_BOUND
+_BAND_UNKNOWN = pc.CHAIN_BAND_UNKNOWN
 
 
 def get_audio_quality_score(
@@ -900,24 +911,23 @@ def get_audio_quality_score(
     # Atmos only exists inside Dolby Digital Plus (as JOC) on anything this
     # player can emit - plain AC-3 has no Atmos variant, so an "Atmos" in the
     # track name is a release-group flourish. Crediting it used to make a
-    # stereo AC-3 titled "Dolby Atmos" outrank a real surround track.
-    atmos_flag = 1 if (cls == pc.AUDIO_NATIVE and pc.is_dolby_digital_plus(blob)
-                       and any(k in blob for k in ("ATMOS", "JOC"))) else 0
+    # stereo AC-3 titled "Dolby Atmos" outrank a real surround track. The rule
+    # is shared core so audiofit's degraded branch credits it identically.
+    atmos_flag = pc.atmos_credit_for(cls, blob)
     try:
         bitrate = int(props.get("tag_bps") or props.get("bps") or props.get("tag_bitrate") or props.get("bitrate") or 0)
     except (ValueError, TypeError):
         bitrate = 0
-    try:
-        sampling_freq = int(float(props.get("audio_sampling_frequency") or 48000))
-    except (ValueError, TypeError):
-        sampling_freq = 48000
+    # ``sample_rate_of``, not ``int(float(x or 48000))``: an unknown rate is
+    # reported as the STRING "0" by both mkvmerge and ffprobe, and a non-empty
+    # string is truthy whatever it spells — so the ``or`` never fired and the
+    # tie-break below became 0 instead of the chain's 48000. The same fact then
+    # ranked differently depending on which tool reported it (an int 0 did hit
+    # the ``or``), which is exactly the disagreement the shared scorer exists
+    # to make impossible. Same scar as the channels parse immediately above.
+    sampling_freq = pc.sample_rate_of(props.get("audio_sampling_frequency"))
     original = 1 if props.get("flag_original") else 0
-    if cls in (pc.AUDIO_NATIVE, pc.AUDIO_DTS_CORE, pc.AUDIO_DECODE_PCM):
-        band = _BAND_CHAIN_NATIVE
-    elif cls == pc.AUDIO_TRANSCODE_BOUND:
-        band = _BAND_TRANSCODE_BOUND
-    else:
-        band = _BAND_UNKNOWN
+    band = pc.chain_band_for(cls)
     achievable = pc.achievable_channels(cls, channels, pc.resolve_wiring(wiring))
     return (achievable, band, atmos_flag, tier, bitrate, sampling_freq, original)
 
@@ -1060,32 +1070,6 @@ def _fsync_directory(directory: Path) -> None:
         except OSError:
             pass
 
-def _source_snapshot(path: Path, stat_result: os.stat_result | None = None) -> dict[str, Any]:
-    """Return a cheap identity snapshot used to reject concurrent source changes."""
-    st = stat_result if stat_result is not None else path.stat()
-    fields: dict[str, Any] = {
-        "size": int(st.st_size),
-        "mtime_ns": int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))),
-        "device": int(getattr(st, "st_dev", 0)),
-        "inode": int(getattr(st, "st_ino", 0)),
-    }
-    canonical = json.dumps(fields, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    fields["identity"] = hashlib.sha256(canonical).hexdigest()
-    return fields
-
-def _source_snapshot_matches(path: Path, snapshot: dict[str, Any]) -> bool:
-    try:
-        observed = _source_snapshot(path)
-    except OSError:
-        return False
-    expected = dict(snapshot or {})
-    # Older journal records might not carry a digest, but no current run writes
-    # one. Compare named fields rather than trusting a malformed record.
-    for key in ("size", "mtime_ns", "device", "inode"):
-        if key not in expected or expected.get(key) != observed.get(key):
-            return False
-    return bool(expected.get("identity") == observed.get("identity"))
-
 def _validate_srt_file(sidecar: Path) -> tuple[bool, str, dict[str, Any] | None]:
     """Validate one covering SRT file, returning ``(valid, reason, snapshot)``.
 
@@ -1118,9 +1102,9 @@ def _validate_srt_file(sidecar: Path) -> tuple[bool, str, dict[str, Any] | None]
         after_read_stat = sidecar.stat(follow_symlinks=False)
     except OSError as exc:
         return False, f"could not re-stat external SRT after reading: {exc}", None
-    if _source_snapshot(sidecar, file_stat)["identity"] != _source_snapshot(sidecar, after_read_stat)["identity"]:
+    if source_snapshot(sidecar, file_stat)["identity"] != source_snapshot(sidecar, after_read_stat)["identity"]:
         return False, "external SRT changed while being validated", None
-    snapshot = _source_snapshot(sidecar, after_read_stat)
+    snapshot = source_snapshot(sidecar, after_read_stat)
     snapshot["sha256"] = hashlib.sha256(raw).hexdigest()
     return True, "", snapshot
 
@@ -1181,7 +1165,7 @@ def external_srt_snapshot_matches(record: dict[str, Any]) -> bool:
         and str(current.get("path") or "") == str(path)
         and bool(re.fullmatch(r"[0-9a-f]{64}", expected_digest))
         and current_digest == expected_digest
-        and _source_snapshot_matches(path, record["snapshot"])
+        and source_snapshot_matches(path, record["snapshot"])
     )
 
 def _transaction_token_from_temp_name(name: str) -> str | None:
@@ -1238,7 +1222,7 @@ def create_transaction(original: Path, temp: Path, token: str, orig_stat: os.sta
         "source_path": str(original),
         "source_name": original.name,
         "temp_name": temp.name,
-        "source_snapshot": _source_snapshot(original, orig_stat),
+        "source_snapshot": source_snapshot(original, orig_stat),
     }
 
 def cleanup_transaction_artifacts(temp_path: Path, journal_path: Path | None = None) -> None:
@@ -1877,7 +1861,7 @@ def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: st
                     level="WARNING", log_file_path=log_file_path)
                 preserved += 1
                 continue
-            if not _source_snapshot_matches(temp, journal.get("temp_snapshot") or {}):
+            if not source_snapshot_matches(temp, journal.get("temp_snapshot") or {}):
                 log(f"Leaving changed verified temp for manual review: '{filename}'",
                     level="WARNING", log_file_path=log_file_path)
                 preserved += 1
@@ -1951,7 +1935,7 @@ def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: st
                 # proves the MKV on disk is the verified one, so the stale
                 # MP4 and the journal can both go.
                 if original.exists():
-                    if _source_snapshot_matches(output, journal.get("temp_snapshot") or {}):
+                    if source_snapshot_matches(output, journal.get("temp_snapshot") or {}):
                         log(f"Finishing interrupted MP4 -> MKV conversion: removing '{source_name}' "
                             f"beside verified '{output_name}'",
                             level="WARNING", log_file_path=log_file_path)
@@ -2202,6 +2186,32 @@ def remux_verdict(stats: dict[str, Any], before: dict[str, int]) -> tuple[str, s
     return None
 
 
+def verdict_subject(movie: Path, stats: dict[str, Any], before: dict[str, int]) -> Path:
+    """The path a verdict describes: ``movie``, or what a conversion published.
+
+    An MP4 -> MKV conversion deletes its source and publishes a NEW file under
+    the canonical name, so the source path is not where the verdict lives any
+    more. Recording against it keyed a row on a path that no longer exists —
+    with ``size``/``mtime_ns`` NULL, because there was nothing left to stat —
+    and ``organize status`` joins verdicts to live movies by path, so the
+    freshly converted and cleaned movie read as ``unmeasured`` for the remux
+    step until some later pass happened to look at the ``.mkv``.
+
+    The verdict has to be keyed on the bytes that are on disk, exactly like the
+    probe-cache re-key ``process_mkv`` already does for the same conversion.
+    """
+    cleaned = stats.get("cleaned") or []
+    if len(cleaned) > before.get("cleaned", 0):
+        entry = cleaned[-1]
+        if isinstance(entry, dict) and entry.get("converted_from_mp4"):
+            output_name = str(entry.get("output_name") or "")
+            # A name, never a path: the same guard the transaction journal
+            # applies, so a crafted entry cannot aim a write outside the folder.
+            if output_name and Path(output_name).name == output_name:
+                return movie.parent / output_name
+    return movie
+
+
 def publish_remux_verdict(
     store: StateStore, movie: Path, stats: dict[str, Any], before: dict[str, int],
     log_file_path: str | None = LOG_FILE,
@@ -2210,7 +2220,8 @@ def publish_remux_verdict(
 
     The stamp comes from the file as it is *now*, which for a cleaned movie is
     the remuxed file: the verdict describes the bytes on disk, so the next
-    ``organize status`` reports it as current rather than stale.
+    ``organize status`` reports it as current rather than stale. For a
+    conversion that file has a different NAME too - see :func:`verdict_subject`.
     """
     if not store.enabled:
         return False
@@ -2219,7 +2230,7 @@ def publish_remux_verdict(
         return False
     verdict, detail = decision
     try:
-        store.record(movie, KIND_REMUX, verdict, detail)
+        store.record(verdict_subject(movie, stats, before), KIND_REMUX, verdict, detail)
     except Exception as exc:  # noqa: BLE001 - a cache write can never fail a run
         log(f"state cache not updated for '{movie.name}': {exc}",
             level="WARNING", to_console=False, log_file_path=log_file_path)
@@ -2711,7 +2722,7 @@ def process_mkv(
             cleanup_transaction_artifacts(temp_output, journal_path)
             _active_temp_file = None
             return
-        if not _source_snapshot_matches(mkv_path, transaction["source_snapshot"]):
+        if not source_snapshot_matches(mkv_path, transaction["source_snapshot"]):
             err_msg = "source changed while remuxing; refusing to replace it"
             log(f"{err_msg}: '{display_name}'", level="ERROR", log_file_path=log_file_path)
             stats["errors"].append({"name": movie_name, "error": err_msg})
@@ -2721,7 +2732,7 @@ def process_mkv(
 
         transaction["phase"] = "verified"
         transaction["verified_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
-        transaction["temp_snapshot"] = _source_snapshot(temp_output)
+        transaction["temp_snapshot"] = source_snapshot(temp_output)
         write_transaction(journal_path, transaction)
 
         time.sleep(0.1)

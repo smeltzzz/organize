@@ -4,6 +4,169 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.4.2] - 2026-10-04
+
+A re-audit of the whole tree at 8.4.1, looking for what the 8.4.1 pass missed.
+Seven bugs, all in the audio half of the pipeline, all found by asking one
+question of every code path that could answer it: *do the two tools that touch
+a movie agree about what it is?* They did not. Nothing here adds a feature;
+every change either stops a tool destroying or discarding something it should
+have kept, or stops a tool reporting success for work it did not verify.
+
+### Fixed
+- **audiofit could publish over a movie that changed while it was working.**
+  `audio_standardizer.py` plans every movie first (in parallel) and applies the
+  transcodes afterwards, one at a time, so on a large library the last plan can
+  be hours older than the probe it came from. `movie_standardizer.py` runs from
+  the torrent client whenever a download completes, so it can hardlink a better
+  release onto the very path audiofit is about to publish. Nothing checked:
+  `os.replace` destroyed the freshly ingested movie and published a Dolby track
+  built from the bytes it had *replaced*, verification having already passed
+  against the old file, and the run reported success (exit 0). Reproduced with a
+  9 MiB ingest replaced by a 1 MiB transcode of the 2 MiB file it superseded.
+  `mkv_track_cleaner.py` has always refused exactly this swap by re-checking
+  `source_snapshot_matches` immediately before its own `safe_replace`;
+  audiofit's module docstring claimed to mirror the remuxer's invariants and did
+  not. The identity snapshot is now taken from the same single `stat` the plan
+  was built on, carried with the plan, and re-checked before the publish — and
+  the hardlink deferral is re-checked at that instant too, so "a movie still
+  hardlinked to its seeding source is ALWAYS deferred" now covers the swap and
+  not only the probe. `source_snapshot`/`source_snapshot_matches` moved to
+  `organizekit.core.fsio` because two tools now need them and their behaviour
+  must not differ.
+- **An MP4 → MKV conversion recorded its verdict against a file it had just
+  deleted.** The conversion is the cleaner's one two-step publish: a new file
+  appears under the canonical name, a journal phase is written between the
+  steps, and only then is the superseded MP4 removed. The verdict was keyed on
+  the path the run had been *handed* — the MP4 — so its `size`/`mtime` came back
+  NULL and `organize status`, which joins verdicts to live movies by path, read
+  a movie this run had just converted AND cleaned as `unmeasured` for the remux
+  step until some later pass happened to look at the `.mkv`. The probe cache was
+  already re-keyed onto the new file in the same code path; the verdict was not.
+  `verdict_subject()` now resolves the published name out of the stats entry the
+  run already writes, behind the journal's own guard that it is a name and not a
+  path. The conversion path had no end-to-end coverage at all — every test drove
+  an `.mkv` — so `Mp4ConversionTests` adds seven: the swap and its debris, the
+  verdict key, idempotence across the container change, a seeded MP4 deferred
+  rather than converted, a broken sidecar skipping the movie and never being
+  rewritten, dry-run purity, and a failed conversion leaving the MP4 alone.
+- **The sample-rate twin of the 8.4.1 channel-count bug.** Both mkvmerge and
+  ffprobe report an unknown sample rate as the STRING `"0"`, and
+  `int(float("0" or 48000))` is `0`, because a non-empty string is truthy
+  whatever it spells. One and the same fact therefore ranked a track two
+  different ways depending on which tool reported it (an int `0` did hit the
+  `or` and became 48000) — and sample rate is the last tie-break in
+  `get_audio_quality_score`, so it can decide which audio track survives an
+  irreversible remux. Both reads now go through one shared
+  `playbackchain.sample_rate_of()`.
+- **audiofit verified two of the six things its own ffmpeg command asks for.**
+  README invariant 8 says the command line is never trusted as the definition of
+  success — ffprobe of the result is — but the re-probe checked only the codec
+  and the channel count. Sample rate, the default disposition, the bitrate, the
+  language tag and the title were unverified, and no test pinned the argv
+  either, so any of them could be dropped from `build_ffmpeg_command` without a
+  single gate noticing. Two of those are not cosmetic: dropping `-ar:a:N` lets
+  the new track inherit the master's rate instead of the chain's 48 kHz, and
+  dropping `-disposition:a 0` / `-disposition:a:N default` leaves the lossless
+  master as the container default, so a player still picks the track this chain
+  can never emit and the movie keeps transcoding its audio on every play — the
+  exact failure audiofit exists to end, reported as a success. `verify_output`
+  now checks the sample rate and that the appended track is the container's ONLY
+  default audio. Bitrate, language and title are deliberately still not
+  re-read: a reported `bit_rate` is a container estimate a real encode may
+  round, and refusing a publish over it would trade a silent quality drift for a
+  library of untouched movies. They are pinned on the command line instead, and
+  the reasoning is in the docstring so the omission reads as a decision.
+- **The two tools classified the same audio stream differently, and the remux
+  deleted the track audiofit had just baked in.** `to_cleaner_track()` shapes an
+  ffprobe stream into the mkvmerge shape the cleaner's scorer reads, and it
+  filled the classification blob's two authoritative fields wrongly. Field 1 is
+  the codec NAME and it fell back to `profile or codec_name`, handing the field
+  to the profile outright: `pcm_bluray` carrying a `DTS:X` profile became
+  transcode-bound to the cleaner and decode-to-pcm to audiofit, and `wmapro`
+  with a `PCM` profile disagreed the *other* way, which is worse — one tool
+  settles a movie the other is about to strip of its only playable audio.
+  Appending the profile in parentheses does not work either, because `"w (DTS )"`
+  glues it into a token the classifier's widening step cannot see (`"(DTS"` is
+  not `"DTS"`), the codec fields appear to say nothing, and the fall-through
+  reaches the TITLE — a track *titled* "TrueHD" then decided what a WMA stream
+  is. Field 2 was `f"{codec_name} {profile}"`, which shifted every profile word
+  one token to the right; the DTS refinement reads only token[1], so for a codec
+  the friendly-name table does not rewrite that word was the codec name again
+  and the profile was invisible. ffprobe's older `dca` spelling of DTS with a
+  `DTS-HD MA` profile was dts-core-passthrough to the cleaner and
+  transcode-bound to audiofit: audiofit baked in a Dolby bed the scorer then
+  ranked BELOW the master it cannot play (achievable 8 in the native band beats
+  achievable 6), and the remux deleted the track that had just been appended.
+  `codec_id` now carries the profile alone, mirroring `_stream_blob()` field for
+  field, and the profile never reaches field 1.
+- **`_pool_rank`'s degraded branch put a codec tier in the fail-closed band's
+  slot.** 8.4.1 fixed that fallback's tuple *arity* and left its *meaning*: it
+  returned `(channels_of(stream), CLASS_TIERS[cls], 0, 0, 0, 0, 0)`, so position
+  0 held the raw channel count where the scorer holds the chain-achievable
+  layout and position 1 held a tier where the scorer holds the band. Both are
+  safety positions — `achievable_channels()` maps an unrecognised track to 0
+  precisely so it can never be chosen, and the band is what keeps "plays with no
+  server work" above "unknown". With a tier there instead, an unknown-codec 7.1
+  stream ranked `(6, 10, …)` against a chain-native ALAC stereo track's
+  `(2, 65, …)` and **won**, in the exact degraded state where the module that
+  would have caught it is the one that failed to import. The band and Atmos
+  rules are now shared core (`chain_band_for()`, `atmos_credit_for()`,
+  `CHAIN_BAND_*`) used by the scorer and the fallback alike, so the fallback
+  rebuilds the ordering from the same parts instead of approximating it.
+  Positions 3–6 stay coarser — there is no `chain_audio_tier()` available
+  without the cleaner — and coarser may only break a tie the first three
+  positions already made.
+- **audiofit's stray-temp sweep could delete a nested run's live staging file.**
+  `scan()` opened by unlinking every `*.audiofit-*.tmp.mkv` under the library
+  with no minimum age. The run lock does not make that safe: it is keyed by a
+  SHA-256 of the library path, so a run on `/movies` and a run on
+  `/movies/incoming` hold different locks and are both entitled to be in flight,
+  while `rglob` from the outer root descends into the inner one. The outer sweep
+  unlinked the staging file the inner run's ffmpeg was still writing. POSIX lets
+  that writer carry on into the unlinked inode, so no movie was corrupted and the
+  original always survived — which is why nothing else caught this — but the
+  inner verification then found no output and reported a failed encode,
+  discarding a complete transcode of a file that was never in trouble.
+  `cleanup_orphan_temps()` has gated the cleaner's equivalent sweep on
+  `ORPHAN_MIN_AGE_SECONDS` since the journal work; the constant is now shared
+  core and both sweeps wait the same minute, which is longer than the gap
+  between two staging writes and shorter than any transcode. Waiting costs
+  nothing here: `transcode_one()` unlinks its OWN staging file in a `finally`,
+  so the only files the sweep can find already have a dead writer.
+
+### Added
+- **Twelve properties over the audio chain**, in `tests/test_properties.py`,
+  each proven to fail against the code it now guards. The classification
+  agreement is asserted twice: over generated hostile streams (channel counts
+  0/9/40/`"0"`/None/`"bogus"`, sample rates, language tags, titles that lie
+  about their codec) and — because random sampling hid the `dca` bug twice, the
+  generator's codec list simply did not contain that spelling — over the
+  *exhaustive* cross product of every codec, profile and title spelling, which
+  is enumerable in under a second since only three fields feed the blob.
+  `MutationTests` gains a case that patches the pre-fix fallback tuple back in
+  and asserts the property notices, because a property that cannot fail is
+  decoration.
+- **Two crash-safety tests for the sweep** and an aged-debris companion, so the
+  new gate is pinned from both sides: a temp young enough to be in use survives,
+  a corpse is still reclaimed.
+- `README.md` invariant 2 now states the cross-tool agreement requirement
+  explicitly rather than leaving it implied by "the best the chain can end up
+  with", and invariant 8 names the sample rate and the default-disposition check
+  that `verify_output` gained.
+
+### Notes
+- Deliberately **not** changed, because the current behaviour is the decided
+  one: FLAC/PCM 7.1 counts as achieving 7.1 and outranks a Dolby-bound master;
+  AC-3 5.1 outranks TrueHD 7.1 as a band tie-break at equal reach; audiofit
+  settles only on the ranked-best track; `bitdepth.py`'s `_as_int(x) or 0` for
+  width and height stays, because a reported `0` dimension genuinely means "no
+  idea" and `classify_video()` already fails closed on it. The remaining
+  `int(x or default)` sites were each read: the ones where `"0"` produces a
+  wrong plan are fixed above, the ones where `"0"` legitimately means "nothing
+  present" (counts and flags) are untouched.
+- Test count 1289 → 1320. Coverage 86% → 87%.
+
 ## [8.4.1] - 2026-10-04
 
 ### Fixed
