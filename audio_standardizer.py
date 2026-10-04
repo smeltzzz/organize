@@ -124,6 +124,9 @@ from organizekit.core import (
     resolve_wiring,
     resolve_workers,
     run_field_smoke_test,
+    sample_rate_of,
+    source_snapshot,
+    source_snapshot_matches,
     target_audio_for,
     tools_home,
 )
@@ -347,10 +350,13 @@ def to_cleaner_track(stream: dict[str, Any], audio_ordinal: int) -> dict[str, An
         "aac": "AAC", "flac": "FLAC", "mp3": "MP3", "opus": "Opus",
         "vorbis": "Vorbis", "alac": "ALAC",
     }.get(codec_name, (profile or codec_name or "unknown"))
-    try:
-        sample_rate = int(float(stream.get("sample_rate") or 48000))
-    except (ValueError, TypeError):
-        sample_rate = 48000
+    # ``sample_rate_of``, not ``int(float(x or 48000))``: ffprobe reports an
+    # unknown rate as the STRING "0", which is truthy, so the ``or`` never
+    # fired and the adapter handed the cleaner a 0 where its own parse of the
+    # same fact (an int 0) would have produced 48000. Both tools must read one
+    # reported rate as one number — the shared helper is what makes that
+    # structural rather than a convention.
+    sample_rate = sample_rate_of(stream.get("sample_rate"))
     return {
         # position among audio tracks (not the ffprobe stream index) so the
         # cleaner's helpers see the same shape mkvmerge gives them
@@ -627,8 +633,21 @@ def hardlink_count(path: Path) -> int:
         return 1
 
 
-def transcode_movie(verdict: AudioVerdict, old_payload: dict[str, Any], cfg: Config) -> AudioVerdict:
-    """Apply one planned transcode with the toolkit's safety invariants."""
+def transcode_movie(verdict: AudioVerdict, old_payload: dict[str, Any], cfg: Config,
+                    *, snapshot: dict[str, Any] | None = None) -> AudioVerdict:
+    """Apply one planned transcode with the toolkit's safety invariants.
+
+    ``snapshot`` is the source's identity as ``evaluate_file`` saw it, and it is
+    re-checked immediately before the publish. Planning and applying are two
+    phases of one run, hours apart on a big library, and the ingest hook
+    (``movie_standardizer.py``) runs from the torrent client whenever a
+    download completes — so a better release can land on this exact path while
+    the encode of the old one is still running. ``os.replace`` would then
+    destroy the freshly ingested movie and publish a track built from the bytes
+    it replaced, and report success. The remuxer has always refused that swap
+    (``source_snapshot_matches`` before its own ``safe_replace``); this tool
+    claimed to mirror the remuxer's invariants and did not.
+    """
     started = time.monotonic()
     src = Path(verdict.path)
     tmp = src.with_name(f".{src.stem}.audiofit-{os.getpid()}.tmp.mkv")
@@ -656,6 +675,34 @@ def transcode_movie(verdict: AudioVerdict, old_payload: dict[str, Any], cfg: Con
         ok, why = verify_output(tmp, verdict, cfg, old_payload)
         if not ok:
             verdict.error = f"verification refused the transcode: {why}"
+            verdict.status = STATUS_ERROR
+            verdict.category = CATEGORY_LABELS[STATUS_ERROR]
+            return verdict
+        # The publish is the only destructive act this tool performs, and it
+        # happens long after the two facts below were last true. Both are
+        # re-established here, immediately before the swap, or not at all.
+        links = hardlink_count(src)
+        if links > 1:
+            # "A movie still hardlinked to its seeding source is ALWAYS
+            # deferred" - ALWAYS includes the instant of the publish, not only
+            # the probe. The ingest hook links a new release into the library
+            # from the torrent client, whenever a download completes, so a
+            # movie that was single-linked at plan time can be seeded by the
+            # time its encode finishes. os.replace would not corrupt the seed
+            # (that name keeps the old inode) but it would silently fork the
+            # library copy from the copy still being served, which is the state
+            # the deferral exists to prevent. No error: nothing was lost.
+            verdict.status = STATUS_DEFERRED
+            verdict.category = CATEGORY_LABELS[STATUS_DEFERRED]
+            verdict.info = (f"{links} hardlinks at publish time - the movie became hardlinked "
+                            "to a seeding source after it was planned, so the replace is "
+                            "deferred until seeding stops")
+            verdict.elapsed_seconds = round(time.monotonic() - started, 2)
+            return verdict
+        if snapshot is not None and not source_snapshot_matches(src, snapshot):
+            verdict.error = ("source changed while transcoding; refusing to replace it "
+                             "(the movie on disk is no longer the one this plan was made "
+                             "from - re-run to plan against the new file)")
             verdict.status = STATUS_ERROR
             verdict.category = CATEGORY_LABELS[STATUS_ERROR]
             return verdict
@@ -747,9 +794,16 @@ def run_ffprobe(binary: str, file_path: Path, cfg: Config) -> dict[str, Any]:
     return payload
 
 
-def probe_payload(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -> dict[str, Any]:
-    """ffprobe JSON for one file, through the shared probe cache."""
-    stat = file_path.stat()
+def probe_payload(file_path: Path, cfg: Config, cache: MediaProbeCache | None,
+                  stat: os.stat_result | None = None) -> dict[str, Any]:
+    """ffprobe JSON for one file, through the shared probe cache.
+
+    ``stat`` lets the caller pass the snapshot it already took, so the cached
+    key, the reported size and the identity the publish step is checked against
+    all come from ONE ``stat`` rather than three that could straddle a change.
+    """
+    if stat is None:
+        stat = file_path.stat()
     payload = cache.get(file_path, stat.st_size, stat.st_mtime_ns) if cache is not None else None
     if payload is None:
         payload = run_ffprobe(cfg.ffprobe, file_path, cfg)
@@ -761,20 +815,32 @@ def probe_payload(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -
 # SCAN DRIVER
 # =============================================================================
 
-def evaluate_file(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -> tuple[AudioVerdict, dict[str, Any] | None]:
-    """Probe + plan one movie. Transcodes happen in the caller, serially."""
+def evaluate_file(
+    file_path: Path, cfg: Config, cache: MediaProbeCache | None,
+) -> tuple[AudioVerdict, dict[str, Any] | None, dict[str, Any] | None]:
+    """Probe + plan one movie. Transcodes happen in the caller, serially.
+
+    Returns ``(verdict, payload, snapshot)``. The third element is the source's
+    identity as it was when the plan was made, and it exists because the two
+    halves of a run are separated in time: every movie is probed first (in
+    parallel), and the transcodes are applied afterwards, one at a time, so on
+    a large library the last plan can be hours older than the probe it came
+    from. ``transcode_movie`` re-checks this snapshot before it publishes.
+    """
     try:
-        size = file_path.stat().st_size
+        stat = file_path.stat()
     except OSError as exc:
         return (AudioVerdict(path=str(file_path), status=STATUS_ERROR,
                              category=CATEGORY_LABELS[STATUS_ERROR], info=str(exc),
-                             error=str(exc)), None)
+                             error=str(exc)), None, None)
+    size = stat.st_size
+    snapshot = source_snapshot(file_path, stat)
     try:
-        payload = probe_payload(file_path, cfg, cache)
+        payload = probe_payload(file_path, cfg, cache, stat=stat)
     except Exception as exc:  # noqa: BLE001 - one unreadable file is a report row, not a crash
         return (AudioVerdict(path=str(file_path), status=STATUS_ERROR,
                              category=CATEGORY_LABELS[STATUS_ERROR], info=str(exc),
-                             size_bytes=size, error=str(exc)), None)
+                             size_bytes=size, error=str(exc)), None, None)
     verdict = plan_for_payload(str(file_path), payload, cfg, size_bytes=size)
     if verdict.status in (STATUS_PLANNED, STATUS_TRANSCODED):
         links = hardlink_count(file_path)
@@ -785,8 +851,8 @@ def evaluate_file(file_path: Path, cfg: Config, cache: MediaProbeCache | None) -
                             "replace step is deferred until seeding stops (plan kept: "
                             f"{verdict.source_codec} -> {dolby_name(verdict.target.codec) if verdict.target else 'Dolby'} "
                             f"{verdict.target.channel_name if verdict.target else ''})")
-            return verdict, None
-    return verdict, payload
+            return verdict, None, None
+    return verdict, payload, snapshot
 
 
 def scan(cfg: Config) -> int:
@@ -828,7 +894,7 @@ def scan(cfg: Config) -> int:
         log(f"Probe cache: {cache.path} ({len(cache)} entries loaded)")
 
     results: list[AudioVerdict] = []
-    plans: list[tuple[AudioVerdict, dict[str, Any]]] = []
+    plans: list[tuple[AudioVerdict, dict[str, Any], dict[str, Any]]] = []
     started = time.perf_counter()
     total = len(files)
     workers = resolve_workers(cfg.workers, items=len(files), cap=MAX_CPU_WORKERS)
@@ -845,10 +911,11 @@ def scan(cfg: Config) -> int:
                                             category=CATEGORY_LABELS[STATUS_ERROR],
                                             info=str(outcome.error), error=str(outcome.error)))
             else:
-                verdict, payload = outcome.value
+                verdict, payload, snapshot = outcome.value
                 results.append(verdict)
-                if verdict.status in (STATUS_PLANNED, STATUS_TRANSCODED) and payload is not None:
-                    plans.append((verdict, payload))
+                if (verdict.status in (STATUS_PLANNED, STATUS_TRANSCODED)
+                        and payload is not None and snapshot is not None):
+                    plans.append((verdict, payload, snapshot))
             tag = {STATUS_NATIVE: "NATIVE", STATUS_DTS: "DTS", STATUS_PCM: "PCM",
                    STATUS_PLANNED: "PLAN", STATUS_TRANSCODED: "JOB", STATUS_REVIEW: "REVIEW",
                    STATUS_DEFERRED: "SEEDING", STATUS_ERROR: "ERROR"}.get(results[-1].status, "?")
@@ -868,14 +935,14 @@ def scan(cfg: Config) -> int:
     if plans and not cfg.dry_run:
         log("")
         log(f"Applying {len(plans)} transcode(s) (video is copied, never re-encoded):")
-        for index, (verdict, payload) in enumerate(plans, 1):
+        for index, (verdict, payload, snapshot) in enumerate(plans, 1):
             if not Path(verdict.path).is_file():
                 continue
             log(f"  [{index}/{len(plans)}] {Path(verdict.path).name}: "
                 f"{verdict.source_codec} {verdict.source_channels}ch -> "
                 f"{dolby_name(verdict.target.codec)} "
                 f"{verdict.target.channel_name} @ {verdict.target.bitrate}")
-            result = transcode_movie(verdict, payload, cfg)
+            result = transcode_movie(verdict, payload, cfg, snapshot=snapshot)
             for i, row in enumerate(results):
                 if row.path == result.path:
                     results[i] = result

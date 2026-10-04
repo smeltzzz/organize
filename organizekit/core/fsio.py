@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
+from typing import Any
 
 
 def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
@@ -62,6 +64,57 @@ def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:
         except OSError:
             pass
         raise
+
+
+def source_snapshot(path: Path | str, stat_result: os.stat_result | None = None) -> dict[str, Any]:
+    """A cheap identity snapshot, used to reject concurrent source changes.
+
+    Both tools that replace a movie file — the remuxer and the audio
+    standardizer — work for minutes or hours between reading a source and
+    publishing over it. That window is not theoretical: the ingest hook
+    (``movie_standardizer.py``) runs from the torrent client on completion, so
+    a better release can land *beside* a sweep that is mid-encode, and
+    ``os.replace`` would then destroy the freshly ingested movie and publish a
+    transcode built from the bytes it replaced.
+
+    The snapshot is deliberately size + ``st_mtime_ns`` + device + inode, i.e.
+    everything a *replacement* changes, and deliberately NOT the hardlink
+    count: linking a second name to a file changes none of them, so a seeding
+    check has to be made separately (see ``hardlink_count`` in each tool).
+
+    ``identity`` is a digest over the four fields so a journal or a verdict can
+    carry one opaque value and a reader can still refuse a hand-edited one.
+    """
+    st = stat_result if stat_result is not None else os.stat(path)
+    fields: dict[str, Any] = {
+        "size": int(st.st_size),
+        "mtime_ns": int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))),
+        "device": int(getattr(st, "st_dev", 0)),
+        "inode": int(getattr(st, "st_ino", 0)),
+    }
+    canonical = json.dumps(fields, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    fields["identity"] = hashlib.sha256(canonical).hexdigest()
+    return fields
+
+
+def source_snapshot_matches(path: Path | str, snapshot: dict[str, Any]) -> bool:
+    """True only when ``path`` is still byte-for-byte the snapshotted file.
+
+    An unreadable path answers False: "I cannot prove it is unchanged" must
+    mean "refuse to replace it", never the other way round. Named fields are
+    compared rather than the digest alone so a record missing one (an older
+    journal, a truncated write) fails closed instead of comparing equal by
+    both sides being empty.
+    """
+    try:
+        observed = source_snapshot(path)
+    except OSError:
+        return False
+    expected = dict(snapshot or {})
+    for key in ("size", "mtime_ns", "device", "inode"):
+        if key not in expected or expected.get(key) != observed.get(key):
+            return False
+    return bool(expected.get("identity") == observed.get("identity"))
 
 
 def path_norm(path: Path | str) -> str:

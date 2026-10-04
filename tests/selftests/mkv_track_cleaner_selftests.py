@@ -297,9 +297,9 @@ def run_self_tests() -> int:
         temp_path.write_bytes(b"x" * 4096)
         write_transaction(journal, transaction)
         check(read_transaction(journal) is not None, "transaction journal round-trip")
-        check(_source_snapshot_matches(original, transaction["source_snapshot"]), "source snapshot initial match")
+        check(source_snapshot_matches(original, transaction["source_snapshot"]), "source snapshot initial match")
         original.write_bytes(b"changed" * 1024)
-        check(not _source_snapshot_matches(original, transaction["source_snapshot"]), "source snapshot detects mutation")
+        check(not source_snapshot_matches(original, transaction["source_snapshot"]), "source snapshot detects mutation")
 
         # An unverified missing-original transaction must be preserved, not promoted.
         original.unlink()
@@ -316,7 +316,7 @@ def run_self_tests() -> int:
         recovered_tx["verification_plan"] = verification_plan
         recovered_tx["phase"] = "verified"
         age_for_recovery(recovered_temp)
-        recovered_tx["temp_snapshot"] = _source_snapshot(recovered_temp)
+        recovered_tx["temp_snapshot"] = source_snapshot(recovered_temp)
         write_transaction(recovered_journal, recovered_tx)
         globals()["_run_mkvmerge"] = lambda *_args, **_kwargs: (0, json.dumps(output_info), "")
         cleanup_orphan_temps(tx_tmp, "stub", None)

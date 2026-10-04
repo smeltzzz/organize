@@ -32,7 +32,14 @@ from .console import (
     write_raw,
 )
 from .events import EventStream
-from .fsio import atomic_write_text, path_is_within, path_norm, sha256_file
+from .fsio import (
+    atomic_write_text,
+    path_is_within,
+    path_norm,
+    sha256_file,
+    source_snapshot,
+    source_snapshot_matches,
+)
 from .jsonout import JSON_SCHEMA, json_document, print_json, slug_id
 from .live import LiveLine, ellipsize, strip_ansi
 from .locking import (
@@ -58,6 +65,7 @@ from .playbackchain import (
     AUDIO_TRANSCODE_BOUND,
     AUDIO_UNKNOWN,
     BLOB_FIELD_ABSENT,
+    CHAIN_AUDIO_SAMPLE_RATE,
     CLASS_TIERS,
     DEFAULT_WIRING,
     DISPLAY,
@@ -87,6 +95,7 @@ from .playbackchain import (
     is_chain_native,
     is_dolby_digital_plus,
     resolve_wiring,
+    sample_rate_of,
     synthesis_target_label,
     target_audio_for,
     tier_for_blob,
@@ -248,6 +257,8 @@ __all__ = [
     "resolve_library",
     "run_field_smoke_test",
     "sha256_file",
+    "source_snapshot",
+    "source_snapshot_matches",
     "srt_looks_valid",
     "tool_command",
     "tool_is_available",
@@ -265,6 +276,7 @@ __all__ = [
     "AUDIO_TRANSCODE_BOUND",
     "AUDIO_UNKNOWN",
     "BLOB_FIELD_ABSENT",
+    "CHAIN_AUDIO_SAMPLE_RATE",
     "CLASS_TIERS",
     "DEFAULT_WIRING",
     "DISPLAY",
@@ -294,6 +306,7 @@ __all__ = [
     "is_chain_native",
     "is_dolby_digital_plus",
     "resolve_wiring",
+    "sample_rate_of",
     "synthesis_target_label",
     "target_audio_for",
     "tier_for_blob",

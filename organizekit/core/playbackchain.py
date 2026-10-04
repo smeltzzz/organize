@@ -507,13 +507,43 @@ def dolby_name(codec: str) -> str:
     """Display name of a synthesized Dolby codec ('eac3' / 'ac3')."""
     return DOLBY_CODEC_NAMES.get(codec, codec)
 
+#: The chain's audio sample rate: the Chromecast's HDMI output rate, so a
+#: synthesized track is written at it and never resampled. Recorded as data
+#: because two decisions read it — the target table below and the fallback in
+#: :func:`sample_rate_of` — and they must not drift apart.
+CHAIN_AUDIO_SAMPLE_RATE = 48000
+
+
+def sample_rate_of(value: object, default: int = CHAIN_AUDIO_SAMPLE_RATE) -> int:
+    """Parse a reported sample rate, falling back to ``default`` on nonsense.
+
+    The same trap 8.4.1 closed for channel counts, on the field next to it.
+    Both mkvmerge and ffprobe report an *unknown* rate as the string ``"0"``,
+    and ``int(float("0" or 48000))`` is 0 — the ``or`` never fires, because a
+    non-empty string is truthy whatever it spells. The result was that one and
+    the same fact ranked a track two different ways depending on which tool
+    reported it: an int ``0`` hit the ``or`` and became 48000, a string ``"0"``
+    did not and stayed 0, which is the LAST tie-break in
+    ``get_audio_quality_score`` and can therefore decide which audio track
+    survives an irreversible remux.
+
+    Zero and unparseable are treated identically, as they are for channels:
+    neither is a rate, so both fall back to the chain's.
+    """
+    try:
+        rate = int(float(value))  # type: ignore[arg-type]
+    except (ValueError, TypeError, OverflowError):
+        return default
+    return rate if rate > 0 else default
+
+
 @dataclass(frozen=True)
 class TargetAudio:
     codec: str
     bitrate: str
     channels: int
     channel_name: str
-    sample_rate: int = 48000  # the Chromecast's HDMI output rate; no resample
+    sample_rate: int = CHAIN_AUDIO_SAMPLE_RATE  # no resample on this chain
 
 
 def target_audio_for(source_channels: int, wiring: str = DEFAULT_WIRING) -> TargetAudio:

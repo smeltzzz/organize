@@ -338,7 +338,7 @@ class MaliciousJournalTests(unittest.TestCase):
             "schema": tc.TRANSACTION_SCHEMA_VERSION, "token": token, "phase": phase,
             "source_name": source_name, "temp_name": temp.name,
             "source_path": str(self.library / source_name),
-            "temp_snapshot": tc._source_snapshot(temp),
+            "temp_snapshot": tc.source_snapshot(temp),
             "verification_plan": {},
         }), encoding="utf-8")
         os.utime(journal, (old, old))
@@ -453,6 +453,240 @@ class DurableWriteTests(unittest.TestCase):
         journal = self.root / ".track_cleaner.ghi.json"
         journal.write_text('{"schema": 1, "token": "aaa', encoding="utf-8")
         self.assertIsNone(tc.read_transaction(journal))
+
+
+# ---------------------------------------------------------------------------
+# audio_standardizer.py: the other tool that replaces a movie file
+# ---------------------------------------------------------------------------
+#
+# The remuxer gets a transaction journal because it deletes the superseded MP4
+# in a second named step. ``audio_standardizer.py`` has no journal: its whole
+# transaction is one temp file and one ``os.replace``, so the questions are
+# narrower but the same — is the original intact at every instant, is the temp
+# always swept, can the debris ever be mistaken for a movie, and does the tool
+# still refuse to publish over something that is not the file it planned
+# against. Until now none of that was executed; it was only asserted in the
+# module docstring.
+
+def _audiofit_payload(*streams: dict, duration: str = "7200.000000") -> dict:
+    """An ffprobe payload: one hevc video stream plus ``streams`` audio."""
+    out = [{"index": 0, "codec_type": "video", "codec_name": "hevc"}]
+    for position, stream in enumerate(streams, start=1):
+        entry = {"index": position, "codec_type": "audio", "channels": 8,
+                 "sample_rate": "48000", "tags": {"language": "eng"},
+                 "disposition": {"default": position == 1}}
+        entry.update(stream)
+        out.append(entry)
+    return {"streams": out, "format": {"duration": duration, "size": "8388608"}}
+
+
+#: A 7.1 lossless master — the shape audiofit exists to convert.
+AUDIOFIT_TRUEHD = _audiofit_payload({"codec_name": "truehd", "channels": 8})
+
+
+@unittest.skipIf(os.name == "nt", "the fakes are launched through a POSIX shebang")
+class AudiofitCrashTests(unittest.TestCase):
+    """Kill the transcode at each dangerous instant and inspect the library."""
+
+    def setUp(self) -> None:
+        import fake_ffprobe as fakeff
+        import fakebin
+
+        import audio_standardizer as aus
+        self.aus = aus
+        self.fakeff = fakeff
+
+        self._td = tempfile.TemporaryDirectory(prefix="crash_audiofit_")
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name).resolve()
+        self.library = self.tmp / "Movies"
+        self.folder = self.library / "Film (2020)"
+        self.folder.mkdir(parents=True)
+        self.movie = self.folder / "Film (2020).mkv"
+        fakeff.write_movie(self.movie, AUDIOFIT_TRUEHD, size=2 * 1024 * 1024)
+        self.log = self.tmp / "out" / "audiofit.log"
+        self.report = self.tmp / "out" / "audiofit_report.txt"
+        self.state_db = self.tmp / "out" / "state.db"
+        self.ffmpeg = fakebin.install_python_shim(self.tmp / "bin", "ffmpeg", "fake_ffmpeg")
+        self.ffprobe = fakebin.install_python_shim(self.tmp / "bin", "ffprobe", "fake_ffprobe")
+        self._saved_log_file = aus.log.file
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        self.aus.log.file = self._saved_log_file
+
+    # -- helpers -----------------------------------------------------------
+
+    def _argv(self, *extra: str) -> list[str]:
+        return ["--source", str(self.library), "--log", str(self.log),
+                "--report", str(self.report), "--state-db", str(self.state_db),
+                "--ffprobe", str(self.ffprobe), "--ffmpeg", str(self.ffmpeg),
+                "--workers", "1", *extra]
+
+    def _run(self, *extra: str) -> int:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return self.aus.main(self._argv(*extra))
+
+    def _crash_run(self) -> None:
+        """Run to a power cut. The log is a console log; pin it like _run does."""
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.aus.main(self._argv())
+
+    def _temps(self) -> list[Path]:
+        """Every audiofit staging file anywhere under the library."""
+        return sorted(self.library.rglob("*.audiofit-*.tmp.mkv"))
+
+    def _is_transcode(self, cmd: object) -> bool:
+        """True for the ffmpeg invocation that writes the staging file."""
+        return any(".audiofit-" in str(part) for part in cmd or ())
+
+    def _after_encode(self, act) -> object:
+        """Wrap ``subprocess.run`` so ``act`` fires once the encode has landed.
+
+        That is the window between "the new file exists and verified" and
+        "``os.replace`` publishes it" — the instant the remuxer guards with its
+        source snapshot, and the one an ingest hook landing a better release
+        would choose.
+        """
+        real_run = self.aus.subprocess.run
+        fired = []
+
+        def wrapped(cmd, *args, **kwargs):
+            result = real_run(cmd, *args, **kwargs)
+            if self._is_transcode(cmd) and not fired:
+                fired.append(cmd)
+                act()
+            return result
+
+        return mock.patch.object(self.aus.subprocess, "run", wrapped)
+
+    def _assert_untouched(self, before: bytes) -> None:
+        self.assertTrue(self.movie.is_file(), "the movie must never disappear")
+        self.assertEqual(self.movie.read_bytes(), before,
+                         "a crashed transcode must leave the original byte-identical")
+
+    # -- the crash matrix --------------------------------------------------
+
+    def test_crash_during_the_encode_leaves_the_original_untouched(self) -> None:
+        before = self.movie.read_bytes()
+        real_run = self.aus.subprocess.run
+
+        def crashing(cmd, *args, **kwargs):
+            if self._is_transcode(cmd):
+                # The staging file exists and is half-written when power goes.
+                Path(cmd[-1]).write_bytes(b"PARTIAL")
+                raise Crash("power cut mid-encode")
+            return real_run(cmd, *args, **kwargs)
+
+        with mock.patch.object(self.aus.subprocess, "run", crashing), \
+                self.assertRaises(Crash):
+            self._crash_run()
+        self._assert_untouched(before)
+        self.assertEqual(self._temps(), [], "a crashed encode must sweep its own staging file")
+
+    def test_crash_between_verification_and_the_publish_leaves_the_original(self) -> None:
+        before = self.movie.read_bytes()
+        real_replace = os.replace
+
+        def crashing_replace(src, dst, **kwargs):
+            # Only the publish of the verified staging file over the movie.
+            if ".audiofit-" in str(src):
+                raise Crash("power cut between verification and the swap")
+            return real_replace(src, dst, **kwargs)
+
+        with mock.patch.object(self.aus.os, "replace", crashing_replace), \
+                self.assertRaises(Crash):
+            self._crash_run()
+        self._assert_untouched(before)
+        # ``finally`` runs for a BaseException too, so this crash sweeps its own
+        # staging file. Only a SIGKILL or a real power cut can leave one behind,
+        # and the next run's startup sweep is what covers that (below).
+        self.assertEqual(self._temps(), [], "the publish crash still sweeps its staging file")
+        self.assertEqual(self._run(), 0, "and the library is simply tried again")
+
+    def test_the_staging_file_can_never_be_mistaken_for_a_movie(self) -> None:
+        """Half-written debris must not be discoverable as a movie by any tool.
+
+        The staging name is dot-prefixed and carries the tool's marker, which
+        is the whole reason a crash mid-encode cannot leave something that a
+        media server, the auditor or the remuxer would happily play or clean.
+        """
+        stray = self.folder / ".Film (2020).audiofit-424242.tmp.mkv"
+        stray.write_bytes(b"PARTIAL")
+        cfg = self.aus.Config(source_dir=self.library, min_file_size_mb=0)
+        found = self.aus.discover_videos(self.library, cfg)
+        self.assertNotIn(stray, found, "audiofit must not probe its own debris")
+        self.assertEqual(found, [self.movie], "only the real movie is discovered")
+        self.assertTrue(self.aus.is_junk_name(stray.name),
+                        "the marker name is junk by the same rule that hides it")
+        self.assertEqual(self._run(), 0)
+        self.assertFalse(stray.exists(), "the next run sweeps the stale staging file")
+        self.assertTrue(self.movie.is_file())
+
+    def test_a_movie_replaced_while_the_encode_ran_is_not_clobbered(self) -> None:
+        """The ingest hook lands a NEW release between the probe and the publish.
+
+        ``movie_standardizer.py`` runs from the torrent client on completion, so
+        a better release can be hardlinked onto this exact path while audiofit
+        is still encoding the old one. ``os.replace`` would then destroy the
+        fresh ingest and publish a track built from the bytes it replaced — and
+        report success, because verification had already passed against the old
+        file. The remuxer refuses this swap (``source_snapshot_matches`` before
+        its own ``safe_replace``); this tool must too.
+        """
+        def ingest_a_better_release() -> None:
+            self.fakeff.write_movie(self.movie, AUDIOFIT_TRUEHD, size=9 * 1024 * 1024)
+            os.utime(self.movie, (1_700_000_000, 1_700_000_000))
+
+        with self._after_encode(ingest_a_better_release):
+            code = self._run()
+        ingested = self.movie.read_bytes()
+        self.assertEqual(len(ingested), 9 * 1024 * 1024,
+                         "the freshly ingested movie must survive audiofit's publish")
+        self.assertNotEqual(code, 0, "a refused publish is an error, not a success")
+        self.assertIn("source changed while transcoding", self.report.read_text(encoding="utf-8"))
+        self.assertEqual(self._temps(), [], "the refused staging file is still swept")
+
+    def test_a_movie_that_becomes_seeded_mid_run_is_deferred_at_the_publish(self) -> None:
+        """"Seeding torrents are never touched" includes the instant of the swap.
+
+        A movie that was single-linked when it was planned can be hardlinked to
+        a seed by the time its encode finishes. Deferring only at plan time left
+        the publish to fork the library copy from the copy still being served.
+        """
+        seeds = self.tmp / "torrents"
+        seeds.mkdir()
+
+        def start_seeding() -> None:
+            os.link(self.movie, seeds / self.movie.name)
+
+        with self._after_encode(start_seeding):
+            code = self._run()
+        self.assertEqual(code, 0, "deferring is not an error: nothing was lost")
+        self.assertEqual(self.movie.stat().st_nlink, 2, "the library copy keeps its seed link")
+        self.assertEqual(self.fakeff.read_payload(self.movie)["streams"][-1]["codec_name"],
+                         "truehd", "the movie was left exactly as it was planned")
+        self.assertIn(self.aus.STATUS_DEFERRED, self.report.read_text(encoding="utf-8"))
+        self.assertIn("hardlinks at publish time", self.report.read_text(encoding="utf-8"))
+        self.assertEqual(self._temps(), [])
+
+    def test_the_run_lock_survives_a_crash(self) -> None:
+        """A killed run must not lock the library out of the next one."""
+        real_run = self.aus.subprocess.run
+
+        def crashing(cmd, *args, **kwargs):
+            if self._is_transcode(cmd):
+                raise Crash("power cut")
+            return real_run(cmd, *args, **kwargs)
+
+        with mock.patch.object(self.aus.subprocess, "run", crashing), \
+                self.assertRaises(Crash):
+            self._crash_run()
+        lock_path = self.aus.run_lock_path(self.library)
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            self.assertTrue(core.try_file_lock(handle, strict_non_contention=False),
+                            "the crashed run must have released its lock")
+        self.assertEqual(self._run(), 0, "and the next run starts normally")
 
 
 if __name__ == "__main__":
