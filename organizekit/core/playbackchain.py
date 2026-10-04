@@ -455,16 +455,38 @@ def is_chain_native(blob: str) -> bool:
 # bitstreams on the G454V's OFFICIAL passthrough list, and the AX3125H
 # decodes it on its HDMI IN — the only two hops audio crosses on this
 # wiring. E-AC-3 is strictly the better codec here: at the same bitrate it
-# is a more efficient encode than AC-3, and it carries 7.1 (AC-3 caps at
-# 5.1), so a lossless 7.1 master keeps its full layout instead of folding.
-# 640 kbps is the bitrate every sink in this chain handles with headroom;
-# nothing below is needed and nothing above buys anything audible.
+# is a more efficient encode than AC-3. 640 kbps is the bitrate every sink
+# in this chain handles with headroom; nothing below is needed and nothing
+# above buys anything audible.
 #
 # tv-arc (the explicit alternative): the target stays AC-3 (Dolby Digital),
 # because that path routes sound through the 2013 TV, and AC-3 is the one
 # format licensed-and-supported at every hop of it (ARC and optical
 # included) should the wiring ever regress further.
+#
+# Both wirings synthesize AT MOST a 5.1 bed — see the ceiling recorded
+# immediately below. It is the encoder's limit, not the format's: E-AC-3 the
+# bitstream can carry 7.1, and an existing 7.1 E-AC-3 track passes through
+# this chain untouched. But nothing on the *synthesis* side can produce it.
 # =============================================================================
+
+#: Channel ceiling of everything :func:`target_audio_for` may name, because
+#: it is the ceiling of the encoders that would have to build it. ffmpeg's
+#: ``eac3`` and ``ac3`` encoders support layouts up to 5.1 and no further:
+#: they write independent frames only and never the dependent substreams a
+#: 7.1 E-AC-3 bitstream needs, and they do NOT downmix — asking for ``-ac 8``
+#: fails ("Could not open encoder before EOF … Conversion failed!") and
+#: leaves no output file at all. Verified against ffmpeg 7.0.2 (``ffmpeg -h
+#: encoder=eac3``) and by running both commands: ``-ac 8`` fails, ``-ac 6``
+#: produces a valid ``eac3, 48000 Hz, 5.1(side), fltp, 640 kb/s``.
+#:
+#: This is recorded as DATA rather than prose because two decisions read it:
+#: :func:`target_audio_for` must never promise wider, and
+#: :func:`achievable_channels` must never credit a transcode-bound master
+#: with a layout no encoder can deliver. A track that needs no encoder is
+#: unaffected — a FLAC 7.1 really does arrive as LPCM 7.1 on the bar's
+#: HDMI IN (Hisense's per-port matrix) — so it still achieves its own layout.
+FFMPEG_DOLBY_ENCODE_MAX_CHANNELS = 6
 
 #: Human names for the two Dolby codecs this chain synthesizes (reports,
 #: track titles, docs). Keyed by the ffmpeg codec name.
@@ -499,19 +521,20 @@ def target_audio_for(source_channels: int, wiring: str = DEFAULT_WIRING) -> Targ
 
     Wiring-aware: the default ``soundbar-hdmi-in`` chain (the one this
     install runs) gets Dolby Digital Plus, which both of its two audio hops
-    handle natively and which can carry 7.1; the explicit ``tv-arc``
-    alternative keeps the everywhere-compatible AC-3 target, where 7.1/6.1
-    fold to 5.1 because that path's ceiling is the 2013 TV's return channel.
+    handle natively; the explicit ``tv-arc`` alternative keeps the
+    everywhere-compatible AC-3 target. Both wirings fold anything past 5.1
+    down to 5.1, because the ceiling is the encoders, not the wiring: no
+    Dolby encoder in ffmpeg can emit more than
+    :data:`FFMPEG_DOLBY_ENCODE_MAX_CHANNELS` channels, and asking for 7.1 is
+    not a downmix request — it is a failed encode that writes nothing.
     """
     ch = max(1, int(source_channels or 6))
     if wiring == WIRING_SOUNDBAR_HDMI_IN:
-        if ch >= 8:
-            # Keep the 7.1 layout: E-AC-3 carries it, the G454V bitstreams
-            # it, and the bar's upmixer uses every channel. Never upmixed —
-            # a 7.1 target is only ever kept from a >=7.1 source.
-            return TargetAudio(codec="eac3", bitrate="640k", channels=8, channel_name="7.1")
         if ch >= 5:
-            # 5.1 and 6.1 normalize to 5.1 (a 6.1 fold keeps the LFE).
+            # 5.1, 6.1 and 7.1+ all land at 5.1 (a 6.1 fold keeps the LFE):
+            # the format would carry more, ffmpeg's encoder cannot write it,
+            # and a 7.1 target is exactly the bug that made every >=7.1
+            # lossless master's audiofit fail since 8.1.0. Never upmixed.
             return TargetAudio(codec="eac3", bitrate="640k", channels=6, channel_name="5.1")
         if ch in (3, 4):
             return TargetAudio(codec="eac3", bitrate="448k", channels=ch, channel_name=f"{ch}ch")
@@ -519,6 +542,7 @@ def target_audio_for(source_channels: int, wiring: str = DEFAULT_WIRING) -> Targ
             return TargetAudio(codec="eac3", bitrate="192k", channels=2, channel_name="2.0")
         return TargetAudio(codec="eac3", bitrate="128k", channels=1, channel_name="1.0")
     # tv-arc: AC-3, licensed-and-supported on every hop of the old path.
+    # Its encoder shares the ceiling, so 7.1/6.1 fold exactly as above.
     if ch >= 5:
         return TargetAudio(codec="ac3", bitrate="640k", channels=6, channel_name="5.1")
     if ch in (3, 4):
@@ -555,8 +579,12 @@ def achievable_channels(cls: str, channels: int,
       it and nothing improves it, so it achieves exactly what it carries.
     * A **transcode-bound** track is not a dead end - it is precisely the input
       ``audio_standardizer.py`` synthesizes a chain-native Dolby track from - so
-      it achieves that target's layout (a 7.1 master keeps 7.1 on the default
-      wiring and folds to 5.1 under ``tv-arc``, exactly as the target says).
+      it achieves that target's layout, which is at most 5.1 on EITHER wiring:
+      no Dolby encoder can write wider than that, so a 7.1 master achieves 6,
+      not 8 (see :data:`FFMPEG_DOLBY_ENCODE_MAX_CHANNELS`; the cap comes
+      through :func:`target_audio_for` and so lands here automatically).
+      Tracks needing no encoder are unaffected and achieve their own layout —
+      a FLAC 7.1 arrives as LPCM 7.1 because the bar takes that as-is.
     * An **unknown** track achieves nothing, because the toolkit never
       auto-touches one: fail closed, as everywhere else here.
     """

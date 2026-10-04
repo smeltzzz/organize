@@ -39,9 +39,11 @@ What this tool does, per movie:
   3. The fix: ffmpeg copies EVERY stream losslessly and appends one track,
      transcoded from the best source, to the wiring's chain-native Dolby
      codec at 48 kHz — Dolby Digital Plus (E-AC-3) on the default
-     soundbar-hdmi-in wiring (both of its two audio hops carry it natively,
-     and it keeps a 7.1 master's layout; 5.1 @ 640 kbps otherwise), AC-3 on
-     the explicit tv-arc alternative. Video is never re-encoded; subtitles
+     soundbar-hdmi-in wiring (both of its two audio hops carry it natively),
+     AC-3 on the explicit tv-arc alternative; either way the surround target
+     is 5.1 @ 640 kbps, capped at what ffmpeg's Dolby encoders can actually
+     write (wider sources fold — a 7.1 target would fail the encode outright;
+     see FFMPEG_DOLBY_ENCODE_MAX_CHANNELS). Video is never re-encoded; subtitles
      are never touched. The new track becomes
      the default, and mkv_track_cleaner.py — which the pipeline always runs
      right after this tool — then keeps exactly one audio track: the
@@ -59,7 +61,10 @@ Safety, mirroring the cleaner's invariants:
     right channel count, durations within 3 s), and only then atomically
     replaces the original — a crash mid-run leaves a stray temp file and an
     untouched original, never a half-written movie;
-  * idempotent: a movie that already has a chain-native track is skipped.
+  * idempotent: a movie whose best-ranked (keeper) track is already
+    chain-native is skipped — and because the pool is ranked with the
+    cleaner's own scoring, "skipped" always means the track the cleanup
+    will KEEP is one the chain can emit.
 """
 
 from __future__ import annotations
@@ -91,6 +96,7 @@ from organizekit.core import (
     BLOB_FIELD_ABSENT,
     CLASS_TIERS,
     DEFAULT_WIRING,
+    FFMPEG_DOLBY_ENCODE_MAX_CHANNELS,
     KIND_AUDIOFIT,
     PLAYER,
     SINK,
@@ -391,9 +397,15 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
     1. Find the movie's native-language audio pool with the *cleaner's* own
        logic (commentary/DVS and titled dubs excluded; the language comes
        from the file's own markers, never from a preference for English).
-    2. If ANY pool track is chain-native Dolby (AC-3/E-AC-3), the movie
-       bitstreams end-to-end — done. (Under the chain's tiers the cleaner
-       always keeps that track over anything lossless.)
+    2. The pool is ranked with the cleaner's own score function, so the
+       FIRST entry is the track the cleanup will keep — and the whole verdict
+       keys off that one track. If the keeper is chain-native Dolby
+       (AC-3/E-AC-3), the movie bitstreams end-to-end — done. Never off
+       "does some native track exist?": a native track the cleaner ranks
+       below the keeper is a track the cleanup deletes, so answering for it
+       would settle a movie while stripping its only playable audio (8.3.0).
+       The invariant: if audiofit calls a file settled, the keeper is a
+       track this chain can emit.
     3. Otherwise the pool's best track decides: base DTS is accepted (the
        AX3125H has a DTS decoder and the G454V's firmware passes core DTS)
        unless ``--no-dts-passthrough`` distrusts the unofficial passthrough;
@@ -434,22 +446,26 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
                   key=_pool_rank, reverse=True)
 
     classified = [(s, t, classify_audio_blob(_stream_blob(s))) for s, t in pool]
-    natives = [(s, t) for s, t, cls in classified if cls == AUDIO_NATIVE]
 
     def _v(status: str, info: str, cls: str, **kw: Any) -> AudioVerdict:
         return AudioVerdict(path=path, status=status, category=CATEGORY_LABELS[status],
                             info=info, audio_class=cls, size_bytes=size_bytes,
                             duration_sec=duration, **kw)
 
-    if natives:
-        stream, _track = natives[0]
-        return _v(STATUS_NATIVE,
-                  audio_chain_note(_stream_blob(stream), channels_of(stream), cfg.wiring),
-                  AUDIO_NATIVE)
-
+    # Every branch below asks the same question of the same stream: the
+    # RANKED BEST one, the track the cleaner's own scoring will retain. The
+    # native branch must not be the exception — keying it off "any native
+    # exists in the pool" let a Dolby track ranked *below* a lossless master
+    # answer for the whole file, the cleanup then deleted that Dolby track,
+    # and the movie was left with an audio stream this chain can never emit.
     best_stream, _best_track, best_cls = classified[0]
     best_blob = _stream_blob(best_stream)
     best_channels = channels_of(best_stream)
+
+    if best_cls == AUDIO_NATIVE:
+        return _v(STATUS_NATIVE,
+                  audio_chain_note(best_blob, best_channels, cfg.wiring),
+                  AUDIO_NATIVE)
 
     if best_cls == AUDIO_DTS_CORE and cfg.dts_passthrough_ok:
         return _v(STATUS_DTS,
@@ -1221,8 +1237,8 @@ def run_self_tests() -> int:
         ("AAC/FLAC decode to PCM (still native on this chain)",
          lambda: classify_audio_blob("AAC") == AUDIO_DECODE_PCM
          and classify_audio_blob("FLAC") == AUDIO_DECODE_PCM),
-        ("the default wiring keeps a 7.1 master as Dolby Digital Plus @ 640k",
-         lambda: (lambda t: t.codec == "eac3" and t.channels == 8
+        ("the default wiring folds a 7.1 master into Dolby Digital Plus 5.1 @ 640k",
+         lambda: (lambda t: t.codec == "eac3" and t.channels == FFMPEG_DOLBY_ENCODE_MAX_CHANNELS
                   and t.bitrate == "640k")(target_audio_for(8))),
         ("the tv-arc alternative still targets AC-3 5.1 @ 640k",
          lambda: (lambda t: t.codec == "ac3" and t.channels == 6
@@ -1250,9 +1266,11 @@ def _smoke_truehd_plans_transcode() -> bool:
         "format": {"duration": "7200.0"},
     }, STATUS_PLANNED)
     # Default wiring (soundbar-hdmi-in): the target is Dolby Digital Plus,
-    # which keeps the 7.1 layout of the fixture's 8-channel master.
+    # folded to the widest layout its encoder can write — the fixture's
+    # 8-channel master becomes a 5.1 bed, never a promised-but-failing 7.1.
     return (verdict.status == STATUS_PLANNED and verdict.target is not None
-            and verdict.target.codec == "eac3" and verdict.target.channels == 8
+            and verdict.target.codec == "eac3"
+            and verdict.target.channels == FFMPEG_DOLBY_ENCODE_MAX_CHANNELS
             and verdict.source_stream == 1)
 
 

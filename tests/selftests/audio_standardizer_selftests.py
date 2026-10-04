@@ -37,8 +37,10 @@ def run_self_tests() -> int:
     truehd_only = _payload({"codec_name": "truehd", "channels": 8})
     v = plan_for_payload("m.mkv", truehd_only, base_cfg)
     _assert(v.status == STATUS_PLANNED, f"TrueHD-only plans a transcode, got {v.status}", errors)
-    _assert(v.target is not None and v.target.codec == "eac3" and v.target.channels == 8,
-            "a 7.1 TrueHD keeps its layout as Dolby Digital Plus on the default wiring", errors)
+    _assert(v.target is not None and v.target.codec == "eac3"
+            and v.target.channels == FFMPEG_DOLBY_ENCODE_MAX_CHANNELS,
+            "a 7.1 TrueHD folds to the Dolby Digital Plus 5.1 its encoder can "
+            "actually write on the default wiring", errors)
     _assert(v.target is not None and v.target.bitrate == "640k",
             "the synthesis ceiling is 640 kbps", errors)
     v_arc = plan_for_payload("m.mkv", truehd_only, Config(dry_run=True, wiring=WIRING_TV_ARC))
@@ -122,7 +124,12 @@ def run_self_tests() -> int:
     _assert("language=eng" in cmd, "the appended track keeps the source language tag", errors)
 
     # -- verification: only a strict superset may publish --------------------
-    added = {"index": 2, "codec_type": "audio", "codec_name": "eac3", "channels": 8}
+    # The appended track's shape is DERIVED from the planned target, never
+    # hardcoded: when 8.4.0 capped the Dolby targets at the encoder's 5.1, a
+    # literal here would have "verified" a file the tool could no longer make.
+    t = v.target
+    added = {"index": 2, "codec_type": "audio", "codec_name": t.codec,
+             "channels": t.channels}
     good_new = dict(truehd_only)
     good_new["streams"] = list(truehd_only["streams"]) + [added]
     # patch the probe of the produced file: the verifier reads run_ffprobe

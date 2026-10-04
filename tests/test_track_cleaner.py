@@ -57,9 +57,10 @@ class AudioQualityTests(unittest.TestCase):
         The G454V passthroughs AC-3/E-AC-3 and decodes AAC to PCM; TrueHD it can
         never emit. Among tracks that all reach 5.1, that means the ones needing
         no server re-encode outrank the master that does - a 5.1 AC-3 beats a 5.1
-        TrueHD. It does NOT mean a 2.0 AC-3 beats a 7.1 TrueHD: layout is the
-        primary key, because the remux is irreversible and audiofit can still
-        turn that master into a 7.1 DD+ track.
+        TrueHD, and since 8.4.0 also a 7.1 one (the master folds to 5.1: the
+        widest its encoder can write). It still does NOT mean a 2.0 AC-3 beats
+        a 7.1 TrueHD: layout leads, and audiofit can turn that master into a
+        playable 5.1 DD+ track while the stereo one can never become anything.
         """
         truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 6, "track_name": "Atmos"}}
         aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
@@ -67,13 +68,24 @@ class AudioQualityTests(unittest.TestCase):
         self.assertGreater(tc.get_audio_quality_score(eac3), tc.get_audio_quality_score(truehd))
         self.assertGreater(tc.get_audio_quality_score(aac), tc.get_audio_quality_score(truehd))
 
-    def test_a_wider_master_outranks_a_narrower_track_that_plays_today(self) -> None:
-        """The primary key, and the whole reason the ranking is what it is."""
+    def test_a_wider_master_outranks_a_narrower_track_but_not_an_equal_bed(self) -> None:
+        """Key 1, and the sentence the cap rewrote.
+
+        A 7.1 TrueHD master folds to a 5.1 Dolby bed (no encoder here can
+        write wider), so it OUTRANKS a 5.1 track no longer - the layout key
+        ties, and the band keeps the track that plays today. It still
+        outranks anything narrower, because the fold lands at 5.1 while a
+        stereo track can never become anything. (8.2.0 ranked the master
+        above BOTH, on the false premise that its replacement could keep
+        7.1; ffmpeg's Dolby encoders cannot - see 8.4.0.)
+        """
         truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
         aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
         eac3 = {"codec": "E-AC-3", "properties": {"codec_id": "A_EAC3", "audio_channels": 6}}
-        self.assertGreater(tc.get_audio_quality_score(truehd), tc.get_audio_quality_score(eac3))
-        self.assertGreater(tc.get_audio_quality_score(truehd), tc.get_audio_quality_score(aac))
+        narrow = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 2}}
+        self.assertGreater(tc.get_audio_quality_score(truehd), tc.get_audio_quality_score(narrow))
+        self.assertGreater(tc.get_audio_quality_score(eac3), tc.get_audio_quality_score(truehd))
+        self.assertGreater(tc.get_audio_quality_score(aac), tc.get_audio_quality_score(truehd))
 
     def test_lossless_hd_is_the_best_transcode_SOURCE(self) -> None:
         """Among unplayable tracks the better master still wins (it feeds audiofit)."""
@@ -91,9 +103,10 @@ class AudioQualityTests(unittest.TestCase):
         """
         eac3_titled = _audio(1, codec="E-AC-3", channels=6, name="TrueHD 7.1")
         dtshd_titled = _audio(2, codec="E-AC-3", channels=6, name="DTS-HD MA 7.1")
-        # Compared against a TrueHD of the SAME 5.1 layout, so this stays a test
-        # of the class rather than of the layout key: a wider master legitimately
-        # outranks a narrower native track, but a title cannot move either one.
+        # Compared against a TrueHD of the SAME 5.1 layout, so this stays a
+        # test of the class rather than of the layout key: layout and band
+        # already decide that pair, and the point here is that a title cannot
+        # move either side of it.
         truehd = _audio(3, codec="TrueHD", channels=6, name="Atmos")
         for track in (eac3_titled, dtshd_titled):
             with self.subTest(name=track["properties"]["track_name"]):
@@ -1055,15 +1068,17 @@ class ChainAudioRetentionTests(unittest.TestCase):
         happens to be playable right now.
 
         The remux is irreversible: the AC-3 2.0 that wins today's ranking is gone
-        for good, while the TrueHD 7.1 can still become a chain-native DD+ 7.1 on
-        any later audio_standardizer run. Deleting surround to keep stereo cannot
-        be undone; converting surround can always be done. So the master is kept
-        and the stereo track goes.
+        for good, while the TrueHD 7.1 can still become a chain-native DD+ 5.1
+        bed on any later audio_standardizer run. Deleting surround to keep stereo
+        cannot be undone; converting surround can always be done. So the master
+        is kept and the stereo track goes — and note what the ranking NO LONGER
+        claims: the master achieves 5.1 (the Dolby encoders' ceiling), not the
+        7.1 the 8.1.0-8.3.x target table used to promise.
         """
         truehd = self._track(1, "TrueHD", 8, codec_id="A_MLP", name="Atmos")
         stereo = self._track(2, "AC-3", 2, codec_id="A_AC3")
         self.assertEqual(self._keeper(truehd, stereo), 1)
-        self.assertEqual(tc.get_audio_quality_score(truehd)[0], 8)
+        self.assertEqual(tc.get_audio_quality_score(truehd)[0], 6)
         self.assertEqual(tc.get_audio_quality_score(stereo)[0], 2)
 
     def test_a_convertible_master_loses_to_a_chain_native_track_of_the_same_layout(self) -> None:
@@ -1136,8 +1151,10 @@ class ChainAudioRetentionTests(unittest.TestCase):
 
         Both tracks are chain-native 5.1, so layout and band tie and the Atmos
         flag decides - which is what this 3.1.2 bar with up-firing drivers is
-        for. A genuine DD+ Atmos 5.1 no longer beats a 7.1 master, though:
-        layout leads, and that master converts to a 7.1 DD+ track.
+        for. And a genuine DD+ Atmos 5.1 still loses to a FLAC 7.1: that one
+        really does arrive as LPCM 7.1 - no encoder is involved, so the
+        Dolby encoder cap never touches it. What the cap DOES decide is the
+        match against convertible masters - see the next two tests.
         """
         atmos = self._track(1, "E-AC-3", 6, codec_id="A_EAC3", name="DD+ Atmos")
         flac = self._track(2, "FLAC", 6, codec_id="A_FLAC")
@@ -1145,6 +1162,41 @@ class ChainAudioRetentionTests(unittest.TestCase):
         self.assertEqual(self._keeper(atmos, flac), 1)
         wide = self._track(3, "FLAC", 8, codec_id="A_FLAC")
         self.assertEqual(self._keeper(atmos, wide), 3)
+
+    def test_ddplus_atmos_now_outranks_the_wider_convertible_masters(self) -> None:
+        """The consequence 8.4.0 settles, with NO Atmos special case added.
+
+        A DD+ Atmos 5.1 and a TrueHD/DTS-HD MA 7.1 reach the SAME 5.1 bed -
+        the master folds, because that is the widest its encoder can write -
+        so the existing band tiebreak decides and the track that already
+        plays wins. Correct for this install on its own terms: (1) no
+        open-source encoder can produce DD+ ATMOS at all (the JOC object
+        metadata is gated behind a proprietary signature only Dolby's
+        licensed encoder holds), so a synthesized replacement is never Atmos
+        and a real DD+ Atmos track is irreplaceable; and (2) the AX3125H is
+        a 3.1.2 bar - three front drivers, a wireless sub, two up-firing
+        heights, NO rear surrounds - so 7.1's two extra channels have nothing
+        physical to drive while the height information has drivers waiting.
+        """
+        atmos = self._track(1, "E-AC-3", 6, codec_id="A_EAC3", name="DD+ Atmos")
+        for master in (self._track(2, "TrueHD", 8, codec_id="A_MLP", name="Atmos"),
+                       self._track(2, "DTS-HD MA", 8, codec_id="A_DTS/HD_MA")):
+            with self.subTest(master=master["codec"]):
+                self.assertEqual(tc.get_audio_quality_score(master)[0], 6)
+                self.assertEqual(self._keeper(atmos, master), 1)
+
+    def test_a_51_bitstream_now_outranks_a_71_master(self) -> None:
+        """The 8.2.0 reversal, corrected at its premise.
+
+        8.2.0 let a TrueHD 7.1 outrank an AC-3 5.1 because it reasoned the
+        master would BECOME 7.1 and the bitstream could not go further. The
+        destination is the same 5.1 bed for both; only one needs the server
+        (or audiofit) to build it. Direct-Play-first, same rule - different
+        arithmetic, now honest about the encoder.
+        """
+        surround = self._track(1, "AC-3", 6, codec_id="A_AC3")
+        master = self._track(2, "TrueHD", 8, codec_id="A_MLP", name="7.1")
+        self.assertEqual(self._keeper(surround, master), 1)
 
     def test_within_one_layout_the_better_codec_still_wins(self) -> None:
         """Channels lead the band; the codec sub-tier refines it."""
@@ -1186,9 +1238,10 @@ class CleanupPlanTests(unittest.TestCase):
         assert plan is not None
         # Chain policy: the AAC 2.0 decodes to PCM today but can never become
         # more than stereo, while the TrueHD 7.1 converts to a chain-native DD+
-        # 7.1 - so the master is kept and the stereo track goes. Commentary and
-        # dubs are dropped regardless. (In the real pipeline audiofit has
-        # usually already baked that DD+ track in before this tool runs.)
+        # 5.1 bed (the encoder ceiling) - so the master is kept and the stereo
+        # track goes. Commentary and dubs are dropped regardless. (In the real
+        # pipeline audiofit has usually already baked that DD+ track in before
+        # this tool runs.)
         self.assertEqual(plan.best_audio_id, 2)
         self.assertEqual([t["id"] for t in plan.removed_audio], [1, 3, 4])
         # Every embedded subtitle goes, English (SDH/forced included) or not.
@@ -1225,7 +1278,7 @@ class CleanupPlanTests(unittest.TestCase):
         assert plan is not None
         self.assertTrue(plan.foreign_with_srt)
         # Chain policy: the Spanish TrueHD 7.1 converts to a chain-native DD+
-        # 7.1; the Spanish AAC 2.0 can only ever be stereo. The master wins.
+        # 5.1; the Spanish AAC 2.0 can only ever be stereo. The master wins.
         self.assertEqual(plan.best_audio_id, 1)
         self.assertEqual([t["id"] for t in plan.removed_audio], [2, 3])
         # The external sidecar is the sole subtitle option.

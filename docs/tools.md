@@ -184,9 +184,9 @@ Pro.** A movie whose best track is one of those lossless-HD formats is
 whole runtime of the file, forever. This tool is the one-time offline
 answer. For each movie it probes (`ffprobe`) and classifies:
 
-| Source situation | Verdict | What happens |
+| Source situation (the pool's **ranked best** track decides — see the invariant below) | Verdict | What happens |
 | :--- | :--- | :--- |
-| AC-3 / E-AC-3 on board | `native-ok` | nothing — already bitstreams end-to-end |
+| AC-3 / E-AC-3 ranked first in the pool | `native-ok` | nothing — the track the cleaner will keep already bitstreams end-to-end |
 | base 5.1 DTS core | `dts-core-ok` | accepted (the AX3125H has a DTS decoder and the player's Amlogic firmware passes core DTS — unofficial but real); `--no-dts-passthrough` transcodes these too |
 | AAC / FLAC / PCM / MP3 / Opus | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar takes multichannel PCM, while the explicit `--wiring tv-arc` (this TV offers PCM only for HDMI sources = stereo PCM) makes them transcode candidates |
 | TrueHD / DTS-HD MA / DTS-HD HRA / DTS:X | `transcoded-dolby` | **one chain-native Dolby track is synthesized and appended (Dolby Digital Plus on the default wiring), video untouched** |
@@ -196,18 +196,28 @@ answer. For each movie it probes (`ffprobe`) and classifies:
 The bake-in is exactly one ffmpeg invocation per movie — on the default
 `soundbar-hdmi-in` wiring the codec is Dolby Digital Plus, which both audio
 hops carry natively:
-`ffmpeg -i movie.mkv -map 0 -c copy … -c:a:N eac3 -b:a 640k -ac 8 -ar 48000`
-(`-ac 6` for a 5.1 source). Every original stream is copied; the new track
-is **appended, marked default, and titled with its provenance**
-("Dolby Digital Plus 7.1 (from TrueHD)"). A 7.1 source keeps its layout —
-E-AC-3 carries it; 5.1/6.1 normalize to 5.1 at 640 kbps; stereo sources
-stay stereo at 192 kbps, never upmixed. Under the explicit `--wiring
-tv-arc` the same step targets AC-3 (`-c:a:N ac3`) with 7.1 folded to 5.1.
+`ffmpeg -i movie.mkv -map 0 -c copy … -c:a:N eac3 -b:a 640k -ac 6 -ar 48000`
+Every original stream is copied; the new track is **appended, marked
+default, and titled with its provenance** ("Dolby Digital Plus 5.1 (from
+TrueHD)"). The surround target is 5.1 whatever the source width, because
+that is the ceiling of ffmpeg's Dolby encoders
+(`playbackchain.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS`): E-AC-3 *the format*
+carries 7.1, but no encoder this toolkit can call writes one — it fails
+instead of downmixing, so a promised `-ac 8` meant a failed transcode and
+no output file (fixed in 8.4.0). 5.1/6.1/7.1+ all land at 5.1 at 640 kbps;
+stereo sources stay stereo at 192 kbps, mono mono, never upmixed. Under the
+explicit `--wiring tv-arc` the same step targets AC-3 (`-c:a:N ac3`), whose
+encoder shares the ceiling.
 
 The **source is the best track in the movie's own language** —
 using `mkv_track_cleaner`'s own commentary/dub/native-language rules, so a
 Japanese film is transcoded from its Japanese TrueHD even when an English
-DTS dub sits next to it. Video streams are never re-encoded.
+DTS dub sits next to it. Every verdict — `native-ok` included — is keyed off
+that same ranked-best track, because it is the one the cleaner will *keep*:
+the invariant is that if audiofit calls a file settled, the keeper is a
+track this chain can emit (answering "some Dolby exists" for a track ranked
+below the keeper was the 8.3.0 bug, fixed in 8.3.1). Video streams are never
+re-encoded.
 
 Publishing is fail-closed: the output is **re-probed** before the swap —
 every original stream identical, the appended Dolby track with the right
@@ -234,24 +244,26 @@ track the movie can **end up with** — already chain-native *or* convertible to
 chain-native — because the remux is irreversible. A dropped track is gone for
 good; a master that `audio_standardizer.py` can still convert is not. So a
 TrueHD Atmos 7.1 beats an AC-3 2.0 that plays today: the master becomes a DD+
-7.1, the stereo track can never become anything. The score is compared in this
-order:
+5.1 bed, the stereo track can never become anything. The score is compared in
+this order:
 
 1. **Achievable layout** (`playbackchain.achievable_channels()`). A
    chain-native track achieves the channels it carries; a transcode-bound master
-   achieves the channels the synthesized replacement would have (7.1 stays 7.1
-   on the default wiring, folds to 5.1 under `tv-arc`, never upmixed); an
-   *unknown* track achieves nothing, because the toolkit fail-closes and never
-   auto-touches one. This is also what keeps **FLAC 7.1 ahead of AC-3 2.0**, and
-   Hisense's per-port table confirms LPCM 5.1/7.1 on the bar's HDMI IN
-   ([hardware.md §2](hardware.md)).
+   achieves the channels the synthesized replacement would have — at most 5.1
+   on either wiring, the ceiling of ffmpeg's Dolby encoders, so a 7.1 master
+   achieves 6 and not 8 (8.4.0); an *unknown* track achieves nothing, because
+   the toolkit fail-closes and never auto-touches one. A track needing no
+   encoder is unaffected and keeps its real width: this is what keeps
+   **FLAC 7.1 ahead of AC-3 2.0**, and Hisense's per-port table confirms
+   LPCM 5.1/7.1 on the bar's HDMI IN ([hardware.md §2](hardware.md)).
 2. **Band.** *Chain-native* — Dolby Digital Plus (E-AC-3, Atmos included) and
    Dolby Digital (AC-3) bitstream end-to-end, base DTS is decoded by the
    soundbar, and client-decodable formats (AAC, FLAC/PCM, Opus, MP3) arrive as
    PCM — beats *transcode-bound* (TrueHD, DTS-HD MA, DTS-HD HRA, DTS:X, WMA
    Pro), which beats *unknown*. At an **equal achievable layout** this is the
-   Direct-Play-first rule: a 5.1 AC-3 still beats a 5.1 TrueHD, because only one
-   of them gets to 5.1 without the server re-encoding anything.
+   Direct-Play-first rule: a 5.1 AC-3 still beats a 5.1 TrueHD — and since
+   8.4.0 also a 7.1 one, because the encoder cap lands both at 5.1 and only
+   one of them gets there without the server re-encoding anything.
    `audio_standardizer.py` runs *before* this tool in the pipeline and bakes the
    chain-native Dolby track in from exactly those masters, so by the time the
    cleaner looks, the master has usually already become the DD+ track that wins

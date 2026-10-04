@@ -839,20 +839,24 @@ def get_audio_quality_score(
     1. **achievable layout** (:func:`playbackchain.achievable_channels`) — a
        chain-native track achieves the channels it carries; a transcode-bound
        master achieves the channels ``audio_standardizer.py`` would bake into
-       its replacement (7.1 stays 7.1 on the default wiring, folds to 5.1 under
-       ``tv-arc``); an unknown track achieves nothing, because the toolkit never
-       auto-touches one. This is the key that makes a TrueHD Atmos 7.1 worth
-       more than an AC-3 2.0 that plays today: the master becomes DD+ 7.1, the
-       stereo track can never become anything.
+       its replacement, which is at most 5.1 on either wiring because that is
+       as wide as ffmpeg's Dolby encoders can write
+       (``playbackchain.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS``); an unknown track
+       achieves nothing, because the toolkit never auto-touches one. This is
+       the key that makes a TrueHD Atmos 7.1 worth more than an AC-3 2.0 that
+       plays today: the master becomes a DD+ 5.1 bed, the stereo track can
+       never become anything.
     2. **band** — *plays with no server work* (bitstreamed Dolby, base DTS, or
        decoded to PCM) beats *transcode-bound* beats *unknown*. At an equal
        achievable layout this is the Direct-Play-first rule, and it is what
        keeps a 5.1 AC-3 ahead of a 5.1 TrueHD: same destination, but one of
-       them gets there without the server ever re-encoding anything.
-       ``audio_standardizer.py`` runs before this tool in the pipeline and bakes
-       the chain-native Dolby track in from exactly those masters, so by the
-       time the cleaner looks, the master has usually already become the DD+
-       track that wins on key 1 outright.
+       them gets there without the server ever re-encoding anything. Since the
+       encoder cap both land at 5.1, so a 5.1 AC-3 now outranks a *7.1*
+       TrueHD too — a wider master no longer reaches further than the Dolby
+       track that already plays. ``audio_standardizer.py`` runs before this
+       tool in the pipeline and bakes the chain-native Dolby track in from
+       exactly those masters, so by the time the cleaner looks, the master
+       has usually already become the DD+ track that wins on key 1 outright.
     3. **atmos** — a real DD+ Atmos track is what this 3.1.2 bar with up-firing
        drivers exists for, so it wins among equal layouts. Credited only to
        Dolby Digital Plus: AC-3 has no Atmos variant, so a title cannot claim
@@ -867,8 +871,9 @@ def get_audio_quality_score(
 
     ``wiring`` defaults to :func:`playbackchain.resolve_wiring`, so
     ``ORGANIZE_PLAYBACK_WIRING`` is honoured here exactly as it is in
-    ``audio_standardizer.py``; it only moves key 1, and only for a >=7.1
-    transcode-bound master.
+    ``audio_standardizer.py``; it is threaded through key 1 only — and since
+    both wirings' Dolby targets are capped at 5.1 by what their encoders can
+    write, a wider transcode-bound master now ranks the same on either one.
     """
     props = track.get("properties") or {}
     # codec_blob, not an f-string: the classifier reads field 2 as the codec

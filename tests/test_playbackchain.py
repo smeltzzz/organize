@@ -239,17 +239,58 @@ class TargetAudioTests(unittest.TestCase):
 
     The default ``soundbar-hdmi-in`` wiring (Chromecast -> AX3125H HDMI IN
     -> TV) targets Dolby Digital Plus: both of its two audio hops carry it
-    natively, and it can hold a 7.1 master's layout. The explicit ``tv-arc``
-    alternative keeps the everywhere-compatible AC-3, folding to 5.1.
+    natively. What either wiring may NOT target is anything wider than 5.1:
+    that is the ceiling of ffmpeg's Dolby encoders, recorded as
+    :data:`playbackchain.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS`, because promising
+    a 7.1 bitstream made every >=7.1 master's transcode fail outright.
     """
 
-    def test_default_wiring_keeps_a_71_master_as_dolby_digital_plus(self) -> None:
+    def test_default_wiring_folds_a_71_master_into_dolby_digital_plus_51(self) -> None:
+        # The 8.4.0 regression: this branch once returned channels=8 and
+        # ffmpeg's eac3 encoder cannot write 7.1 at all - it fails instead of
+        # downmixing, so every >=7.1 lossless master's audiofit produced no
+        # file. The layout a track *could* keep if an encoder existed is not
+        # a target; the widest target is the widest encode.
         target = pc.target_audio_for(8)
         self.assertEqual(target.codec, "eac3")
-        self.assertEqual(target.channels, 8)
-        self.assertEqual(target.channel_name, "7.1")
+        self.assertEqual(target.channels, 6)
+        self.assertEqual(target.channel_name, "5.1")
         self.assertEqual(target.bitrate, "640k")
         self.assertEqual(target.sample_rate, 48000)
+
+    def test_no_target_exceeds_the_encoder_ceiling_on_any_wiring(self) -> None:
+        # Every source layout from mono to 7.1, on both wirings: whatever the
+        # table answers, some real encoder must be able to answer it back.
+        for wiring in (pc.WIRING_SOUNDBAR_HDMI_IN, pc.WIRING_TV_ARC):
+            for ch in range(1, 9):
+                with self.subTest(wiring=wiring, ch=ch):
+                    target = pc.target_audio_for(ch, wiring)
+                    self.assertLessEqual(
+                        target.channels, pc.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS,
+                        f"{wiring} promised {target.channels} channels to a "
+                        f"{ch}-channel source; the encoders cap at "
+                        f"{pc.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS}")
+                    if ch >= 5:
+                        # The cap is not "at most 6" on the wide end - the
+                        # fold lands exactly on 5.1, never a lopsided bed.
+                        self.assertEqual((target.channels, target.channel_name),
+                                         (6, "5.1"))
+
+    def test_the_encoder_ceiling_is_recorded_as_data(self) -> None:
+        """The number lives in the shared core, not in each caller's prose.
+
+        6 is not a taste: it is ffmpeg's documented 5.1 limit for BOTH Dolby
+        encoders (verified against 7.0.2 - ``-h encoder=eac3`` lists no
+        layout wider than 5.1, and ``-ac 8`` exits with "Conversion failed!").
+        Exporting it from ``organizekit.core`` lets the docs, the tests and
+        any tool reason from the same recorded fact instead of re-deriving -
+        or re-forgetting - it.
+        """
+        self.assertEqual(pc.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS, 6)
+        from organizekit import core
+        self.assertIs(core.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS,
+                      pc.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS)
+        self.assertIn("FFMPEG_DOLBY_ENCODE_MAX_CHANNELS", core.__all__)
 
     def test_default_wiring_normalizes_51_and_61_to_51_dolby_digital_plus(self) -> None:
         for ch in (5, 6, 7):

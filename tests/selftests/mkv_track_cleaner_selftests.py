@@ -67,21 +67,27 @@ def run_self_tests() -> int:
 
     # The chain policy: the keeper is the best track the movie can END UP with,
     # not the one that plays right now, because the remux is irreversible. A
-    # TrueHD 7.1 master converts to a chain-native DD+ 7.1; a 2.0 track that
-    # plays today can never become anything. Layout therefore leads. At an
-    # EQUAL layout the old rule still holds - a track the G454V can emit
-    # outright outranks a master it cannot, because playing the master means
-    # the Jellyfin server transcodes the audio on every single play.
+    # TrueHD 7.1 master converts to a chain-native DD+ bed AT MOST 5.1 - the
+    # ceiling of ffmpeg's Dolby encoders, not the format's - so it outranks a
+    # 2.0 track that can never become anything, but no longer outranks a 5.1
+    # track that already plays: the layouts arrive equal, and then the band
+    # decides, the way it always did at an equal layout. A track needing no
+    # encoder is untouched by all this - FLAC 7.1 really arrives as 7.1.
     truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 8, "track_name": "Atmos"}}
     truehd51 = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 6}}
     aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
+    flac71 = {"codec": "FLAC", "properties": {"codec_id": "A_FLAC", "audio_channels": 8}}
     eac3 = {"codec": "E-AC-3", "properties": {"codec_id": "A_EAC3", "audio_channels": 6}}
     ac3 = {"codec": "AC-3", "properties": {"codec_id": "A_AC3", "audio_channels": 6}}
     stereo = {"codec": "AC-3", "properties": {"codec_id": "A_AC3", "audio_channels": 2}}
     check(get_audio_quality_score(truehd) > get_audio_quality_score(stereo),
           "chain policy: a convertible TrueHD 7.1 > a 2.0 track that plays today")
-    check(get_audio_quality_score(truehd) > get_audio_quality_score(eac3),
-          "chain policy: TrueHD 7.1 (becomes DD+ 7.1) > chain-native E-AC-3 5.1")
+    check(get_audio_quality_score(eac3) > get_audio_quality_score(truehd),
+          "chain policy: a 7.1 master folds to 5.1 like everything, so the "
+          "chain-native E-AC-3 5.1 wins the layout tie on the band")
+    check(get_audio_quality_score(flac71) > get_audio_quality_score(eac3),
+          "chain policy: a track needing no encoder keeps its real layout - "
+          "FLAC 7.1 outranks a 5.1 bitstream and a 7.1 master alike")
     check(get_audio_quality_score(eac3) > get_audio_quality_score(truehd51),
           "chain policy: at an equal 5.1 layout, E-AC-3 (player passthrough) > TrueHD")
     check(get_audio_quality_score(ac3) > get_audio_quality_score(truehd51),
