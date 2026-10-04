@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.4.1] - 2026-10-04
+
+### Fixed
+- **Defensive zero-channel parsing across the planner and scorer.** Four
+  related places were using `int(value or default)` to read channel counts,
+  which is a Python truthiness trap: the string `"0"` is truthy, so
+  `int("0" or 2) == 0` (not 2) and a stream whose channels field was `0`,
+  `"0"`, or garbage was silently credited with zero channels instead of
+  falling through to the conservative stereo default used everywhere else.
+  Worse, `playbackchain.target_audio_for()` had `int(source_channels or 6)`
+  followed by `max(1, …)`, so `target_audio_for(0)` hit `int(0 or 6) == 6`
+  and promised a 5.1 Dolby bed from an inaudible/mislabeled source, while
+  `target_audio_for("0")` hit `max(1, 0) == 1` and landed on mono. Fixed in
+  `target_audio_for()`, `achievable_channels()`, `audio_standardizer.channels_of()`
+  and `mkv_track_cleaner.get_audio_quality_score()`. A probe whose channels
+  field is 0/`"0"`/bogus now synthesizes a stereo Dolby bed rather than
+  promising a layout the source cannot produce.
+- **`audio_standardizer._pool_rank` degraded-mode tuple arity.** The
+  ImportError fallback (only exercised when the sibling
+  `mkv_track_cleaner` module cannot be imported — a damaged zipapp or
+  checkout) returned a 2-tuple while the real scorer returns a 7-tuple.
+  Python tuple comparison is lexicographic and stops at the first length
+  difference, which can rank a shorter tuple "higher" purely because it
+  runs out of elements. The fallback now matches the scorer's shape
+  (achievable layout, band, atmos, tier, bitrate, sample_rate, original)
+  so ranking stays honest even in degraded mode.
+
 ## [8.4.0] - 2026-10-04
 
 One false premise, removed. **The 7.1 Dolby target could never be built** —
