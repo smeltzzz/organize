@@ -22,8 +22,21 @@ Environment knobs for the failure branches:
 * ``FAKE_FFMPEG_NO_OUTPUT`` — exit 0 but write nothing (interrupted encode).
 * ``FAKE_FFMPEG_WRONG_TRACK`` — append a track of a different codec than
   asked for (verification must refuse the publish).
+* ``FAKE_FFMPEG_WRONG_RATE`` — append the track at a sample rate other than the
+  ``-ar:a:N`` that was asked for.
+* ``FAKE_FFMPEG_IGNORING_DISPOSITION`` — leave every original stream's default
+  flag alone and do not set the new track's, i.e. behave like an ffmpeg that
+  silently dropped the ``-disposition`` options.
 * ``FAKE_FFMPEG_LOG`` — append every full argv as one JSON line to this file,
   so tests can assert the exact command the tool built.
+
+The ``-disposition`` options ARE honoured, in command order and per stream
+specifier, because a double that ignored them would hide exactly the drift the
+tool's verification pass exists to catch: ``-disposition:a 0`` followed by
+``-disposition:a:N default`` is how the appended Dolby track is made the one a
+player picks, and a fake that always wrote ``default: 1`` on the new track
+while leaving the lossless master default-flagged too would let a build that
+dropped both options pass every test.
 """
 
 from __future__ import annotations
@@ -34,6 +47,57 @@ import sys
 from pathlib import Path
 
 VERSION_BANNER = "ffmpeg version 7.1 Copyright (c) 2000-2025 the FFmpeg developers"
+
+
+def _disposition_options(args: list[str]) -> list[tuple[str, str]]:
+    """Every ``-disposition[:spec] value`` pair, in command order.
+
+    Order matters: real ffmpeg applies output options left to right, so the
+    LAST one matching a stream is the one that sticks. That is what makes
+    ``-disposition:a 0`` (clear every audio stream) followed by
+    ``-disposition:a:N default`` (this one is the default) work at all.
+    """
+    found: list[tuple[str, str]] = []
+    for i, arg in enumerate(args):
+        if arg.startswith("-disposition") and i + 1 < len(args):
+            found.append((arg[len("-disposition"):], args[i + 1]))
+    return found
+
+
+def _spec_matches(spec: str, kind: str, index: int) -> bool:
+    """Does ``spec`` (":a", ":a:1", "") select output stream ``index`` of ``kind``?"""
+    if not spec:
+        return True
+    parts = [part for part in spec.split(":") if part != ""]
+    if not parts:
+        return True
+    if parts[0] not in ("a", "audio"):
+        return False
+    if len(parts) == 1:
+        return kind == "audio"
+    try:
+        return kind == "audio" and int(parts[1]) == index
+    except ValueError:
+        return False
+
+
+def _apply_dispositions(streams: list[dict], options: list[tuple[str, str]]) -> None:
+    """Set each output stream's disposition from the options that select it."""
+    audio_index = 0
+    for stream in streams:
+        kind = str(stream.get("codec_type") or "")
+        if kind != "audio":
+            continue
+        selected = None
+        for spec, value in options:
+            if _spec_matches(spec, kind, audio_index):
+                selected = value  # last match wins, as in ffmpeg
+        if selected is not None:
+            # ffmpeg's `-disposition` replaces the whole set: "0" clears every
+            # flag, a bare name leaves only that one set.
+            value = selected.strip().lstrip("+")
+            stream["disposition"] = {} if value == "0" else {value: 1}
+        audio_index += 1
 
 
 def _output_option(args: list[str], prefix: str) -> str | None:
@@ -115,6 +179,9 @@ def main(argv: list[str] | None = None) -> int:
             elif key == "title":
                 title = value
 
+    if os.environ.get("FAKE_FFMPEG_WRONG_RATE"):
+        sample_rate = 44100 if sample_rate != 44100 else 48000
+
     next_index = max((int(s.get("index", 0)) for s in payload.get("streams", [])), default=0) + 1
     wrong = bool(os.environ.get("FAKE_FFMPEG_WRONG_TRACK"))
     appended = {
@@ -125,10 +192,13 @@ def main(argv: list[str] | None = None) -> int:
         "sample_rate": sample_rate,
         "bit_rate": bitrate.rstrip("k") + "000" if bitrate.endswith("k") else bitrate,
         "tags": {"language": language, "title": title},
-        "disposition": {"default": 1},
+        "disposition": {"default": 0},
     }
     payload = dict(payload)
-    payload["streams"] = list(payload.get("streams", [])) + [appended]
+    streams = list(payload.get("streams", [])) + [appended]
+    if not os.environ.get("FAKE_FFMPEG_IGNORING_DISPOSITION"):
+        _apply_dispositions(streams, _disposition_options(args))
+    payload["streams"] = streams
     write_movie(dst, payload, size=1024 * 1024)
     return 0
 

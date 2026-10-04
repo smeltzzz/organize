@@ -128,34 +128,73 @@ def run_self_tests() -> int:
     # hardcoded: when 8.4.0 capped the Dolby targets at the encoder's 5.1, a
     # literal here would have "verified" a file the tool could no longer make.
     t = v.target
+    # ffprobe reports rates as strings; the disposition is what the command's
+    # `-disposition:a 0` / `-disposition:a:N default` pair leaves behind.
     added = {"index": 2, "codec_type": "audio", "codec_name": t.codec,
-             "channels": t.channels}
-    good_new = dict(truehd_only)
-    good_new["streams"] = list(truehd_only["streams"]) + [added]
+             "channels": t.channels, "sample_rate": str(t.sample_rate),
+             "disposition": {"default": 1}}
+
+    def superset(appended: dict[str, Any], *, clear_original_defaults: bool = True,
+                 duration: str | None = None) -> dict[str, Any]:
+        """A probe shaped like this tool's own command would leave behind.
+
+        Every original stream is still there, the appended track is last, and
+        — unless a case is testing the failure — the lossless master has lost
+        its default flag, because that is what makes the new track the one a
+        player picks.
+        """
+        streams = []
+        for stream in truehd_only["streams"]:
+            if stream.get("codec_type") == "audio" and clear_original_defaults:
+                stream = dict(stream, disposition={})
+            streams.append(stream)
+        out = dict(truehd_only)
+        out["streams"] = streams + [appended]
+        if duration is not None:
+            out["format"] = {"duration": duration}
+        return out
+
     # patch the probe of the produced file: the verifier reads run_ffprobe
     original_run_ffprobe = run_ffprobe
     try:
-        def fake_run(binary: str, file_path: Path, cfg: Config) -> dict[str, Any]:
-            return good_new
-        globals()["run_ffprobe"] = fake_run
+        def probe_of(payload: dict[str, Any]) -> Any:
+            def fake_run(binary: str, file_path: Path, cfg: Config) -> dict[str, Any]:
+                return payload
+            return fake_run
+
+        globals()["run_ffprobe"] = probe_of(superset(added))
         ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)
         _assert(ok, f"a clean superset verifies ({why})", errors)
 
-        bad_new = dict(truehd_only)  # nothing appended
-        globals()["run_ffprobe"] = lambda b, p, c: bad_new
+        globals()["run_ffprobe"] = probe_of(dict(truehd_only))  # nothing appended
         ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)
         _assert(not ok, "a file with no new track is refused", errors)
 
-        wrong = dict(truehd_only)
-        wrong["streams"] = list(truehd_only["streams"]) + [dict(added, codec_name="dts")]
-        globals()["run_ffprobe"] = lambda b, p, c: wrong
+        globals()["run_ffprobe"] = probe_of(superset(dict(added, codec_name="dts")))
         ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)
         _assert(not ok, "an appended track of the wrong codec is refused", errors)
 
-        drifted = dict(truehd_only)
-        drifted["streams"] = list(truehd_only["streams"]) + [added]
-        drifted["format"] = {"duration": "10.000000"}
-        globals()["run_ffprobe"] = lambda b, p, c: drifted
+        globals()["run_ffprobe"] = probe_of(superset(dict(added, channels=t.channels + 2)))
+        ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)
+        _assert(not ok, "an appended track of the wrong width is refused", errors)
+
+        globals()["run_ffprobe"] = probe_of(superset(dict(added, sample_rate="44100")))
+        ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)
+        _assert(not ok, "an appended track at the wrong sample rate is refused", errors)
+
+        globals()["run_ffprobe"] = probe_of(superset(dict(added, disposition={})))
+        ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)
+        _assert(not ok, "an appended track that is not the default is refused", errors)
+
+        # The silent-defeat case: everything about the new track is right, but
+        # the master kept its default flag, so a player still picks the track
+        # this chain can never emit and the movie keeps transcoding.
+        globals()["run_ffprobe"] = probe_of(
+            superset(added, clear_original_defaults=False))
+        ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)
+        _assert(not ok, "a second default audio track is refused", errors)
+
+        globals()["run_ffprobe"] = probe_of(superset(added, duration="10.000000"))
         ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)
         _assert(not ok, "a duration drift beyond tolerance is refused", errors)
     finally:

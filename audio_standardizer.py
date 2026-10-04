@@ -585,14 +585,40 @@ def build_ffmpeg_command(cfg: Config, src: Path, dst: Path, verdict: AudioVerdic
     ]
 
 
+def is_default_audio(stream: dict[str, Any]) -> bool:
+    """True when ffprobe says this stream is a container default."""
+    disposition = stream.get("disposition")
+    if not isinstance(disposition, dict):
+        return False
+    return bool(disposition.get("default"))
+
+
 def verify_output(produced: Path, verdict: AudioVerdict, cfg: Config,
                   old_payload: dict[str, Any]) -> tuple[bool, str]:
     """Prove the new file is a strict superset before it may replace the old.
 
-    Video streams must be description-identical (same codecs, same count),
-    the appended audio track must be the Dolby codec that was asked for with
-    the right channel count, and the duration may only drift within
-    tolerance — the same contract the cleaner verifies on a remux.
+    Video streams must be description-identical (same codecs, same count), the
+    appended audio track must be the Dolby codec that was asked for with the
+    right channel count and sample rate, it must be the container's ONLY
+    default audio track, and the duration may only drift within tolerance — the
+    same contract the cleaner verifies on a remux.
+
+    Sample rate and the default flag are checked because they are the two
+    output options whose loss would not be visible any other way. ``-ar:a:N``
+    dropped means the new track inherits the master's rate rather than the
+    chain's 48 kHz; ``-disposition:a 0`` / ``-disposition:a:N default`` dropped
+    means the lossless master stays the track a player picks — so the movie
+    keeps transcoding its audio on every play, which is the exact failure this
+    tool exists to end, and it would have been reported as a success. ffmpeg's
+    command line is never trusted as the definition of success (README, safety
+    invariant 8); ffprobe of the result is.
+
+    Bitrate, the language tag and the title are NOT re-read here, deliberately:
+    they are pinned on the command line by
+    ``test_the_bake_in_command_is_exactly_what_the_docs_promise``, and a
+    reported ``bit_rate`` is a container estimate that a real encode may round,
+    so refusing a publish over it would trade a silent quality drift for a
+    library of untouched movies.
     """
     try:
         new_payload = run_ffprobe(cfg.ffprobe, produced, cfg)
@@ -616,6 +642,16 @@ def verify_output(produced: Path, verdict: AudioVerdict, cfg: Config,
         if channels_of(added) != verdict.target.channels:
             return False, (f"appended {wanted} track is {channels_of(added)}ch, "
                            f"expected {verdict.target.channels}ch")
+        rate = sample_rate_of(added.get("sample_rate"))
+        if rate != verdict.target.sample_rate:
+            return False, (f"appended {wanted} track is {rate} Hz, "
+                           f"expected the chain's {verdict.target.sample_rate} Hz")
+        defaults = [position for position, stream in enumerate(new_audio)
+                    if is_default_audio(stream)]
+        if defaults != [len(new_audio) - 1]:
+            return False, (f"the appended {wanted} track is not the container's only "
+                           f"default audio (default-flagged positions: "
+                           f"{defaults or 'none'} of {len(new_audio)})")
         old_dur = float((old_payload.get("format") or {}).get("duration") or 0)
         new_dur = float((new_payload.get("format") or {}).get("duration") or 0)
         if old_dur and abs(new_dur - old_dur) > 3.0:

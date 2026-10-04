@@ -221,10 +221,17 @@ re-encoded.
 
 Publishing is fail-closed: the output is **re-probed** before the swap —
 every original stream identical, the appended Dolby track with the right
-channel count, duration drift ≤ 3 s — and dropped otherwise. The temp file
-carries the tool's marker name (`.*.audiofit-PID.tmp.mkv`), a stale one is
-swept the next run, and `os.replace` publishes atomically. A movie hardlinked
-to its torrent seed is deferred rather than replaced. `--dry-run` needs only
+channel count and the chain's 48 kHz sample rate, that track the container's
+*only* default audio (otherwise a player still picks the lossless master and
+the movie keeps transcoding on every play), duration drift ≤ 3 s — and dropped
+otherwise. Immediately before the swap the source is re-checked against the
+identity it was planned from, because planning and applying are hours apart on
+a large library and the ingest hook can land a better release on that path in
+between; a movie that changed is refused, not clobbered. The temp file carries
+the tool's marker name (`.*.audiofit-PID.tmp.mkv`), a stale one is swept the
+next run, and `os.replace` publishes atomically. A movie hardlinked to its
+torrent seed is deferred rather than replaced — re-checked at the publish, not
+only at the probe, because a seed link can appear in between. `--dry-run` needs only
 `ffprobe` (it prints the plan; ffmpeg is checked at run start when
 transcodes are due and missing makes the step skip with a reason, like every
 other prerequisite in the toolkit).
