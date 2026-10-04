@@ -815,9 +815,15 @@ def is_forced_subtitle(track: dict[str, Any]) -> bool:
 #: Direct-Play-first rule: at an equal achievable layout, a track that needs NO
 #: server work beats one that does. It is the second key rather than the first
 #: because the remux is irreversible - see that function's docstring.
-_BAND_CHAIN_NATIVE = 2   # AC-3 / DD+ / base DTS / anything decoded to PCM
-_BAND_TRANSCODE_BOUND = 1  # TrueHD / DTS-HD / DTS:X / WMA Pro: convertible by audiofit
-_BAND_UNKNOWN = 0        # fail-closed: reported, never chosen if anything else exists
+#:
+#: Aliases, not a second definition: the bands are shared core because
+#: ``audio_standardizer._pool_rank`` has to reproduce this scorer's ordering
+#: conventions in its degraded branch, where this module is the thing that
+#: failed to import. ``tests/test_shared_core.py`` is what makes a copy here
+#: unrepresentable.
+_BAND_CHAIN_NATIVE = pc.CHAIN_BAND_NATIVE
+_BAND_TRANSCODE_BOUND = pc.CHAIN_BAND_TRANSCODE_BOUND
+_BAND_UNKNOWN = pc.CHAIN_BAND_UNKNOWN
 
 
 def get_audio_quality_score(
@@ -902,9 +908,9 @@ def get_audio_quality_score(
     # Atmos only exists inside Dolby Digital Plus (as JOC) on anything this
     # player can emit - plain AC-3 has no Atmos variant, so an "Atmos" in the
     # track name is a release-group flourish. Crediting it used to make a
-    # stereo AC-3 titled "Dolby Atmos" outrank a real surround track.
-    atmos_flag = 1 if (cls == pc.AUDIO_NATIVE and pc.is_dolby_digital_plus(blob)
-                       and any(k in blob for k in ("ATMOS", "JOC"))) else 0
+    # stereo AC-3 titled "Dolby Atmos" outrank a real surround track. The rule
+    # is shared core so audiofit's degraded branch credits it identically.
+    atmos_flag = pc.atmos_credit_for(cls, blob)
     try:
         bitrate = int(props.get("tag_bps") or props.get("bps") or props.get("tag_bitrate") or props.get("bitrate") or 0)
     except (ValueError, TypeError):
@@ -918,12 +924,7 @@ def get_audio_quality_score(
     # to make impossible. Same scar as the channels parse immediately above.
     sampling_freq = pc.sample_rate_of(props.get("audio_sampling_frequency"))
     original = 1 if props.get("flag_original") else 0
-    if cls in (pc.AUDIO_NATIVE, pc.AUDIO_DTS_CORE, pc.AUDIO_DECODE_PCM):
-        band = _BAND_CHAIN_NATIVE
-    elif cls == pc.AUDIO_TRANSCODE_BOUND:
-        band = _BAND_TRANSCODE_BOUND
-    else:
-        band = _BAND_UNKNOWN
+    band = pc.chain_band_for(cls)
     achievable = pc.achievable_channels(cls, channels, pc.resolve_wiring(wiring))
     return (achievable, band, atmos_flag, tier, bitrate, sampling_freq, original)
 

@@ -108,8 +108,11 @@ from organizekit.core import (
     MediaProbeCache,
     Report,
     RunLog,
+    achievable_channels,
+    atmos_credit_for,
     atomic_write_text,
     audio_chain_note,
+    chain_band_for,
     classify_audio_blob,
     codec_blob,
     default_tool_dir,
@@ -349,7 +352,25 @@ def to_cleaner_track(stream: dict[str, Any], audio_ordinal: int) -> dict[str, An
         "dts": f"DTS ({profile})" if profile else "DTS",
         "aac": "AAC", "flac": "FLAC", "mp3": "MP3", "opus": "Opus",
         "vorbis": "Vorbis", "alac": "ALAC",
-    }.get(codec_name, (profile or codec_name or "unknown"))
+    }.get(codec_name) or codec_name or "unknown"
+    # Field 1 of the classification blob is the codec NAME and it is the only
+    # authoritative one, so for a codec outside that table the profile must not
+    # be rendered into it. The fallback used to be ``profile or codec_name``,
+    # which handed field 1 to the profile outright: ffprobe's ``pcm_bluray``
+    # carrying a ``DTS:X`` profile became a track NAMED "DTS:X", the cleaner
+    # classified it transcode-bound, and this tool - reading its own
+    # ``_stream_blob``, where the name still came first - called the very same
+    # stream decode-to-pcm. ``wmapro`` with a ``PCM`` profile disagreed the
+    # other way, which is the worse direction: one tool settles a movie the
+    # other is about to strip of its only playable audio.
+    #
+    # Nor may it be appended in parentheses. ``"w (DTS )"`` glues the profile
+    # to a token the classifier's widening step cannot see ("(DTS" is not
+    # "DTS"), so the codec fields appear to say nothing and the fall-through
+    # reaches the TITLE - and a track titled "TrueHD" then decided what a WMA
+    # stream is. The profile already travels in ``codec_id`` below, which is
+    # blob field 2: exactly the one place ``classify_audio_blob`` documents as
+    # allowed to refine a codec name.
     # ``sample_rate_of``, not ``int(float(x or 48000))``: ffprobe reports an
     # unknown rate as the STRING "0", which is truthy, so the ``or`` never
     # fired and the adapter handed the cleaner a 0 where its own parse of the
@@ -364,7 +385,20 @@ def to_cleaner_track(stream: dict[str, Any], audio_ordinal: int) -> dict[str, An
         "type": "audio",
         "codec": friendly,
         "properties": {
-            "codec_id": (f"{codec_name} {profile}").strip(),
+            # And ``codec_id`` must be the profile ALONE, never
+            # ``f"{codec_name} {profile}"``. Prefixing the name shifted every profile
+            # word one token to the right, and ``classify_audio_blob``'s DTS
+            # refinement reads only token[1] — the first word of field 2. For a codec
+            # the table above does not rewrite, that word was the codec name again, so
+            # the profile became invisible: ffprobe's ``dca`` spelling of DTS with a
+            # ``DTS-HD MA`` profile classified dts-core-passthrough in the cleaner and
+            # transcode-bound here. audiofit then baked in a chain-native Dolby bed
+            # that ``get_audio_quality_score`` ranked BELOW the unplayable master
+            # (achievable 8 in the native band beats achievable 6), so the cleaner
+            # deleted the track just appended and the movie went back to transcoding
+            # on every play. Field 2 has to mirror ``_stream_blob`` exactly or the two
+            # tools are reading different facts about one file.
+            "codec_id": profile,
             "language": _stream_language(stream),
             "language_ietf": _stream_language(stream),
             "track_name": str(tags.get("title") or ""),
@@ -535,10 +569,39 @@ def _pool_rank(pair: tuple[dict[str, Any], dict[str, Any]]) -> Any:
         import mkv_track_cleaner as tc
         return tc.get_audio_quality_score(track)
     except Exception:  # noqa: BLE001
-        ch = channels_of(stream)
-        return (ch,
-                CLASS_TIERS.get(classify_audio_blob(_stream_blob(stream)), 0),
-                0, 0, 0, 0, 0)
+        # Degraded mode: the scorer is unreachable, so its ordering has to be
+        # rebuilt from shared parts. Every position holds the SAME KIND of
+        # quantity in the SAME slot as ``get_audio_quality_score`` returns,
+        # because the two decide which track survives an irreversible remux.
+        # The version this replaced returned ``(channels_of(stream),
+        # CLASS_TIERS[cls], 0, 0, 0, 0, 0)`` - the raw channel count in the
+        # chain-achievable slot and a codec TIER in the fail-closed BAND slot.
+        # Both are safety positions: ``achievable_channels`` maps AUDIO_UNKNOWN
+        # to 0 exactly so an unrecognised track can never be chosen, and the
+        # band is what keeps "plays with no server work" above "unknown". With
+        # a tier there instead, an unknown-codec 7.1 stream ranked ``(6, 10,
+        # ...)`` against a chain-native ALAC stereo track's ``(2, 65, ...)``
+        # and WON - audiofit would have called a movie settled on the strength
+        # of a track this chain can never emit. Positions 3-6 stay coarser
+        # (there is no ``chain_audio_tier`` and none of mkvmerge's ``tag_bps``
+        # spellings available here); coarser may only break a tie the first
+        # three positions already made, which
+        # ``test_the_degraded_rank_fallback_keeps_the_scorers_ordering_conventions``
+        # is what asserts.
+        blob = _stream_blob(stream)
+        cls = classify_audio_blob(blob)
+        disposition = stream.get("disposition") if isinstance(stream.get("disposition"), dict) else {}
+        try:
+            bitrate = int(stream.get("bit_rate") or 0)
+        except (ValueError, TypeError):
+            bitrate = 0
+        return (achievable_channels(cls, channels_of(stream), resolve_wiring(DEFAULT_WIRING)),
+                chain_band_for(cls),
+                atmos_credit_for(cls, blob),
+                CLASS_TIERS.get(cls, 0),
+                bitrate,
+                sample_rate_of(stream.get("sample_rate")),
+                1 if disposition.get("original") else 0)
 
 
 def describe_stream(stream: dict[str, Any]) -> str:
