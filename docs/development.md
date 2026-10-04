@@ -22,7 +22,7 @@ patches the lookup itself, inside the test body.
 
 ```bash
 python3 organize.py test                          # built-in self-tests (one per script)
-python3 -m unittest discover -s tests -p "test_*.py"   # 1,320 unit tests, ~25 s
+python3 -m unittest discover -s tests -p "test_*.py"   # 1,516 unit tests, ~25 s
 pip install -e ".[dev]" && pytest                 # same suite under pytest
 ruff check .                                      # lint (configured in pyproject.toml)
 ```
