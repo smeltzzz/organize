@@ -2182,6 +2182,32 @@ def remux_verdict(stats: dict[str, Any], before: dict[str, int]) -> tuple[str, s
     return None
 
 
+def verdict_subject(movie: Path, stats: dict[str, Any], before: dict[str, int]) -> Path:
+    """The path a verdict describes: ``movie``, or what a conversion published.
+
+    An MP4 -> MKV conversion deletes its source and publishes a NEW file under
+    the canonical name, so the source path is not where the verdict lives any
+    more. Recording against it keyed a row on a path that no longer exists —
+    with ``size``/``mtime_ns`` NULL, because there was nothing left to stat —
+    and ``organize status`` joins verdicts to live movies by path, so the
+    freshly converted and cleaned movie read as ``unmeasured`` for the remux
+    step until some later pass happened to look at the ``.mkv``.
+
+    The verdict has to be keyed on the bytes that are on disk, exactly like the
+    probe-cache re-key ``process_mkv`` already does for the same conversion.
+    """
+    cleaned = stats.get("cleaned") or []
+    if len(cleaned) > before.get("cleaned", 0):
+        entry = cleaned[-1]
+        if isinstance(entry, dict) and entry.get("converted_from_mp4"):
+            output_name = str(entry.get("output_name") or "")
+            # A name, never a path: the same guard the transaction journal
+            # applies, so a crafted entry cannot aim a write outside the folder.
+            if output_name and Path(output_name).name == output_name:
+                return movie.parent / output_name
+    return movie
+
+
 def publish_remux_verdict(
     store: StateStore, movie: Path, stats: dict[str, Any], before: dict[str, int],
     log_file_path: str | None = LOG_FILE,
@@ -2190,7 +2216,8 @@ def publish_remux_verdict(
 
     The stamp comes from the file as it is *now*, which for a cleaned movie is
     the remuxed file: the verdict describes the bytes on disk, so the next
-    ``organize status`` reports it as current rather than stale.
+    ``organize status`` reports it as current rather than stale. For a
+    conversion that file has a different NAME too - see :func:`verdict_subject`.
     """
     if not store.enabled:
         return False
@@ -2199,7 +2226,7 @@ def publish_remux_verdict(
         return False
     verdict, detail = decision
     try:
-        store.record(movie, KIND_REMUX, verdict, detail)
+        store.record(verdict_subject(movie, stats, before), KIND_REMUX, verdict, detail)
     except Exception as exc:  # noqa: BLE001 - a cache write can never fail a run
         log(f"state cache not updated for '{movie.name}': {exc}",
             level="WARNING", to_console=False, log_file_path=log_file_path)

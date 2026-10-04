@@ -408,6 +408,128 @@ class WhatTheRunTellsStatusTests(CleanerRunFixture):
 
 
 @unittest.skipIf(WINDOWS, "the fake mkvmerge is launched through a POSIX shebang")
+class Mp4ConversionTests(CleanerRunFixture):
+    """An MP4 is remuxed into the canonical MKV in the same pass.
+
+    This is the cleaner's only two-step publish: a NEW file appears under the
+    canonical name, a journal phase is written between the two steps, and only
+    then is the superseded MP4 removed. It is therefore the path with the most
+    ways to leave a library inconsistent - and the README advertises it ("MP4
+    releases are converted to MKV here") - yet it had no end-to-end coverage at
+    all: every test in this file drove an ``.mkv``.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.movie.unlink()
+        self.mp4 = self.folder / "Film (2000).mp4"
+        fake.write_movie(self.mp4, dirty_movie_spec())
+        self.mkv = self.folder / "Film (2000).mkv"
+
+    def test_an_mp4_becomes_a_cleaned_mkv_and_the_mp4_is_gone(self) -> None:
+        self.assertEqual(self._run(), 0)
+        self.assertTrue(self.mkv.is_file(), "the canonical MKV is published")
+        self.assertFalse(self.mp4.exists(), "the superseded MP4 is removed")
+        self.assertEqual(self._leftovers(), [], "no staging file and no journal survive")
+        tracks = self._tracks(self.mkv)
+        self.assertEqual(len([k for k, _ in tracks if k == "audio"]), 1,
+                         "the conversion applies the same one-keeper policy")
+        self.assertEqual(len([k for k, _ in tracks if k == "subtitles"]), 0)
+        self.assertIn("MP4", self._report_text().upper())
+
+    def test_the_verdict_is_recorded_against_the_mkv_that_now_exists(self) -> None:
+        """The verdict has to describe bytes that are on disk.
+
+        A conversion deletes the path the run was handed, so recording against
+        it keyed a row on a file that no longer exists - with NULL size/mtime,
+        because there was nothing left to stat. ``organize status`` joins
+        verdicts to live movies by path, so a movie this run had just converted
+        AND cleaned read as ``unmeasured`` for the remux step, and stayed that
+        way until some later pass happened to look at the ``.mkv``.
+        """
+        from organizekit.core import KIND_REMUX, open_state, path_norm
+
+        self.assertEqual(self._run(), 0)
+        store = open_state(self.state_db, tool="tests")
+        self.addCleanup(store.close)
+        rows = store.verdicts(KIND_REMUX)
+        self.assertNotIn((path_norm(self.mp4), KIND_REMUX), rows,
+                         "the deleted MP4 must not keep a verdict nobody can read")
+        row = rows[(path_norm(self.mkv), KIND_REMUX)]
+        self.assertEqual(row.verdict, tc.STATUS_CLEANED)
+        info = self.mkv.stat()
+        self.assertTrue(row.is_current_for(info.st_size, info.st_mtime_ns),
+                        "stamped with the size/mtime the reader compares against")
+
+    def test_a_second_run_sees_the_converted_movie_as_clean(self) -> None:
+        """Idempotence across the container swap: run two must change nothing."""
+        self.assertEqual(self._run(), 0)
+        published = self.mkv.read_bytes()
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(self.mkv.read_bytes(), published)
+        self.assertFalse(self.mp4.exists())
+        self.assertEqual(self.verdict_name(self.mkv), tc.STATUS_ALREADY_CLEAN)
+
+    def verdict_name(self, path: Path) -> str:
+        from organizekit.core import KIND_REMUX, open_state, path_norm
+
+        store = open_state(self.state_db, tool="tests")
+        self.addCleanup(store.close)
+        return store.verdicts(KIND_REMUX)[(path_norm(path), KIND_REMUX)].verdict
+
+    def test_a_seeding_mp4_is_deferred_and_never_converted(self) -> None:
+        """"Seeding torrents are never touched" covers the conversion too.
+
+        The MP4 is the file the seed shares, so converting it is the one case
+        where the toolkit would otherwise create a NEW file and delete the one
+        the torrent client is still serving.
+        """
+        seed = self.tmp / "seed.mp4"
+        os.link(self.mp4, seed)
+        before = self.mp4.read_bytes()
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(self.mp4.read_bytes(), before, "the seeded MP4 is untouched")
+        self.assertFalse(self.mkv.exists(), "and no MKV appears beside it")
+        self.assertTrue(seed.exists())
+        self.assertEqual(seed.read_bytes(), before)
+        self.assertEqual(self.verdict_name(self.mp4), tc.STATUS_DEFERRED)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_a_broken_sidecar_skips_the_mp4_entirely(self) -> None:
+        """An existing sidecar is authoritative even when it is unusable.
+
+        The conversion strips every embedded subtitle, so proceeding past a
+        broken ``.eng.srt`` would leave the movie with no subtitle at all and no
+        way back - and would have rewritten the container to do it.
+        """
+        sidecar = self.folder / "Film (2000).eng.srt"
+        sidecar.write_text("this is not a subtitle at all\n", encoding="utf-8")
+        before_movie = self.mp4.read_bytes()
+        before_sidecar = sidecar.read_bytes()
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(self.mp4.read_bytes(), before_movie, "the movie is skipped")
+        self.assertFalse(self.mkv.exists(), "and never converted")
+        self.assertEqual(sidecar.read_bytes(), before_sidecar,
+                         "the sidecar is authoritative: never rewritten")
+        self.assertEqual(len(self._tracks(self.mp4)), len(dirty_movie_spec()["tracks"]),
+                         "no embedded subtitle was stripped without a replacement")
+
+    def test_a_conversion_dry_run_publishes_nothing(self) -> None:
+        before = self.mp4.read_bytes()
+        self.assertEqual(self._run("--dry-run"), 0)
+        self.assertEqual(self.mp4.read_bytes(), before)
+        self.assertFalse(self.mkv.exists())
+        self.assertEqual(self._leftovers(), [])
+        self.assertIn("DRY RUN", self._report_text().upper())
+
+    def test_a_failed_conversion_leaves_the_mp4_alone(self) -> None:
+        before = self.mp4.read_bytes()
+        self.assertEqual(self._run(env={"FAKE_MKVMERGE_RC": "2"}), 1)
+        self.assertEqual(self.mp4.read_bytes(), before)
+        self.assertFalse(self.mkv.exists(), "a failed remux publishes no MKV")
+        self.assertEqual(self._leftovers(), [], "the failed attempt is swept up")
+
+@unittest.skipIf(WINDOWS, "the fake mkvmerge is launched through a POSIX shebang")
 class LibraryChangedUnderneathTests(CleanerRunFixture):
     """A remux takes minutes; the library does not hold still for them.
 
