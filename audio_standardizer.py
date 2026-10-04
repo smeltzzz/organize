@@ -118,6 +118,7 @@ from organizekit.core import (
     iter_completed,
     open_probe_cache,
     open_state,
+    orphan_is_abandoned,
     path_is_within,
     probe_cache_path,
     resolve_library,
@@ -787,8 +788,27 @@ def scan(cfg: Config) -> int:
     log("")
 
     # Housekeeping: temp files from a run that died mid-transcode must never
-    # masquerade as movies; they always carry this tool's marker name.
-    for stray in cfg.source_dir.rglob("*.audiofit-*.tmp.mkv"):
+    # masquerade as movies; they always carry this tool's marker name. Two
+    # limits, both of which this sweep used to be missing.
+    #
+    # *Only debris, never work in flight.* The run lock is keyed by the library
+    # path, so a sweep over /movies and a live transcode under /movies/4K hold
+    # different locks and overlap - and a temp named for this tool is exactly
+    # what the overlapping run is writing into. The cleaner's recovery pass has
+    # always aged its orphans first; this now asks the same shared question.
+    #
+    # *A dry run deletes nothing.* The report this run prints says "dry-run (no
+    # file modified)" and docs/tools.md promises --dry-run does "everything
+    # except the mutation", so the sweep is named rather than performed. The
+    # debris is invisible to every other decision here (discover_videos skips
+    # dot-files), so leaving it for the live run costs nothing.
+    strays = sorted(cfg.source_dir.rglob("*.audiofit-*.tmp.mkv"),
+                    key=lambda item: str(item).casefold())
+    abandoned = [stray for stray in strays if orphan_is_abandoned(stray)]
+    for stray in abandoned:
+        if cfg.dry_run:
+            log(f"[DRY-RUN] Would remove stale temp file: {stray.name}")
+            continue
         try:
             stray.unlink()
             log(f"Removed stale temp file: {stray.name}")

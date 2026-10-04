@@ -260,6 +260,11 @@ def run_self_tests() -> int:
     original_runner = globals()["_run_mkvmerge"]
 
     def age_for_recovery(path: Path) -> None:
+        # Imported here rather than resolved from the tool's namespace: the
+        # orphan age moved to organizekit.core so that audio_standardizer's
+        # sweep is governed by the same rule instead of its own copy.
+        from organizekit.core import ORPHAN_MIN_AGE_SECONDS
+
         aged = time.time() - ORPHAN_MIN_AGE_SECONDS - 2.0
         os.utime(path, (aged, aged))
 

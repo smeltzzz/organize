@@ -146,7 +146,7 @@ class RemuxCrashTests(unittest.TestCase):
         touching it would fail the tamper check for the wrong reason and hide
         whatever the recovery logic would really have done.
         """
-        elapsed = tc.ORPHAN_MIN_AGE_SECONDS + 60 if aged else 0.0
+        elapsed = core.ORPHAN_MIN_AGE_SECONDS + 60 if aged else 0.0
         later = time.time() + elapsed
         with contextlib.redirect_stdout(io.StringIO()), \
                 mock.patch.object(tc.time, "time", lambda: later):
@@ -331,7 +331,7 @@ class MaliciousJournalTests(unittest.TestCase):
         # Age the temp first, then fingerprint it: the journal must be
         # internally consistent so that the only thing recovery can object to
         # is the hostile ``source_name`` under test.
-        old = time.time() - (tc.ORPHAN_MIN_AGE_SECONDS + 60)
+        old = time.time() - (core.ORPHAN_MIN_AGE_SECONDS + 60)
         os.utime(temp, (old, old))
         journal = tc._transaction_journal_path(self.library, token)
         journal.write_text(json.dumps({
@@ -371,7 +371,7 @@ class MaliciousJournalTests(unittest.TestCase):
     def test_a_legacy_temp_with_no_journal_is_kept_when_the_original_is_gone(self) -> None:
         legacy = self.library / f"{tc.TEMP_PREFIX}Film (2020).mkv"
         legacy.write_bytes(REMUXED_BYTES)
-        old = time.time() - (tc.ORPHAN_MIN_AGE_SECONDS + 60)
+        old = time.time() - (core.ORPHAN_MIN_AGE_SECONDS + 60)
         os.utime(legacy, (old, old))
         self.assertEqual(self._recover(), 0)
         self.assertTrue(legacy.exists(), "unexplained data is never deleted")
@@ -381,7 +381,7 @@ class MaliciousJournalTests(unittest.TestCase):
         original.write_bytes(MOVIE_BYTES)
         legacy = self.library / f"{tc.TEMP_PREFIX}Film (2020).mkv"
         legacy.write_bytes(REMUXED_BYTES)
-        old = time.time() - (tc.ORPHAN_MIN_AGE_SECONDS + 60)
+        old = time.time() - (core.ORPHAN_MIN_AGE_SECONDS + 60)
         os.utime(legacy, (old, old))
         self.assertEqual(self._recover(), 1)
         self.assertFalse(legacy.exists())

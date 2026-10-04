@@ -4,7 +4,40 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 from pathlib import Path
+
+#: How old a tool's own staging debris must be before a later run may delete
+#: it. Both tools that rewrite a movie (``mkv_track_cleaner.py`` and
+#: ``audio_standardizer.py``) stage their output in a sibling temporary and
+#: sweep whatever an interrupted run left behind on the next pass. The sweep
+#: cannot tell "abandoned by a process that died" from "being written right
+#: now" by name alone, and the two runs are not always mutually excluded: the
+#: run lock is keyed by the library path, so a sweep over ``/movies`` and a
+#: live transcode under ``/movies/4K`` hold different locks and overlap. Age
+#: is the discriminator - a staging file this young is somebody's work in
+#: flight, so it is left alone and the next run picks it up.
+ORPHAN_MIN_AGE_SECONDS = 60.0
+
+
+def orphan_is_abandoned(path: Path | str, *, now: float | None = None) -> bool:
+    """True when a staging file is old enough to be debris, not work in flight.
+
+    The one rule both sweeping tools follow, in one place: they used to differ,
+    and the difference was that ``audio_standardizer.py`` deleted any temp
+    carrying its marker name however fresh, so an overlapping sibling run lost
+    the file ffmpeg was writing into and reported a failure for a movie that
+    was perfectly healthy.
+
+    A file that cannot be statted is **not** abandoned. "I could not read it"
+    is not evidence that nobody owns it, and the safe answer to both is the
+    same: leave it where it is.
+    """
+    try:
+        mtime = Path(path).stat().st_mtime
+    except OSError:
+        return False
+    return (time.time() if now is None else now) - mtime >= ORPHAN_MIN_AGE_SECONDS
 
 
 def atomic_write_text(dest: Path, text: str, *, replace: bool = True) -> None:

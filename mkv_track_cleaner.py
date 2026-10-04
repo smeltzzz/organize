@@ -102,6 +102,7 @@ from organizekit.core import (
     normalize_srt_newlines,
     open_probe_cache,
     open_state,
+    orphan_is_abandoned,
     print_text,
     promote_legacy_external_english_srt,
     resolve_library,
@@ -169,7 +170,9 @@ TRANSACTION_JOURNAL_SUFFIX = ".json"
 TRANSACTION_SCHEMA_VERSION = 1
 LOCK_FILENAME = ".track_cleaner.lock"
 STANDARDIZER_LOCK_TIMEOUT_SECONDS = 60.0
-ORPHAN_MIN_AGE_SECONDS = 60.0
+# The orphan age is NOT defined here any more: audio_standardizer sweeps its own
+# staging debris by the same rule, so the one age lives in organizekit.core.fsio
+# and both tools ask organizekit.core.orphan_is_abandoned.
 MIN_OUTPUT_RATIO = 0.50  # remux smaller than 50% of source → reject (likely truncated)
 # Hardlinked movies are always deferred. Replacing one would break the seed
 # link and consume another full movie-sized allocation until seeding ends.
@@ -1811,10 +1814,9 @@ def cleanup_orphan_temps(target_path: Path, mkvmerge_bin: str, log_file_path: st
                     and filename.lower().endswith((".mkv", ".mp4"))):
                 continue
             temp = Path(root) / filename
-            try:
-                if now - temp.stat().st_mtime < ORPHAN_MIN_AGE_SECONDS:
-                    continue
-            except OSError:
+            if not orphan_is_abandoned(temp, now=now):
+                # Younger than the orphan age - a concurrent remux may still be
+                # writing it - or un-stattable, which is not evidence either way.
                 continue
 
             token = _transaction_token_from_temp_name(filename)

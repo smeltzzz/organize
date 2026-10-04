@@ -32,8 +32,13 @@ sys.path.insert(0, str(REPO))
 
 from organizekit import core  # noqa: E402  (needs the path bootstrap above)
 
-# Every module that used to vendor helpers, plus the two orchestrators.
+# Every module that used to vendor helpers, plus the two orchestrators - and
+# ``audio_standardizer.py``, which was missing from this list for as long as it
+# has existed. It is the tool that rewrites movie audio, so it is the one place
+# a re-vendored ``atomic_write_text`` would cost a library; the rule has to
+# cover it whether or not it has ever broken it.
 TOOLS = (
+    "audio_standardizer.py",
     "bitdepth.py",
     "library_auditor.py",
     "mkv_track_cleaner.py",
@@ -85,6 +90,7 @@ class NothingMayReVendorTheCore(unittest.TestCase):
 
     def test_tools_bind_the_core_implementation_itself(self) -> None:
         """Importing must be by reference, not by re-assignment to a copy."""
+        import audio_standardizer
         import bitdepth
         import library_auditor
         import mkv_track_cleaner
@@ -92,9 +98,15 @@ class NothingMayReVendorTheCore(unittest.TestCase):
         import pipeline
         import subtitle_extractor
 
-        for module in (bitdepth, library_auditor, mkv_track_cleaner,
-                       movie_standardizer, pipeline, subtitle_extractor):
-            for name in ("Report", "resolve_library", "atomic_write_text"):
+        for module in (audio_standardizer, bitdepth, library_auditor,
+                       mkv_track_cleaner, movie_standardizer, pipeline,
+                       subtitle_extractor):
+            # ``orphan_is_abandoned`` is here because two tools sweep their own
+            # interrupted staging files and one age must govern both: a second
+            # copy of that number is how audiofit came to delete a temp file a
+            # live sibling run was still writing.
+            for name in ("Report", "resolve_library", "atomic_write_text",
+                         "orphan_is_abandoned"):
                 bound = getattr(module, name, None)
                 if bound is None:
                     continue  # a tool need not use every helper

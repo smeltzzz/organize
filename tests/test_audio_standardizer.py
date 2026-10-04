@@ -14,6 +14,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -355,6 +356,129 @@ class RealTranscodeRunTests(ChainFixture):
         stray.write_bytes(b"not a movie")
         self.assertEqual(self._run(), 0)
         self.assertIn("Movies inspected", self.report_text())
+
+
+class StaleTempSweepTests(unittest.TestCase):
+    """The housekeeping sweep may remove abandoned debris, and nothing else.
+
+    ``scan()`` starts by deleting every ``*.audiofit-*.tmp.mkv`` under the
+    library, because a run killed mid-transcode leaves one behind and it must
+    never masquerade as a movie. It asked two questions too few:
+
+    * **Was this a dry run?** ``--dry-run`` is documented as "everything except
+      the mutation", and this tool's own report line says "dry-run (no file
+      modified)" - yet the sweep deleted a file inside the library anyway. The
+      cleaner does not do this: its recovery pass is gated on the single-instance
+      lock, which a dry run deliberately does not take.
+    * **Is it actually abandoned?** The run lock is keyed by the library path, so
+      a sweep over ``/movies`` and a live transcode under ``/movies/4K`` hold
+      *different* locks and overlap. The overlapping run's in-flight temp carries
+      exactly this pattern, so the sweep deleted the file ffmpeg was writing into
+      and that run reported "ffmpeg failed" for a healthy movie. The cleaner's
+      recovery has always aged its orphans first (``ORPHAN_MIN_AGE_SECONDS``);
+      the age now lives in ``organizekit.core`` and both tools ask it.
+
+    These run without the fake binaries: a library holding only debris is
+    discovered as empty, so the sweep is the whole run.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(prefix="affix_sweep_")
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name).resolve()
+        self.library = self.tmp / "Movies"
+        self.library.mkdir()
+        self.log_file = self.tmp / "out" / "audiofit.log"
+        self.report = self.tmp / "out" / "audiofit_report.txt"
+        self._saved = (aus.log.file, aus.log.live)
+        aus.log.file = self.log_file
+        aus.log.live = None
+        self.addCleanup(self._restore)
+
+    def _restore(self) -> None:
+        aus.log.file, aus.log.live = self._saved
+
+    def _stray(self, title: str = "Film (2001)", *, age: float | None = None,
+               pid: int = 4242) -> Path:
+        """A debris file named exactly the way ``transcode_movie`` names one."""
+        folder = self.library / title
+        folder.mkdir(parents=True, exist_ok=True)
+        stray = folder / f".{title}.audiofit-{pid}.tmp.mkv"
+        stray.write_bytes(b"debris" * 100)
+        if age is not None:
+            stamped = time.time() - age
+            os.utime(stray, (stamped, stamped))
+        return stray
+
+    def _scan(self, *, dry_run: bool = False) -> int:
+        cfg = aus.Config(
+            source_dir=self.library, log_file=self.log_file, report_file=self.report,
+            state_db=self.tmp / "out" / "state.db", dry_run=dry_run,
+            use_state=False, use_cache=False, min_file_size_mb=1.0,
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            return aus.scan(cfg)
+
+    def _listing(self) -> list[str]:
+        return sorted(str(p.relative_to(self.library)) for p in self.library.rglob("*"))
+
+    def _log_text(self) -> str:
+        return self.log_file.read_text(encoding="utf-8")
+
+    def test_a_dry_run_leaves_the_library_file_for_file(self) -> None:
+        """The one mode that promises an untouched library must keep it."""
+        stray = self._stray(age=3600.0)
+        before = self._listing()
+        self.assertEqual(self._scan(dry_run=True), 0)
+        self.assertEqual(self._listing(), before,
+                         "a dry run changed what is in the library")
+        self.assertTrue(stray.is_file(), "the debris is still there to sweep later")
+        self.assertIn("Would remove stale temp file", self._log_text())
+        self.assertIn("dry-run (no file modified)", self.report.read_text(encoding="utf-8"))
+
+    def test_a_live_run_still_sweeps_abandoned_debris(self) -> None:
+        stray = self._stray(age=3600.0)
+        self.assertEqual(self._scan(), 0)
+        self.assertFalse(stray.exists(), "aged debris is this tool's to clean up")
+        self.assertIn("Removed stale temp file", self._log_text())
+
+    def test_a_temp_a_sibling_run_may_still_be_writing_is_left_alone(self) -> None:
+        """Fresh debris is indistinguishable from work in flight, so it waits."""
+        stray = self._stray()  # mtime = now: a live transcode could be writing it
+        self.assertEqual(self._scan(), 0)
+        self.assertTrue(stray.is_file(),
+                        "a young temp belongs to the run that is writing it")
+        self.assertNotIn("Removed stale temp file", self._log_text())
+
+    def test_the_age_it_waits_for_is_the_cleaners_age(self) -> None:
+        """One rule for both sweeps, imported rather than retyped."""
+        from organizekit import core
+
+        self.assertIs(aus.orphan_is_abandoned, core.orphan_is_abandoned)
+        stray = self._stray(age=core.ORPHAN_MIN_AGE_SECONDS + 1.0)
+        self.assertEqual(self._scan(), 0)
+        self.assertFalse(stray.exists())
+
+    def test_another_tools_staging_is_never_this_sweep_business(self) -> None:
+        """The cleaner's orphan temp and journal are the cleaner's to recover.
+
+        audiofit cannot read a cleaner transaction journal, so it has no way to
+        know whether that staging file was verified. Deleting it would destroy
+        the one artifact ``cleanup_orphan_temps`` promotes a crashed-but-complete
+        remux from.
+        """
+        folder = self.library / "Film (2001)"
+        folder.mkdir()
+        cleaner_temp = folder / "temp_clean_abc123__Film (2001).mkv"
+        cleaner_temp.write_bytes(b"x" * 1024)
+        journal = folder / ".track_cleaner.abc123.json"
+        journal.write_text("{}", encoding="utf-8")
+        aged = time.time() - 3600.0
+        for path in (cleaner_temp, journal):
+            os.utime(path, (aged, aged))
+        before = self._listing()
+        self.assertEqual(self._scan(), 0)
+        self.assertEqual(self._listing(), before)
 
 
 class PlannerUnitTests(unittest.TestCase):

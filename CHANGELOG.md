@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`audio_standardizer.py --dry-run` no longer changes the library.** `scan()`
+  opened with a housekeeping sweep that deleted every `*.audiofit-*.tmp.mkv`
+  under `--source` — including on a dry run, whose whole promise is that the
+  library comes back as it was found (`docs/tools.md`: "everything except the
+  mutation") and whose own report line said "dry-run (no file modified)" while
+  it deleted a file. The sweep now reports what it would remove and removes
+  nothing; the live run still sweeps. `mkv_track_cleaner.py` never had this bug
+  because its recovery pass is gated on the single-instance lock, which a dry
+  run deliberately does not take.
+- **The same sweep no longer deletes a temp file a live run is still writing.**
+  The run lock is keyed by the library path, so a sweep over `/movies` and a
+  transcode under `/movies/4K` hold *different* locks and overlap — and the
+  in-flight temp of that second run matches audiofit's debris pattern exactly.
+  The overlapped run then found its output missing and reported `ffmpeg failed`
+  for a movie that was perfectly healthy (no data loss: the original is only
+  ever replaced after verification, but the run was wrong about it). audiofit
+  now asks the age question the cleaner's recovery has always asked.
+- **That age is one rule, not two.** `ORPHAN_MIN_AGE_SECONDS` moved out of
+  `mkv_track_cleaner.py` into `organizekit/core/fsio.py` next to a new
+  `orphan_is_abandoned()` predicate, and both sweeps call it — the core
+  membership rule is "more than one tool needs it *and* its behaviour must not
+  differ between them", which is now true of this one. A file that cannot be
+  statted is not abandoned: "I could not read it" is not evidence nobody owns
+  it.
+
+### Tests
+- New `StaleTempSweepTests`: a dry run leaves the library file-for-file
+  unchanged and says what it would sweep; a live run removes debris old enough
+  to be abandoned; a fresh temp is left to whoever is writing it; the age it
+  waits for is the cleaner's age, by identity of the shared function; and
+  another tool's staging artifacts (`temp_clean_*.mkv` and its
+  `.track_cleaner.*.json` journal) are never this sweep's business — audiofit
+  cannot read that journal, so it has no way to know whether the staging file
+  was verified.
+- `tests/test_shared_core.py` now covers `audio_standardizer.py`, the one tool
+  the "no tool may re-vendor a core helper" rule had been omitting — it is also
+  the tool that rewrites movie audio.
+
 ## [8.4.0] - 2026-10-04
 
 One false premise, removed. **The 7.1 Dolby target could never be built** —

@@ -32,7 +32,14 @@ from .console import (
     write_raw,
 )
 from .events import EventStream
-from .fsio import atomic_write_text, path_is_within, path_norm, sha256_file
+from .fsio import (
+    ORPHAN_MIN_AGE_SECONDS,
+    atomic_write_text,
+    orphan_is_abandoned,
+    path_is_within,
+    path_norm,
+    sha256_file,
+)
 from .jsonout import JSON_SCHEMA, json_document, print_json, slug_id
 from .live import LiveLine, ellipsize, strip_ansi
 from .locking import (
@@ -223,7 +230,9 @@ __all__ = [
     "probe_cache_path",
     "Report",
     "RunLog",
+    "ORPHAN_MIN_AGE_SECONDS",
     "atomic_write_text",
+    "orphan_is_abandoned",
     "child_cwd",
     "clip_text",
     "decode_srt_bytes",
