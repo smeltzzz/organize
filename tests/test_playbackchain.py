@@ -317,6 +317,41 @@ class TargetAudioTests(unittest.TestCase):
         self.assertEqual(pc.target_audio_for(2, pc.WIRING_TV_ARC).bitrate, "192k")
         self.assertEqual(pc.target_audio_for(1, pc.WIRING_TV_ARC).channels, 1)
 
+    def test_zero_or_unparseable_source_channels_defaults_to_stereo(self) -> None:
+        """Defensive: a 0-channel or bogus source must NOT promise 5.1.
+
+        ``int("0" or 6)`` used to evaluate to 0, not 6, because the string
+        ``"0"`` is truthy in Python; ``ch = max(1, 0)`` then clamped to 1
+        and the >=5 branch picked a 5.1 @ 640 kbps target from a track that
+        had no audio. Worse, ``int(0 or 6) == 6`` landed on 5.1 for the
+        integer 0. A probe payload with channels=0 (an image attachment
+        mislabeled as audio, or an exotic codec ffprobe cannot describe)
+        must therefore synthesize a conservative stereo bed, not fail the
+        Dolby encoder ceiling assertion by targeting 5.1 from silence.
+        """
+        for bogus in (0, "0", -5, None, "", "bogus"):
+            for wiring in (pc.WIRING_SOUNDBAR_HDMI_IN, pc.WIRING_TV_ARC):
+                with self.subTest(bogus=bogus, wiring=wiring):
+                    target = pc.target_audio_for(bogus, wiring)
+                    self.assertEqual(
+                        target.channels, 2,
+                        f"target_audio_for({bogus!r}) on {wiring} promised "
+                        f"{target.channels}ch instead of safe stereo",
+                    )
+
+    def test_achievable_channels_is_defensive_against_string_zero(self) -> None:
+        """mkvmerge/ffprobe occasionally render channels as the string "0"."""
+        for zero in (0, "0", None, "", "bogus"):
+            with self.subTest(zero=zero):
+                self.assertEqual(
+                    pc.achievable_channels(pc.AUDIO_NATIVE, zero), 0,
+                    "zero-channel native must achieve zero, not credit audio",
+                )
+                self.assertEqual(
+                    pc.achievable_channels(pc.AUDIO_TRANSCODE_BOUND, zero), 0,
+                    "zero-channel transcode source must achieve zero",
+                )
+
 
 class VideoClassificationTests(unittest.TestCase):
     def test_native_codecs_at_1080p_direct_play(self) -> None:

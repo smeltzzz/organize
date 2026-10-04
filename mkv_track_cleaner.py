@@ -888,8 +888,14 @@ def get_audio_quality_score(
     tier = chain_audio_tier(blob)
 
     try:
-        channels = int(props.get("audio_channels") or 2)
+        channels = int(props.get("audio_channels"))
     except (ValueError, TypeError):
+        channels = 0
+    if channels <= 0:
+        # mkvmerge reports channels as the string "0" for exotic/unknown
+        # tracks; ``int("0" or 2)`` produced 0 and let the scorer credit a
+        # zero-channel track with achieving stereo. Fall back to stereo,
+        # matching ``audio_standardizer.channels_of``.
         channels = 2
     # Atmos only exists inside Dolby Digital Plus (as JOC) on anything this
     # player can emit - plain AC-3 has no Atmos variant, so an "Atmos" in the
