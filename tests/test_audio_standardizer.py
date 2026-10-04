@@ -176,14 +176,15 @@ class RealTranscodeRunTests(ChainFixture):
         self.assertEqual(code, 0)
 
         # The two lossless files were replaced by a verified superset. On the
-        # default wiring the synthesized track is Dolby Digital Plus, which
-        # keeps the 7.1 layout of these 8-channel masters.
+        # default wiring the synthesized track is Dolby Digital Plus folded to
+        # 5.1 — the widest layout ffmpeg's Dolby encoders can actually write
+        # (an 8-channel master no longer buys an 8-channel promise that fails).
         for path, before_streams in ((truehd, TRUEHD_ONLY), (dtshd, DTSHD_ONLY)):
             streams = self.payload_of(path)["streams"]
             with self.subTest(movie=path.name):
                 self.assertEqual(len(streams), len(before_streams["streams"]) + 1)
                 self.assertEqual(streams[-1]["codec_name"], "eac3")
-                self.assertEqual(streams[-1]["channels"], 8)
+                self.assertEqual(streams[-1]["channels"], 6)
                 self.assertEqual(streams[0]["codec_name"], "hevc")
         # The already-native file and the reviewable one were never opened.
         self.assertEqual(done.read_bytes(), timestamp_before)
@@ -197,6 +198,11 @@ class RealTranscodeRunTests(ChainFixture):
             self.assertIn("eac3", args)
             self.assertIn("640k", args)
             self.assertIn("0:1", args)  # '-map 0:1' input-side
+            # The command line itself must respect the encoder ceiling — this
+            # is the exact argument (`-ac:a:1 8`) that made ffmpeg fail and
+            # write nothing for every >=7.1 master before 8.4.0.
+            ac_idx = args.index("-ac:a:1")
+            self.assertEqual(args[ac_idx + 1], "6")
         # State remembers what was done.
         rows = self.plan_rows()
         self.assertEqual(rows["TrueHD Film (2001)"], aus.STATUS_TRANSCODED)
@@ -407,22 +413,57 @@ class PlannerUnitTests(unittest.TestCase):
                 assert v.target is not None
                 self.assertEqual(v.target.codec, "ac3")
 
-    def test_the_default_wiring_targets_dolby_digital_plus_and_keeps_71(self) -> None:
+    def test_the_default_wiring_targets_dolby_digital_plus_folded_to_51(self) -> None:
         # A lossless 7.1 master on the chain as cabled: the synthesized track
         # is Dolby Digital Plus (official G454V passthrough, decoded by the
-        # AX3125H's HDMI IN) and keeps the master's full 7.1 layout.
+        # AX3125H's HDMI IN), folded to 5.1 - the ceiling of the encoder that
+        # has to build it. The format could carry 7.1; no ffmpeg Dolby encoder
+        # can write one, and asking it to fails the whole transcode.
         v = aus.plan_for_payload("m.mkv", TRUEHD_ONLY, self.cfg)
         self.assertEqual(v.status, aus.STATUS_PLANNED)
         assert v.target is not None
         self.assertEqual(v.target.codec, "eac3")
-        self.assertEqual(v.target.channels, 8)
+        self.assertEqual(v.target.channels, pc.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS)
+        self.assertEqual(v.target.channel_name, "5.1")
         self.assertEqual(v.target.bitrate, "640k")
-        # The tv-arc alternative keeps the every-hop AC-3 target, folded.
+        # The tv-arc alternative keeps the every-hop AC-3 target, folded too.
         cfg = aus.Config(dry_run=True, wiring=pc.WIRING_TV_ARC)
         v = aus.plan_for_payload("m.mkv", TRUEHD_ONLY, cfg)
         assert v.target is not None
         self.assertEqual(v.target.codec, "ac3")
         self.assertEqual(v.target.channels, 6)
+
+    def test_a_native_track_below_the_keeper_never_settles_the_file(self) -> None:
+        """The 8.3.1 fix: the verdict is about the KEEPER, not about existence.
+
+        A pool holding a 7.1 lossless master and a narrow AC-3 2.0: the
+        master ranks first (it reaches a 5.1 bed, the stereo track can never
+        become anything), so the cleanup keeps the master and deletes the
+        AC-3. Answering `native-ok` because "some AC-3 exists" is what left
+        those movies with only audio the chain cannot emit - transcoders on
+        every play. The file is not settled; it is planned, and the appended
+        DD+ track is what the cleaner keeps afterwards.
+        """
+        payload = _payload({"codec_name": "truehd", "channels": 8},
+                           {"codec_name": "ac3", "channels": 2})
+        v = aus.plan_for_payload("m.mkv", payload, self.cfg)
+        self.assertNotIn(v.status, aus.SETTLED_AUDIOFIT)
+        self.assertEqual(v.status, aus.STATUS_PLANNED)
+        self.assertEqual(v.source_stream, 1)
+        self.assertEqual(v.source_codec, "truehd")
+        # And after the bake-in, the same file IS settled: the appended DD+
+        # 5.1 now ranks above the master (same reach, no server work), so the
+        # keeper is a track the chain emits - the invariant, stated the other
+        # way round.
+        after = dict(payload)
+        target = v.target
+        assert target is not None
+        after["streams"] = list(payload["streams"]) + [
+            {"index": 3, "codec_type": "audio", "codec_name": target.codec,
+             "channels": target.channels, "sample_rate": target.sample_rate,
+             "tags": {"language": "eng"}, "disposition": {"default": 0}}]
+        v_after = aus.plan_for_payload("m.mkv", after, self.cfg)
+        self.assertEqual(v_after.status, aus.STATUS_NATIVE)
 
     def test_a_titled_eac3_stream_is_native_from_the_ffprobe_fields(self) -> None:
         """The classifier reads codec_name/profile; the title never decides."""
@@ -439,18 +480,22 @@ class PlannerUnitTests(unittest.TestCase):
                                  if payload is EAC3_TITLED_TRUEHD else
                                  "EAC3 - DTS-HD MA 7.1")
 
-    def test_the_transcode_source_is_the_widest_lossless_master(self) -> None:
-        # Two lossless masters, no native track: the source is the one that
-        # reaches the widest layout, because the target preserves it. A TrueHD
-        # 7.1 becomes a DD+ 7.1; burning the DTS-HD MA 5.1 instead would cap
-        # the library at 5.1 forever. Same table the cleaner ranks with, so the
-        # two tools cannot disagree about which master to keep.
+    def test_the_transcode_source_is_the_highest_tier_master_not_the_widest(self) -> None:
+        # Two lossless masters, no native track. Since 8.4.0 both reach the
+        # SAME 5.1 bed - the encoder ceiling means a 7.1 master no longer
+        # reaches further than a 5.1 one - so the widest is not special any
+        # more and the chain's master-preference table picks the input:
+        # DTS-HD MA outranks TrueHD, exactly as it already did at equal
+        # layouts. Before the cap this fixture chose TrueHD *because* 7.1
+        # stayed 7.1; that premise was false, and it is what made the whole
+        # >=7.1 library's audiofit fail. Same table the cleaner ranks with,
+        # so the two tools still cannot disagree about which master to burn.
         payload = _payload({"codec_name": "truehd", "channels": 8},
                            {"codec_name": "dts", "profile": "DTS-HD MA", "channels": 6})
         v = aus.plan_for_payload("m.mkv", payload, self.cfg)
         self.assertEqual(v.status, aus.STATUS_PLANNED)
-        self.assertEqual(v.source_stream, 1)
-        self.assertEqual(v.source_codec, "truehd")
+        self.assertEqual(v.source_stream, 2)
+        self.assertEqual(v.source_codec, "dts")
 
     def test_at_an_equal_layout_the_highest_tier_master_is_the_source(self) -> None:
         # Determinism, not preference: both reach 5.1, so the chain's

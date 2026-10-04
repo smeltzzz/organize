@@ -266,34 +266,47 @@ track plays right now?", and that question decides the order. The remux is
 **irreversible**: a dropped track is gone for good, while a track that merely
 needs converting can still be converted on any later run. Deleting a TrueHD
 Atmos 7.1 master to keep a stereo AC-3 that plays today cannot be undone;
-converting that master into a DD+ 7.1 can always be done. So:
+converting that master into a DD+ 5.1 bed can always be done. So:
 
 1. **achievable layout** — how many channels the track reaches *on this chain*,
    via `playbackchain.achievable_channels()`. A chain-native track achieves the
    channels it carries; a transcode-bound master achieves the channels
-   `audio_standardizer.py` would bake into its replacement (7.1 stays 7.1 on the
-   default wiring, folds to 5.1 under `tv-arc` — never upmixed); an *unknown*
-   track achieves nothing, because the toolkit fail-closes and never auto-touches
-   one. This is the key that makes **TrueHD Atmos 7.1 worth more than an AC-3
-   2.0 that plays today**, and it is what keeps FLAC 7.1 ahead of AC-3 2.0.
+   `audio_standardizer.py` would bake into its replacement, which is **at most
+   5.1 on either wiring** — the ceiling is ffmpeg's Dolby encoders, not the
+   format (`playbackchain.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS`); a wider master
+   folds, it is never promised a bitstream that would fail to encode. An
+   *unknown* track achieves nothing, because the toolkit fail-closes and never
+   auto-touches one. This is the key that makes **TrueHD Atmos 7.1 worth more
+   than an AC-3 2.0 that plays today** (6 beats 2). Tracks needing no encoder
+   are untouched by the cap — FLAC 7.1 really arrives as LPCM 7.1 on the bar's
+   HDMI IN, which is what keeps **FLAC 7.1 ahead of everything Dolby-bound**.
 2. **band** — *plays with no server work* (AC-3 / DD+ / base DTS / anything
    decoded to PCM) beats *transcode-bound* (TrueHD / DTS-HD / DTS:X / WMA Pro)
    beats *unknown*. At an **equal achievable layout** this is the
    Direct-Play-first rule and it is unchanged: a 5.1 AC-3 still beats a 5.1
    TrueHD, because both land at 5.1 and only one of them gets there without the
-   server re-encoding anything. "Highest sample rate wins" is still the wrong
-   metric; "reaches the widest layout, with the least server work" is the right
-   one.
+   server re-encoding anything — and since 8.4.0 a 5.1 AC-3 also beats a 7.1
+   TrueHD, which folds to the same bed (8.2.0 ranked the master above both on
+   the false premise that its replacement would be 7.1). "Highest sample rate
+   wins" is still the wrong metric; "reaches the widest layout, with the least
+   server work" is the right one.
 3. **Atmos** — a real DD+ Atmos track wins among equal layouts, because a 3.1.2
-   bar with up-firing drivers is what it exists for.
+   bar with up-firing drivers is what it exists for. This needs no special case
+   against 7.1 masters any more: both reach the same 5.1 bed, so the band above
+   already keeps the Atmos track — correct, since no open encoder can synthesize
+   Atmos at all (the JOC object metadata is gated behind a proprietary Dolby
+   signature), so a real DD+ Atmos stream is irreplaceable, while 7.1's two
+   extra channels drive nothing on a bar with no rear speakers.
 4. **codec sub-tier** — the historical quality order refines the rest:
    DD+ (100) > DD (95) > base DTS core (80) > lossless-decodable (66) >
    Opus (62) > other lossy (60), and below the band DTS-HD MA / DTS:X (34) >
    DTS-HD HRA (32) > the rest (30). That lower half is also what picks the best
    *transcode source*: `audio_standardizer.py` ranks its own pool with this same
    function, so the two tools cannot disagree about which master to burn — and
-   because key 1 leads, they agree that a TrueHD 7.1 is a better source than a
-   DTS-HD MA 5.1, since the target preserves 7.1.
+   because the encoder cap makes every surround master land on the same 5.1
+   bed, the source is the **highest-tier** master again rather than the widest:
+   a DTS-HD MA 5.1 outranks a TrueHD 7.1 as *input* (it did not before 8.4.0,
+   when the target table wrongly preserved 7.1).
 
 The per-port table in §2 is what makes multichannel decoded audio first-class on
 this wiring — LPCM 5.1/7.1 are supported on the bar's HDMI IN — which is why a
@@ -316,21 +329,26 @@ or the cleaner run standalone.
   Dolby Atmos via HDMI pass-through) and on Hisense's decoder list for the
   bar. Nothing else about the target is hedged.
 * E-AC-3 is strictly the better codec of the two Dolby bitstreams: a more
-  efficient encode than AC-3 at any given bitrate, and it can carry **7.1**
-  where AC-3 caps at 5.1 — so a lossless 7.1 master keeps its full layout
-  (the bar's upmixer uses every channel), instead of being folded. 5.1 and
-  6.1 sources normalize to 5.1; stereo stays stereo (192 kbps), mono mono —
-  nothing is ever upmixed.
+  efficient encode than AC-3 at any given bitrate. Width is not one of its
+  advantages *on the synthesis side*: the format can carry 7.1, but no Dolby
+  encoder in ffmpeg can write past 5.1 — `eac3` and `ac3` support layouts up
+  to 5.1 only (they write independent frames and never the dependent
+  substreams 7.1 needs), and they fail rather than downmix, so the toolkit's
+  own target table caps at 5.1 on both wirings
+  (`playbackchain.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS`). An existing DD+ 7.1
+  stream in a file is a different matter — nothing converts it, it just
+  bitstreams. 5.1/6.1/7.1+ sources all normalize to a 5.1 bed at 640 kbps;
+  stereo stays stereo (192 kbps), mono mono — nothing is ever upmixed.
 * 640 kbps is the bitrate every sink in this chain handles with headroom
   and the ceiling these mixes need; the transcode source is usually a
   lossless master with plenty of headroom, so the ceiling is the honest
   choice.
 * **Under the explicit `tv-arc` alternative** the synthesized target stays
-  AC-3 (Dolby Digital) and 7.1 folds to 5.1: that path routes sound through
-  the 2013 TV, and AC-3 is the one format licensed-and-supported at every
-  hop of it (ARC and optical included). Re-muxing an existing E-AC-3 (or
-  AC-3) track is of course *kept* as-is on either wiring — it is native
-  too, and Atmos carries through.
+  AC-3 (Dolby Digital), where 5.1 has been the encoder's limit all along;
+  that path routes sound through the 2013 TV, and AC-3 is the one format
+  licensed-and-supported at every hop of it (ARC and optical included).
+  Re-muxing an existing E-AC-3 (or AC-3) track is of course *kept* as-is on
+  either wiring — it is native too, and Atmos carries through.
 
 ## 6 · The settings checklist (the human half of the chain)
 

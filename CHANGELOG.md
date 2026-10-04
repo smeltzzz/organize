@@ -4,6 +4,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.4.0] - 2026-10-04
+
+One false premise, removed. **The 7.1 Dolby target could never be built** —
+and since 8.1.0 introduced it, every movie with a ≥7.1 lossless master has
+been failing `audio_standardizer.py` outright.
+
+### Fixed
+- **`target_audio_for()` no longer promises a layout no encoder can write.**
+  It returned `channels=8, channel_name="7.1"` for any ≥7.1 source on the
+  default wiring, so `build_ffmpeg_command()` emitted `-c:a:N eac3 -b:a 640k
+  -ac:a:N 8` — and ffmpeg's E-AC-3 encoder cannot produce 7.1. Its supported
+  channel layouts stop at 5.1 because it writes independent frames only and
+  never the dependent substreams a 7.1 bitstream needs. It does not downmix;
+  it fails ("Could not open encoder before EOF … Conversion failed!") and
+  writes nothing. AC-3 has the same ceiling. Verified against a real
+  `ffmpeg 7.0.2` (`ffmpeg -h encoder=eac3`) and by running both commands:
+  `-ac 8` fails, `-ac 6` produces a valid `eac3, 48000 Hz, 5.1(side), fltp,
+  640 kb/s`. Both Dolby targets now cap at 5.1, on either wiring.
+- **The ceiling is recorded as data, not prose:**
+  `playbackchain.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS = 6`, exported from
+  `organizekit.core`. `achievable_channels()` inherits the fix automatically
+  — it asks `target_audio_for()` — so a transcode-bound 7.1 master achieves
+  **6, not 8**, and a track that needs no encoder is unaffected: FLAC 7.1
+  really does arrive as LPCM 7.1 on the bar's HDMI IN, per Hisense's per-port
+  matrix, and still achieves its own layout. A test walks every source layout
+  from mono to 7.1 on both wirings and asserts no target exceeds the ceiling.
+
+### Changed
+- **The keeper ranking follows the corrected arithmetic, and no Atmos special
+  case was added anywhere.** A genuine DD+ Atmos 5.1 track now outranks a
+  wider lossless master: both reach the same 5.1 bed, so the existing band
+  tiebreak decides, and the track that already plays wins. Correct here for
+  two independent reasons: (1) no open encoder can produce DD+ ATMOS at all —
+  the JOC object metadata is gated behind a proprietary cryptographic
+  signature only Dolby's licensed encoder holds, so a synthesized track is
+  never Atmos and a real one is irreplaceable; and (2) the Hisense AX3125H is
+  a 3.1.2 bar — three front drivers, a wireless sub, two up-firing height
+  drivers, no rear surrounds — so 7.1's two extra channels have nothing
+  physical to drive while the height information has two drivers waiting.
+  The resulting ranking, all covered by tests: DD+ Atmos 5.1 > TrueHD Atmos
+  7.1 and > DTS-HD MA 7.1; TrueHD 7.1 still > AC-3 2.0 (8.2.0's core rule
+  survives); AC-3 5.1 > TrueHD 7.1 (this REVERSES 8.2.0, correctly — 8.2.0
+  reasoned from the false premise that the master would become 7.1); FLAC 7.1
+  > both (unaffected; needs no encoder). The transcode source becomes the
+  highest-tier master again rather than the widest, since 7.1 no longer
+  reaches further than 5.1.
+- **Deliberately unchanged:** FLAC 7.1 still counts as reaching 7.1 and still
+  beats a master. That is honest — the track arrives as LPCM 7.1 — but
+  whether a 3.1.2 bar with no surround drivers *benefits* from 7.1 input is
+  an acoustic judgement call, not a provable fact, so it is left out of the
+  ranking.
+- The audiofit verification self-test no longer hardcodes an 8-channel
+  appended track; it derives the expected shape from the planned target, so a
+  future change to the target table cannot silently unverify the verifier.
+- Docs corrected: [hardware.md](docs/hardware.md) §5, [tools.md](docs/tools.md)
+  §2 and §3, the `get_audio_quality_score` and `achievable_channels`
+  docstrings — all of them claimed E-AC-3 carries 7.1, so a master keeps its
+  full layout.
+
+## [8.3.1] - 2026-10-04
+
+**`audiofit` answered for the wrong track.** Never published standalone —
+PyPI went 8.3.0 → 8.4.0, which contains this fix too; it gets its own entry
+because it is a separate bug with a separate lesson.
+
+### Fixed
+- `audio_standardizer.plan_for_payload()` returned `STATUS_NATIVE` if the
+  candidate pool contained **any** chain-native stream. But
+  `mkv_track_cleaner.py` keeps exactly one track, and since 8.2.0 it ranks
+  by the layout a track can *reach* — so it kept the lossless master and
+  deleted the Dolby track audiofit had just relied on, leaving a movie whose
+  only audio the Chromecast G454V can never emit: transoding on every play,
+  forever.
+- The verdict now keys off the **ranked best stream** (`classified[0]`), like
+  every other branch of that planner already did — `AUDIO_DTS_CORE`,
+  `AUDIO_DECODE_PCM` and `AUDIO_UNKNOWN` all asked "what is the best?"; only
+  the native branch had asked "does one exist?". The pool is ranked with the
+  cleaner's own score function, so `classified[0]` **is** the keeper, which
+  makes the invariant stateable: *if audiofit calls a file settled, the
+  keeper is a track this chain can emit.*
+
 ## [8.3.0] - 2026-10-03
 
 One behaviour change, requested: **every cut of a movie is the same movie.**
