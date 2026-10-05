@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Base DTS core is now transcoded by default on the `soundbar-hdmi-in`
+  wiring.** It was previously left alone everywhere. Core DTS is the only
+  format this toolkit accepted on an *unofficial* basis: it is not on Google's
+  published passthrough list for the G454V (DD / DD+ / Atmos-via-DD+), and it
+  plays because the Amlogic Android TV firmware happens to pass it through at
+  the HDMI layer. That is real but it is not a contract, and the failure mode
+  if a system update ends it is the silent one this toolkit exists to prevent —
+  every DTS movie begins transcoding server-side on every play. Two further
+  facts make keeping it a bad trade on this specific chain: the AX3125H is
+  **3.1.2 with no surround speakers**, so a 5.1 mix is folded into L/C/R +
+  2 height + sub whatever carries it; and DTS core runs ~1.5 Mbps against the
+  DD+ target's 640 kbps, roughly **400 MB on a two-hour movie**. The policy is
+  data — `playbackchain.DTS_PASSTHROUGH_DEFAULT` — and the `tv-arc` wiring
+  deliberately keeps the historical accept-DTS behaviour, because that path is
+  the documented-degraded alternative this install does not run and
+  re-deciding its DTS policy is a separate question.
+- **`audio_standardizer.py` gained `--dts-passthrough`.** The two flags are now
+  a mutually-exclusive pair over a three-valued default: neither flag means
+  "use the wiring's policy", and either flag states it explicitly and wins. An
+  existing `--no-dts-passthrough` in a scheduler keeps working unchanged, and
+  `--dts-passthrough` restores the old accept-DTS behaviour on the default
+  wiring. The run banner now says which of the two it is applying
+  (`[wiring default]` vs `[overridden by flag]`).
+
+### Fixed
+- **`bitdepth.py` reported a worker count it never used.** `cfg_from_args`
+  expanded `--workers` with `args.workers if args.workers > 0 else
+  os.cpu_count()`, bypassing `MAX_CPU_WORKERS`. The pool was never actually
+  oversubscribed — `scan()` re-resolves through `resolve_workers` — but
+  `cfg.workers` is what the banner and the log print, so on a 16- or 64-core
+  host the run claimed far more workers than it ran. Same fix
+  `audio_standardizer.cfg_from_args` already carried.
+
 ## [8.4.2] - 2026-10-04
 
 A re-audit of the whole tree at 8.4.1, looking for what the 8.4.1 pass missed.

@@ -187,7 +187,7 @@ answer. For each movie it probes (`ffprobe`) and classifies:
 | Source situation (the pool's **ranked best** track decides — see the invariant below) | Verdict | What happens |
 | :--- | :--- | :--- |
 | AC-3 / E-AC-3 ranked first in the pool | `native-ok` | nothing — the track the cleaner will keep already bitstreams end-to-end |
-| base 5.1 DTS core | `dts-core-ok` | accepted (the AX3125H has a DTS decoder and the player's Amlogic firmware passes core DTS — unofficial but real); `--no-dts-passthrough` transcodes these too |
+| base 5.1 DTS core | `transcoded-dolby` (default) / `dts-core-ok` | **transcoded to the wiring's Dolby target by default on `soundbar-hdmi-in`**: core DTS is not on Google's published passthrough list for the G454V — it rides on Amlogic firmware behaviour — and at ~1.5 Mbps it costs ~400 MB a movie for audio the 3.1.2 bar downmixes anyway. `--dts-passthrough` keeps it as-is (the AX3125H does have a DTS decoder); `tv-arc` still accepts it by default. See `playbackchain.DTS_PASSTHROUGH_DEFAULT` |
 | AAC / FLAC / PCM / MP3 / Opus | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar takes multichannel PCM, while the explicit `--wiring tv-arc` (this TV offers PCM only for HDMI sources = stereo PCM) makes them transcode candidates |
 | TrueHD / DTS-HD MA / DTS-HD HRA / DTS:X | `transcoded-dolby` | **one chain-native Dolby track is synthesized and appended (Dolby Digital Plus on the default wiring), video untouched** |
 | unknown codec | `review-unknown` | fail-closed in the report; never auto-touched |

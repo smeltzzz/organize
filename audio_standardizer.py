@@ -32,7 +32,7 @@ What this tool does, per movie:
   2. Classify the audio with the chain table:
 
        native-passthrough   AC-3 / E-AC-3            -> done, bitstreams as-is
-       dts-core             base 5.1 DTS             -> done (see --no-dts-passthrough)
+       dts-core             base 5.1 DTS             -> FIX by default (see --dts-passthrough)
        decode-to-pcm        AAC/FLAC/MP3/Opus/PCM... -> done (see --wiring note)
        transcode-bound      TrueHD/DTS-HD/DTS:X/WMA  -> FIX, offline, now
 
@@ -118,6 +118,7 @@ from organizekit.core import (
     codec_blob,
     default_tool_dir,
     dolby_name,
+    dts_passthrough_default,
     enable_utf8_stdio,
     iter_completed,
     open_probe_cache,
@@ -213,8 +214,19 @@ class Config:
     use_state: bool = True
     state_db: Path | None = None
     wiring: str = DEFAULT_WIRING
-    dts_passthrough_ok: bool = True
+    #: ``None`` means "take the wiring's default" (``playbackchain``'s
+    #: :data:`DTS_PASSTHROUGH_DEFAULT`: declined on soundbar-hdmi-in, accepted
+    #: on tv-arc). ``__post_init__`` resolves it, so every reader downstream
+    #: sees a plain ``bool`` and no caller has to know the table exists. The
+    #: field stays three-valued rather than defaulting to ``False`` so that
+    #: ``Config(wiring=WIRING_TV_ARC)`` is self-consistent instead of silently
+    #: carrying the other wiring's policy.
+    dts_passthrough_ok: bool | None = None
     limit: int = 0
+
+    def __post_init__(self) -> None:
+        if self.dts_passthrough_ok is None:
+            self.dts_passthrough_ok = dts_passthrough_default(self.wiring)
 
     @property
     def min_bytes(self) -> int:
@@ -963,7 +975,14 @@ def scan(cfg: Config) -> int:
     log(f"Wiring                 : {cfg.wiring}"
         + (" (recommended)" if cfg.wiring == WIRING_SOUNDBAR_HDMI_IN
            else " (degraded: plain ARC/optical — see docs/hardware.md)"))
-    log(f"DTS core accepted      : {'yes' if cfg.dts_passthrough_ok else 'no (transcode too)'}")
+    # Say whether this is the wiring's own policy or a flag overriding it:
+    # "no" is now the default on soundbar-hdmi-in, and a reader of the log
+    # should not have to guess whether somebody passed a flag to get it.
+    dts_default = dts_passthrough_default(cfg.wiring)
+    dts_origin = "wiring default" if cfg.dts_passthrough_ok == dts_default else "overridden by flag"
+    log(f"DTS core accepted      : "
+        f"{'yes' if cfg.dts_passthrough_ok else 'no (transcoded to the Dolby target)'}"
+        f" [{dts_origin}]")
     log(f"Dry run                : {cfg.dry_run}")
     log(f"ffprobe                : {cfg.ffprobe}")
     log(f"ffmpeg                 : {cfg.ffmpeg}")
@@ -1159,9 +1178,9 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         STATUS_DEFERRED: "Action: nothing — rerun once seeding stops and these transcode normally.",
         STATUS_ERROR: "Action: read the error lines; no listed file was modified.",
         STATUS_NATIVE: "Action: none. Dolby Digital / Digital Plus already bitstreams end-to-end.",
-        STATUS_DTS: "Action: none on this chain. Distrust the unofficial DTS passthrough? "
-                    "Rerun with --no-dts-passthrough to transcode these to the "
-                    "chain-native Dolby codec too.",
+        STATUS_DTS: "Action: none - these are kept only because --dts-passthrough (or the "
+                    "tv-arc wiring) asked for it. The default declines the unofficial DTS "
+                    "passthrough and converts these to the chain-native Dolby codec.",
         STATUS_PCM: "Action: none. The Chromecast decodes these to PCM; over the soundbar's "
                     "HDMI IN even multichannel PCM plays.",
     }
@@ -1318,10 +1337,27 @@ def build_parser() -> argparse.ArgumentParser:
                               "sources, so multichannel PCM arrives stereo-only and 5.1+ "
                               f"decode-to-pcm movies are transcoded too. Env: "
                               f"{WIRING_ENV_VAR}."))
-    parser.add_argument("--no-dts-passthrough", dest="dts_passthrough_ok",
-                        action="store_false", default=True,
-                        help="Treat base DTS as transcode-bound (some Android-TV builds "
-                             "or apps decline the unofficial DTS passthrough)")
+    # Three-valued on purpose: neither flag given means "use the wiring's
+    # default" (playbackchain.DTS_PASSTHROUGH_DEFAULT), which is *decline* on
+    # the default soundbar-hdmi-in wiring and *accept* on tv-arc. Giving
+    # either flag states the policy explicitly and wins over the table, so a
+    # scheduler that already passes --no-dts-passthrough keeps working
+    # unchanged and anyone who wants the old accept-DTS behaviour on the
+    # default wiring has --dts-passthrough to say so.
+    dts = parser.add_mutually_exclusive_group()
+    dts.add_argument("--no-dts-passthrough", dest="dts_passthrough_ok",
+                     action="store_false", default=None,
+                     help="Treat base DTS as transcode-bound: convert it to the wiring's "
+                          f"Dolby target. The DEFAULT on {WIRING_SOUNDBAR_HDMI_IN}, because "
+                          "core DTS is not on Google's published passthrough list for the "
+                          "G454V - it rides on Amlogic firmware behaviour that no update "
+                          "promises to keep - and at ~1.5 Mbps it costs real disk for audio "
+                          "a 3.1.2 bar downmixes anyway")
+    dts.add_argument("--dts-passthrough", dest="dts_passthrough_ok",
+                     action="store_true", default=None,
+                     help="Leave base DTS alone, trusting the unofficial passthrough. The "
+                          f"default on {WIRING_TV_ARC}; opt in here to restore it on "
+                          f"{WIRING_SOUNDBAR_HDMI_IN}")
     parser.add_argument("--dry-run", action="store_true",
                         help="Probe and show the plan; never modify any file")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N movies (testing)")
@@ -1358,7 +1394,11 @@ def cfg_from_args(args: argparse.Namespace) -> Config:
         use_state=not bool(args.no_state),
         state_db=args.state_db,
         wiring=resolve_wiring(args.wiring),
-        dts_passthrough_ok=bool(args.dts_passthrough_ok),
+        # None = neither --dts-passthrough nor --no-dts-passthrough was given;
+        # Config.__post_init__ then resolves it from the wiring. Do NOT coerce
+        # with bool() here - that would turn "unset" into "accept DTS" and
+        # quietly reinstate the old default on every run.
+        dts_passthrough_ok=args.dts_passthrough_ok,
         limit=args.limit,
     )
 

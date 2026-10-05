@@ -225,18 +225,31 @@ class RealTranscodeRunTests(ChainFixture):
         streams = self.payload_of(film)["streams"]
         self.assertEqual(streams[-1]["tags"]["language"], "jpn")
 
-    def test_dts_core_is_accepted_by_default_and_transcoded_on_request(self) -> None:
+    def test_dts_core_is_transcoded_by_default_and_kept_on_request(self) -> None:
+        # The default wiring (soundbar-hdmi-in) DECLINES base DTS: it is not
+        # on Google's published passthrough list for the G454V, it rides on
+        # Amlogic firmware behaviour, and at ~1.5 Mbps it costs real disk for
+        # audio a 3.1.2 bar downmixes anyway. So a plain DTS file is
+        # converted to the wiring's Dolby Digital Plus target with no flag.
         film = self.movie("DTS Film (2004)", DTS_CORE)
-        self.assertEqual(self._run(), 0)
-        self.assertEqual(self.payload_of(film)["streams"][1]["codec_name"], "dts")
-        # With passthrough refused, the same file is transcoded — to the
-        # default wiring's Dolby Digital Plus target.
         before = film.read_bytes()
-        code = self._run("--no-dts-passthrough",
-                        env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
+        code = self._run(env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
         self.assertEqual(code, 0)
         self.assertNotEqual(film.read_bytes(), before)
         self.assertEqual(self.payload_of(film)["streams"][-1]["codec_name"], "eac3")
+
+    def test_dts_passthrough_opts_back_into_keeping_base_dts(self) -> None:
+        # The escape hatch for anyone who trusts the unofficial passthrough:
+        # the file is left exactly as it was found.
+        film = self.movie("DTS Film (2004)", DTS_CORE)
+        before = film.read_bytes()
+        self.assertEqual(self._run("--dts-passthrough"), 0)
+        self.assertEqual(film.read_bytes(), before, "the original is untouched")
+        self.assertEqual(self.payload_of(film)["streams"][1]["codec_name"], "dts")
+
+    def test_the_two_dts_flags_are_mutually_exclusive(self) -> None:
+        with self.assertRaises(SystemExit):
+            aus.build_parser().parse_args(["--dts-passthrough", "--no-dts-passthrough"])
 
     def test_the_default_hdmi_in_wiring_accepts_multichannel_flac(self) -> None:
         # The default wiring is the chain as cabled: the Chromecast feeds the
@@ -444,10 +457,11 @@ class PlannerUnitTests(unittest.TestCase):
     def test_every_real_world_codec_family_has_a_verdict(self) -> None:
         # self.cfg uses the DEFAULT wiring, soundbar-hdmi-in: the soundbar's
         # HDMI IN carries multichannel PCM, so multichannel PCM-decodes are
-        # accepted as-is; only the lossless-HD masters still need work.
+        # accepted as-is; the lossless-HD masters AND base DTS need work
+        # (DTS because this wiring declines the unofficial passthrough).
         cases = {
             "eac3": aus.STATUS_NATIVE, "ac3": aus.STATUS_NATIVE,
-            "dts": aus.STATUS_DTS, "aac": aus.STATUS_PCM, "flac": aus.STATUS_PCM,
+            "dts": aus.STATUS_PLANNED, "aac": aus.STATUS_PCM, "flac": aus.STATUS_PCM,
             "truehd": aus.STATUS_PLANNED, "gsm_ms": aus.STATUS_REVIEW,
         }
         for codec, wanted in cases.items():
