@@ -1,0 +1,64 @@
+# TEMPORARY diagnostic workflow.
+#
+# The job logs for this branch cannot be downloaded from the sandbox the work is
+# being done in (the Actions log blob host is unreachable there), so the failing
+# test names and their tracebacks are re-emitted as check-run annotations, which
+# the REST API does serve. This file is deleted again in the same PR once the
+# failures it reports have been fixed.
+name: diag
+
+on:
+  push:
+    branches: [arena/01a10860-organize]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report-failures:
+    name: failures on ${{ matrix.os }} / ${{ matrix.py }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            py: "3.11"
+          - os: ubuntu-latest
+            py: "3.13"
+          - os: windows-latest
+            py: "3.11"
+          - os: windows-latest
+            py: "3.13"
+          - os: macos-latest
+            py: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+      - name: Run the suite and publish every failure as an annotation
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p "test_*.py" > suite-output.txt 2>&1 || true
+          tail -3 suite-output.txt
+          python - <<'PY'
+          import re
+
+          with open("suite-output.txt", encoding="utf-8", errors="replace") as fh:
+              text = fh.read()
+          emitted = 0
+          for block in re.split(r"^={20,}$", text, flags=re.M):
+              head = re.search(r"^(FAIL|ERROR): (.+)$", block, flags=re.M)
+              if head is None:
+                  continue
+              lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
+              body = " // ".join(lines[:12])[:950]
+              title = f"{head.group(1)} {head.group(2).strip()}"[:200]
+              print(f"::error title={title}::{body}")
+              emitted += 1
+              if emitted >= 20:
+                  break
+          print(f"::notice title=failures published::{emitted}")
+          PY
