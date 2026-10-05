@@ -76,3 +76,56 @@ jobs:
           if not packed:
               print("::notice title=failures::none")
           PY
+
+  provisioned-windows:
+    # Mirrors ci.yml's `provisioned` job: a real workstation shape, with
+    # MKVToolNix and FFmpeg installed, which is the one machine the matrix
+    # above never tests and the one job still failing.
+    name: provisioned failures (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install MKVToolNix and FFmpeg
+        run: choco install mkvtoolnix ffmpeg -y --no-progress
+        shell: bash
+      - name: Run the suite and publish every failure as an annotation
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p "test_*.py" > suite-output.txt 2>&1 || true
+          tail -3 suite-output.txt
+          python - <<'PY'
+          import re
+
+          with open("suite-output.txt", encoding="utf-8", errors="replace") as fh:
+              text = fh.read()
+          summary = re.search(r"^(FAILED|OK).*$", text, flags=re.M)
+          print(f"::notice title=suite::{summary.group(0)[:200] if summary else 'no summary'}")
+
+          entries = []
+          for block in re.split(r"^={20,}$", text, flags=re.M):
+              head = re.search(r"^(FAIL|ERROR): \S+ \((\S+)\)", block, flags=re.M)
+              if head is None:
+                  continue
+              lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
+              reason = next((line for line in reversed(lines)
+                             if re.match(r"^[A-Za-z_.]*(Error|Exception|Exit)", line)), lines[-1])
+              entries.append(f"{head.group(1)[0]} {head.group(2)}: {reason}"[:260])
+
+          packed, current = [], ""
+          for entry in entries:
+              if current and len(current) + len(entry) + 3 > 940:
+                  packed.append(current)
+                  current = ""
+              current = f"{current} ;; {entry}" if current else entry
+              if len(packed) >= 8:
+                  break
+          if current and len(packed) < 9:
+              packed.append(current)
+          for index, chunk in enumerate(packed, start=1):
+              print(f"::error title=failures {index}/{len(packed)} of {len(entries)}::{chunk}")
+          if not packed:
+              print("::notice title=failures::none")
+          PY
