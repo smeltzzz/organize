@@ -15,6 +15,7 @@ Environment switches let a test make it misbehave:
 
 * ``FAKE_FFPROBE_RC``      -> exit with this code, with a message on stderr
 * ``FAKE_FFPROBE_GARBAGE`` -> print something that is not JSON
+* ``FAKE_FFPROBE_JSON_ARRAY`` -> print valid JSON that is not an object
 * ``FAKE_FFPROBE_SLEEP``   -> linger, so the caller's timeout fires
 * ``FAKE_FFPROBE_VERSION_RC`` -> fail the ``-version`` handshake
 """
@@ -161,6 +162,12 @@ def main(argv: list[str] | None = None) -> int:
     if rc:
         print(f"{args[-1]}: Invalid data found when processing input", file=sys.stderr)
         return rc
+
+    if os.environ.get("FAKE_FFPROBE_JSON_ARRAY"):
+        # Valid JSON, wrong shape: a proxy or a wrapper that answers for ffprobe
+        # can emit a list, and the caller must refuse it instead of indexing it.
+        print("[1, 2]")
+        return 0
 
     if os.environ.get("FAKE_FFPROBE_GARBAGE"):
         print("<!DOCTYPE html><html>this is not ffprobe output</html>")

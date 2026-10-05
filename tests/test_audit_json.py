@@ -236,9 +236,13 @@ class AuditJsonTests(unittest.TestCase):
         from_json_run = self.report.read_text(encoding="utf-8").splitlines()
         self._run()
         from_human_run = self.report.read_text(encoding="utf-8").splitlines()
-        # Only the generated-at stamp may differ between two runs.
+        # Only the run's own wall-clock fields may differ between two runs: the
+        # generated-at stamp and the elapsed time each run measured for itself.
+        # Everything else is the report's content, and a JSON run that changed
+        # any of it would be a different audit wearing the same clothes.
         differing = [a for a, b in zip(from_json_run, from_human_run, strict=True) if a != b]
-        self.assertTrue(all("Generated" in line for line in differing), differing)
+        self.assertTrue(all("Generated" in line or "Elapsed" in line for line in differing),
+                        differing)
 
     def test_the_human_run_still_prints_the_report_to_stdout(self) -> None:
         self._canonical()
