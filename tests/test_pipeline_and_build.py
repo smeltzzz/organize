@@ -106,11 +106,24 @@ class StepLaunchTests(unittest.TestCase):
         self.assertEqual(result.returncode, 3)
 
     def test_a_step_with_an_unmet_prerequisite_is_skipped_before_anything_starts(self) -> None:
+        """The prerequisite answer is injected, not read off the host.
+
+        A machine that has MKVToolNix installed - the shape this toolkit is
+        written for, and one of the CI jobs - *meets* the extractor's
+        prerequisite, so a test that relied on the binary being absent would
+        launch the step there and assert nothing about skipping. What is under
+        test is the ordering: the check happens before the child is built, so a
+        step that cannot run never starts one, and the reason it gives is the
+        prerequisite's own wording.
+        """
         cfg = pl.Config(library=self.library, steps=("extractor",))
         with mock.patch.object(pl.subprocess, "run", mock.Mock()) as run, \
+                mock.patch.object(pl, "prerequisite_issue",
+                                  lambda step: "mkvextract was not found"), \
                 redirect_stdout(io.StringIO()):
             result = pl.run_step(pl.STEPS["extractor"], cfg)
         self.assertEqual(result.status, "skipped")
+        self.assertEqual(result.detail, "mkvextract was not found")
         run.assert_not_called()
 
 
