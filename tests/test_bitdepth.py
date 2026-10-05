@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from typing import Any
 
@@ -477,3 +478,43 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkerResolutionTests(unittest.TestCase):
+    """`cfg_from_args` must apply the same cap the pool applies.
+
+    `scan()` re-resolves through `resolve_workers`, so the pool was always
+    capped at MAX_CPU_WORKERS; what was wrong was `cfg.workers`, which the
+    banner prints. On a many-core host it reported the raw core count while
+    the run used at most 8.
+    """
+
+    def _cfg(self, argv: list[str]) -> Any:
+        return tb.cfg_from_args(tb.build_parser().parse_args(argv))
+
+    def test_explicit_worker_count_is_capped(self) -> None:
+        self.assertEqual(self._cfg(["--workers", "64"]).workers, tb.MAX_CPU_WORKERS)
+
+    def test_explicit_worker_count_under_the_cap_is_kept(self) -> None:
+        self.assertEqual(self._cfg(["--workers", "3"]).workers, 3)
+
+    def test_auto_worker_count_is_capped(self) -> None:
+        with unittest.mock.patch.object(tb.os, "cpu_count", return_value=64):
+            cfg = self._cfg(["--workers", "0"])
+        self.assertEqual(cfg.workers, tb.MAX_CPU_WORKERS)
+
+    def test_auto_worker_count_is_always_positive(self) -> None:
+        with unittest.mock.patch.object(tb.os, "cpu_count", return_value=None):
+            cfg = self._cfg(["--workers", "0"])
+        self.assertGreaterEqual(cfg.workers, 1)
+
+    def test_reported_workers_match_the_pool(self) -> None:
+        # The invariant the banner depends on: re-resolving a config value
+        # that has already been resolved must be a no-op.
+        for requested in ("1", "3", "8", "64"):
+            with self.subTest(requested=requested):
+                cfg = self._cfg(["--workers", requested])
+                self.assertEqual(
+                    tb.resolve_workers(cfg.workers, items=1000, cap=tb.MAX_CPU_WORKERS),
+                    cfg.workers,
+                )
