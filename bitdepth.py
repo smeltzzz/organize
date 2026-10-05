@@ -1239,7 +1239,15 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 def cfg_from_args(args: argparse.Namespace) -> Config:
-    workers = args.workers if args.workers > 0 else (os.cpu_count() or 4)
+    # `--workers 0` means "decide for me", and the decision is the *shared*
+    # one. This used to be `args.workers or os.cpu_count()`, which skipped the
+    # MAX_CPU_WORKERS cap: on a 16- or 64-core host `cfg.workers` became the
+    # raw core count, so the banner printed by `scan()` claimed far more
+    # workers than the run actually used (`scan()` re-resolves through
+    # `resolve_workers`, so the pool itself was always capped - only the
+    # reported number lied). Resolving once, here, makes the banner, the log
+    # and the pool agree. Same fix as audio_standardizer.py's `cfg_from_args`.
+    workers = resolve_workers(args.workers, cap=MAX_CPU_WORKERS)
     return Config(
         source_dir=args.source,
         log_file=args.log,

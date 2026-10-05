@@ -224,6 +224,60 @@ def resolve_wiring(explicit: str | None = None) -> str:
 
 
 # =============================================================================
+# BASE DTS: accepted, or treated as transcode-bound?
+# =============================================================================
+
+#: Whether base 5.1 DTS core should be left alone, per wiring.
+#:
+#: Base DTS is the one format in this chain that plays for a reason nobody
+#: guarantees. It is NOT on Google's published passthrough list for the G454V
+#: (that list is Dolby Digital / Dolby Digital Plus / Atmos-via-DD+); it works
+#: because the Amlogic Android TV firmware happens to pass core DTS through at
+#: the HDMI layer. That is real and widely reported, but it is a firmware
+#: accident, not a contract, and nothing stops a system update from ending it.
+#:
+#: ``soundbar-hdmi-in`` (the DEFAULT) therefore declines it, for three reasons
+#: that all point the same way on this specific chain:
+#:
+#: 1. **It is the only unofficial link in an otherwise fully-licensed path.**
+#:    Every other format this toolkit leaves alone is documented at both hops.
+#:    If the firmware ever stops passing DTS, those movies begin transcoding on
+#:    the server on every play, silently - exactly the failure the whole
+#:    toolkit exists to prevent, and the one that is hardest to notice.
+#: 2. **The AX3125H is 3.1.2 and has no surround speakers.** Its seven drivers
+#:    are L/C/R, two up-firing height channels and the sub; a 5.1 mix is folded
+#:    into that array whatever carries it. The audible gap between a 1.5 Mbps
+#:    DTS core and a 640 kbps DD+ bed, after that fold, is not the reason to
+#:    keep the larger file.
+#: 3. **It costs real disk.** DTS core runs ~1.5 Mbps against DD+ at 640 kbps,
+#:    which is roughly 400 MB on a two-hour movie, for audio the bar downmixes
+#:    anyway.
+#:
+#: ``tv-arc`` keeps the historical ``True``. The asymmetry is deliberate and
+#: narrow: that path is the documented-degraded alternative this install does
+#: not run (docs/hardware.md §3-§4), and re-deciding its DTS policy is a
+#: separate question from the default wiring's. Flipping it here would be an
+#: untested change to a path nobody exercises.
+#:
+#: Either way this is only a DEFAULT: ``--dts-passthrough`` and
+#: ``--no-dts-passthrough`` state the policy explicitly and win over the table.
+DTS_PASSTHROUGH_DEFAULT: dict[str, bool] = {
+    WIRING_SOUNDBAR_HDMI_IN: False,
+    WIRING_TV_ARC: True,
+}
+
+
+def dts_passthrough_default(wiring: str | None = None) -> bool:
+    """Whether base DTS core is accepted as-is on ``wiring``, absent a flag.
+
+    See :data:`DTS_PASSTHROUGH_DEFAULT` for why the default wiring declines
+    it. An unrecognized wiring resolves through :func:`resolve_wiring` first,
+    so this can never answer for a chain that does not exist.
+    """
+    return DTS_PASSTHROUGH_DEFAULT[resolve_wiring(wiring)]
+
+
+# =============================================================================
 # AUDIO: what happens to a track on THIS chain
 # =============================================================================
 

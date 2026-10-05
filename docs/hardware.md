@@ -43,14 +43,30 @@ Facts (Google's own materials and device measurements; sources at the end):
 
 Two subtleties the research surfaced and the code encodes:
 
-1. **Base Dolby Digital 5.1 DTS core is the unofficial extra.** Google's
-   published passthrough list for this device is DD/DD+ only, but the
-   Amlogic Android TV firmware passes plain 5.1 DTS core through the HDMI
-   layer in practice (widely reported; see sources). The toolkit treats base
-   DTS as *acceptable but unofficial*: it is left alone by default, and
-   `--no-dts-passthrough` converts it to the wiring's chain-native Dolby
-   codec (Dolby Digital Plus on the default wiring) for anyone who
-   distrusts it.
+1. **Base Dolby Digital 5.1 DTS core is the unofficial extra — and the
+   default wiring declines it.** Google's published passthrough list for
+   this device is DD/DD+ only, but the Amlogic Android TV firmware passes
+   plain 5.1 DTS core through the HDMI layer in practice (widely reported;
+   see sources). That is real, but it is firmware behaviour rather than a
+   contract, so on the default `soundbar-hdmi-in` wiring the toolkit
+   **converts base DTS to Dolby Digital Plus** rather than depend on it.
+   Three reasons, all pointing the same way on this chain:
+   * it is the only unlicensed link in a path that is otherwise documented
+     at every hop, and if a system update ever ends it those movies start
+     transcoding server-side on every play, silently;
+   * the AX3125H is **3.1.2 and has no surround speakers** — L/C/R, two
+     up-firing height drivers and the sub — so a 5.1 mix is folded into that
+     array whatever carries it, and the audible gap between DTS core and a
+     640 kbps DD+ bed after that fold is not worth the risk;
+   * DTS core runs ~1.5 Mbps against DD+ at 640 kbps, roughly **400 MB on a
+     two-hour movie**, for audio the bar downmixes anyway.
+
+   `--dts-passthrough` opts back into keeping it for anyone who trusts the
+   firmware; `--no-dts-passthrough` states the default explicitly. The
+   `tv-arc` alternative keeps the historical accept-DTS policy — that path
+   is the documented-degraded one this install does not run (§3–§4), and
+   re-deciding its DTS policy is a separate question. The table is
+   `playbackchain.DTS_PASSTHROUGH_DEFAULT`.
 2. **HDR10/HDR10+/HLG "play" here means tone-mapped to SDR.** The panel is a
    1080p SDR display, so the Chromecast outputs SDR after tone-mapping.
    That is a picture-preserving operation done at playback time, with zero
@@ -233,7 +249,7 @@ leaves the player — the server transcodes audio on **every** play.
 | AAC 5.1 / stereo | decode → PCM ✅ | ✅ (multich. PCM) | ⚠️ stereo only on this TV | stereo = fine; 5.1+ native on the **default** HDMI-IN wiring, **AC-3 candidate only under `tv-arc`** |
 | FLAC / PCM / ALAC 7.1 | decode → PCM ✅ | ✅ multich. | ⚠️ stereo only on this TV | native multichannel on the **default** HDMI-IN wiring; **AC-3 candidate (5.1+) only under `tv-arc`** |
 | MP3 / Opus / Vorbis | decode → PCM ✅ | ✅ | ✅ stereo | fine |
-| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | accepted by default; `--no-dts-passthrough` transcodes it |
+| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | **transcoded to DD+ by default** on `soundbar-hdmi-in` (unofficial, and ~1.5 Mbps for audio a 3.1.2 bar downmixes — §1); `--dts-passthrough` keeps it; still accepted by default under `tv-arc` |
 | **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** from it by audio_standardizer (AC-3 under `tv-arc`) |
 | **DTS-HD MA / HRA, DTS:X** | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** (AC-3 under `tv-arc`) |
 | WMA Pro / WMA Lossless | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** — no ExoPlayer decoder, so `ffmpeg` converts it like any other master |
