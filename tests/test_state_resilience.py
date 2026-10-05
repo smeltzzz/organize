@@ -96,11 +96,28 @@ class StateStoreFixture:
         self._tmp = tempfile.TemporaryDirectory(prefix="state_")
         self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(self._close_real_handle)
         self.db_path = self.root / "state.db"
         self.store = StateStore(self.db_path, tool="tests")
         self.addCleanup(self.store.close)
         self.library = self.root / "lib"
         self.library.mkdir()
+
+    def _close_real_handle(self) -> None:
+        """Close the connection behind a proxy a test may have installed.
+
+        ``store.close()`` goes through whatever handle the test swapped in, and
+        the test whose whole point is that ``close`` raises leaves the real
+        sqlite connection open. On Windows an open database handle makes its
+        directory undeletable, so the failure would surface in teardown instead
+        of in the test that caused it.
+        """
+        real = getattr(getattr(self.store, "_db", None), "_real", None)
+        if real is not None:
+            try:
+                real.close()
+            except sqlite3.Error:
+                pass
 
     def _movie(self, title: str, size: int = 4096) -> Path:
         folder = self.library / title
@@ -399,9 +416,11 @@ class OpenStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.object(state_mod, "default_state_db", tripwire):
                 store = open_state(Path(tmp) / "state.db", tool="tests")
-            self.addCleanup(store.close)
-            self.assertTrue(store.enabled)
-            self.assertEqual(store.path, Path(tmp) / "state.db")
+            try:
+                self.assertTrue(store.enabled)
+                self.assertEqual(store.path, Path(tmp) / "state.db")
+            finally:
+                store.close()  # before the tree goes: Windows pins an open database
 
 
 if __name__ == "__main__":

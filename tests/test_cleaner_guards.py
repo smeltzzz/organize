@@ -304,10 +304,11 @@ class WindowsTimestampTests(QuietTestCase):
 
     def test_off_windows_nothing_is_attempted(self) -> None:
         windll = mock.Mock()
+        host = os.name
         with platforms.posix(), mock.patch.object(ctypes, "windll", windll, create=True):
             tc._restore_windows_ctime(self.root / "Film (2020).mkv", self._stat())
         windll.assert_not_called()
-        self.assertEqual(os.name, "posix", "the host platform is put back the way it was")
+        self.assertEqual(os.name, host, "the host platform is put back the way it was")
 
     def test_a_stat_without_nanosecond_fields_is_applied_in_whole_seconds(self) -> None:
         """Not every ``stat_result`` a caller can hand over carries ``*_ns``.
@@ -466,17 +467,23 @@ class TrackClassificationTests(QuietTestCase):
         """Durability is best-effort; the journal write itself is not."""
         with platforms.windows():
             tc._fsync_directory(self.root)  # returns immediately on Windows
-        with mock.patch.object(tc.os, "open", side_effect=OSError("no directory handles here")):
+        # The rest is the POSIX half of the same function, so it has to be asked
+        # on a POSIX host: on a Windows one the early return above is the whole
+        # body and none of these handles is ever touched.
+        with platforms.posix(), \
+                mock.patch.object(tc.os, "open", side_effect=OSError("no directory handles here")):
             tc._fsync_directory(self.root)
         close = mock.Mock()
-        with mock.patch.object(tc.os, "open", lambda *a, **k: 3), \
+        with platforms.posix(), \
+                mock.patch.object(tc.os, "open", lambda *a, **k: 3), \
                 mock.patch.object(tc.os, "fsync", side_effect=OSError("not a syncable fd")), \
                 mock.patch.object(tc.os, "close", close):
             tc._fsync_directory(self.root)
         close.assert_called_once_with(3)
 
     def test_a_descriptor_that_cannot_be_closed_does_not_fail_the_journal_write(self) -> None:
-        with mock.patch.object(tc.os, "open", lambda *a, **k: 3), \
+        with platforms.posix(), \
+                mock.patch.object(tc.os, "open", lambda *a, **k: 3), \
                 mock.patch.object(tc.os, "fsync", lambda fd: None), \
                 mock.patch.object(tc.os, "close", side_effect=OSError("bad descriptor")):
             tc._fsync_directory(self.root)  # must not raise

@@ -37,6 +37,7 @@ from unittest import mock
 import fake_mkvmerge as fake
 
 import mkv_track_cleaner as tc
+from organizekit.core import console as console_mod
 from organizekit.core.locking import LockTimeoutError
 
 REPO = Path(__file__).resolve().parents[1]
@@ -589,7 +590,11 @@ class BannerTests(CleanerRunHarness):
     def test_the_lossless_line_is_emphasised_on_a_console_that_takes_colour(self) -> None:
         """The one line the banner colours is the promise the tool is making."""
         out = ReconfigurableTTY()
-        code, _ = self.run_main("--nice", stream=out, env={"FORCE_COLOR": "1"}, color=True)
+        # A captured stream is not a console, so Windows cannot be asked whether
+        # it takes VT escapes; the answer a real Windows Terminal gives is
+        # injected. On POSIX enable_windows_vt() is already True.
+        with mock.patch.object(console_mod, "enable_windows_vt", lambda: True):
+            code, _ = self.run_main("--nice", stream=out, env={"FORCE_COLOR": "1"}, color=True)
         self.assertEqual(code, 0)
         drawn = out.getvalue()
         lossless = [line for line in drawn.splitlines() if "LOSSLESS" in line]

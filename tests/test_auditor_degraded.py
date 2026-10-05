@@ -157,7 +157,9 @@ class UnreadableFolderTests(AuditorFixture):
         self.assertTrue(error, "the failure has to come back as a message")
         result = la.classify_folder(stray)
         self.assertEqual(result.state, "INACCESSIBLE")
-        self.assertIn("not a directory", result.detail.lower())
+        detail = result.detail.lower()
+        self.assertTrue("not a directory" in detail or "directory name is invalid" in detail,
+                        f"the operating system's own reason is passed through: {detail}")
 
     def test_a_movie_that_vanishes_before_its_stat_is_an_error(self) -> None:
         """The folder is read, then a file is gone: say so, do not drop it.

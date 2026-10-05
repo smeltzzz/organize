@@ -103,8 +103,13 @@ class BinaryDiscoveryTests(TempFixture):
             self.assertEqual(aus.find_ffprobe(str(binary)), str(binary))
 
     def test_a_binary_beside_the_tools_is_found(self) -> None:
-        """The single-file build and a portable install keep ffmpeg next to them."""
-        binary = self.root / "ffmpeg"
+        """The single-file build and a portable install keep ffmpeg next to them.
+
+        ``find_binary`` appends the host's executable suffix to the bundled-tools
+        candidate, so the stand-in has to carry it too or the search is being
+        asked about a file it was never going to look at.
+        """
+        binary = self.root / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
         binary.write_bytes(b"#!/bin/sh\n")
         with mock.patch.object(aus.shutil, "which", lambda name: None), \
                 mock.patch.object(aus, "tools_home", lambda: self.root):

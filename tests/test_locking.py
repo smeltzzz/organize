@@ -276,9 +276,13 @@ class CoordinationLockTests(unittest.TestCase):
         lock = locking.CoordinationLock(self.target, timeout_seconds=5.0)
         lock.acquire()
         self.assertTrue(lock.path.is_file())
-        self.assertEqual(lock.path.read_bytes(), b"\0",
+        # Not read_bytes() while the lock is held: on Windows the byte-range
+        # lock denies a second handle to the very byte it protects, so the byte
+        # is measured by size now and by content once the holder is gone.
+        self.assertEqual(lock.path.stat().st_size, 1,
                          "the first byte is materialised for the Windows range lock")
         lock.release()
+        self.assertEqual(lock.path.read_bytes(), b"\0")
         # A second holder can take it immediately, so the release really unlocked.
         again = locking.CoordinationLock(self.target, timeout_seconds=5.0)
         again.acquire()
@@ -441,7 +445,11 @@ class ExclusiveRunLockTests(unittest.TestCase):
         only actionable if the lock says which pid and when.
         """
         with locking.ExclusiveRunLock(self.path, 1.0, busy_message="held by {path}"):
-            content = self.path.read_text(encoding="utf-8")
+            self.assertTrue(self.path.is_file(), "the lock file exists while it is held")
+        # Read after the release. The holder line outlives the holder - that is
+        # the whole point of writing it - and on Windows a second handle cannot
+        # read a byte the range lock is holding.
+        content = self.path.read_text(encoding="utf-8")
         self.assertTrue(content.startswith(f"pid={os.getpid()} "), content)
         self.assertIn("started=", content)
         self.assertTrue(self.path.parent.is_dir(), "the lock's directory is created on demand")
@@ -450,7 +458,8 @@ class ExclusiveRunLockTests(unittest.TestCase):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text("pid=1 started=1970-01-01T00:00:00+00:00\n", encoding="utf-8")
         with locking.ExclusiveRunLock(self.path, 1.0):
-            lines = self.path.read_text(encoding="utf-8").splitlines()
+            pass
+        lines = self.path.read_text(encoding="utf-8").splitlines()  # see above: not while held
         self.assertEqual(len(lines), 1, "a lock file must not accumulate dead holders")
         self.assertTrue(lines[0].startswith(f"pid={os.getpid()} "))
 

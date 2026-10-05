@@ -30,6 +30,7 @@ from pathlib import Path
 from unittest import mock
 
 import mkv_track_cleaner as tc
+from organizekit.core import console as console_mod
 from organizekit.core.live import strip_ansi
 
 REPO = Path(__file__).resolve().parents[1]
@@ -165,8 +166,14 @@ class TerminalConsoleTests(unittest.TestCase):
         self.assertGreaterEqual(drawn.count("\n"), 1)
 
     def test_an_error_log_line_is_red_when_the_console_takes_colour(self) -> None:
-        console, stream = self.console(color=True)
-        console.log_line("22:31:05", "ERROR", "verification failed")
+        # "Takes colour" on Windows means VT processing was granted. A captured
+        # stream has no console to configure, so GetConsoleMode fails and the
+        # shipped refusal stands - which is right for a pipe and wrong for this
+        # fixture. The grant is injected; on POSIX the helper already answers
+        # True and the patch changes nothing.
+        with mock.patch.object(console_mod, "enable_windows_vt", lambda: True):
+            console, stream = self.console(color=True)
+            console.log_line("22:31:05", "ERROR", "verification failed")
         drawn = stream.getvalue()
         self.assertIn("\033[", drawn)
         self.assertIn(tc.LiveConsole.RED, drawn)

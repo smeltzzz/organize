@@ -25,11 +25,15 @@ the paths where the answer could have been wrong silently:
 
 from __future__ import annotations
 
+import contextlib
 import io
+import os
 import shutil
 import tempfile
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -39,6 +43,27 @@ from test_bitdepth_e2e import InspectorRunFixture
 
 import bitdepth as bd
 from organizekit.core import playbackchain as pc
+
+WINDOWS = os.name == "nt"
+
+
+@contextlib.contextmanager
+def handshake(returncode: int) -> Iterator[None]:
+    """Answer the probe handshake without launching anything, on Windows only.
+
+    The stand-ins here are shebang scripts: an executable on POSIX, a text file
+    on Windows. The claim under test is what discovery hands the handshake and
+    what the handshake makes of the answer, not how an operating system runs a
+    script - so everywhere else the script really runs, and on Windows the
+    answer is injected.
+    """
+    if not WINDOWS:
+        yield
+        return
+    with mock.patch.object(bd.subprocess, "run",
+                           lambda *a, **k: SimpleNamespace(returncode=returncode)):
+        yield
+
 
 DOVI_RECORD = {"side_data_type": "DOVI configuration record", "dv_profile": 8,
                "dv_bl_signal_compatibility_id": 1, "el_present_flag": 0,
@@ -172,7 +197,7 @@ class ToolDiscoveryTests(unittest.TestCase):
         binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         binary.chmod(0o755)
         with mock.patch.object(bd.shutil, "which", return_value=str(binary)), \
-                mock.patch.object(bd, "tools_home", return_value=home):
+                mock.patch.object(bd, "tools_home", return_value=home), handshake(0):
             self.assertEqual(bd.find_ffprobe(), str(binary))
             self.assertTrue(bd.ffprobe_works(str(binary)))
 
@@ -279,7 +304,9 @@ class ProbeFailureTests(unittest.TestCase):
         result = bd.inspect_movie(gone, bd.Config())
         self.assertEqual(result.status, bd.STATUS_ERROR)
         self.assertEqual(result.category, bd.CATEGORY_LABELS[bd.STATUS_ERROR])
-        self.assertIn("No such file", result.error or "")
+        error = result.error or ""
+        self.assertTrue("No such file" in error or "cannot find the file" in error.lower(),
+                        f"the operating system's own reason is passed through: {error}")
 
 
 class DegradedRunTests(InspectorRunFixture):

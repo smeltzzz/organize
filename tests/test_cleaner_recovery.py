@@ -293,13 +293,19 @@ class PidAliveTests(QuietTestCase):
             self.assertFalse(tc._pid_alive(4_000_000))
 
     def test_a_pid_that_refuses_to_be_signalled_is_alive(self) -> None:
-        """EPERM means the process exists and belongs to somebody else."""
-        with mock.patch.object(tc.os, "kill", side_effect=PermissionError):
+        """EPERM means the process exists and belongs to somebody else.
+
+        ``os.kill(pid, 0)`` is the POSIX probe; on Windows the same function
+        goes through OpenProcess instead (covered below), so the signalling half
+        has to be asked on a POSIX host.
+        """
+        with platforms.posix(), mock.patch.object(tc.os, "kill", side_effect=PermissionError):
             self.assertTrue(tc._pid_alive(1))
 
     def test_a_kill_that_fails_for_any_other_reason_is_treated_as_alive(self) -> None:
         for error in (OSError("nope"), OverflowError("pid too large"), ValueError("bad pid")):
-            with self.subTest(error=error), mock.patch.object(tc.os, "kill", side_effect=error):
+            with self.subTest(error=error), platforms.posix(), \
+                    mock.patch.object(tc.os, "kill", side_effect=error):
                 self.assertTrue(tc._pid_alive(12345))
 
     def test_this_process_is_alive(self) -> None:
