@@ -141,6 +141,67 @@ class CleanerRunHarness(unittest.TestCase):
                       if p.name.startswith((tc.TEMP_PREFIX, tc.TRANSACTION_MARKER)))
 
 
+
+class SweepInterruptTests(CleanerRunHarness):
+    """Ctrl-C during a sweep: stop, kill the child, and still publish the decisions.
+
+    A remux pass runs for hours, so an interrupt is a normal event, not a crash.
+    What has to survive it is the record: every movie already decided is in the
+    report, the mkvmerge child is dead rather than orphaned writing into the
+    library, and the exit code tells a scheduler the run was cut short.
+    """
+
+    def second_movie(self) -> Path:
+        folder = self.library / "Second (2021)"
+        folder.mkdir()
+        movie = folder / "Second (2021).mkv"
+        movie.write_bytes(MOVIE_BYTES)
+        return movie
+
+    def log_text(self) -> str:
+        return self.log.read_text(encoding="utf-8") if self.log.exists() else ""
+
+    def test_an_interrupt_during_a_movie_lets_it_finish_and_stops_before_the_next(self) -> None:
+        """The handler sets a flag; it does not raise into a running remux.
+
+        Killing mkvmerge mid-write is how a library ends up with a truncated movie,
+        so the sweep finishes the movie it is holding and then stops at the top of
+        the next iteration: one decision published, nothing half-written, exit 130.
+        """
+        self.second_movie()
+        real_process = tc.process_mkv
+        calls: list[str] = []
+
+        def process_then_stop(**kwargs: object) -> None:
+            calls.append(str(kwargs["mkv_path"]))
+            real_process(**kwargs)  # type: ignore[arg-type]
+            tc._interrupt_requested = True  # what the SIGINT handler does
+
+        with mock.patch.object(tc, "process_mkv", process_then_stop):
+            code, _out = self.run_main()
+
+        self.assertEqual(code, 130)
+        self.assertEqual(len(calls), 1, "the queue stopped before the second movie")
+        self.assertEqual(self.leftovers(), [], "and the first one left nothing behind")
+        self.assertTrue(self.report_text(), "what it decided is still published")
+
+    def test_an_interrupt_between_movies_still_kills_the_child_and_reports(self) -> None:
+        """The interrupt lands while a verdict is being published, not inside a remux."""
+        self.second_movie()
+        with mock.patch.object(tc, "publish_remux_verdict", side_effect=KeyboardInterrupt), \
+                mock.patch.object(tc, "_kill_active_child") as killed:
+            code, _out = self.run_main()
+
+        self.assertEqual(code, 130)
+        killed.assert_called_once_with()
+        self.assertTrue(tc._interrupt_requested)
+        report = self.report_text()
+        self.assertTrue(report, "an interrupted sweep still publishes what it decided")
+        self.assertIn("interrupt", report.lower())
+        self.assertIn("Execution interrupted by user", self.log_text())
+
+
+
 class ArgumentGateTests(CleanerRunHarness):
     def test_a_negative_coordination_timeout_is_a_usage_error(self) -> None:
         """A negative wait is not a wait; argparse answers before any lock is taken."""
@@ -365,6 +426,81 @@ class FailureDuringRunTests(CleanerRunHarness):
         self.assertEqual(self.movie.read_bytes(), REMUXED_BYTES)
         self.assertIn("verdict(s) recorded for `organize status`",
                       self.log.read_text(encoding="utf-8"))
+
+
+class WallOfAudioTests(CleanerRunHarness):
+    """A movie with a dozen audio tracks is a real release, not an error."""
+
+    def test_the_removed_track_list_is_truncated_in_the_log(self) -> None:
+        """Twelve dropped tracks are one line with a count, not twelve lines.
+
+        The per-movie detail is what an operator reads to check the decision; a
+        wall of near-identical lines hides the one track that was kept.
+        """
+        tracks = [fake.video_track(), fake.audio_track(default=True)]
+        tracks += [fake.audio_track(name=f"Commentary {n}", codec="AC-3", codec_id="A_AC3",
+                                    channels=2) for n in range(2, 12)]
+        self.info = fake.make_spec(tracks)
+        code, _out = self.run_main()
+        logged = self.log.read_text(encoding="utf-8")
+        self.assertEqual(code, 0, logged[-800:])
+        self.assertIn("Removing 10 Audio Track(s):", logged)
+        self.assertIn("+2 more", logged)
+        self.assertEqual(self.remuxes, 1)
+
+
+class MidRemuxInterruptTests(CleanerRunHarness):
+    def test_a_control_c_during_the_remux_leaves_no_debris_behind(self) -> None:
+        """The staging file and its journal are removed on the way out.
+
+        An interrupted mkvmerge leaves a partial container in the library's own
+        folder; if it survived, the next sweep (or Jellyfin) would see a movie that
+        is half a file. The exception is re-raised so the run exits 130 and says it
+        was interrupted rather than reporting a clean pass.
+        """
+        real_fake = self._fake_mkvmerge
+
+        def interrupted_remux(cmd: list[str], on_progress=None):
+            if "-J" not in cmd:
+                output = Path(cmd[cmd.index("-o") + 1])
+                output.write_bytes(b"half a movie")  # what mkvmerge would leave
+                raise KeyboardInterrupt
+            return real_fake(cmd, on_progress)
+
+        with mock.patch.object(tc, "_run_mkvmerge", interrupted_remux):
+            code, _out = self.run_main()
+
+        self.assertEqual(code, 130)
+        self.assertEqual(self.leftovers(), [], "no staging file or journal survived")
+        self.assertEqual(self.movie.read_bytes(), MOVIE_BYTES, "the movie was not touched")
+        self.assertIn("INTERRUPTED by user", self.report_text())
+
+
+class SystemExitTests(CleanerRunHarness):
+    def test_a_system_exit_inside_a_movie_is_not_swallowed_as_a_movie_error(self) -> None:
+        """``SystemExit`` means "stop the process", not "this one movie failed".
+
+        The per-movie handler catches ``Exception`` so one bad movie cannot end a
+        sweep, and ``SystemExit`` derives from ``BaseException`` for exactly that
+        reason: swallowing it would turn a shutdown request into a fake error row
+        and keep remuxing for hours after the operator asked it to stop.
+        """
+        def abort(*_a: object, **_kw: object) -> None:
+            raise SystemExit(3)
+
+        with (mock.patch.object(tc, "verify_remux_output", abort),
+              self.assertRaises(SystemExit) as ctx):
+            self.run_main()
+
+        self.assertEqual(ctx.exception.code, 3)
+        self.assertEqual(self.movie.read_bytes(), MOVIE_BYTES, "the movie was not replaced")
+        self.assertFalse(self.report.exists(), "no report claims a decision was made")
+        # The staging file and its journal stay: they are the evidence the next
+        # sweep's crash recovery replays, and deleting them here would hide a
+        # transaction that was open when the process was told to stop.
+        leftovers = self.leftovers()
+        self.assertTrue(any(name.endswith(".json") for name in leftovers), leftovers)
+        self.assertTrue(any(name.startswith(tc.TEMP_PREFIX) for name in leftovers), leftovers)
 
 
 class InterruptTests(CleanerRunHarness):

@@ -55,10 +55,15 @@ class DepthEvidenceTests(unittest.TestCase):
         "unknown" would send a 10-bit file to HandBrake for a re-encode it does
         not need, and reading them as 8 would send a *12-bit* master there too.
         """
-        self.assertEqual(bd.bit_depth_from_pix_fmt("p010le"), 10)
-        self.assertEqual(bd.bit_depth_from_pix_fmt("p012le"), 12)
-        self.assertEqual(bd.bit_depth_from_pix_fmt("p016le"), 16)
-        self.assertEqual(bd.bit_depth_from_pix_fmt("P010"), 10, "the case is not the depth")
+        for name, depth in (("p010le", 10), ("p012le", 12), ("p016le", 16)):
+            with self.subTest(pix_fmt=name):
+                self.assertEqual(bd.bit_depth_from_pix_fmt(name), depth,
+                                 "the explicit table knows this one")
+        # A variant the table does not list still has to answer from its name:
+        # the substring rule is what catches an ffprobe that spells it differently.
+        for name, depth in (("p010", 10), ("p012", 12), ("p016", 16), ("P012BE", 12)):
+            with self.subTest(pix_fmt=name):
+                self.assertEqual(bd.bit_depth_from_pix_fmt(name), depth)
 
     def test_a_main_12_profile_is_read_as_12_bit(self) -> None:
         """With no pixel format and no raw-sample field, the profile is the evidence."""
@@ -155,7 +160,12 @@ class ToolDiscoveryTests(unittest.TestCase):
         self.addCleanup(self._td.cleanup)
 
     def test_a_probe_on_the_path_is_found_once_even_when_it_is_listed_twice(self) -> None:
-        """The bundled-tools directory and PATH can name the same binary."""
+        """The bundled-tools directory and PATH can name the same binary.
+
+        A candidate that cannot be executed is handed back unchanged and only the
+        handshake that follows refuses it: the search does not pretend PATH said
+        something it did not.
+        """
         home = self.tmp / "tools"
         home.mkdir()
         binary = home / "ffprobe"
@@ -163,8 +173,19 @@ class ToolDiscoveryTests(unittest.TestCase):
         binary.chmod(0o755)
         with mock.patch.object(bd.shutil, "which", return_value=str(binary)), \
                 mock.patch.object(bd, "tools_home", return_value=home):
+            self.assertEqual(bd.find_ffprobe(), str(binary))
+            self.assertTrue(bd.ffprobe_works(str(binary)))
+
+        # The same path listed twice, with nothing behind it: the second listing is
+        # skipped as a duplicate, and PATH's own answer is handed back unverified.
+        bare = self.tmp / "bare"
+        bare.mkdir()
+        ghost = str(bare / "ffprobe")
+        with mock.patch.object(bd.shutil, "which", return_value=ghost), \
+                mock.patch.object(bd, "tools_home", return_value=bare):
             found = bd.find_ffprobe()
-        self.assertEqual(found, str(binary))
+        self.assertEqual(found, ghost, "PATH's answer is returned even unverified")
+        self.assertFalse(bd.ffprobe_works(found), "and the handshake is what refuses it")
 
     def test_a_binary_that_cannot_be_executed_is_not_a_working_probe(self) -> None:
         self.assertFalse(bd.ffprobe_works(str(self.tmp / "no-such-ffprobe")))

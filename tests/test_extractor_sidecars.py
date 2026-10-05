@@ -20,6 +20,7 @@ verdicts are ``covered`` (do nothing), ``review`` (a human decides) and
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -302,6 +303,22 @@ class LedgerTests(SidecarFixture):
                 sha256="0" * 64, path=self.ledger)
         self.assertFalse(recorded)
         self.assertTrue(sidecar.is_file(), "the sidecar the run published is untouched")
+
+
+class AtomicJsonTests(SidecarFixture):
+    def test_a_staging_file_that_cannot_be_removed_does_not_fail_the_write(self) -> None:
+        """Debris in the temp directory must not cost the ledger its contents.
+
+        The publish already happened by the time the staging file is cleaned up, so
+        an unlink that fails is noise: raising there would report a failed record
+        for a ledger that was written correctly.
+        """
+        target = FaultyPath(self.tmp / "ledger.json")
+        FaultyPath.fail_unlink = True
+        sx.atomic_write_json(target, {"version": 1, "sidecars": {"a": {"method": "text"}}})
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8"))["version"], 1)
+        for stage in self.tmp.glob(".ledger.json.partial.*"):
+            Path(stage).unlink()
 
 
 class LabelTests(SidecarFixture):

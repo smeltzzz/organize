@@ -68,6 +68,22 @@ class TerminalConsoleTests(unittest.TestCase):
         self.assertIn("Alpha (2001).mkv", strip_ansi(drawn))
         self.assertIn("cleaned 1.2 GiB saved", strip_ansi(drawn))
 
+    def test_a_detail_arriving_under_a_live_bar_commits_the_bar_first(self) -> None:
+        """A permanent line never lands on top of the progress bar.
+
+        The bar is redrawn in place with no newline; if a detail were printed while
+        it was open, the two would interleave into unreadable garbage on the one
+        terminal the operator is watching during a multi-hour sweep.
+        """
+        console, stream = self.console()
+        console.begin_file("[  1/3] ", "Alpha (2001)/Alpha (2001).mkv", 4096)
+        console.remux_progress(50, time.monotonic() - 5)
+        before = stream.getvalue().count("\n")
+        console.detail("-> subtitles   : removing 2")
+        drawn = strip_ansi(stream.getvalue())
+        self.assertGreater(drawn.count("\n"), before, "the open bar was committed first")
+        self.assertIn("-> subtitles   : removing 2", drawn)
+
     def test_a_bar_is_drawn_under_the_movie_line_it_belongs_to(self) -> None:
         """The first detail commits the file line so the bar cannot overwrite it.
 

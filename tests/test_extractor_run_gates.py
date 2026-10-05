@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
 import sys
 import tempfile
 import types
@@ -329,6 +330,77 @@ class RunShapeTests(LoggedRun):
         self.assertEqual(len(warnings), 1, f"the warning is logged once: {logged}")
         report = (self.reports / "report.txt").read_text(encoding="utf-8")
         self.assertIn("NEED ATTENTION", report)
+
+
+    def test_the_parallel_sidecar_check_says_how_many_workers_it_used(self) -> None:
+        """``--workers`` changes how the library is read, and the log has to say so.
+
+        A run that reads folders in parallel and one that does not must produce the
+        same verdicts; the line naming the worker count is how an operator confirms
+        which of the two they got (and that ``--workers 1`` reproduces it).
+        """
+        self.movie("Alpha (2001)", [fake.video_track(), fake.subtitle_track()])
+        self.movie("Beta (2002)", [fake.video_track(), fake.subtitle_track()])
+        self.assertEqual(self.run_tool("--workers", "2")[0], 0)
+        self.assertIn("Inspecting existing sidecars with 2 workers", self.log_text())
+
+    def test_the_serial_run_says_nothing_about_workers(self) -> None:
+        self.movie("Alpha (2001)", [fake.video_track(), fake.subtitle_track()])
+        self.assertEqual(self.run_tool("--workers", "1")[0], 0)
+        self.assertNotIn("Inspecting existing sidecars", self.log_text())
+        self.assertIn("Found 1 eligible movies.", self.log_text())
+
+
+class BridgeTests(LoggedRun):
+    """A movie that is not a Matroska is read through a bridge MKV in temp space."""
+
+    def mp4(self, folder: str = "Bridge (2015)") -> Path:
+        directory = self.library / folder
+        directory.mkdir(parents=True, exist_ok=True)
+        movie = directory / f"{folder}.mp4"
+        write_movie(movie, [fake.video_track(), fake.subtitle_track()])
+        return movie
+
+    def test_a_bridge_mkvmerge_cannot_build_is_reported_with_its_own_exit_code(self) -> None:
+        """The movie is not "no subtitles": mkvmerge could not read it, and that is a finding.
+
+        Inventing a NO-SUBS verdict here would tell the operator the film has no
+        English track, when the truth is the container could not be opened - and the
+        fix (a corrupt file, a wrong extension) is completely different.
+        """
+        movie = self.mp4()
+        with mock.patch.dict(os.environ, {"FAKE_MKVMERGE_RC": "2"}):
+            code, _stdout, _stderr = self.run_tool()
+        self.assertEqual(code, 0)
+        logged = self.log_text()
+        self.assertIn("NO-SUBS", logged)
+        self.assertIn(f"mkvmerge could not read '{movie.name}' for extraction (exit 2)",
+                      self.report_text())
+        self.assertFalse(self.sidecar(movie).exists())
+
+    def test_a_bridge_whose_tracks_cannot_be_read_is_reported_as_unreadable(self) -> None:
+        """Building the bridge is not enough; the tool has to be able to read it back."""
+        movie = self.mp4()
+        real_probe = sx.probe_embedded_subtitle_tracks
+        calls: list[Path] = []
+
+        def probe(video: Path, mkvmerge_bin: str, timeout: float | None = None):
+            calls.append(Path(video))
+            result = real_probe(video, mkvmerge_bin, timeout=timeout)
+            if len(calls) == 2:  # the second read is of the bridge
+                return None, "the bridge MKV could not be read"
+            return result
+
+        with mock.patch.object(sx, "probe_embedded_subtitle_tracks", side_effect=probe):
+            code, _stdout, _stderr = self.run_tool()
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2, "the movie was probed, then the bridge")
+        self.assertIn("could not read the movie's tracks: the bridge MKV could not be read",
+                      self.report_text())
+        self.assertFalse(self.sidecar(movie).exists())
+        self.assertEqual(list(self.library.rglob("bridge_*.mkv")), [],
+                         "the bridge lives in temp space and leaves nothing behind")
 
 
 class GroupingTests(unittest.TestCase):

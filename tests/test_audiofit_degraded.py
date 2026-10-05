@@ -696,5 +696,76 @@ class MainGateTests(ChainFixture):
         self.assertEqual(Path(key[0]).name, movie.name)
 
 
+class DiscoveryFaultTests(TempFixture):
+    """What the sweep walks when the library is not entirely readable."""
+
+    def test_a_movie_that_cannot_be_statted_is_skipped_not_fatal(self) -> None:
+        """A leftover symlink whose target is gone must not stop the run.
+
+        The audio sweep transcodes, so it walks the whole library; one dead link
+        that raised would cost every other movie its verdict. Skipping it is safe
+        because the link is not a movie the chain can play either.
+        """
+        good = self.movie("TrueHD Film (2001)")
+        (good.parent / "Gone (2003).mkv").symlink_to(self.root / "nowhere" / "Gone (2003).mkv")
+        cfg = self.config(min_file_size_mb=0)
+
+        self.assertEqual(aus.discover_videos(self.library, cfg), [good])
+
+    def test_a_limit_caps_the_sweep_after_the_first_n_movies(self) -> None:
+        first = self.movie("Alpha (2001)")
+        self.movie("Beta (2002)")
+        cfg = self.config(min_file_size_mb=0, limit=1)
+        self.assertEqual(aus.discover_videos(self.library, cfg), [first])
+
+    def test_a_file_below_the_size_floor_is_not_swept(self) -> None:
+        """The floor is what keeps the sweep off samples and stubs.
+
+        Transcoding is expensive and destructive, so a file that is not a feature
+        is not a candidate: it is skipped by size before anything reads its tracks.
+        """
+        feature = self.movie("Feature (2001)", size=8 * 1024 * 1024)
+        self.movie("Sample (2001)", size=64 * 1024)
+        cfg = self.config(min_file_size_mb=1)
+        self.assertEqual(aus.discover_videos(self.library, cfg), [feature])
+
+
+class ShippedSelfTestTests(unittest.TestCase):
+    """``audio_standardizer.py --self-test`` as shipped, on a machine with no FFmpeg."""
+
+    def pristine(self) -> object:
+        import importlib.util
+        import types
+
+        spec = importlib.util.spec_from_file_location(
+            "audio_standardizer_pristine", REPO / "audio_standardizer.py")
+        assert spec is not None and spec.loader is not None
+        module: types.ModuleType = importlib.util.module_from_spec(spec)
+        # Registered while it executes: ``@dataclass`` resolves its own annotations
+        # through ``sys.modules[cls.__module__]``.
+        sys.modules[spec.name] = module
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(spec.name, None)
+            raise
+        return module
+
+    def test_the_field_smoke_test_passes_without_ffmpeg_installed(self) -> None:
+        """This is what an operator runs when a verdict looks wrong on their own gear.
+
+        ``tests/selftests`` rebinds ``run_self_tests`` on the imported module, so the
+        shipped body is only reachable through a second copy loaded from source.
+        """
+        tool = self.pristine()
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = tool.main(["--self-test"])
+        printed = out.getvalue()
+        self.assertEqual(code, 0, printed)
+        self.assertIn("self-test passed", printed.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
