@@ -600,7 +600,14 @@ class BannerTests(CleanerRunHarness):
         lossless = [line for line in drawn.splitlines() if "LOSSLESS" in line]
         self.assertTrue(lossless, drawn[:400])
         self.assertIn("\033[", lossless[0], "the lossless line is the coloured one")
-        self.assertIn("nice +10", drawn, "--nice is reported in the banner")
+        # The banner reports the priority the run actually got, and how it gets
+        # there is the platform's: nice(2) on POSIX, SetPriorityClass on Windows,
+        # and "unchanged" when the host refuses either. What the operator is
+        # promised is that --nice is not silently dropped.
+        self.assertIn("Process priority", drawn)
+        self.assertTrue(any(outcome in drawn
+                            for outcome in ("nice +10", "below-normal", "unchanged")),
+                        f"--nice is reported in the banner: {drawn[:400]}")
 
 
 if __name__ == "__main__":
