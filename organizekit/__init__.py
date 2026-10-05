@@ -14,6 +14,6 @@ it six times.
 
 from __future__ import annotations
 
-VERSION = "8.4.2"
+VERSION = "8.5.0"
 
 __all__ = ["VERSION"]
