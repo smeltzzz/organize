@@ -86,6 +86,11 @@ jobs:
     # runner): that code was 100%-covered and deleted with its tests, and the
     # suite measures 86% without it. The floor keeps its point of slack; it
     # is a ratchet - raise it again in a later testing pass, never lower it.
+    # 85 -> 95 in that later testing pass: refusal, recovery and degraded-mode
+    # suites for the launcher, the cleaner, the standardizers, the extractor,
+    # the pipeline runner, the archive build and every organizekit module. The
+    # suite measures 98% here; the floor keeps its slack because the
+    # end-to-end remux tests skip off POSIX and a skipped test covers nothing.
     name: Coverage gate
     runs-on: ubuntu-latest
     steps:
@@ -99,7 +104,7 @@ jobs:
       - name: Report and enforce the floor
         run: |
           python -m coverage report
-          python -m coverage report --fail-under=85
+          python -m coverage report --fail-under=95
 
   packaging:
     # Regression guard for the broken console entry point: pyproject declared
