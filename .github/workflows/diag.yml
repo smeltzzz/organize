@@ -48,17 +48,31 @@ jobs:
 
           with open("suite-output.txt", encoding="utf-8", errors="replace") as fh:
               text = fh.read()
-          emitted = 0
+          summary = re.search(r"^(FAILED|OK).*$", text, flags=re.M)
+          print(f"::notice title=suite::{summary.group(0)[:200] if summary else 'no summary'}")
+
+          entries = []
           for block in re.split(r"^={20,}$", text, flags=re.M):
-              head = re.search(r"^(FAIL|ERROR): (.+)$", block, flags=re.M)
+              head = re.search(r"^(FAIL|ERROR): \S+ \((\S+)\)", block, flags=re.M)
               if head is None:
                   continue
               lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
-              body = " // ".join(lines[:12])[:950]
-              title = f"{head.group(1)} {head.group(2).strip()}"[:200]
-              print(f"::error title={title}::{body}")
-              emitted += 1
-              if emitted >= 20:
+              reason = next((line for line in reversed(lines)
+                             if re.match(r"^[A-Za-z_.]*(Error|Exception|Exit)", line)), lines[-1])
+              entries.append(f"{head.group(1)[0]} {head.group(2)}: {reason}"[:260])
+
+          packed, current = [], ""
+          for entry in entries:
+              if current and len(current) + len(entry) + 3 > 940:
+                  packed.append(current)
+                  current = ""
+              current = f"{current} ;; {entry}" if current else entry
+              if len(packed) >= 8:
                   break
-          print(f"::notice title=failures published::{emitted}")
+          if current and len(packed) < 9:
+              packed.append(current)
+          for index, chunk in enumerate(packed, start=1):
+              print(f"::error title=failures {index}/{len(packed)} of {len(entries)}::{chunk}")
+          if not packed:
+              print("::notice title=failures::none")
           PY

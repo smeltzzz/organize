@@ -62,6 +62,10 @@ class QuietTestCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="cleaner_recovery_")
         self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
+        # The cleaner appends through one module-level file object closed at
+        # exit; on Windows an open handle makes the tree undeletable and the test
+        # dies in teardown instead of reporting what it measured.
+        self.addCleanup(tc.close_log_fp)
         capture = redirect_stdout(io.StringIO())
         capture.__enter__()
         self.addCleanup(capture.__exit__, None, None, None)

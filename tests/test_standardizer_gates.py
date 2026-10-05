@@ -518,16 +518,28 @@ class DuplicateScanTests(StandardizerFixture):
         self.assertTrue(second.is_dir(), "an ambiguous duplicate is never deleted")
 
     def test_a_duplicate_that_is_the_same_file_is_removed_without_losing_anything(self) -> None:
-        """A leftover hardlink tree: one inode, two folders."""
+        """A leftover hardlink tree: one inode, two folders, one name afterwards.
+
+        Which of the two folders keeps the name is not part of the promise: the
+        keeper is chosen by size, these two sizes are the same inode's size, and
+        the tie is broken by the order the library directory happens to
+        enumerate in. What is promised is that the movie survives, that exactly
+        one name for it is left, and that nothing was copied to get there.
+        """
         keeper = self.library / "Film (2020)"
         leftover = self.library / "Film 2020"
         keeper.mkdir()
         leftover.mkdir()
         movie = write_video(keeper / "Film (2020).mkv", size=BIG)
-        os.link(movie, leftover / "Film (2020).mkv")
+        twin = leftover / "Film (2020).mkv"
+        os.link(movie, twin)
         self.configure(enable_deduplication=True, maintenance_mode="DELETE")
         ms.deduplicate_movies(self.library)
-        self.assertTrue(movie.is_file(), "the inode still has a name")
+
+        survivors = [path for path in (movie, twin) if path.exists()]
+        self.assertEqual(len(survivors), 1, "one inode keeps exactly one name")
+        self.assertEqual(survivors[0].stat().st_size, BIG, "and it is still the whole movie")
+        self.assertEqual(survivors[0].stat().st_nlink, 1, "the extra name is really gone")
 
     def test_a_video_less_duplicate_that_still_holds_files_is_kept(self) -> None:
         """Subtitles and artwork are unique data even when the movie is not there."""

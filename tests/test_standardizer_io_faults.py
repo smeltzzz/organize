@@ -431,7 +431,13 @@ class RunFaultTests(StandardizerRunFixture):
         self.assertNotIn("Duplicate files", self.log_text())
 
     def test_the_same_pair_is_collapsed_when_the_inode_check_answers(self) -> None:
-        """The contrast the test above depends on: a proven hardlink is removed."""
+        """The contrast the test above depends on: a proven hardlink is removed.
+
+        Same promise as the unit-level twin: exactly one name survives and the
+        run says it collapsed a duplicate group rather than leaving an ambiguous
+        one. Which folder wins the tie between two equal sizes depends on the
+        order the library enumerates in, so the test does not pin it.
+        """
         keep = self.library / "Film (2020)"
         keep.mkdir()
         keeper = keep / "Film (2020).mkv"
@@ -444,8 +450,12 @@ class RunFaultTests(StandardizerRunFixture):
         code = self.run_main("--deduplicate", "--maintenance-mode", "DELETE")
 
         self.assertEqual(code, 0)
-        self.assertFalse(duplicate.exists(), "a proven same-inode duplicate is safe to drop")
-        self.assertTrue(keeper.is_file())
+        logged = self.log_text()
+        self.assertIn("Duplicate group", logged)
+        self.assertNotIn("Leaving ambiguous duplicate", logged)
+        survivors = [path for path in (keeper, duplicate) if path.exists()]
+        self.assertEqual(len(survivors), 1, "a proven same-inode duplicate is safe to drop")
+        self.assertEqual(survivors[0].stat().st_size, 8 * 1024 * 1024)
 
     def test_a_rollback_that_fails_is_logged_and_leaves_the_old_container_alone(self) -> None:
         """Container replacement verifies before it removes; if the undo fails, say so.

@@ -80,6 +80,10 @@ class CleanerRunHarness(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="cleaner_run_")
         self.addCleanup(self._tmp.cleanup)
+        # The cleaner appends through one module-level file object closed at
+        # exit; on Windows an open handle makes the tree undeletable and the test
+        # dies in teardown instead of reporting what it measured.
+        self.addCleanup(tc.close_log_fp)
         self.root = Path(self._tmp.name).resolve()
         self.library = self.root / "library"
         self.folder = self.library / "Film (2020)"

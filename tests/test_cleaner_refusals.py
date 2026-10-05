@@ -91,6 +91,7 @@ class ProcessMkvRefusalTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="cleaner_refusal_")
         self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(tc.close_log_fp)  # Windows: an open log handle pins the tree
         self.library = self.root / "library"
         self.folder = self.library / "Film (2020)"
         self.folder.mkdir(parents=True)
@@ -409,6 +410,7 @@ class ReportFailureTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="cleaner_report_")
         self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(tc.close_log_fp)  # Windows: an open log handle pins the tree
         self.report = self.root / "out" / "cleaner_report.txt"
         capture = redirect_stdout(io.StringIO())
         capture.__enter__()
@@ -485,6 +487,7 @@ class LeftoverBranchTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="cleaner_leftover_")
         self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(tc.close_log_fp)  # Windows: an open log handle pins the tree
         capture = redirect_stdout(io.StringIO())
         capture.__enter__()
         self.addCleanup(capture.__exit__, None, None, None)

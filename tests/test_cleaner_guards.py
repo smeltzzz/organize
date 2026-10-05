@@ -66,6 +66,10 @@ class QuietTestCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="cleaner_guard_")
         self.root = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
+        # The cleaner appends through one module-level file object closed at
+        # exit; on Windows an open handle makes the tree undeletable and the test
+        # dies in teardown instead of reporting what it measured.
+        self.addCleanup(tc.close_log_fp)
         capture = redirect_stdout(io.StringIO())
         capture.__enter__()
         self.addCleanup(capture.__exit__, None, None, None)
@@ -379,17 +383,18 @@ class WindowsTimestampTests(QuietTestCase):
 
     def test_on_posix_the_sweep_nices_itself(self) -> None:
         nice = mock.Mock()
-        with platforms.posix(), mock.patch.object(tc.os, "nice", nice):
+        with platforms.posix(), mock.patch.object(tc.os, "nice", nice, create=True):
             self.assertEqual(tc.apply_low_priority(), "nice +10")
         nice.assert_called_once_with(10)
 
     def test_a_nice_that_is_not_permitted_says_so_instead_of_failing(self) -> None:
-        with platforms.posix(), mock.patch.object(tc.os, "nice",
-                                                  mock.Mock(side_effect=PermissionError)):
+        with platforms.posix(), mock.patch.object(tc.os, "nice", create=True,
+                                                  new=mock.Mock(side_effect=PermissionError)):
             self.assertEqual(tc.apply_low_priority(), "unchanged (nice: permission denied)")
 
     def test_a_platform_without_nice_at_all_says_so(self) -> None:
-        with platforms.posix(), mock.patch.object(tc.os, "nice", mock.Mock(side_effect=OSError("no"))):
+        with platforms.posix(), mock.patch.object(
+                tc.os, "nice", create=True, new=mock.Mock(side_effect=OSError("no"))):
             self.assertEqual(tc.apply_low_priority(), "unchanged (no)")
 
 

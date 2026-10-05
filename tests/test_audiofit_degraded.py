@@ -629,14 +629,16 @@ class ConfigurationGateTests(TempFixture):
 
 class NiceTests(TempFixture):
     def test_the_sweep_lowers_its_own_priority_when_asked(self) -> None:
-        with mock.patch.object(aus.os, "nice", mock.Mock()) as nice:
+        with mock.patch.object(aus.os, "nice", mock.Mock(), create=True) as nice:
             aus.maybe_be_nice()
         nice.assert_called_once_with(10)
 
     def test_a_platform_without_nice_is_not_a_failure(self) -> None:
-        with mock.patch.object(aus.os, "nice", mock.Mock(side_effect=AttributeError)):
+        with mock.patch.object(aus.os, "nice", create=True,
+                               new=mock.Mock(side_effect=AttributeError)):
             aus.maybe_be_nice()
-        with mock.patch.object(aus.os, "nice", mock.Mock(side_effect=OSError("not permitted"))):
+        with mock.patch.object(aus.os, "nice", create=True,
+                               new=mock.Mock(side_effect=OSError("not permitted"))):
             aus.maybe_be_nice()
 
 
