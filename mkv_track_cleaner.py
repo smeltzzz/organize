@@ -45,9 +45,14 @@ before it starts, and the remux is refused outright when there is not enough roo
 
 Pipeline position: run this AFTER movie_standardizer.py and AFTER
 subtitle_extractor.py. Extraction must come first because this remux strips
-every embedded subtitle from a movie that has a validated external English SRT
-beside it; a movie without one keeps its embedded English subtitle tracks so
-the extractor can still build the sidecar on a later run.
+EVERY embedded subtitle from EVERY movie it cleans - with or without a
+validated external SRT beside it (see the invariant above, and
+``plan_cleanup``, where ``keep_subtitles`` is unconditionally empty). There is
+no "keeps the embedded tracks when there is no sidecar" fallback: a movie
+remuxed before the extractor has run loses its embedded subtitles for good,
+and the extractor has nothing left to build a sidecar from on a later run.
+``pipeline.py`` enforces the order (``toolchain.STEP_ORDER``, asserted by its
+smoke test); running this tool standalone is what skips that guard.
 
 MP4 releases are converted to MKV here: the same remux that cleans the tracks
 also writes the output as Matroska, the verified MKV is published under the
