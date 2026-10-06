@@ -160,7 +160,7 @@ def print_dashboard() -> None:
     print(bold("  WORKFLOW PIPELINE (tuned for: Chromecast HD G454V -> AX3125H -> UN60F6350AF):"))
     print(f"    {cyan('1. standardize')} {SYM_ARROW} qBittorrent completion hook: hardlinks & names into Title (Year)")
     print(f"    {cyan('2. extract')}     {SYM_ARROW} subtitle_extractor: text track -> <movie>.eng.srt; image-only movies by exact OpenSubtitles hash")
-    print(f"    {cyan('3. audio')}       {SYM_ARROW} audio_standardizer: TrueHD/DTS-HD -> chain-native Dolby Digital Plus 640k on this wiring (video untouched)")
+    print(f"    {cyan('3. audio')}       {SYM_ARROW} audio_standardizer: TrueHD/WMA Pro -> chain-native Dolby Digital Plus 640k; DTS-HD/DTS:X already play via their DTS core")
     print(f"    {cyan('4. clean')}       {SYM_ARROW} MKVToolNix lossless remux: keeps the best audio the chain can END UP with (surround before stereo), strips subs")
     print(f"    {cyan('5. 10bit')}       {SYM_ARROW} FFprobe inspection: queue 8-bit SDR for HandBrake, protect HDR, check G454V fit")
     print(f"    {cyan('6. audit')}       {SYM_ARROW} Read-only health check: verifies container, naming, and SRT health")
@@ -414,8 +414,9 @@ def check_ffmpeg(_ctx: DoctorContext) -> DiagnosticCheck:
         name="FFmpeg (ffmpeg)",
         status="warn",
         message="Not found on PATH or standard install paths",
-        detail="The 'audio' step will be skipped (TrueHD/DTS-HD tracks stay server-transcoded "
-               "on every play). --dry-run still produces the plan with ffprobe alone.",
+        detail="The 'audio' step will be skipped (TrueHD/WMA Pro tracks stay server-transcoded "
+               "on every play; DTS-HD/DTS:X play via the DTS core the player extracts, so they "
+               "need no step). --dry-run still produces the plan with ffprobe alone.",
         remedy=(
             "Windows: winget install Gyan.FFmpeg or drop ffmpeg.exe in C:\\ffmpeg\\bin\\\n"
             "Debian/Ubuntu: sudo apt install -y ffmpeg\n"
@@ -1312,7 +1313,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("extract", aliases=["extract-subs"], help="Extract embedded English tracks into validated <movie>.eng.srt sidecars", add_help=False)
 
     # audio
-    subparsers.add_parser("audio", aliases=["audiofit", "ac3"], help="Bake chain-native Dolby audio in from TrueHD/DTS-HD tracks the G454V can never emit", add_help=False)
+    subparsers.add_parser("audio", aliases=["audiofit", "ac3"], help="Bake chain-native Dolby audio in from the TrueHD/WMA Pro tracks the G454V can never emit (DTS-HD/DTS:X play via their extracted DTS core)", add_help=False)
 
     # clean
     subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep the best audio the chain can end up with (surround before stereo), strip subs; MP4 converted to MKV", add_help=False)

@@ -87,11 +87,21 @@ class AudioQualityTests(unittest.TestCase):
         self.assertGreater(tc.get_audio_quality_score(eac3), tc.get_audio_quality_score(truehd))
         self.assertGreater(tc.get_audio_quality_score(aac), tc.get_audio_quality_score(truehd))
 
-    def test_lossless_hd_is_the_best_transcode_SOURCE(self) -> None:
-        """Among unplayable tracks the better master still wins (it feeds audiofit)."""
+    def test_the_better_master_is_still_the_best_transcode_SOURCE(self) -> None:
+        """Among unplayable tracks the better master still wins (it feeds audiofit).
+
+        The pair this test used to compare - DTS-HD MA against DTS-HD HRA -
+        both play now: the player extracts the DTS core each one carries
+        (user-confirmed 2026-10), so neither is a burn candidate. The
+        transcode-source question moved to the formats with no core at all: a
+        lossless TrueHD master is burned in preference to lossy WMA Pro, and a
+        DTS-HD track outranks BOTH, because it needs no burn at all.
+        """
+        truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 6}}
+        wmapro = {"codec": "WMA Pro", "properties": {"codec_id": "A_WMAPRO", "audio_channels": 6}}
         dtshd = {"codec": "DTS-HD MA", "properties": {"codec_id": "A_DTS/HD_MA", "audio_channels": 8}}
-        dtshr = {"codec": "DTS-HD HRA", "properties": {"codec_id": "A_DTS-HD HRA", "audio_channels": 8}}
-        self.assertGreater(tc.get_audio_quality_score(dtshd), tc.get_audio_quality_score(dtshr))
+        self.assertGreater(tc.get_audio_quality_score(truehd), tc.get_audio_quality_score(wmapro))
+        self.assertGreater(tc.get_audio_quality_score(dtshd), tc.get_audio_quality_score(truehd))
 
     def test_a_titled_eac3_track_is_still_chain_native(self) -> None:
         """The scorer reads codec fields, never the track title.
@@ -1116,11 +1126,17 @@ class ChainAudioRetentionTests(unittest.TestCase):
                 self.assertEqual(self._keeper(core_track, stereo), 1)
 
     def test_a_real_profile_still_upgrades_a_bare_dts_name(self) -> None:
-        """The fix is field STABILITY, not blindness to field 2."""
+        """The fix is field STABILITY, not blindness to field 2.
+
+        A bare ``DTS`` codec name refined by a real ``DTS-HD MA`` profile is
+        the core-fallback class: it plays (the player extracts the core), so
+        it is NOT transcode-bound — but it still ranks below the AC-3 5.1 that
+        bitstreams as-is, which is why the keeper below is unchanged.
+        """
         master = self._track(1, "DTS", 6, codec_id="A_DTS/HD_MA")
         stereo = self._track(2, "AC-3", 6, codec_id="A_AC3")
         self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "DTS-HD MA", "")),
-                         pc.AUDIO_TRANSCODE_BOUND)
+                         pc.AUDIO_DTS_HD_CORE)
         self.assertEqual(tc.get_audio_quality_score(master)[0],
                          tc.get_audio_quality_score(stereo)[0])
         self.assertEqual(self._keeper(master, stereo), 2)

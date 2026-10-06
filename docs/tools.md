@@ -10,7 +10,7 @@ For the order they run in and why that order is load-bearing, see
 | Tool | One line | Needs |
 | :--- | :--- | :--- |
 | [`subtitle_extractor.py`](#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: from the movie's own text track, or an exact-hash OpenSubtitles match when only bitmaps exist | `mkvmerge` + `mkvextract` (an OpenSubtitles API key for image-only movies) |
-| [`audio_standardizer.py`](#2--audio_standardizerpy--chain-native-audio) | Chain-native audio for the G454V: bake one Dolby Digital Plus track @ 640 kbps (default wiring) in from every TrueHD/DTS-HD master, or report what's already native | `ffprobe` (+ `ffmpeg` when something needs the new track) |
+| [`audio_standardizer.py`](#2--audio_standardizerpy--chain-native-audio) | Chain-native audio for the G454V: bake one Dolby Digital Plus track @ 640 kbps (default wiring) in from every TrueHD/WMA-Pro master, or report what's already native (DTS-HD/DTS:X play via their extracted DTS core) | `ffprobe` (+ `ffmpeg` when something needs the new track) |
 | [`mkv_track_cleaner.py`](#3--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best chain-playable audio, strip commentary, dubs and embedded subtitles | `mkvmerge` |
 | [`bitdepth.py`](#4--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed, report each file's chain fit | `ffprobe` |
 | [`library_auditor.py`](#5--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
@@ -178,18 +178,20 @@ read-only mount or a permissions mistake costs no download.
 Every verdict derives from one fact the hardware dossier
 ([hardware.md](hardware.md)) establishes: the **Chromecast with Google TV
 (HD) G454V can emit Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3,
-Atmos included) and decoded PCM — never TrueHD, DTS-HD MA, DTS:X or WMA
-Pro.** A movie whose best track is one of those lossless-HD formats is
-*audio-transcoded by the Jellyfin server on every single play* — for the
-whole runtime of the file, forever. This tool is the one-time offline
-answer. For each movie it probes (`ffprobe`) and classifies:
+Atmos included), base DTS, decoded PCM — and, out of any DTS-HD MA/HRA or
+DTS:X bitstream, the backward-compatible DTS core it carries. It can never
+emit TrueHD, WMA Pro or DTS Express.** A movie whose best track is one of
+*those* (no backward-compatible core) is *audio-transcoded by the Jellyfin
+server on every single play* — for the whole runtime of the file, forever.
+This tool is the one-time offline answer. For each movie it probes (`ffprobe`) and classifies:
 
 | Source situation (the pool's **ranked best** track decides — see the invariant below) | Verdict | What happens |
 | :--- | :--- | :--- |
 | AC-3 / E-AC-3 ranked first in the pool | `native-ok` | nothing — the track the cleaner will keep already bitstreams end-to-end |
 | base 5.1 DTS core | `dts-core-ok` (default) / `transcoded-dolby` | **kept as-is on both wirings**, on measured evidence rather than assumption: playing a base-DTS movie through Jellyfin to the G454V reports **Direct Play** and lights the AX3125H's **DTS** indicator, two independent confirmations of the passthrough. Converting would be irreversible loss buying nothing — 1509 kbps DTS core to a 640 kbps DD+ bed is ~870 kbps, about **780 MB on a two-hour movie**, for audio the 3.1.2 bar downmixes anyway — and it is reversible later from the untouched source if firmware ever ends it. `--no-dts-passthrough` states the conversion policy explicitly. See `playbackchain.DTS_PASSTHROUGH_DEFAULT` |
 | AAC / FLAC / PCM / MP3 / Opus | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar takes multichannel PCM, while the explicit `--wiring tv-arc` (this TV offers PCM only for HDMI sources = stereo PCM) makes them transcode candidates |
-| TrueHD / DTS-HD MA / DTS-HD HRA / DTS:X | `transcoded-dolby` | **one chain-native Dolby track is synthesized and appended (Dolby Digital Plus on the default wiring), video untouched** |
+| DTS-HD MA / DTS-HD HRA / DTS:X | `dts-hd-core-ok` (default) / `transcoded-dolby` | **kept as-is on both wirings**: user-confirmed 2026-10 — the player cannot emit the lossless HD layer, but it extracts the DTS core every such bitstream carries and bitstreams that, so the bar decodes surround as DTS 5.1 (panel reads `DTS`), with no server work. A 7.1 master reaches 5.1. `--no-dts-passthrough` converts it anyway, from the lossless layer. See `playbackchain.PLAYER.dts_hd_core_fallback` |
+| TrueHD / DTS-HD LBR (DTS Express) | `transcoded-dolby` | **one chain-native Dolby track is synthesized and appended (Dolby Digital Plus on the default wiring), video untouched**. Neither has a backward-compatible core, which is what separates them from the DTS-HD row above |
 | unknown codec | `review-unknown` | fail-closed in the report; never auto-touched |
 | still hardlinked to a seed | `deferred-seeding` | untouched until seeding stops |
 
@@ -255,7 +257,9 @@ TrueHD Atmos 7.1 beats an AC-3 2.0 that plays today: the master becomes a DD+
 this order:
 
 1. **Achievable layout** (`playbackchain.achievable_channels()`). A
-   chain-native track achieves the channels it carries; a transcode-bound master
+   chain-native track achieves the channels it carries — except the DTS-HD
+   family, native *by core fallback*, which achieves its core's layout, at most
+   5.1 (`playbackchain.DTS_CORE_MAX_CHANNELS`); a transcode-bound master
    achieves the channels the synthesized replacement would have — at most 5.1
    on either wiring, the ceiling of ffmpeg's Dolby encoders, so a 7.1 master
    achieves 6 and not 8 (8.4.0); an *unknown* track achieves nothing, because
@@ -265,9 +269,10 @@ this order:
    LPCM 5.1/7.1 on the bar's HDMI IN ([hardware.md §2](hardware.md)).
 2. **Band.** *Chain-native* — Dolby Digital Plus (E-AC-3, Atmos included) and
    Dolby Digital (AC-3) bitstream end-to-end, base DTS is decoded by the
-   soundbar, and client-decodable formats (AAC, FLAC/PCM, Opus, MP3) arrive as
-   PCM — beats *transcode-bound* (TrueHD, DTS-HD MA, DTS-HD HRA, DTS:X, WMA
-   Pro), which beats *unknown*. At an **equal achievable layout** this is the
+   soundbar, the DTS core inside DTS-HD/DTS:X is extracted and bitstreamed by
+   the player, and client-decodable formats (AAC, FLAC/PCM, Opus, MP3) arrive
+   as PCM — beats *transcode-bound* (TrueHD, WMA Pro, DTS-HD LBR), which beats
+   *unknown*. At an **equal achievable layout** this is the
    Direct-Play-first rule: a 5.1 AC-3 still beats a 5.1 TrueHD — and since
    8.4.0 also a 7.1 one, because the encoder cap lands both at 5.1 and only
    one of them gets there without the server re-encoding anything.
@@ -279,15 +284,19 @@ this order:
    variant, so a title cannot claim one. A 3.1.2 bar with up-firing drivers is
    what DD+ Atmos exists for.
 4. **Codec sub-tier**, refining a settled layout: DD+ (100) > DD (95) > base
-   DTS (80) > FLAC/PCM (66) > Opus (62) > other lossy (60). Below the band it is
-   DTS-HD MA / DTS:X (34) > DTS-HD HRA (32) > the rest (30), which is what picks
-   the best *transcode source*. `audio_standardizer.py` ranks its own source pool
-   with this same function, so the two tools cannot disagree about which master
-   to burn.
+   DTS **and the DTS-HD family** (80 — a DTS core is what reaches the bar
+   either way) > FLAC/PCM (66) > Opus (62) > other lossy (60). Below the band
+   sit the formats with no native path: a lossless master (TrueHD/MLP, WMA
+   Lossless, 34) > WMA Pro (32) > the rest (30), which is what picks the best
+   *transcode source*. `audio_standardizer.py` ranks its own source pool with
+   this same function, so the two tools cannot disagree about which master to
+   burn.
 
 Keeping a convertible master is only correct if it actually gets converted, so
-every movie whose retained audio is still transcode-bound is named in the report
-(`Kept audio needing audiofit`) and warned about on the console and in the log.
+every movie whose retained audio is still transcode-bound (TrueHD / WMA Pro /
+DTS Express) is named in the report (`Kept audio needing audiofit`) and warned
+about on the console and in the log. A kept DTS-HD master is not in that bucket:
+it plays as its core, so there is nothing left to convert.
 A movie in that bucket means audiofit did not run or could not — usually a
 missing `ffmpeg`, or this tool run standalone instead of through `organize run`.
 

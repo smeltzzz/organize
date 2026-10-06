@@ -148,7 +148,7 @@ class DryRunPlansTheWholeLibraryTests(ChainFixture):
         self.assertEqual(self._run("--dry-run"), 0)
         report = self.report_text()
         # Dry-run verbs: PLANNED rows are named by their will-do status.
-        for verdict in (aus.STATUS_DTS, aus.STATUS_REVIEW):
+        for verdict in (aus.STATUS_DTS, aus.STATUS_DTS_HD, aus.STATUS_REVIEW):
             with self.subTest(verdict=verdict):
                 self.assertIn(verdict, report)
         self.assertIn("WOULD TRANSCODE", report)
@@ -165,9 +165,8 @@ class DryRunPlansTheWholeLibraryTests(ChainFixture):
 
 @unittest.skipIf(WINDOWS, "the fakes are launched through a POSIX shebang")
 class RealTranscodeRunTests(ChainFixture):
-    def test_truehd_and_dtshd_gain_a_dolby_digital_plus_track_that_passes_verification(self) -> None:
+    def test_truehd_gains_a_dolby_digital_plus_track_that_passes_verification(self) -> None:
         truehd = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
-        dtshd = self.movie("DTS HD Film (2002)", DTSHD_ONLY)
         done = self.movie("Ready Film (2003)", EAC3_DONE)
         odd = self.movie("Odd Film (2005)", UNKNOWN_AUDIO)
         timestamp_before = done.read_bytes()
@@ -175,24 +174,22 @@ class RealTranscodeRunTests(ChainFixture):
         code = self._run(env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
         self.assertEqual(code, 0)
 
-        # The two lossless files were replaced by a verified superset. On the
-        # default wiring the synthesized track is Dolby Digital Plus folded to
-        # 5.1 — the widest layout ffmpeg's Dolby encoders can actually write
-        # (an 8-channel master no longer buys an 8-channel promise that fails).
-        for path, before_streams in ((truehd, TRUEHD_ONLY), (dtshd, DTSHD_ONLY)):
-            streams = self.payload_of(path)["streams"]
-            with self.subTest(movie=path.name):
-                self.assertEqual(len(streams), len(before_streams["streams"]) + 1)
-                self.assertEqual(streams[-1]["codec_name"], "eac3")
-                self.assertEqual(streams[-1]["channels"], 6)
-                self.assertEqual(streams[0]["codec_name"], "hevc")
+        # The lossless file was replaced by a verified superset. On the default
+        # wiring the synthesized track is Dolby Digital Plus folded to 5.1 — the
+        # widest layout ffmpeg's Dolby encoders can actually write (an
+        # 8-channel master no longer buys an 8-channel promise that fails).
+        streams = self.payload_of(truehd)["streams"]
+        self.assertEqual(len(streams), len(TRUEHD_ONLY["streams"]) + 1)
+        self.assertEqual(streams[-1]["codec_name"], "eac3")
+        self.assertEqual(streams[-1]["channels"], 6)
+        self.assertEqual(streams[0]["codec_name"], "hevc")
         # The already-native file and the reviewable one were never opened.
         self.assertEqual(done.read_bytes(), timestamp_before)
         self.assertEqual(self.payload_of(odd)["streams"][1]["codec_name"], "gsm_ms")
 
-        # Exactly two ffmpeg runs, shaped as the docs promise.
+        # Exactly one ffmpeg run, shaped as the docs promise.
         calls = self.ffmpeg_invocations()
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 1)
         for args in calls:
             self.assertIn("-c:a:1", args)
             self.assertIn("eac3", args)
@@ -206,15 +203,45 @@ class RealTranscodeRunTests(ChainFixture):
         # State remembers what was done.
         rows = self.plan_rows()
         self.assertEqual(rows["TrueHD Film (2001)"], aus.STATUS_TRANSCODED)
-        self.assertEqual(rows["DTS HD Film (2002)"], aus.STATUS_TRANSCODED)
 
-        # A second pass is a no-op: the appended AC-3 makes both files settled
-        # (the transcoded bucket is empty; both now report chain-native).
+        # A second pass is a no-op: the appended DD+ makes the file settled
+        # (the transcoded bucket is empty; it now reports chain-native).
         code = self._run()
         self.assertEqual(code, 0)
-        rows = self.plan_rows()
-        self.assertEqual(rows["TrueHD Film (2001)"], aus.STATUS_NATIVE)
-        self.assertEqual(rows["DTS HD Film (2002)"], aus.STATUS_NATIVE)
+        self.assertEqual(self.plan_rows()["TrueHD Film (2001)"], aus.STATUS_NATIVE)
+
+    def test_dts_hd_is_settled_by_the_extracted_core_and_left_untouched(self) -> None:
+        """DTS-HD MA needs no transcode: the player emits the core it carries.
+
+        User-confirmed 2026-10 on the real chain. The file must come back
+        byte-identical, with no ffmpeg run and its own stored status — this is
+        exactly the flip side of the 8.5.0 revert for base DTS: converting
+        would destroy the lossless master to replace audio the bar already
+        decodes as DTS 5.1.
+        """
+        dtshd = self.movie("DTS HD Film (2002)", DTSHD_ONLY)
+        before = dtshd.read_bytes()
+        code = self._run(env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
+        self.assertEqual(code, 0)
+        self.assertEqual(dtshd.read_bytes(), before, "the original is untouched")
+        self.assertEqual(self.payload_of(dtshd)["streams"][1]["codec_name"], "dts")
+        self.assertEqual(self.ffmpeg_invocations(), [])
+        self.assertEqual(self.plan_rows()["DTS HD Film (2002)"], aus.STATUS_DTS_HD)
+        self.assertEqual(self._run(), 0)
+        self.assertEqual(self.plan_rows()["DTS HD Film (2002)"], aus.STATUS_DTS_HD)
+
+    def test_no_dts_passthrough_converts_dts_hd_from_its_lossless_layer(self) -> None:
+        """The one way to spend a DTS-HD master deliberately."""
+        dtshd = self.movie("DTS HD Film (2002)", DTSHD_ONLY)
+        before = dtshd.read_bytes()
+        code = self._run("--no-dts-passthrough",
+                         env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
+        self.assertEqual(code, 0)
+        self.assertNotEqual(dtshd.read_bytes(), before)
+        streams = self.payload_of(dtshd)["streams"]
+        self.assertEqual(streams[-1]["codec_name"], "eac3")
+        self.assertEqual(streams[-1]["channels"], 6)
+        self.assertEqual(self.plan_rows()["DTS HD Film (2002)"], aus.STATUS_TRANSCODED)
 
     def test_the_source_is_the_native_language_track_not_the_dub(self) -> None:
         film = self.movie("Jidaigeki (1999)", FOREIGN_JPN)
@@ -461,9 +488,12 @@ class PlannerUnitTests(unittest.TestCase):
     def test_every_real_world_codec_family_has_a_verdict(self) -> None:
         # self.cfg uses the DEFAULT wiring, soundbar-hdmi-in: the soundbar's
         # HDMI IN carries multichannel PCM, so multichannel PCM-decodes are
-        # accepted as-is, and base DTS is accepted too (measured on the real
-        # chain: Jellyfin Direct Plays it and the AX3125H lights its DTS
-        # indicator). Only the lossless-HD masters need work.
+        # accepted as-is, and the DTS family is accepted too (measured on the
+        # real chain: Jellyfin Direct Plays base DTS and the AX3125H lights
+        # its DTS indicator; for DTS-HD/DTS:X the player extracts the core
+        # such a track carries - user-confirmed 2026-10). Only the masters
+        # with no backward-compatible core need work: TrueHD, WMA Pro,
+        # DTS Express.
         cases = {
             "eac3": aus.STATUS_NATIVE, "ac3": aus.STATUS_NATIVE,
             "dts": aus.STATUS_DTS, "aac": aus.STATUS_PCM, "flac": aus.STATUS_PCM,
@@ -472,6 +502,17 @@ class PlannerUnitTests(unittest.TestCase):
         for codec, wanted in cases.items():
             with self.subTest(codec=codec):
                 v = aus.plan_for_payload("m.mkv", _payload({"codec_name": codec}), self.cfg)
+                self.assertEqual(v.status, wanted)
+        # The DTS family splits by profile, and both halves must have a
+        # verdict: the core-bearing variants settle as dts-hd-core-ok, while
+        # DTS Express (no backward-compatible core) transcodes like TrueHD.
+        for profile, wanted in (("DTS-HD MA", aus.STATUS_DTS_HD),
+                                ("DTS-HD HRA", aus.STATUS_DTS_HD),
+                                ("DTS:X", aus.STATUS_DTS_HD),
+                                ("DTS Express", aus.STATUS_PLANNED)):
+            with self.subTest(profile=profile):
+                v = aus.plan_for_payload("m.mkv", _payload(
+                    {"codec_name": "dts", "profile": profile, "channels": 6}), self.cfg)
                 self.assertEqual(v.status, wanted)
 
     def test_the_default_config_is_the_hdmi_in_wiring(self) -> None:
@@ -577,33 +618,50 @@ class PlannerUnitTests(unittest.TestCase):
                                  if payload is EAC3_TITLED_TRUEHD else
                                  "EAC3 - DTS-HD MA 7.1")
 
-    def test_the_transcode_source_is_the_highest_tier_master_not_the_widest(self) -> None:
-        # Two lossless masters, no native track. Since 8.4.0 both reach the
-        # SAME 5.1 bed - the encoder ceiling means a 7.1 master no longer
-        # reaches further than a 5.1 one - so the widest is not special any
-        # more and the chain's master-preference table picks the input:
-        # DTS-HD MA outranks TrueHD, exactly as it already did at equal
-        # layouts. Before the cap this fixture chose TrueHD *because* 7.1
-        # stayed 7.1; that premise was false, and it is what made the whole
-        # >=7.1 library's audiofit fail. Same table the cleaner ranks with,
-        # so the two tools still cannot disagree about which master to burn.
+    def test_a_dts_hd_master_settles_the_movie_without_a_transcode(self) -> None:
+        """TrueHD + DTS-HD MA: the DTS-HD track wins, and nothing is burned.
+
+        The class table now answers the pool question the way playback does.
+        Both masters reach 5.1 (the encoder ceiling folds the TrueHD), but
+        only the DTS-HD track plays with no server work — the player extracts
+        the DTS core it carries (user-confirmed 2026-10) — so it takes the
+        native band and settles the movie, instead of being burned into a
+        smaller DD+ bed. TrueHD alone still transcode; the two-tool invariant
+        (the cleaner keeps what audiofit ranked first) is what makes this
+        safe.
+        """
         payload = _payload({"codec_name": "truehd", "channels": 8},
                            {"codec_name": "dts", "profile": "DTS-HD MA", "channels": 6})
         v = aus.plan_for_payload("m.mkv", payload, self.cfg)
+        self.assertEqual(v.status, aus.STATUS_DTS_HD)
+        self.assertEqual(v.audio_class, aus.AUDIO_DTS_HD_CORE)
+        self.assertIsNone(v.target, "a settled verdict appends no track")
+        self.assertIn("DTS-HD MA", v.info, "the keeper is the DTS-HD track, not TrueHD")
+        self.assertIn(v.status, aus.SETTLED_AUDIOFIT)
+
+    def test_the_transcode_source_is_the_best_master_among_the_bound_ones(self) -> None:
+        # Two formats with no backward-compatible core: TrueHD (lossless) and
+        # WMA Pro (lossy). Both reach the same 5.1 bed, so the chain's
+        # master-preference table picks the burn input - the lossless one -
+        # deterministically. Before 8.6.0 the fixture was TrueHD vs DTS-HD MA;
+        # that pair no longer transcodes at all (the test above), which is the
+        # one behavioural change the DTS core fallback brings.
+        payload = _payload({"codec_name": "truehd", "channels": 8},
+                           {"codec_name": "wmapro", "channels": 6})
+        v = aus.plan_for_payload("m.mkv", payload, self.cfg)
         self.assertEqual(v.status, aus.STATUS_PLANNED)
-        self.assertEqual(v.source_stream, 2)
-        self.assertEqual(v.source_codec, "dts")
+        self.assertEqual(v.source_stream, 1)
 
     def test_at_an_equal_layout_the_highest_tier_master_is_the_source(self) -> None:
         # Determinism, not preference: both reach 5.1, so the chain's
-        # master-preference table breaks the tie (DTS-HD MA ranks above TrueHD
-        # — both decode losslessly) and picks the same source every run.
+        # master-preference table breaks the tie (the lossless TrueHD ranks
+        # above WMA Pro) and picks the same source every run.
         payload = _payload({"codec_name": "truehd", "channels": 6},
-                           {"codec_name": "dts", "profile": "DTS-HD MA", "channels": 6})
+                           {"codec_name": "wmapro", "channels": 6})
         v = aus.plan_for_payload("m.mkv", payload, self.cfg)
         self.assertEqual(v.status, aus.STATUS_PLANNED)
-        self.assertEqual(v.source_stream, 2)
-        self.assertEqual(v.source_codec, "dts")
+        self.assertEqual(v.source_stream, 1)
+        self.assertEqual(v.source_codec, "truehd")
 
     def test_nothing_planned_means_no_target(self) -> None:
         v = aus.plan_for_payload("m.mkv", EAC3_DONE, self.cfg)

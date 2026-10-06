@@ -12,8 +12,9 @@ five separate commands, and the order between the first three is load-bearing:
 
 ``subtitle_extractor.py`` builds each movie's English sidecar from the
 movie's own embedded subtitle track. ``audio_standardizer.py`` then bakes a
-chain-native Dolby track in (from TrueHD/DTS-HD masters the Chromecast HD
-G454V can never emit) while every original track is still in the file.
+chain-native Dolby track in (from the TrueHD/WMA Pro masters the Chromecast
+HD G454V can never emit — DTS-HD and DTS:X need no help, the player extracts
+the DTS core they carry) while every original track is still in the file.
 ``mkv_track_cleaner.py`` strips every embedded subtitle once a validated
 sidecar exists and keeps exactly one audio track — under the chain's tiers it
 always keeps the chain-native Dolby track audiofit just created, and drops the

@@ -46,7 +46,8 @@ Five maintenance tools, one fixed order. Two orderings are load-bearing:
    already in the file is gone for good.
 2. **Audio-fit before remux.** The audio standardizer bakes a chain-native
    Dolby track in (Dolby Digital Plus on the default wiring) from any
-   TrueHD/DTS-HD master the G454V can never emit; the cleaner's chain tiers
+   TrueHD/WMA-Pro master the G454V can never emit (DTS-HD/DTS:X need
+   no conversion - the player extracts their DTS core); the cleaner's chain tiers
    then keep exactly that new track and a remux can retire the lossless
    master **without ever leaving a movie with no playable audio**. Reversed,
    the cleaner would keep a playable-but-lossy survivor and discard a 7.1
@@ -78,8 +79,9 @@ wrong.
 └───────────┬───────────┘   movies: exact-moviehash OpenSubtitles match
             ▼
 ┌───────────────────────┐   ffprobe sweep; Dolby Digital Plus @ 640k baked in
-│ 3 · audio             │   from any TrueHD/DTS-HD master (video untouched,
-└───────────┬───────────┘   verified), chain-native tracks reported as done
+│ 3 · audio             │   from any TrueHD/WMA-Pro master the G454V cannot
+└───────────┬───────────┘   emit (video untouched, verified); DTS-HD/DTS:X
+                            and native tracks reported as already playable
             ▼
 ┌───────────────────────┐   lossless mkvmerge remux: 1 best chain-playable
 │ 4 · clean             │   audio (the Dolby track just created wins), strip
