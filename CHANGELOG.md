@@ -4,7 +4,89 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.6.1] - 2026-10-06
+
+A codec-fact audit of the reference chain (Chromecast with Google TV HD
+`G454V` → Hisense `AX3125H` soundbar, HDMI IN). The four blocks the chain
+actually delivers — bitstreamed `AC-3`/`E-AC-3`/`E-AC-3 JOC` into the bar's
+3.1.2 array, `DTS` core, multichannel `LPCM 5.1/7.1` accepted at the HDMI IN,
+and AAC/MP3/FLAC/Opus/Vorbis/WAV decoded in software — were already the table,
+including 8.6.0's DTS-core fallback for DTS-HD MA/HRA and DTS:X. Three
+consequences of those same facts were not modelled, and one of them could cost
+a library its only Atmos track.
+
+### Fixed
+- **No DTS track is credited with a wider layout than a DTS core can carry.**
+  `achievable_channels()` capped the *DTS-HD* family at 5.1
+  (`DTS_CORE_MAX_CHANNELS`) and left base `dts-core-passthrough` uncapped,
+  while "achievable layout" is the FIRST key of the keeper ranking. The shape
+  this missed is ordinary: mkvmerge reports every DTS-family stream as codec
+  `DTS` with codec ID `A_DTS` and puts the `DTS:X`/`DTS-HD MA` label only in
+  the track *name* — which the classifier rightly refuses to read as a codec —
+  so a 7.1 DTS:X was credited with achieving 8 channels and beat a genuine
+  DD+ 5.1 Atmos track (6) outright. The winner keeps the movie's audio; the
+  loser is deleted by an irreversible remux. The cap now belongs to the class,
+  not to the label: both DTS classes reach `DTS_CORE_MAX_CHANNELS`, and a
+  misread spelling is a misreport rather than a mistake.
+- **`DTSX` is read as the DTS-HD family.** `DTSHD` has been an accepted
+  spelling for as long as this table existed; the separator-free form of DTS:X
+  had not, so an extractor that flattens the colon reported `DTS` and lost the
+  HD-class label. (A spaced-out `DTS X` still reads as core DTS on purpose —
+  chasing it would mean reading the token after the profile, which is the
+  title — and the cap above is what makes that safe.)
+- **ALAC and WavPack are no longer `decode-to-pcm`.** They were credited with
+  the chain's software-decode path *and* the lossless sub-tier rung (66, above
+  Opus and Vorbis), on nothing: the Android TV media framework has no decoder
+  for either, ExoPlayer needs an FFmpeg extension neither the stock player nor
+  Jellyfin's Android-TV client ships, and Jellyfin's own codec table marks ALAC
+  unsupported on Android TV. They are `AUDIO_UNKNOWN` now — fail-closed,
+  reported, never auto-touched, achieving zero channels so a codec this chain
+  cannot play can never out-rank one it can. `WAVPACK` also used to be caught by
+  the `WAV` substring; `has_no_platform_decoder()` is why that cannot recur.
+
+### Added
+- **The player's decode ceiling is modelled as data, and it is a report.** The
+  software decoder this chain's facts bound at 24-bit / 96 kHz is now
+  `Player.max_decoded_sample_rate` / `Player.max_decoded_bit_depth`, read by
+  `exceeds_decode_ceiling()`. A FLAC/LPCM stream past it moves out of
+  `pcm-decode-ok` and into `review-unknown` with the number that broke the bound
+  in its line, because "the player decodes it, so nothing transcodes" is only a
+  promise about a stream the decoder is specified to handle. Just as
+  deliberately, it is **not** a transcode and **not** a ranking key: what a
+  24/192 stream does on this box (fail, or be resampled to the mixer's 48 kHz)
+  has not been measured, and neither an unmeasured maybe nor a preference for
+  hi-res is evidence to spend a lossless master or to delete one. Bitstreamed
+  Dolby and DTS never touch this decoder, so their sample rates are not this
+  question. `organize doctor` and the chain summary now print the bound.
+
+### Documentation
+- `docs/hardware.md` §1 states the channel ceilings per format, gains
+  subtlety 4 (the decode ceiling, and why it stops at reporting), three new
+  practical-consequence bullets, and a settings-checklist paragraph on the
+  manual surround selection and the app-level bitstreamers (Kodi, VLC, Nova,
+  Plex) that reach the same core/PCM result the table already assumes; the §5
+  matrix splits `FLAC/PCM` by ceiling and gives ALAC/WavPack their own row.
+  `docs/tools.md`'s verdict and ranking tables follow. `.env.example` and the
+  front page say the same thing in fewer words.
+- **The suite follows the change:** 2,341 → **2,355 tests** (14 new — the
+  DTS:X-vs-Atmos regression run through the live scorer rather than a restated
+  tuple, the fail-closed no-decoder family, and the ceiling pinned at its
+  boundary: exactly 96 kHz stays `pcm-decode-ok`), green fully offline on
+  `Python 3.11.2 | Linux`, and `organize.py test` passes with five new
+  audio-standardizer checks. CI on the PR (`#64`) is green end to end — the
+  Linux/macOS/Windows × 3.11–3.13 matrix, `Packaging`,
+  `Single-file build (organize.pyz)`, `Coverage gate`, the
+  `CLI smoke test (doctor + dashboard)`, and `Lint (ruff)`, whose one request
+  was to sort the new core import into alphabetical place. No workflow or CI
+  file needed a change for this release, so the release is the merge and the
+  tag: `git tag -a v8.6.1 -m "8.6.1" && git push origin v8.6.1`, which publishes
+  [organizekit 8.6.1](https://pypi.org/project/organizekit/) for the
+  `pip install --upgrade organizekit` upgrade path. **Tag it from the merged
+  commit on `main`** — a tag on the unmerged head would publish a wheel while
+  `main` still says 8.6.0.
+
 ## [8.6.0] - 2026-10-06
+
 
 The DTS-HD family was re-measured on the real chain, and it is not what the
 toolkit assumed: **the player extracts the backward-compatible DTS core out of

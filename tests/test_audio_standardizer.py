@@ -498,6 +498,8 @@ class PlannerUnitTests(unittest.TestCase):
             "eac3": aus.STATUS_NATIVE, "ac3": aus.STATUS_NATIVE,
             "dts": aus.STATUS_DTS, "aac": aus.STATUS_PCM, "flac": aus.STATUS_PCM,
             "truehd": aus.STATUS_PLANNED, "gsm_ms": aus.STATUS_REVIEW,
+            # Lossless, and still review: this player decodes no ALAC.
+            "alac": aus.STATUS_REVIEW, "wavpack": aus.STATUS_REVIEW,
         }
         for codec, wanted in cases.items():
             with self.subTest(codec=codec):
@@ -514,6 +516,54 @@ class PlannerUnitTests(unittest.TestCase):
                 v = aus.plan_for_payload("m.mkv", _payload(
                     {"codec_name": "dts", "profile": profile, "channels": 6}), self.cfg)
                 self.assertEqual(v.status, wanted)
+
+    def test_a_stream_past_the_decode_ceiling_is_reviewed_not_settled(self) -> None:
+        """The player's software decoders are specified to 24-bit / 96 kHz.
+
+        That bound is part of the chain's facts, so a 24/192 FLAC is not "more
+        resolution that Direct Plays" - it is a stream the decoder is not
+        specified to handle. What happens to one here has never been measured
+        (a failed decode, or a silent resample to the mixer's 48 kHz), and
+        neither answer justifies acting: synthesizing a replacement would spend
+        a lossless master on a guess, and calling it ``pcm-decode-ok`` would
+        promise a play nobody checked. So the movie is reviewed and untouched.
+        """
+        over = aus.plan_for_payload("m.mkv", _payload(
+            {"codec_name": "flac", "channels": 6, "sample_rate": "192000",
+             "bits_per_sample": 24}), self.cfg)
+        self.assertEqual(over.status, aus.STATUS_REVIEW)
+        self.assertIsNone(over.target, "the ceiling is a report, not a transcode plan")
+        self.assertEqual(over.audio_class, aus.AUDIO_DECODE_PCM)
+        self.assertIn("decode ceiling", over.info)
+
+    def test_the_ceiling_is_a_bound_and_not_a_climate(self) -> None:
+        """96 kHz is inside it, and an unreported rate is not a breach."""
+        for rate in (96000, "96000", 48000, None, "0", 0, "bogus"):
+            with self.subTest(rate=rate):
+                v = aus.plan_for_payload("m.mkv", _payload(
+                    {"codec_name": "flac", "channels": 6, "sample_rate": rate}), self.cfg)
+                self.assertEqual(v.status, aus.STATUS_PCM)
+        # 32-bit is a bit-depth breach even at a rate inside the ceiling...
+        deep = aus.plan_for_payload("m.mkv", _payload(
+            {"codec_name": "flac", "channels": 2, "sample_rate": 48000,
+             "bits_per_sample": 32}), self.cfg)
+        self.assertEqual(deep.status, aus.STATUS_REVIEW)
+        # ...and a bitstream never touches the software decoder, so its rate is
+        # simply not this question.
+        for codec in ("eac3", "ac3", "dts", "truehd"):
+            with self.subTest(codec=codec):
+                v = aus.plan_for_payload("m.mkv", _payload(
+                    {"codec_name": codec, "channels": 8,
+                     "sample_rate": 192000, "bits_per_sample": 32}), self.cfg)
+                self.assertNotIn("decode ceiling", v.info)
+
+    def test_the_ceiling_reaches_the_report_the_human_reads(self) -> None:
+        """A review bucket that does not say why is a bucket nobody opens."""
+        payload = _payload({"codec_name": "flac", "channels": 6, "sample_rate": "192000"})
+        verdict = aus.plan_for_payload("m.mkv", payload, self.cfg)
+        self.assertEqual(verdict.status, aus.STATUS_REVIEW)
+        self.assertIn("192 kHz", verdict.info)
+        self.assertIn("96 kHz", verdict.info)
 
     def test_the_default_config_is_the_hdmi_in_wiring(self) -> None:
         # No flag, no environment override: the planner must assume the chain

@@ -45,7 +45,9 @@ What this tool does, per movie:
        dts-core             base 5.1 DTS             -> done by default (see --dts-passthrough)
        dts-hd-core          DTS-HD MA/HRA, DTS:X     -> done by default: the player extracts
                                                        the DTS core and bitstreams that
-       decode-to-pcm        AAC/FLAC/MP3/Opus/PCM... -> done (see --wiring note)
+       decode-to-pcm        AAC/FLAC/MP3/Opus/PCM... -> done (see --wiring note), up to the
+                                                       player's 24-bit/96 kHz decode ceiling;
+                                                       past that ceiling it is REVIEW, untouched
        transcode-bound      TrueHD/WMA Pro/DTS-HD LBR-> FIX, offline, now
 
   3. The fix: ffmpeg copies EVERY stream losslessly and appends one track,
@@ -133,6 +135,7 @@ from organizekit.core import (
     dolby_name,
     dts_passthrough_default,
     enable_utf8_stdio,
+    exceeds_decode_ceiling,
     iter_completed,
     open_probe_cache,
     open_state,
@@ -200,7 +203,8 @@ CATEGORY_LABELS = {
     STATUS_PCM: "4. DECODE-TO-PCM  —  OK (Chromecast decodes to PCM)",
     STATUS_TRANSCODED: "5. TRANSCODED  —  chain-native Dolby baked in from a lossless track",
     STATUS_PLANNED: "5. WOULD TRANSCODE  —  dry-run plan only",
-    STATUS_REVIEW: "6. REVIEW  —  unknown audio, fail-closed, untouched",
+    STATUS_REVIEW: "6. REVIEW  —  unknown codec, or a decoded stream past the player's "
+                   "24-bit/96 kHz ceiling; fail-closed, untouched",
     STATUS_DEFERRED: "7. DEFERRED  —  still seeding, untouched",
     STATUS_ERROR: "8. ERRORS",
 }
@@ -565,8 +569,25 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
 
     pcm_acceptable = not (cfg.wiring == WIRING_TV_ARC and best_channels > 2)
     if best_cls == AUDIO_DECODE_PCM and pcm_acceptable:
-        return _v(STATUS_PCM,
-                  f"{describe_stream(best_stream)} — {audio_chain_note(best_blob, best_channels, cfg.wiring)}",
+        # Inside the player's decode ceiling this is a settled movie; past it,
+        # it is a question for a human. The G454V's software decoders are
+        # specified to 24-bit/96 kHz, so a 24/192 FLAC is not "more
+        # resolution that Direct Plays" - it is a stream the chain has no
+        # promise about. What actually happens to one here has never been
+        # measured (a decode failure, or a silent resample to the mixer's
+        # 48 kHz), and neither guess is worth acting on: synthesizing a Dolby
+        # replacement would spend a lossless master on a maybe, and reporting
+        # "pcm-decode-ok" would promise a Direct Play nobody checked. So the
+        # movie lands in the review bucket, untouched, with the reason.
+        over = exceeds_decode_ceiling(best_stream.get("sample_rate"),
+                                      best_stream.get("bits_per_sample"))
+        if not over:
+            return _v(STATUS_PCM,
+                      f"{describe_stream(best_stream)} — {audio_chain_note(best_blob, best_channels, cfg.wiring)}",
+                      AUDIO_DECODE_PCM)
+        return _v(STATUS_REVIEW,
+                  f"{describe_stream(best_stream)} — "
+                  f"{audio_chain_note(best_blob, best_channels, cfg.wiring, sample_rate=best_stream.get('sample_rate'), bit_depth=best_stream.get('bits_per_sample'))}",
                   AUDIO_DECODE_PCM)
 
     if best_cls == AUDIO_UNKNOWN:
@@ -1138,7 +1159,7 @@ def scan(cfg: Config) -> int:
     else:
         failed = [r for r in applied if r.error]
         log(f"  Transcoded to Dolby      : {len(applied) - len(failed)} done, {len(failed)} failed ({dolby_label})")
-    log(f"  Review (unknown audio)   : {by[STATUS_REVIEW]}")
+    log(f"  Review (unverified)      : {by[STATUS_REVIEW]}")
     log(f"  Deferred (still seeding) : {by[STATUS_DEFERRED]}")
     log(f"  Errors                   : {by[STATUS_ERROR]}")
     log("=" * 79)
@@ -1184,7 +1205,8 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         (by[STATUS_NATIVE], "Already chain-native", "AC-3/E-AC-3: bitstreams as-is"),
         (by[STATUS_DTS] + by[STATUS_DTS_HD] + by[STATUS_PCM], "Native via decode/DTS",
          "no action on this chain"),
-        (by[STATUS_REVIEW], "Human review", "unknown audio — fail-closed, untouched"),
+        (by[STATUS_REVIEW], "Human review",
+         "unknown codec, or past the 24-bit/96 kHz decode ceiling — fail-closed, untouched"),
         (by[STATUS_DEFERRED], "Deferred (seeding)", "still hardlinked to a seed"),
         (by[STATUS_ERROR], "Errors", "not modified"),
         (len(results), "Movies inspected", "every MKV in the library"),
@@ -1201,7 +1223,12 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         "runs next and keeps exactly one chain-native track; the foreign-language "
         "dubs, commentary and the master leave the file there. DTS-HD is NOT in "
         "that bucket: the player extracts the DTS core such a track carries and "
-        "the bar decodes it, so those movies are reported, not converted."
+        "the bar decodes it, so those movies are reported, not converted. The DTS "
+        "family is credited at most 5.1 either way - the core's own ceiling. Two "
+        "things are reported for a human instead of being settled here: a codec this "
+        "player has no decoder for (ALAC, WavPack) and a decoded stream past the "
+        "G454V's 24-bit/96 kHz ceiling - the first is outside the chain's table, and "
+        "what the second does on this box has not been measured."
     )
 
     ordered = [STATUS_PLANNED if cfg.dry_run else STATUS_TRANSCODED,
@@ -1211,7 +1238,13 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         STATUS_TRANSCODED: "Action: none left — the chain-native Dolby track is in the file now; "
                            "the cleaner will keep it and drop the lossless master.",
         STATUS_PLANNED: "Action: run without --dry-run to bake these in, then let the cleaner keep the new track.",
-        STATUS_REVIEW: "Action: inspect by hand. Unknown audio is never auto-touched.",
+        STATUS_REVIEW: "Action: inspect by hand. Neither an unrecognized codec nor a stream past "
+                       "the G454V's 24-bit/96 kHz decode ceiling is ever auto-touched: the first "
+                       "is not in this chain's table at all, and what the second does on this box "
+                       "has not been measured (a failed decode, or a silent resample to 48 kHz). "
+                       "Play it once: if the bar goes quiet or the server starts transcoding the "
+                       "audio, the fix is to re-encode that track inside the ceiling (or let "
+                       "audio_standardizer bake the Dolby target from it once the class says so).",
         STATUS_DEFERRED: "Action: nothing — rerun once seeding stops and these transcode normally.",
         STATUS_ERROR: "Action: read the error lines; no listed file was modified.",
         STATUS_NATIVE: "Action: none. Dolby Digital / Digital Plus already bitstreams end-to-end.",
@@ -1257,9 +1290,11 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         "dts-hd-core-ok = DTS-HD MA/HRA, DTS:X: the player cannot emit the lossless HD layer, but it "
         "extracts the backward-compatible DTS core and bitstreams that (user-confirmed 2026-10) - "
         "the bar decodes DTS 5.1, no server work.",
-        "pcm-decode-ok = AAC/FLAC/MP3/Opus/PCM: the Chromecast decodes; HDMI IN accepts multichannel PCM.",
+        "pcm-decode-ok = AAC/FLAC/MP3/Opus/Vorbis/WAV/PCM within 24-bit/96 kHz: the Chromecast decodes; HDMI IN accepts multichannel PCM.",
         f"transcoded-dolby = TrueHD/WMA Pro/DTS Express can never leave the G454V, so {synth} was synthesized (@ 640 kbps surround).",
-        "review-unknown = unrecognized audio; fail-closed, untouched. deferred-seeding = still hardlinked to a seed.",
+        "review-unknown = fail-closed, untouched: an unrecognized codec (ALAC and WavPack count - this "
+        "player has no decoder for either), or a decoded stream past the G454V's 24-bit/96 kHz ceiling. "
+        "deferred-seeding = still hardlinked to a seed.",
         "Facts and wiring: organizekit/core/playbackchain.py · full write-up: docs/hardware.md.",
     ]
     report.footer(footer)
@@ -1531,6 +1566,20 @@ def run_self_tests() -> int:
                   and classify_audio_blob("DTS-HD LBR") == AUDIO_TRANSCODE_BOUND)),
         ("a 7.1 DTS-HD master reaches 5.1 on this chain (its core's layout)",
          lambda: achievable_channels(AUDIO_DTS_HD_CORE, 8) == 6),
+        ("the DTS family is capped at the core's 5.1, label or no label",
+         lambda: (achievable_channels(AUDIO_DTS_CORE, 8) == 6
+                  and achievable_channels(AUDIO_DTS_HD_CORE, 8) == 6)),
+        ("DTSX spelled without a colon is still the DTS-HD family",
+         lambda: (classify_audio_blob("DTSX") == AUDIO_DTS_HD_CORE
+                  and classify_audio_blob("DTS DTSX") == AUDIO_DTS_HD_CORE)),
+        ("a DTS label this table cannot prove is still capped, so the cap is not "
+         "made of spellings",
+         lambda: classify_audio_blob("DTS DTS X 7.1") == AUDIO_DTS_CORE
+         and achievable_channels(AUDIO_DTS_CORE, 8) == 6),
+        ("ALAC and WavPack have no decoder on this player: fail closed",
+         lambda: (classify_audio_blob("ALAC A_ALAC") == AUDIO_UNKNOWN
+                  and classify_audio_blob("WAVPACK") == AUDIO_UNKNOWN
+                  and classify_audio_blob("A_ALAC") == AUDIO_UNKNOWN)),
         ("AAC/FLAC decode to PCM (still native on this chain)",
          lambda: classify_audio_blob("AAC") == AUDIO_DECODE_PCM
          and classify_audio_blob("FLAC") == AUDIO_DECODE_PCM),
@@ -1548,6 +1597,10 @@ def run_self_tests() -> int:
          _smoke_dts_hd_converts_on_flag),
         ("unknown audio is reviewed, never touched",
          _smoke_unknown_is_reviewed),
+        ("a 24/192 FLAC is reviewed, not settled (past the decode ceiling)",
+         _smoke_hires_pcm_is_reviewed),
+        ("96 kHz FLAC is inside the ceiling and settles as decoded PCM",
+         _smoke_pcm_at_the_ceiling_is_ok),
         ("a chain-native movie needs nothing",
          _smoke_native_is_done),
     ])
@@ -1620,6 +1673,41 @@ def _smoke_unknown_is_reviewed() -> bool:
         "format": {"duration": "3600.0"},
     }, STATUS_REVIEW)
     return verdict.status == STATUS_REVIEW
+
+
+def _smoke_hires_pcm_is_reviewed() -> bool:
+    """A 24-bit/192 kHz FLAC: past what this player's decoders are specified
+    for, so it is reported rather than settled - and, deliberately, rather
+    than converted too. Nothing here has measured what such a stream does on
+    the G454V, and a synthesized replacement bought on a guess is exactly the
+    irreversible action this toolkit refuses to take.
+    """
+    verdict = _smoke_plan({
+        "streams": [
+            {"index": 0, "codec_type": "video", "codec_name": "h264"},
+            {"index": 1, "codec_type": "audio", "codec_name": "flac", "channels": 6,
+             "sample_rate": "192000", "bits_per_sample": 24,
+             "tags": {"language": "eng"}, "disposition": {"default": 1}},
+        ],
+        "format": {"duration": "3600.0"},
+    }, STATUS_REVIEW)
+    return (verdict.status == STATUS_REVIEW and verdict.audio_class == AUDIO_DECODE_PCM
+            and verdict.target is None
+            and "192 kHz" in verdict.info)
+
+
+def _smoke_pcm_at_the_ceiling_is_ok() -> bool:
+    """The boundary itself: 96 kHz is inside the ceiling, so it settles."""
+    verdict = _smoke_plan({
+        "streams": [
+            {"index": 0, "codec_type": "video", "codec_name": "h264"},
+            {"index": 1, "codec_type": "audio", "codec_name": "flac", "channels": 6,
+             "sample_rate": "96000", "bits_per_sample": 24,
+             "tags": {"language": "eng"}, "disposition": {"default": 1}},
+        ],
+        "format": {"duration": "3600.0"},
+    }, STATUS_PCM)
+    return verdict.status == STATUS_PCM
 
 
 def _smoke_native_is_done() -> bool:

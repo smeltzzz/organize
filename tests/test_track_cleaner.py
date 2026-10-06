@@ -1141,6 +1141,71 @@ class ChainAudioRetentionTests(unittest.TestCase):
                          tc.get_audio_quality_score(stereo)[0])
         self.assertEqual(self._keeper(master, stereo), 2)
 
+    def test_a_dts_stream_credited_7_1_cannot_outrank_the_atmos_bed(self) -> None:
+        """The regression 8.6.1 closes: the DTS family reaches 5.1, always.
+
+        ``achievable layout`` is the FIRST key of the keeper ranking, so
+        crediting a DTS-labelled track with the eight channels a DTS-HD MA or
+        DTS:X master claims let it beat a real DD+ 5.1 Atmos track - and the
+        loser of that comparison is deleted from the file permanently. It fires
+        on the ordinary shape of a real MKV: mkvmerge calls every DTS-family
+        stream "DTS" with codec ID "A_DTS" and puts the HD label only in the
+        track name, which the classifier must (and does) refuse to read as a
+        codec. The core is what the bar hears either way, so it is the core's
+        layout that gets credited.
+        """
+        dtsx = self._track(1, "DTS", 8, codec_id="A_DTS", name="DTS:X 7.1")
+        atmos = self._track(2, "E-AC-3", 6, codec_id="A_EAC3", name="Atmos 5.1")
+        self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "A_DTS", "DTS:X 7.1")),
+                         pc.AUDIO_DTS_CORE)
+        self.assertEqual(tc.get_audio_quality_score(dtsx)[0], 6)
+        self.assertEqual(tc.get_audio_quality_score(atmos)[0], 6)
+        self.assertEqual(self._keeper(dtsx, atmos), 2,
+                         "the Atmos track must survive; the DTS stream delivers a core")
+
+    def test_alac_and_wavpack_cannot_win_the_lossless_rung(self) -> None:
+        """Lossless and undecodable is not a reason to keep a track.
+
+        Both sit in the same tier as FLAC on paper, and this player has no
+        decoder for either - so an ALAC 7.1 used to out-rank the Dolby track
+        that actually plays, and the remux is irreversible. Fail-closed means
+        achieving nothing here.
+        """
+        for codec, codec_id in (("ALAC", "A_ALAC"), ("WavPack", "A_WAVPACK")):
+            with self.subTest(codec=codec):
+                master = self._track(1, codec, 8, codec_id=codec_id)
+                surround = self._track(2, "AC-3", 6, codec_id="A_AC3")
+                self.assertEqual(pc.classify_audio_blob(pc.codec_blob(codec, codec_id, "")),
+                                 pc.AUDIO_UNKNOWN)
+                self.assertEqual(tc.get_audio_quality_score(master)[0], 0)
+                self.assertEqual(self._keeper(master, surround), 2)
+
+    def test_the_decode_ceiling_is_a_report_and_not_a_ranking_key(self) -> None:
+        """Nothing about a 24/192 FLAC is settled, and nothing is deleted either.
+
+        The player's software decoders are specified to 24-bit/96 kHz, so audio
+        past that is not promised a Direct Play - but what actually happens to
+        such a stream on this box has never been measured, and a keep-one-track
+        decision cannot be undone. So the ceiling moves the audiofit verdict
+        (see ``test_audio_standardizer``) and deliberately NOT this ranking.
+        """
+        def hi_res(rate: int) -> dict:
+            return {"id": 1, "type": "audio", "codec": "FLAC",
+                    "properties": {"language": "eng", "language_ietf": "en",
+                                   "codec_id": "A_FLAC", "audio_channels": 8,
+                                   "audio_sampling_frequency": rate,
+                                   "tag_bitrate": "3000000"}}
+
+        def key(rate: int) -> tuple:
+            return tc.get_audio_quality_score(hi_res(rate),
+                                              wiring=pc.WIRING_SOUNDBAR_HDMI_IN)
+
+        # Layout, band and tier are identical: the ceiling is not one of them.
+        self.assertEqual(key(192000)[:3], key(96000)[:3])
+        # The historical tie-breaks still read the file as it is (a higher rate
+        # wins *within* equal keys), which is a preference, not a promise.
+        self.assertEqual(key(192000)[0], 8)
+
     def test_the_two_blob_builders_agree_about_the_same_track(self) -> None:
         """One track, one verdict - whatever tool read it."""
         import audio_standardizer as aus

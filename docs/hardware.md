@@ -37,11 +37,11 @@ Facts (Google's own materials and device measurements; sources at the end):
 | Video ceiling | **1920×1080 @ 60 Hz max**. No 4K output at all. |
 | Video decoders | H.264 (AVC), H.265 (HEVC), VP9, **AV1**, MPEG-2 — up to 1080p60 |
 | HDR | HDR10, HDR10+, HLG — **Dolby Vision is NOT supported on this model** (the 4K model has it; the HD does not) |
-| Audio passthrough | Dolby Digital (**AC-3**) and Dolby Digital Plus (**E-AC-3**, incl. JOC/Atmos) — the licensed, documented set; plus **base 5.1 DTS** and, out of any DTS-HD bitstream, **the DTS core it carries** (see the subtleties below) |
-| Audio decode | AAC/AAC-LC/HE-AAC, MP3, FLAC, Opus, Vorbis, PCM — decoded in software to PCM |
+| Audio passthrough | Dolby Digital (**AC-3**, up to 5.1) and Dolby Digital Plus (**E-AC-3**, up to 7.1, incl. JOC/Atmos) — the licensed, documented set; plus **base 5.1 DTS** and, out of any DTS-HD bitstream, **the DTS core it carries**, which is 5.1 at the widest (see the subtleties below) |
+| Audio decode | AAC/AAC-LC/HE-AAC v1/v2, MP3, FLAC, Opus, Vorbis, WAV/PCM — decoded in software to PCM, **up to 24-bit / 96 kHz**; multichannel LPCM 5.1/7.1 is accepted at the bar's HDMI IN. **ALAC and WavPack are not in this set at all** (no platform decoder, and no bitstream path to fall back on) |
 | Audio never emitted | **TrueHD (incl. TrueHD Atmos), WMA Pro, DTS-HD LBR (DTS Express)** — Android TV/ExoPlayer cannot pass these through and refuses to decode them. Note what is *not* on this row: DTS-HD MA/HR and DTS:X arrive as an extracted DTS core (subtlety 2), so the movie still plays |
 
-Three subtleties the research surfaced and the code encodes:
+Four subtleties the research surfaced and the code encodes:
 
 1. **Base 5.1 DTS core plays on this chain — measured on the real hardware,
    not assumed.** Google's published passthrough list for this device is
@@ -103,6 +103,24 @@ Three subtleties the research surfaced and the code encodes:
    That is a picture-preserving operation done at playback time, with zero
    generation loss — unlike a HandBrake re-encode, which is why the
    bit-depth inspector's "protect HDR, never re-encode" stand is unchanged.
+4. **The software-decode path has a ceiling, and it is a *report*, not a plan.**
+   Every track that is not bitstreamed goes through a decoder in the box, and
+   that decoder is specified to **24-bit / 96 kHz** — the same bound for
+   multichannel FLAC as for stereo LPCM. A 24/192 FLAC is therefore not "more
+   resolution that Direct Plays"; it is a stream nobody has promised anything
+   about, and the two things that could happen to it (a failed decode, or a
+   silent resample to the mixer's 48 kHz) have not been measured on this chain.
+   So `playbackchain.exceeds_decode_ceiling()` **reports** such a movie — it
+   lands in `audio_standardizer.py`'s review bucket, untouched — and stops
+   there. Deliberately *not* a transcode, and deliberately not a ranking key:
+   the keep-one-track decision is irreversible, and an unmeasured maybe is not
+   evidence to delete a master over. The codecs the decoder does not have at all
+   (ALAC, WavPack) are not even a maybe — they are `AUDIO_UNKNOWN`, fail-closed
+   like anything else outside this chain's table.
+   The same 24-bit/96 kHz bound is why a 192 kHz *Dolby* or *DTS* track is left
+   completely alone: those never touch this decoder, so the ceiling is not their
+   question (`Player.max_decoded_sample_rate`, `Player.max_decoded_bit_depth`,
+   `Player.undecodable_codecs`).
 
 Practical consequences (all encoded in the code):
 
@@ -137,6 +155,21 @@ Practical consequences (all encoded in the code):
 * AAC/FLAC/PCM audio ⇒ decodes locally to PCM; on the default wiring
   (soundbar HDMI IN) multichannel PCM arrives intact, while over the explicit
   ARC alternative this TV delivers it stereo-only (§3).
+* AAC/FLAC/PCM audio **past 24-bit / 96 kHz** ⇒ neither promised nor converted:
+  `audio_standardizer.py` reports it for a human and touches nothing
+  (subtlety 4). Inside the bound, 96 kHz FLAC and 24-bit LPCM are as
+  chain-native as anything else in the family.
+* ALAC / WavPack ⇒ no decoder on this box and no bitstream path to fall back on,
+  so they are `AUDIO_UNKNOWN` — reported, never auto-touched, and credited with
+  **zero** achievable channels in the keeper ranking, which is what stops a
+  format nobody can play from looking lossless enough to delete one that can.
+* Any **DTS**-labelled track reaches at most **5.1** on this chain, whether it is
+  a plain core or the core extracted from a DTS-HD/DTS:X master (subtleties 1
+  and 2), so `achievable_channels()` caps the whole family at
+  `DTS_CORE_MAX_CHANNELS`. That cap is what keeps a file whose DTS:X-ness only
+  appears in the *title* — where the classifier rightly refuses to read it —
+  from being credited 7.1, outranking a real DD+ 5.1 Atmos track on layout, and
+  getting that Atmos track stripped by the remux.
 
 ## 2 · The sound — Hisense AX3125H (3.1.2ch soundbar + wireless sub, 440 W)
 
@@ -291,9 +324,11 @@ leaves the player — the server transcodes audio on **every** play.
 | Dolby Digital (AC-3) 5.1 | passthrough ✅ | ✅ decodes | ⚠️ this TV offers PCM only for HDMI sources, so ARC/opt may deliver it as stereo (§3) | kept as-is; the synthesis target only under `tv-arc` |
 | Dolby Digital Plus (E-AC-3, incl. Atmos JOC) | passthrough ✅ | ✅ decodes | ⚠️ same PCM-only limit — DD+ Atmos does not survive this TV's ARC path (§3) | **goal format** — best possible track on this chain; what audio_standardizer synthesizes on the default wiring |
 | AAC 5.1 / stereo | decode → PCM ✅ | ✅ (multich. PCM) | ⚠️ stereo only on this TV | stereo = fine; 5.1+ native on the **default** HDMI-IN wiring, **AC-3 candidate only under `tv-arc`** |
-| FLAC / PCM / ALAC 7.1 | decode → PCM ✅ | ✅ multich. | ⚠️ stereo only on this TV | native multichannel on the **default** HDMI-IN wiring; **AC-3 candidate (5.1+) only under `tv-arc`** |
-| MP3 / Opus / Vorbis | decode → PCM ✅ | ✅ | ✅ stereo | fine |
-| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | **kept as-is on both wirings** — measured working on this chain (§1: Jellyfin Direct Play + the AX3125H's DTS indicator); `--no-dts-passthrough` converts it to DD+ instead |
+| FLAC / PCM 7.1 (≤ 24-bit/96 kHz) | decode → PCM ✅ | ✅ multich. | ⚠️ stereo only on this TV | native multichannel on the **default** HDMI-IN wiring; **AC-3 candidate (5.1+) only under `tv-arc`** |
+| FLAC / PCM **past 24-bit / 96 kHz** | ⚠️ outside the decoder's specification (§1, subtlety 4) | (moot — the decoder is the question) | ⚠️ | **reported for review, untouched**: no synthesized replacement and no ranking effect, because what a 24/192 stream does here has not been measured — the toolkit neither promises it nor deletes it |
+| MP3 / Opus / Vorbis / WAV | decode → PCM ✅ | ✅ | ✅ stereo | fine |
+| ALAC / WavPack | ❌ no platform decoder, no bitstream path | (n/a) | ❌ | **`unknown` — fail-closed**: lossless-looking codecs this player cannot decode at all (ExoPlayer needs an FFmpeg extension neither Jellyfin nor the stock player ships). Never classed `decode-to-pcm`, never credited a layout |
+| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build); **5.1 is the format's ceiling, so nothing in the DTS family is ever credited wider** | ✅ decodes | ⚠️ same PCM-only limit (§3) | **kept as-is on both wirings** — measured working on this chain (§1: Jellyfin Direct Play + the AX3125H's DTS indicator); `--no-dts-passthrough` converts it to DD+ instead |
 | **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** from it by audio_standardizer (AC-3 under `tv-arc`) |
 | **DTS-HD MA / HRA, DTS:X** | ❌ the HD layer is never emitted — but the player **extracts the DTS core** ✅ (§1) | ✅ decodes as DTS 5.1 (panel reads `DTS`) | ⚠️ same PCM-only limit (§3) | **kept as-is on both wirings** — user-confirmed 2026-10: the core Direct Plays, so converting would only spend the lossless layer; `--no-dts-passthrough` converts it from that layer to DD+ instead. A 7.1 master reaches 5.1 (the core's ceiling) |
 | **DTS-HD LBR / DTS Express** | ❌ **cannot be emitted at all** (no backward-compatible core) | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** (AC-3 under `tv-arc`) |
@@ -426,6 +461,15 @@ or the cleaner run standalone.
   build — including the DTS core it extracts from a DTS-HD/DTS:X track, §1);
   *Audio output format*: Standard; turn *off* "match content frame rate" only
   if you see judder complaints — irrelevant to audio.
+  If a DTS track ever arrives at the bar as stereo, that same menu is the first
+  thing to move: select the surround/bitstream mode **manually** instead of
+  Auto, and check the player app's own audio settings on top of it. Apps that
+  bitstream for themselves (Kodi, VLC, Nova, Plex) can carry the DTS core that
+  Auto declines to pass, and apps that decode internally (Kodi, Plex) hand the
+  bar uncompressed multichannel PCM — which its HDMI IN accepts (§2). Both
+  routes deliver exactly what the table already assumes, and no toolkit decision
+  depends on them: that is why the defaults stay safe with the stock client, and
+  why a per-app toggle is a playback-time lever rather than a library layout.
 * **AX3125H (default HDMI-IN wiring):** the Chromecast sits on the bar's
   **HDMI IN** socket, and the bar's **HDMI OUT (TV eARC/ARC)** goes to a TV
   HDMI input; source = **HDMI In**; EQ mode Movie; night mode off;
@@ -475,10 +519,19 @@ Player:
   metadata. DTS-HD LBR / DTS Express has no core and is the exception. This is
   the observation that moved the DTS-HD family out of `transcode-bound` in
   `playbackchain` (it is bounded to this chain, like every other row here).
+* **USER-CONFIRMED (2026-10) for this chain, codec by codec:** the bitstream
+  set the G454V hands to the AX3125H's HDMI IN is AC-3 (5.1), E-AC-3 (7.1),
+  E-AC-3 JOC (Atmos, decoded by the bar's 3.1.2 array), DTS Digital Surround
+  (core 5.1) and LPCM — stereo up to 24-bit/96 kHz, and multichannel LPCM
+  5.1/7.1 on both ends; the software-decode set is AAC (LC, HE-AAC v1/v2),
+  MP3, FLAC (to 24-bit/96 kHz), Opus, Vorbis and WAV. ALAC and WavPack are
+  absent from both lists, and no hi-res stream above 24-bit/96 kHz is claimed
+  to decode. This is the reading §1's subtlety 4, §5's two new rows and
+  `Player.max_decoded_sample_rate` / `Player.undecodable_codecs` rest on.
 * Android Developers, *Supported media formats* (the passthrough/decode
   matrix Android TV devices share; TrueHD / DTS-HD / DTS:X absent, which is
   why the DTS core fallback above had to be measured rather than read off a
-  spec sheet).
+  spec sheet, and ALAC / WavPack absent from the decoder list too).
   <https://developer.android.com/guide/topics/media/media-formats>
 
 Soundbar:

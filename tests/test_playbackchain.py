@@ -121,8 +121,13 @@ class AudioClassificationTests(unittest.TestCase):
     DTS_CORE = ("DTS", "A_DTS", "dts", "DTS Core 5.1")
     PCM_DECODE = (
         "AAC", "A_AAC", "aac", "FLAC", "A_FLAC", "MP3", "Opus", "Vorbis",
-        "PCM", "A_PCM/INT/BIG", "ALAC", "WAV",
+        "PCM", "A_PCM/INT/BIG", "WAV",
     )
+    #: Lossless, and NOT playable by this player: no decoder in the Android TV
+    #: media framework, no bitstream path either (unlike DTS-HD, which has its
+    #: core). They must fail closed, and "WAVPACK" must never be read as "WAV".
+    NO_PLATFORM_DECODER = ("ALAC", "A_ALAC", "WAVPACK", "A_WAVPACK",
+                           "ALAC Apple Lossless 5.1", "WavPack 24-bit 48 kHz")
     DTS_HD_CORE = (
         "DTS-HD MA", "DTS-HD Master Audio", "DTS-HD High Resolution Audio",
         "DTS-HD HRA", "DTS:X", "DTS-X", "A_DTS/LOSSLESS", "DTS DTS-HD MA 7.1",
@@ -183,6 +188,34 @@ class AudioClassificationTests(unittest.TestCase):
             with self.subTest(blob=blob):
                 self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_UNKNOWN)
                 self.assertFalse(pc.is_chain_native(blob))
+
+    def test_codecs_with_no_decoder_here_are_unknown_not_decoded(self) -> None:
+        """ALAC and WavPack look like the FLAC family and are not in it.
+
+        Crediting them with "decode-to-pcm" promised a Direct Play the chain
+        cannot deliver (Android TV has no ALAC decoder; Jellyfin's own codec
+        table says so), and the lossless sub-tier then ranked them ABOVE the
+        codecs that do decode - which is how a track nobody can play ends up
+        as the one track an irreversible remux keeps.
+        """
+        for blob in self.NO_PLATFORM_DECODER:
+            with self.subTest(blob=blob):
+                self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_UNKNOWN)
+                self.assertFalse(pc.is_chain_native(blob))
+                self.assertEqual(pc.chain_band_for(pc.AUDIO_UNKNOWN), pc.CHAIN_BAND_UNKNOWN)
+                self.assertEqual(pc.achievable_channels(pc.AUDIO_UNKNOWN, 8), 0)
+        # The predicate is shared with the cleaner's tier table, and the
+        # substring is what makes it necessary: "WAVPACK" contains "WAV".
+        self.assertTrue(pc.has_no_platform_decoder("wavpack"))
+        self.assertFalse(pc.has_no_platform_decoder("WAV"))
+        self.assertFalse(pc.has_no_platform_decoder("FLAC"))
+
+    def test_a_title_cannot_rescue_a_codec_with_no_decoder(self) -> None:
+        # Field 1 decides, in both directions: a title narrating an HD source
+        # may not promote an ALAC stream into the DTS family, exactly as it
+        # may not demote a real E-AC-3 into TrueHD.
+        self.assertEqual(pc.classify_audio_blob("ALAC - FROM DTS-HD MA 7.1"), pc.AUDIO_UNKNOWN)
+        self.assertEqual(pc.classify_audio_blob("WAVPACK A_WAVPACK DTS:X"), pc.AUDIO_UNKNOWN)
 
     def test_titles_never_demote_a_proven_codec(self) -> None:
         """Real tracks narrate history in their titles; the codec fields rule.
@@ -419,6 +452,102 @@ class TargetAudioTests(unittest.TestCase):
                 self.assertEqual(
                     pc.achievable_channels(pc.AUDIO_DTS_HD_CORE, channels), wanted)
 
+    def test_base_dts_is_capped_at_the_same_layout_as_any_dts_core(self) -> None:
+        """The cap is a property of the format, not of how well the label was read.
+
+        A DTS Digital Surround bitstream tops out at 5.1 (DTS-ES reaches 6.1 on
+        some discs), so a DTS-labelled track claiming eight channels is either a
+        DTS-HD/DTS:X stream whose core the player extracts or a wrong label -
+        and in both cases it reaches six. Before the cap, the *label* decided:
+        a DTS:X 7.1 track that mkvmerge only managed to call "DTS" (its HD
+        identity sitting in the track name, which the classifier rightly
+        refuses to trust) was credited with achieving 7.1, and "achievable
+        layout" is the FIRST key of the keeper ranking. That is how a movie
+        could keep the DTS core the bar hears as 5.1 and strip its only
+        DD+ 5.1 Atmos track, irreversibly, because a title said 7.1.
+        """
+        for channels, wanted in ((8, 6), (7, 6), (6, 6), (5, 5), (2, 2), (1, 1)):
+            with self.subTest(channels=channels):
+                self.assertEqual(
+                    pc.achievable_channels(pc.AUDIO_DTS_CORE, channels), wanted)
+        # Dolby is NOT capped: E-AC-3 really does carry 7.1 on this chain, and
+        # AC-3 never claims more than the core layout anyway.
+        self.assertEqual(pc.achievable_channels(pc.AUDIO_NATIVE, 8), 8)
+        # The band and the tier are untouched by the cap: a DTS core is still
+        # chain-native, and it still cannot outrank Dolby on width.
+        atmos = pc.codec_blob("E-AC-3", "A_EAC3", "Atmos 5.1")
+        dtsx = pc.codec_blob("DTS", "A_DTS", "DTS:X 7.1")
+        self.assertEqual(pc.atmos_credit_for(pc.classify_audio_blob(atmos), atmos), 1)
+        self.assertEqual(pc.atmos_credit_for(pc.classify_audio_blob(dtsx), dtsx), 0)
+        self.assertEqual(pc.achievable_channels(pc.AUDIO_DTS_CORE, 8),
+                         pc.achievable_channels(pc.AUDIO_NATIVE, 6))
+
+    def test_dtsx_spellings_the_separator_can_hide(self) -> None:
+        """"DTSX" is what an extractor writes when it flattens the colon."""
+        for blob in ("DTSX", "DTS DTSX", "A_DTS/HD_MA", "DTS:X", "DTS-X 7.1",
+                     "DTS DTS:X 5.1"):
+            with self.subTest(blob=blob):
+                self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_DTS_HD_CORE)
+        # A spaced-out "DTS X" is not chased across a token boundary, because
+        # the next token after a one-word profile is the title - and the design
+        # rule is that titles never promote. The width cap makes that a
+        # mislabel rather than a mistake, which is the whole reason the
+        # promotion rule stays strict.
+        self.assertEqual(pc.classify_audio_blob("DTS DTS X 7.1"), pc.AUDIO_DTS_CORE)
+        self.assertEqual(pc.achievable_channels(pc.AUDIO_DTS_CORE, 8),
+                         pc.achievable_channels(pc.AUDIO_DTS_HD_CORE, 8))
+
+
+class PlayerDecodeCeilingTests(unittest.TestCase):
+    """The software decode path is bounded, and being bounded is not the same as broken.
+
+    The chain's read of the Android TV media framework is that this player
+    decodes AAC / MP3 / FLAC / Opus / Vorbis / WAV up to 24-bit and 96 kHz. The
+    ceiling therefore decides what the toolkit may *promise*; what a wider
+    stream actually does here (a failed decode, or a silent resample to the
+    mixer's 48 kHz) has never been measured on this box - so the answer is a
+    report and no action: nothing is synthesized from it and no ranking key is
+    influenced by it.
+    """
+
+    def test_the_ceiling_is_recorded_on_the_player(self) -> None:
+        self.assertEqual(pc.PLAYER.max_decoded_sample_rate, 96000)
+        self.assertEqual(pc.PLAYER.max_decoded_bit_depth, 24)
+        self.assertIn("ALAC", pc.PLAYER.undecodable_codecs)
+        self.assertIn("WAVPACK", pc.PLAYER.undecodable_codecs)
+
+    def test_within_the_ceiling_is_silent(self) -> None:
+        for rate in (48000, 96000, "96000", 44100, 0, None, "", "bogus"):
+            with self.subTest(rate=rate):
+                self.assertEqual(pc.exceeds_decode_ceiling(rate, 24), "")
+        # An unreported depth cannot breach a depth ceiling.
+        for depth in (0, None, "", "unknown", 16, 24):
+            with self.subTest(depth=depth):
+                self.assertEqual(pc.exceeds_decode_ceiling(48000, depth), "")
+
+    def test_past_it_names_the_number_that_is_past(self) -> None:
+        self.assertIn("192 kHz", pc.exceeds_decode_ceiling(192000))
+        self.assertIn("32-bit", pc.exceeds_decode_ceiling(48000, 32))
+        # A rate is a rate in every shape the probes hand over.
+        self.assertIn("192 kHz", pc.exceeds_decode_ceiling("192000.0", None))
+
+    def test_the_note_promises_nothing_past_the_ceiling(self) -> None:
+        flac = pc.codec_blob("FLAC", "A_FLAC", "24bit 192kHz")
+        over = pc.audio_chain_note(flac, 6, pc.WIRING_SOUNDBAR_HDMI_IN,
+                                   sample_rate=192000, bit_depth=24)
+        self.assertIn("decode ceiling", over)
+        self.assertIn("review", over)
+        under = pc.audio_chain_note(flac, 6, pc.WIRING_SOUNDBAR_HDMI_IN,
+                                    sample_rate=96000, bit_depth=24)
+        self.assertIn("decoded by the Chromecast to PCM", under)
+        # A bitstreamed Dolby track never touches this decoder, so its sample
+        # rate is not this question: 192 kHz is not a reason to doubt a DD+ or
+        # a DTS core passthrough.
+        for blob in ("E-AC-3 A_EAC3 7.1", "DTS A_DTS 5.1", "TRUEHD A_TRUEHD 7.1"):
+            with self.subTest(blob=blob):
+                note = pc.audio_chain_note(blob, 8, pc.WIRING_SOUNDBAR_HDMI_IN,
+                                           sample_rate=192000, bit_depth=32)
+                self.assertNotIn("decode ceiling", note)
 
 class VideoClassificationTests(unittest.TestCase):
     def test_native_codecs_at_1080p_direct_play(self) -> None:
