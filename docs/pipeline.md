@@ -49,8 +49,9 @@ Five maintenance tools, one fixed order. Two orderings are load-bearing:
    WMA Pro and DTS-HD LBR/DTS Express sources without a guaranteed path in the
    app-neutral Plex/Jellyfin profile.
    Some apps decode TrueHD to PCM, but plain PCM loses TrueHD Atmos objects;
-   the generated E-AC-3 fallback is not Atmos/JOC. Dolby MAT output remains
-   unverified for G454V. DTS-HD/DTS:X need no conversion on this measured chain:
+   the generated E-AC-3 fallback is not Atmos/JOC. Dolby MAT is not a G454V
+   output at all — it is the Google TV Streamer's MS12 transport.
+   DTS-HD/DTS:X need no conversion on this measured chain:
    the player extracts their DTS core. The cleaner's tiers then keep the Dolby
    track where a supported transcode succeeds, so the remux can retire the
    lossless master without losing the profile's prepared audio path. Unknown

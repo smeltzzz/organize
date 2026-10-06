@@ -1234,8 +1234,9 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         f"{synth} fallback for TrueHD/WMA Pro/DTS Express without re-encoding video, "
         "and the generated E-AC-3 is not Atmos/JOC. DTS-HD/DTS:X are not in that "
         "bucket: the measured player extracts the DTS core and the bar decodes it. "
-        "The DTS family is credited at most 5.1. Dolby MAT output remains unverified; "
-        "MAT/MPCM labels are reported as unknown, not assumed PCM. ALAC/WavPack "
+        "The DTS family is credited at most 5.1. Dolby MAT is not a G454V output "
+        "(it is the Google TV Streamer's MS12 transport), so MAT/MPCM labels are "
+        "reported as unknown, not assumed PCM. ALAC/WavPack "
         "and decoded audio past the toolkit envelope are also reported for review."
     )
 

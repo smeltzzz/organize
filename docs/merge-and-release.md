@@ -52,8 +52,16 @@
 > repository link on the README absolute so PyPI stops resolving them beneath
 > `/project/organizekit/`.
 >
+> **8.6.3 corrects one sentence of that.** A fact-check against primary sources
+> found the MS12 reporting says more than "unverified": the Streamer *is* the
+> MS12 device, and the Chromecast is documented as plain HDMI pass-through, so
+> the G454V has no MAT output path at all. 8.6.3 also refreshes the device's OS
+> (Android 14, not "12, upgradeable to 14") and grounds the 48 kHz envelope and
+> DTS app-dependence in measured reports. It is prepared on this branch, not
+> released: merge it and tag `v8.6.3` to publish.
+>
 > **Nothing else is outstanding.** No workflow file, held patch, tag or secret is
-> waiting on a human, and the whole suite (2,359 tests, offline) plus `Lint
+> waiting on a human, and the whole suite (2,360 tests, offline) plus `Lint
 > (ruff)`, `Coverage gate`, `Packaging` and the single-file build are green on
 > `main`.
 >
@@ -131,7 +139,7 @@ syntax gate, a file the merge deleted, and the `provisioned` job still did
 `pip install ffsubsync` then `import sync_subtitles`. The bot cannot fix a
 workflow file, so that was step 2's patch. **This is history: PR #40 applied
 the patch, and CI on `main` has been green since.** Everything else in that
-run was green on the same merge: the whole suite (2,359 tests) on Linux, macOS
+run was green on the same merge: the whole suite (2,360 tests) on Linux, macOS
 and Windows across Python 3.11–3.13, packaging, the single-file build, the lint
 job, the coverage floor and the doctor smoke test.
 
