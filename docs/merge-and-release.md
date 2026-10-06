@@ -1,67 +1,42 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **8.6.1 is prepared in [PR #64](https://github.com/smeltzzz/organize/pull/64),**
-> on top of the published 8.6.0. v8.6.0 was tagged on 2026-10-06 and the tag
-> ran `release.yml` to completion: the wheel, sdist and zipapp were built, PyPI
-> published
-> [organizekit 8.6.0](https://pypi.org/project/organizekit/8.6.0/), and the
-> artifacts were attached to the
-> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.0).
-> (8.0.1 through 8.5.1 shipped the same way; each is a tag on `main`. The note
-> that sat in this block — "8.0.1 is prepared in PR #45", written the day
-> before that release was tagged — had simply never been carried forward. The
-> authoritative sequence of what shipped is the
-> [changelog](../CHANGELOG.md), and every entry after 8.0.1 confirms the tag
-> was cut and published.)
+> **v8.6.1 was cut and published on 2026-10-06.** [PR #64](https://github.com/smeltzzz/organize/pull/64)
+> merged into `main` as `e3db1c9`; the `v8.6.1` tag points at that merge commit,
+> not at the branch head; and the tag's `release.yml` ran green end to end — the
+> suite gate, the wheel/sdist/zipapp build, the **PyPI publish**
+> ([organizekit 8.6.1](https://pypi.org/project/organizekit/8.6.1/)), and the
+> three assets on the
+> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.1)
+> (`organize.pyz`, the wheel, the sdist). So `pip install --upgrade organizekit`
+> already resolves to it; from a checkout, `python3 -m pip install --upgrade .`.
 >
-> 8.6.1 is a patch release for three consequences of the reference chain's codec
-> facts that the table stated but did not model, found while auditing the
-> published facts against `organizekit/core/playbackchain.py`:
+> What it shipped is in the [changelog](../CHANGELOG.md): a chain-fact audit that
+> found the published facts correct and three of their consequences unmodelled —
+> the DTS family not width-capped as a family (a DTS core tops out at 5.1, and
+> achievable layout is the *first* key of an irreversible keep-one-track
+> decision, so an uncapped `DTS:X` label could delete a file's only Atmos track),
+> ALAC/WavPack credited with a software-decode path and a lossless ranking rung
+> this player does not give them, and the 24-bit/96 kHz decode ceiling absent
+> from the table entirely (it is a *report* — `review-unknown`, never a transcode
+> and never a ranking key, because what a 24/192 stream does on this box has not
+> been measured).
 >
-> * the **DTS family was not width-capped as a family** — only the DTS-HD class
->   was capped at its core's 5.1, and achievable layout is the *first* key of an
->   irreversible keep-one-track ranking, so a 7.1 `DTS:X` whose HD-ness lives in
->   the track name (which the classifier must not read) could out-rank the only
->   `DD+ 5.1 Atmos` track in a file and have it deleted by the remux;
-> * **ALAC and WavPack were credited with a software-decode path and the lossless
->   ranking rung** they do not have on this player — no platform decoder, no
->   bitstream fallback, and Jellyfin's own codec table marks ALAC unsupported on
->   Android TV;
-> * the **24-bit / 96 kHz decode ceiling** this chain has was absent from the
->   table, so a 24/192 FLAC read as "direct play, nothing to do". It is data now
->   (`Player.max_decoded_sample_rate`, `max_decoded_bit_depth`,
->   `undecodable_codecs`, `exceeds_decode_ceiling()`), and deliberately a
->   *report*: such a stream moves from `pcm-decode-ok` to `review-unknown` —
->   untouched, no synthesized Dolby replacement, and never a ranking key,
->   because what it does on this box (fail, or be silently resampled to the
->   mixer's 48 kHz) has not been measured.
+> **Nothing is outstanding.** No workflow file, held patch, tag or secret is
+> waiting on a human, and the suite (2,355 tests, offline) plus `Lint (ruff)`,
+> `Coverage gate`, `Packaging` and the single-file build are green on `main`.
 >
-> What remains is the merge and the tag. The suite is 2,355 tests — 14 of them
-> new, including the DTS:X-vs-Atmos regression run through the real scorer and
-> the ceiling's boundary at exactly 96 kHz — green fully offline, and
-> `python organize.py test` passes with five new checks in the audio
-> standardizer's own self-test. PR #64 touches no workflow file, so nothing is
-> held back in `docs/` for it. Confirm the version, then tag the merged commit
-> from an up-to-date `main`:
+> The next release follows the shape recorded below. One rule carries forward
+> every time, because it is the only step that can be done wrong quietly: **tag
+> the merged commit on `main`, never the open branch** — a tag on an unmerged
+> head publishes a wheel while `main` still reports a different version, and
+> leaves the changelog section unreachable from the released commit. A release is
+> a *merge plus a tag*, not a merge.
 >
-> ```bash
-> git checkout main && git pull origin main
-> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 8.6.1
-> git tag -a v8.6.1 -m "8.6.1" && git push origin v8.6.1
-> ```
->
-> The pushed tag triggers `release.yml`, which checks that the tag matches
-> `organizekit.VERSION`, runs the suite, builds the wheel/sdist/zipapp,
-> publishes to PyPI and attaches the zipapp to the GitHub release. **Wait for
-> the release workflow to succeed** before moving an existing install onto it:
-> `python3 -m pip install --upgrade organizekit` (or `pipx upgrade
-> organizekit`); from a checkout, `python3 -m pip install --upgrade .`.
-> Details are in the [8.6.1 changelog entry](../CHANGELOG.md).
->
-> **Tag the merged commit on `main`, never the open branch.** A tag pointing at
-> an unmerged head publishes a wheel while `main` still reports a different
-> version, and it leaves the changelog section unreachable from the released
-> commit. A release is a *merge plus a tag*, not a merge.
+> And when a release lands, replace this block. The note this one replaced said
+> "8.0.1 is prepared in PR #45 — what remains is the merge and the tag", written
+> the day before that tag was cut and left standing six releases too long, which
+> is precisely how a release document starts pointing its reader at work already
+> done.
 
 > **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
