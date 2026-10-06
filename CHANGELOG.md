@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.6.4] - 2026-10-06
+
+The owner's own statement of the reference chain's behaviour now supersedes the
+research attribution 8.6.3 had preferred. Two facts are aligned to it: **the
+G454V's Dolby path is its Dolby MS12 stack running as bitstreaming** (it never
+emits uncompressed Dolby MAT — that is the Apple TV 4K / Xbox transport), and
+**MPEG audio is one family** (MP1/MP2 join MP3 as app-decoded PCM). No other
+classification moved: the DTS family keeps its measured accept policy and 5.1
+cap, TrueHD stays transcode-bound, and MAT/MPCM *file* labels stay fail-closed
+`unknown`, because a MAT signal still cannot arrive on this chain.
+
+### Changed
+- **MS12/Dolby MAT attribution follows the chain's owner, not the 2024
+  Streamer reporting.** 8.6.3 had concluded that the Dolby MS12 decoder and its
+  Dolby MAT 2.1 output belonged to the Google TV Streamer, with the Chromecast
+  as a pass-through device. The corrected chain fact is: the G454V's Dolby
+  audio path is its **Dolby MS12** software stack in *bitstream* mode — AC-3 /
+  E-AC-3 / Atmos-via-DD+ JOC leave the HDMI port as encoded bitstreams for the
+  AX3125H to decode, which is what Google's "Dolby-encoded audio (HDMI
+  passthrough)" line and this chain's own measurements show. It does **not**
+  emit uncompressed Dolby MAT (LPCM + Atmos objects); that on-box-decode
+  transport is the Apple TV 4K / Xbox one.
+  `PLAYER.dolby_ms12_bitstream_stack` records the stack, `PLAYER.dolby_mat_output`
+  stays `False`, and the MAT note now says exactly why a MAT/MPCM label stays
+  `AUDIO_UNKNOWN`: this chain still never receives a MAT signal, so the label is
+  not evidence of a playable track. The chain summary (`organize doctor`), the
+  audio standardizer's summary and footer, README, `docs/hardware.md`,
+  `docs/tools.md`, `docs/pipeline.md` and `.env.example` all follow, and the
+  FlatpanelsHD/tech-coverage entries are re-annotated as Streamer context
+  rather than evidence about this player.
+- **The MPEG-audio family is classified whole: MP1, MP2 and MP3.**
+  `_classify_audio_segment` had reached MPEG-1/2 Layer III (`MP3`, `A_MPEG/L3`)
+  but let Layer I and II fall through to the fail-closed `unknown` class. The
+  marker set now also covers ffprobe's `mp1`/`mp2`, mkvmerge's `A_MPEG/L1` /
+  `A_MPEG/L2`, and the human labels "MPEG-1/2 Audio Layer I/II/III", so those
+  tracks land in `decode-to-pcm` (tier 65) inside the same 24-bit/48 kHz review
+  envelope. Musepack is not MPEG audio and still fails closed.
+  `audio_standardizer.py` gains the matching display names and legend wording.
+
+### Tests
+- 2,360 → **2,361 tests**: a new test pins the MPEG-audio family (all three
+  layers, both toolkits' spellings, with Musepack excluded), and the MAT tests
+  now assert the MS12 bitstream stack and its note text in place of the
+  Streamer attribution. Full offline suite: **2,361 discovered, 2,356 passed,
+  5 skipped** (`python -m unittest discover -s tests -p 'test_*.py'`).
+
 ## [8.6.3] - 2026-10-06
 
 A fact-check of the reference chain against primary sources, not against the
