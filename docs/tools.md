@@ -189,10 +189,11 @@ This tool is the one-time offline answer. For each movie it probes (`ffprobe`) a
 | :--- | :--- | :--- |
 | AC-3 / E-AC-3 ranked first in the pool | `native-ok` | nothing — the track the cleaner will keep already bitstreams end-to-end |
 | base 5.1 DTS core | `dts-core-ok` (default) / `transcoded-dolby` | **kept as-is on both wirings**, on measured evidence rather than assumption: playing a base-DTS movie through Jellyfin to the G454V reports **Direct Play** and lights the AX3125H's **DTS** indicator, two independent confirmations of the passthrough. Converting would be irreversible loss buying nothing — 1509 kbps DTS core to a 640 kbps DD+ bed is ~870 kbps, about **780 MB on a two-hour movie**, for audio the 3.1.2 bar downmixes anyway — and it is reversible later from the untouched source if firmware ever ends it. `--no-dts-passthrough` states the conversion policy explicitly. See `playbackchain.DTS_PASSTHROUGH_DEFAULT` |
-| AAC / FLAC / PCM / MP3 / Opus | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar takes multichannel PCM, while the explicit `--wiring tv-arc` (this TV offers PCM only for HDMI sources = stereo PCM) makes them transcode candidates |
+| AAC / FLAC / PCM / MP3 / Opus / Vorbis / WAV **within 24-bit/96 kHz** | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar's HDMI IN takes multichannel LPCM 5.1/7.1, while the explicit `--wiring tv-arc` (this TV offers PCM only for HDMI sources = stereo PCM) makes them transcode candidates |
+| FLAC / PCM **past 24-bit or 96 kHz** | `review-unknown` | **reported, untouched.** The decoder this family depends on is specified to 24-bit/96 kHz on the G454V; whether a wider stream fails or is silently resampled to 48 kHz has not been measured on this chain, so the toolkit neither promises a Direct Play nor spends a lossless master guessing ([hardware.md §1, subtlety 4](hardware.md)) |
 | DTS-HD MA / DTS-HD HRA / DTS:X | `dts-hd-core-ok` (default) / `transcoded-dolby` | **kept as-is on both wirings**: user-confirmed 2026-10 — the player cannot emit the lossless HD layer, but it extracts the DTS core every such bitstream carries and bitstreams that, so the bar decodes surround as DTS 5.1 (panel reads `DTS`), with no server work. A 7.1 master reaches 5.1. `--no-dts-passthrough` converts it anyway, from the lossless layer. See `playbackchain.PLAYER.dts_hd_core_fallback` |
 | TrueHD / DTS-HD LBR (DTS Express) | `transcoded-dolby` | **one chain-native Dolby track is synthesized and appended (Dolby Digital Plus on the default wiring), video untouched**. Neither has a backward-compatible core, which is what separates them from the DTS-HD row above |
-| unknown codec | `review-unknown` | fail-closed in the report; never auto-touched |
+| unknown codec — including **ALAC and WavPack**, which this player has no decoder for at all | `review-unknown` | fail-closed in the report; never auto-touched |
 | still hardlinked to a seed | `deferred-seeding` | untouched until seeding stops |
 
 The bake-in is exactly one ffmpeg invocation per movie — on the default
@@ -257,9 +258,13 @@ TrueHD Atmos 7.1 beats an AC-3 2.0 that plays today: the master becomes a DD+
 this order:
 
 1. **Achievable layout** (`playbackchain.achievable_channels()`). A
-   chain-native track achieves the channels it carries — except the DTS-HD
-   family, native *by core fallback*, which achieves its core's layout, at most
-   5.1 (`playbackchain.DTS_CORE_MAX_CHANNELS`); a transcode-bound master
+   chain-native track achieves the channels it carries — except the **whole DTS
+   family** (base DTS *and* the DTS-HD/DTS:X tracks that are native *by core
+   fallback*), because what reaches the bar is a DTS core either way and a core
+   tops out at 5.1 (`playbackchain.DTS_CORE_MAX_CHANNELS`). The cap is applied
+   to the class, not to the label, so a DTS:X track whose HD-ness sits only in
+   its title cannot be credited 7.1 and cannot outrank — and so cannot get
+   stripped in favour of — a real DD+ 5.1 Atmos track; a transcode-bound master
    achieves the channels the synthesized replacement would have — at most 5.1
    on either wiring, the ceiling of ffmpeg's Dolby encoders, so a 7.1 master
    achieves 6 and not 8 (8.4.0); an *unknown* track achieves nothing, because
@@ -285,7 +290,9 @@ this order:
    what DD+ Atmos exists for.
 4. **Codec sub-tier**, refining a settled layout: DD+ (100) > DD (95) > base
    DTS **and the DTS-HD family** (80 — a DTS core is what reaches the bar
-   either way) > FLAC/PCM (66) > Opus (62) > other lossy (60). Below the band
+   either way) > FLAC/PCM (66) > Opus (62) > other lossy (60). ALAC and WavPack
+   are not in the 66 rung: they are `unknown` on this chain, so they achieve
+   nothing and can only be kept as the sole track in a file. Below the band
    sit the formats with no native path: a lossless master (TrueHD/MLP, WMA
    Lossless, 34) > WMA Pro (32) > the rest (30), which is what picks the best
    *transcode source*. `audio_standardizer.py` ranks its own source pool with

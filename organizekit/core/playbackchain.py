@@ -25,13 +25,21 @@ The short version of the physics, and why it drives every default:
 
 * The Chromecast with Google TV (HD) is the *only* player. It decodes
   H.264, HEVC, VP9 and AV1 up to 1080p60, and it can only ever EMIT
-  Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3, including DD+ Atmos
-  via HDMI pass-through), base 5.1 DTS (chipset-level, unofficial),
-  the backward-compatible DTS core extracted out of a DTS-HD MA/HRA or
-  DTS:X track, and decoded PCM. The only families it genuinely cannot
-  get any audio out of are TrueHD and WMA (Pro / Lossless), plus DTS
+  Dolby Digital (AC-3, up to 5.1), Dolby Digital Plus (E-AC-3, up to 7.1,
+  including DD+ Atmos via HDMI pass-through), base 5.1 DTS (chipset-level,
+  unofficial), the backward-compatible DTS core extracted out of a DTS-HD
+  MA/HRA or DTS:X track, and decoded PCM. The only families it genuinely
+  cannot get any audio out of are TrueHD and WMA (Pro / Lossless), plus DTS
   Express — so a TrueHD track in a file is not free quality, it is a
   guaranteed server-side audio transcode on every single play.
+* The PCM it decodes is itself bounded: the Android TV media framework on
+  this box decodes AAC (LC / HE-AAC v1 / v2), MP3, FLAC, Opus, Vorbis and
+  WAV, and it does so up to 24-bit / 96 kHz (``PLAYER.max_decoded_bit_depth``
+  and ``PLAYER.max_decoded_sample_rate``). Two consequences, both modelled:
+  a 24/192 FLAC is not "better audio" but a stream past the ceiling, which
+  :func:`exceeds_decode_ceiling` reports instead of promising; and ALAC and
+  WavPack have no decoder here at all, so they are :data:`AUDIO_UNKNOWN` —
+  fail-closed, like every other codec outside this chain's confirmed set.
 * A DTS-HD track is NOT in that bucket. The player cannot emit the HD
   layer, but DTS-HD is backward compatible by design: the player extracts
   the DTS core (5.1, lossy) that every DTS-HD bitstream carries and
@@ -40,7 +48,11 @@ The short version of the physics, and why it drives every default:
   layer (and any DTS:X object metadata), not the audio. Converting such a
   track to DD+ would therefore destroy the lossless master to buy nothing
   (see ``DTS_PASSTHROUGH_DEFAULT``); the recorded device fact is
-  ``PLAYER.dts_hd_core_fallback``, measured on this chain 2026-10.
+  ``PLAYER.dts_hd_core_fallback``, measured on this chain 2026-10. What
+  reaches the bar is a DTS core either way, so the WHOLE DTS family — base
+  DTS included — is width-capped at the core's 5.1
+  (``DTS_CORE_MAX_CHANNELS``): no DTS-labelled track is ever credited with
+  achieving 7.1 on this chain.
 * The AX3125H is fed through its HDMI IN port, which decodes everything
   the Chromecast can emit — AC-3, DD+ Atmos, DTS, and multichannel PCM —
   before the video passes through to the TV. That is what makes the
@@ -119,6 +131,34 @@ class Player:
     #: low-bitrate decoder with no backward-compatible core, so it stays
     #: transcode-bound.
     dts_hd_core_fallback: bool = True
+    #: The ceiling of the software decode path, i.e. what happens to every
+    #: track that is NOT bitstreamed. The Android TV media framework on this
+    #: SoC decodes AAC (AAC-LC, HE-AAC v1/v2), MP3, FLAC, Opus, Vorbis and
+    #: WAV (linear PCM) - and the format table for this chain bounds that
+    #: decode at 24-bit / 96 kHz, for LPCM 2.0 exactly as for FLAC.
+    #:
+    #: The ceiling is modelled because it is a real boundary of the promise
+    #: this toolkit makes: "the player decodes it, so nothing transcodes" is
+    #: only true of a stream the decoder is specified to handle. What a
+    #: 24/192 FLAC actually does here is not documented anywhere (a hard
+    #: decode failure, or a silent resample by AudioFlinger to the mixer's
+    #: rate - which then discards the extra resolution on its way out
+    #: anyway), and the toolkit does not guess about either. So
+    #: :func:`exceeds_decode_ceiling` *reports* such a track and nothing
+    #: else: no synthesized replacement, and above all no irreversible
+    #: keep-one-track decision taken on an unmeasured premise. A dropped
+    #: master cannot be un-dropped; a flagged movie costs one manual look.
+    max_decoded_sample_rate: int = 96000
+    max_decoded_bit_depth: int = 24
+    #: Codecs a rip can legitimately carry that this player has NO decoder
+    #: for, and that it cannot bitstream either (unlike DTS-HD, there is no
+    #: backward-compatible core to fall back to): ALAC and WavPack. They are
+    #: absent from the chain's confirmed decode set, and Jellyfin's own
+    #: codec table lists ALAC as unsupported on Android TV while the FFmpeg
+    #: decoder ExoPlayer would need is not in the shipped client. They are
+    #: therefore never classed ``decode-to-pcm``; they are
+    #: :data:`AUDIO_UNKNOWN`, which is reported and left alone.
+    undecodable_codecs: tuple[str, ...] = ("ALAC", "A_ALAC", "WAVPACK", "A_WAVPACK")
 
 @dataclass(frozen=True)
 class Sink:
@@ -212,7 +252,9 @@ SOURCES: tuple[str, ...] = (
     "https://www.samsung.com/sg/support/tv-audio-video/how-to-use-the-hdmi-arc-port-on-a-samsung-tv/ (Samsung support: HDMI-ARC carries PCM 2ch, Dolby Digital up to 5.1 and DTS Digital Surround up to 5.1; 2013-2014 F/H-series sound-output path)",
     "USER-CONFIRMED 2026-09 on the actual UN60F6350AF: with HDMI sources connected, the TV offers PCM only as its digital audio output format, so the ARC/optical path delivers multichannel content as stereo PCM",
     "USER-CONFIRMED 2026-10 on the actual G454V -> AX3125H chain: DTS-HD MA, DTS-HD HRA and DTS:X are never passed through as HD bitstreams, but the player does not drop the audio - it automatically extracts the backward-compatible DTS CORE (5.1) every such bitstream carries and bitstreams that, so the bar still decodes surround and its front panel reads DTS (not DTS-HD/DTS:X). These tracks therefore Direct Play with no server transcode; what is lost is the HD layer and any DTS:X object metadata. DTS-HD LBR / DTS Express is the exception (no backward-compatible core), so it stays transcode-bound",
-    "https://jellyfin.org/docs/general/clients/codec-support/ (Jellyfin Android-TV codec support matrix: AAC/AC3/EAC3 direct)",
+    "https://developer.android.com/guide/topics/media/media-formats (Android Developers, *Supported media formats*: the platform decoder set every Android TV device shares - AAC-LC / HE-AAC v1 / v2, MP3, FLAC, Opus, Vorbis and linear PCM, bounded at 24-bit / 96 kHz on this chain's read of the table; TrueHD / DTS-HD / DTS:X absent, which is why the DTS-core fallback above had to be measured rather than read off a spec sheet, and ALAC / WavPack absent too)",
+    "USER-CONFIRMED 2026-10 for this chain (G454V into the AX3125H's HDMI IN): the bitstream set is AC-3 (5.1), E-AC-3 (7.1), E-AC-3 JOC (Atmos, decoded by the bar's 3.1.2 array), DTS core 5.1, and LPCM - stereo up to 24-bit/96 kHz on the PCM path and multichannel LPCM 5.1/7.1 accepted by both the Chromecast HAL and the bar's HDMI IN; the software-decode set is AAC/MP3/FLAC/Opus/Vorbis/WAV up to 24-bit/96 kHz; DTS may additionally need the manual surround selection in the Google TV sound settings or an app with its own bitstreamer (Kodi, VLC, Nova, Plex); TrueHD, DTS-HD MA/HRA (core only) and DTS:X (core only) never bitstream as lossless",
+    "https://jellyfin.org/docs/general/clients/codec-support/ (ALAC listed unsupported for Android and Android TV: the client reports the format, the platform decoder is what is missing - the reason ALAC is fail-closed here rather than 'decoded to PCM')",
 )
 
 # =============================================================================
@@ -304,10 +346,14 @@ DTS_PASSTHROUGH_DEFAULT: dict[str, bool] = {
 }
 
 
-#: Widest layout the backward-compatible DTS core can carry: 5.1 (6
+#: Widest layout the DTS family can ever reach on this chain: 5.1 (6
 #: channels). DTS-ES extends the core family to 6.1 on some discs, but 5.1 is
-#: the layout a DTS-HD MA/HRA or DTS:X stream carries as its core, and it is
-#: the cap :func:`achievable_channels` credits such a track with.
+#: both the ceiling of a plain DTS Digital Surround bitstream and the layout a
+#: DTS-HD MA/HRA or DTS:X stream carries as its backward-compatible core - so
+#: :func:`achievable_channels` caps the family here wherever a track claims to
+#: be wider, whether it is the base core or the core extracted from an HD
+#: master. The cap is what keeps an over-credited DTS label from outranking a
+#: real DD+ 5.1 (with Atmos) in a keep-one-track decision.
 DTS_CORE_MAX_CHANNELS = 6
 
 
@@ -442,7 +488,11 @@ def _classify_audio_segment(b: str) -> str | None:
         return AUDIO_DECODE_PCM
     if any(k in b for k in ("FLAC", "A_FLAC")):
         return AUDIO_DECODE_PCM
-    if any(k in b for k in ("PCM", "A_PCM", "WAV", "ALAC", "WAVPACK")):
+    # The decodable PCM family. ALAC and WavPack are deliberately NOT here:
+    # this player has no decoder for either (see
+    # ``Player.undecodable_codecs``), and "WAVPACK" must not be read as "WAV"
+    # - the same substring trap that makes ATRAC3 need its own guard.
+    if any(k in b for k in ("PCM", "A_PCM", "WAV")):
         return AUDIO_DECODE_PCM
     if any(k in b for k in ("OPUS", "A_OPUS", "VORBIS", "A_VORBIS",
                             "MP3", "MPEG/L", "MPEG AUDIO", "A_MPEG")):
@@ -462,15 +512,47 @@ _DTS_CODEC_NAME_TOKENS = frozenset({"DTS", "DCA"})
 #: than a plain core. Deliberately DTS-specific: "DTS TRUEHD 7.1" is a core
 #: track whose title narrates a source, and must not be promoted to an HD
 #: master.
+#:
+#: The separator-free spelling ("DTSX") is here because it is what real rips
+#: write when an extractor flattens the colon, and unlike a spaced-out
+#: "DTS X" it is one token - so it can be matched without ever reading past
+#: the field it appeared in, which is the line the title must not cross. A
+#: "DTS X" spelling still lands in the DTS family (as the base core), and since
+#: 8.6.1 that is a mislabel rather than a mistake: both DTS classes deliver a
+#: core, rank tier 80, and are capped at the core's 5.1 by
+#: :data:`DTS_CORE_MAX_CHANNELS`, so neither the band, the tier nor the width
+#: a track is credited with depends on which of the two the blob happened to
+#: spell. What the cap is worth is the case it fixes: crediting a 7.1 DTS
+#: stream with eight channels let it outrank a genuine DD+ 5.1 Atmos track in
+#: a keep-one-track decision that cannot be undone.
 _DTS_HD_CORE_MARKERS = (
     "DTS-HD", "DTS/HD", "DTS:X", "DTS-X", "DTS_X",
-    "DTS HD", "DTSHD", "A_DTS/LOSSLESS", "DTS LOSSLESS",
+    "DTS HD", "DTSHD", "DTSX", "A_DTS/LOSSLESS", "DTS LOSSLESS",
 )
 
 #: DTS-HD spellings with NO backward-compatible core. DTS-HD LBR (DTS
 #: Express) is a separate low-bitrate decoder - used for secondary audio -
 #: and a plain DTS decoder cannot play it, so these stay transcode-bound.
 _DTS_HD_NO_CORE_MARKERS = ("LBR", "EXPRESS")
+
+
+def has_no_platform_decoder(blob: str) -> bool:
+    """True when this text names a codec the G454V cannot decode or bitstream.
+
+    ALAC and WavPack are the two a movie can plausibly carry: both are lossless,
+    both look like members of the FLAC/PCM family, and neither has a decoder in
+    the Android TV media framework (nor in the client decoders Jellyfin's
+    Android-TV app can use), while DTS-HD - the other "HD" label in this table -
+    does have a backward-compatible core to fall back to. They therefore belong
+    to no class at all, and this predicate exists so that decision is stated
+    once: :func:`classify_audio_blob` fails closed on it, and
+    :func:`mkv_track_cleaner.chain_audio_tier` must not hand these names the
+    lossless sub-tier it gives FLAC.
+
+    The check is substring-wide on purpose: ``WAVPACK`` contains ``WAV``, and a
+    family that is matched by substring has to be rejected by substring.
+    """
+    return any(marker in (blob or "").upper() for marker in PLAYER.undecodable_codecs)
 
 #: Bare DTS spellings that can *start* a two-word DTS name, so the word after
 #: them may still belong to the codec rather than to a title ("DTS Express",
@@ -544,6 +626,15 @@ def classify_audio_blob(blob: str) -> str:
         return AUDIO_UNKNOWN
     if "ATRAC" in tokens[0]:
         # Sony ATRAC3 contains "AC3" as a substring; it is none of this chain.
+        return AUDIO_UNKNOWN
+    if has_no_platform_decoder(tokens[0]):
+        # ALAC and WavPack, decided by the codec-NAME field alone: this player
+        # has no decoder for them and no bitstream path to fall back on, so
+        # they are fail-closed rather than "decoded to PCM". Checked here, and
+        # not inside the segment classifier, for two reasons - "WAVPACK"
+        # contains "WAV" (the ATRAC trap again), and a title narrating a source
+        # ("DTS-HD MA (from ALAC)") must not reach this rule from the widened
+        # scan, exactly as no title may decide anything else here.
         return AUDIO_UNKNOWN
     # 1. The codec-NAME field decides, in isolation. A title word can never
     #    enter this step: with no profile field present, the old code joined
@@ -709,6 +800,46 @@ def sample_rate_of(value: object, default: int = CHAIN_AUDIO_SAMPLE_RATE) -> int
     return rate if rate > 0 else default
 
 
+def bit_depth_of(value: object) -> int:
+    """Parse a reported bit depth; anything unparseable is "not reported".
+
+    Deliberately without a fallback constant: an unknown depth cannot breach a
+    ceiling, and inventing one would turn a missing field into a claim about
+    the file. Only a real number above :attr:`Player.max_decoded_bit_depth`
+    counts, which keeps the ceiling honest about what the probe actually saw.
+    """
+    try:
+        depth = int(float(value))  # type: ignore[arg-type]
+    except (ValueError, TypeError, OverflowError):
+        return 0
+    return depth if depth > 0 else 0
+
+
+def exceeds_decode_ceiling(sample_rate: object, bit_depth: object = 0) -> str:
+    """A reason string when a decoded stream is past this player's ceiling.
+
+    "" means the stream is within it (or the probe could not say). This is asked
+    only of the ``decode-to-pcm`` family, where the player has to run a software
+    decoder: the bitstreamed formats (AC-3, E-AC-3, the DTS family) never touch
+    that decoder, so a 192 kHz sample rate on a Dolby track is not this
+    question at all.
+
+    The answer is deliberately a *report*, not a plan: the ceiling says the
+    decoder is not specified beyond 24-bit/96 kHz, not that the file is
+    unplayable, and nothing here has measured which of a decode failure or a
+    silent resample to the mixer's 48 kHz actually happens. So no Dolby track is
+    synthesized from it and no keep-one-track ranking is influenced by it - see
+    :attr:`Player.max_decoded_sample_rate`.
+    """
+    rate = sample_rate_of(sample_rate, default=0)
+    depth = bit_depth_of(bit_depth)
+    if rate > PLAYER.max_decoded_sample_rate:
+        return f"this stream's {rate // 1000} kHz rate is past it"
+    if depth > PLAYER.max_decoded_bit_depth:
+        return f"this stream's {depth}-bit depth is past it"
+    return ""
+
+
 @dataclass(frozen=True)
 class TargetAudio:
     codec: str
@@ -789,9 +920,14 @@ def achievable_channels(cls: str, channels: int,
 
     * A **chain-native** track is already at its final layout. Nothing converts
       it and nothing improves it, so it achieves exactly what it carries — with
-      one exception: a DTS-HD MA/HRA or DTS:X track is native *by core
-      fallback*, and the core it falls back to tops out at 5.1
-      (:data:`DTS_CORE_MAX_CHANNELS`), so a 7.1 master achieves 6, not 8.
+      one exception, and it covers the whole DTS family: what reaches the bar is
+      a DTS **core**, whether the file carries a plain DTS Digital Surround
+      bitstream or the core the player extracts from a DTS-HD MA/HRA or DTS:X
+      track. A core tops out at 5.1 (:data:`DTS_CORE_MAX_CHANNELS`), so a 7.1
+      master achieves 6, not 8 - and so does any other DTS-labelled track,
+      however it was labelled. Crediting a DTS stream with 8 channels is what
+      let a DTS:X track whose HD-ness sits only in the *title* outrank a genuine
+      DD+ 5.1 Atmos track and get it stripped by an irreversible remux.
     * A **transcode-bound** track is not a dead end - it is precisely the input
       ``audio_standardizer.py`` synthesizes a chain-native Dolby track from - so
       it achieves that target's layout, which is at most 5.1 on EITHER wiring:
@@ -809,14 +945,17 @@ def achievable_channels(cls: str, channels: int,
         ch = 0
     if ch <= 0:
         return 0
-    if cls == AUDIO_DTS_HD_CORE:
-        # The backward-compatible DTS core is what reaches the bar, and the
-        # core layout tops out at 5.1 (DTS-ES 6.1 at the very widest) - a
-        # DTS-HD MA 7.1 track therefore achieves 6 channels, not 8. It is
-        # still native-band: nothing has to encode anything, the player
-        # extracts the core on the fly.
+    if cls in (AUDIO_DTS_HD_CORE, AUDIO_DTS_CORE):
+        # The DTS core is what reaches the bar in both cases - passed through
+        # as-is, or extracted from an HD bitstream by the player - and a core
+        # layout tops out at 5.1 (DTS-ES 6.1 at the very widest). A DTS-HD MA
+        # 7.1 track therefore achieves 6 channels, not 8, and so does a track
+        # the probe only managed to call "DTS" with 8 channels: the cap is a
+        # property of the format, not of how confidently the label was read.
+        # Neither case loses anything at playback - both are native-band, and
+        # nothing has to encode anything.
         return min(ch, DTS_CORE_MAX_CHANNELS)
-    if cls in (AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DECODE_PCM):
+    if cls in (AUDIO_NATIVE, AUDIO_DECODE_PCM):
         return ch
     if cls == AUDIO_TRANSCODE_BOUND:
         return target_audio_for(ch, wiring).channels
@@ -877,8 +1016,17 @@ def atmos_credit_for(cls: str, blob: str) -> int:
     return 1 if any(marker in upper for marker in _ATMOS_MARKERS) else 0
 
 
-def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> str:
-    """One human sentence describing where this track actually ends up."""
+def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING,
+                     *, sample_rate: object = 0, bit_depth: object = 0) -> str:
+    """One human sentence describing where this track actually ends up.
+
+    ``sample_rate``/``bit_depth`` are optional and only ever read for the
+    software-decoded family, where they decide whether the stream is inside the
+    player's 24-bit/96 kHz decode ceiling (:func:`exceeds_decode_ceiling`).
+    Callers that have a probed stream should pass them: a note that promises
+    "the Chromecast decodes this" about a 24/192 FLAC is a promise this chain
+    has no evidence for.
+    """
     cls = classify_audio_blob(blob)
     ch = channels or 2
     if cls == AUDIO_NATIVE:
@@ -925,6 +1073,20 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> 
                 "and bitstreams that - the bar decodes DTS 5.1 and its panel reads "
                 "DTS, not DTS-HD/DTS:X; no server transcode")
     if cls == AUDIO_DECODE_PCM:
+        over = exceeds_decode_ceiling(sample_rate, bit_depth)
+        if over:
+            # Reported, never promised: the decoder this family depends on is
+            # specified only up to 24-bit/96 kHz here, so whether a wider stream
+            # fails or is quietly resampled to the mixer's rate is not something
+            # the chain's evidence settles. audio_standardizer.py puts these in
+            # its review bucket and leaves the file alone - see
+            # Player.max_decoded_sample_rate.
+            return (f"the Chromecast's software decoder has a documented decode ceiling of "
+                    f"{PLAYER.max_decoded_bit_depth}-bit/"
+                    f"{PLAYER.max_decoded_sample_rate // 1000} kHz, and {over}; whether "
+                    "that means a failed decode or a silent resample to 48 kHz has not "
+                    "been measured on this chain, so it is reported for review, and no "
+                    "Direct Play is promised over it")
         if ch > 2 and wiring == WIRING_TV_ARC:
             return ("the Chromecast decodes this to PCM, but this TV's digital audio "
                     "output offers PCM 2.0 for HDMI sources - over ARC/optical this "
@@ -1039,7 +1201,10 @@ def chain_summary_lines(wiring: str | None = None) -> list[str]:
         + f"; HDR {('/'.join(PLAYER.hdr_formats))} tone-mapped to SDR here; Dolby Vision NOT supported",
         f"         audio  passthrough: {', '.join(PLAYER.passthrough_audio)} "
         f"(+ {', '.join(PLAYER.passthrough_audio_unofficial)} unofficial, and the DTS core "
-        "inside DTS-HD/DTS:X); decodes AAC/FLAC/Opus/MP3 to PCM; NEVER TrueHD / WMA Pro",
+        "inside DTS-HD/DTS:X; the whole DTS family reaches at most 5.1); decodes "
+        f"AAC/MP3/FLAC/Opus/Vorbis/WAV to PCM up to {PLAYER.max_decoded_bit_depth}-bit/"
+        f"{PLAYER.max_decoded_sample_rate // 1000} kHz; NEVER TrueHD / WMA Pro; "
+        "ALAC and WavPack have no decoder here",
         f"Sink   : {SINK.model} {SINK.description} — decodes "
         "DD/DD+ Atmos/TrueHD/DTS/DTS-HD/multi-PCM",
         f"Display: {DISPLAY.model} ({DISPLAY.resolution[0]}x{DISPLAY.resolution[1]} SDR, "

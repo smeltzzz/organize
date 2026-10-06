@@ -972,8 +972,13 @@ def chain_audio_tier(blob: str) -> int:
         return 80
     if cls == pc.AUDIO_DECODE_PCM:
         # All arrive as PCM after the player decodes them; lossless sources
-        # rank above lossy ones *within* the class.
-        if any(k in b for k in ("PCM", "FLAC", "ALAC", "WAVPACK", "A_PCM", "A_FLAC")):
+        # rank above lossy ones *within* the class. ALAC and WavPack are gone
+        # from this tuple: the player decodes neither, so they are
+        # AUDIO_UNKNOWN now and land on the fail-closed rung below. Keeping
+        # them here would hand a format this chain cannot play the same
+        # lossless credit FLAC has, and this ranking decides which track
+        # survives an irreversible remux.
+        if any(k in b for k in ("PCM", "FLAC", "A_PCM", "A_FLAC")):
             return 66
         if "OPUS" in b or "A_OPUS" in b:
             return 62
