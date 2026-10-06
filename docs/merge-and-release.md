@@ -1,76 +1,43 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **v8.6.2 was cut and published on 2026-10-06.** [PR #66](https://github.com/smeltzzz/organize/pull/66)
-> merged into `main` as `a61ce4f`; the `v8.6.2` tag points at that merge commit,
-> not at the branch head; and the tag's `release.yml` ran the suite gate, the
-> wheel/sdist/zipapp build and the **PyPI publish**
-> ([organizekit 8.6.2](https://pypi.org/project/organizekit/8.6.2/)) green end
-> to end. So `pip install --upgrade organizekit` already resolves to it; from a
-> checkout, `python3 -m pip install --upgrade .`.
->
-> **One thing is outstanding, and it is not code.** The run's final job,
-> `github-release`, died inside `softprops/action-gh-release` on a transient
-> `Too many retries.` — a raw GitHub API error, with the suite gate, the build
-> and the PyPI upload all green ahead of it. The
-> [v8.6.2 GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.2)
-> therefore currently carries **no assets**, where every earlier release carries
-> three. The run's `release-artifacts` bundle is still retained (not expired),
-> so the repair is one command, with `actions: write`, and nothing is rebuilt:
+> **v8.6.3 is ready to ship — merge [PR #67](https://github.com/smeltzzz/organize/pull/67)
+> and tag it.** That PR carries the fact-check that made this repository
+> describe the hardware instead of itself — the MS12/Dolby MAT stack belongs to
+> the Google TV Streamer, not the G454V; a current player runs Android 14; DTS
+> and PCM delivery are app-dependent — and it moves `VERSION` to `8.6.3`.
+> Merging it and pushing the tag *is* the release: `release.yml` runs the suite
+> gate, builds the wheel, the sdist and the zipapp, publishes to PyPI, and
+> attaches the three assets. **Until that tag exists PyPI still serves 8.6.2's
+> wording**, and `pip install` reads PyPI — so tagging is the step that updates
+> every install.
 >
 > ```bash
-> gh run rerun 37521371375 --failed    # re-runs the asset job against the same artifacts
+> gh pr merge 67 --merge      # a normal merge: the commits carry the story
+> git fetch origin && git checkout main && git pull
+> git tag -a v8.6.3 -m "organizekit 8.6.3" && git push origin v8.6.3
 > ```
 >
-> If GitHub will not re-run that run, attach the three files by hand — and do
-> **not** rebuild the wheel or the sdist: download the exact files PyPI already
-> published (these are the bytes the failed job built, and the digests below are
-> PyPI's own), then build only the zipapp, from the tag:
+> This ledger is the owner's, and the owner runs one install: **previous
+> releases are not maintained once a newer one exists.** v8.6.2's GitHub release
+> therefore carries no assets, and that is deliberate rather than pending. Its
+> asset step died on a transient `Too many retries.` from the upload host
+> *after* PyPI had accepted the release; PyPI — the thing `pip install --upgrade
+> organizekit` actually reads — is complete and correct, its tag still points at
+> the merged commit `a61ce4f`, and nothing of value lives in an attach list.
 >
-> ```bash
-> python3 -m pip download --no-deps organizekit==8.6.2 -d dist
-> git archive v8.6.2 | tar -x -C /tmp/v862
-> (cd /tmp/v862 && python3 scripts/build_pyz.py)
-> gh release upload v8.6.2 dist/organizekit-8.6.2* /tmp/v862/dist/organize.pyz
-> ```
+> What did need fixing is the failure itself, so it cannot repeat on the tag
+> that matters: `release.yml`'s final step no longer uses a third-party release
+> action, it retries the attach six times with a growing backoff, and it uploads
+> with `--clobber` so a retry — or a manual re-run of the job — is idempotent
+> instead of an "asset already exists" error. A bad minute on the upload host
+> can no longer leave a published version with an empty release beside it.
 >
-> Expected content: wheel `2e1ad98d391167b71958905d2a01aa82989e7af4599e217765d753d4b7f3fabd`,
-> sdist `5a0d97048e755a81ffb475709d6eb687c54eed50614e038a5a9c181ee5b363c7`,
-> zipapp rebuilt from the tag with `scripts/build_pyz.py` (deterministic for a
-> given interpreter, 285 KiB, 30 modules, runs and prints the chain). Once the
-> attach succeeds, replace this paragraph with the shipped line the earlier
-> releases have.
->
-> What it shipped is in the [changelog](../CHANGELOG.md): a second chain review
-> that corrected the software-decode envelope from 96 kHz to **24-bit / 48 kHz**
-> (a toolkit policy, not a Google-published G454V maximum, and a *report* —
-> never a transcode and never a ranking key), kept DTS explicitly unofficial
-> while making the DTS-HD MA/HRA and DTS:X **core fallback** first-class,
-> described TrueHD as app-dependent rather than impossible (no TrueHD bitstream
-> path; plain PCM loses the Atmos objects; the synthesized E-AC-3 is not JOC),
-> demoted Dolby MAT/MS12 to **unverified** for this player rather than
-> transferring the Google TV Streamer's behaviour to it, and made every
-> repository link on the README absolute so PyPI stops resolving them beneath
-> `/project/organizekit/`.
->
-> **8.6.3 corrects one sentence of that.** A fact-check against primary sources
-> found the MS12 reporting says more than "unverified": the Streamer *is* the
-> MS12 device, and the Chromecast is documented as plain HDMI pass-through, so
-> the G454V has no MAT output path at all. 8.6.3 also refreshes the device's OS
-> (Android 14, not "12, upgradeable to 14") and grounds the 48 kHz envelope and
-> DTS app-dependence in measured reports. It is prepared on this branch, not
-> released: merge it and tag `v8.6.3` to publish.
->
-> **Nothing else is outstanding.** No workflow file, held patch, tag or secret is
-> waiting on a human, and the whole suite (2,360 tests, offline) plus `Lint
-> (ruff)`, `Coverage gate`, `Packaging` and the single-file build are green on
-> `main`.
->
-> The next release follows the shape recorded below. One rule carries forward
-> every time, because it is the only step that can be done wrong quietly: **tag
-> the merged commit on `main`, never the open branch** — a tag on an unmerged
-> head publishes a wheel while `main` still reports a different version, and
-> leaves the changelog section unreachable from the released commit. A release is
-> a *merge plus a tag*, not a merge.
+> What 8.6.2 and 8.6.3 changed is in the [changelog](../CHANGELOG.md). One rule
+> carries forward every time, because it is the only step that can be done wrong
+> quietly: **tag the merged commit on `main`, never the open branch** — a tag on
+> an unmerged head publishes a wheel while `main` still reports a different
+> version, and leaves the changelog section unreachable from the released
+> commit. A release is a *merge plus a tag*, not a merge.
 >
 > And when a release lands, replace this block. The note this one replaced
 > recorded v8.6.1 as shipped, three assets and all, the day that tag was cut;

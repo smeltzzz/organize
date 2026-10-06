@@ -14,6 +14,17 @@ stay fail-closed `unknown`, the DTS family keeps its measured accept policy and
 its 5.1 cap — so no library decision flips on this release.
 
 ### Fixed
+- **The release cannot go red after publishing any more.** v8.6.2's final job
+  died in `softprops/action-gh-release` on a transient `Too many retries.` from
+  the asset upload host — after the suite, the build and the PyPI upload had all
+  gone green, which is the worst possible moment to stop. The job now creates
+  the release with `gh` (preinstalled on the runners, one less third-party
+  action for work that is nothing but API calls), retries the attach six times
+  with a growing backoff, and uses `--clobber` so a retry — or a manual re-run
+  of the job — is idempotent instead of an "asset already exists" error. The
+  owner maintains one install and does not archive superseded releases, so
+  v8.6.2's missing assets are deliberately not re-attached: PyPI, which is what
+  `pip install` reads, is complete and correct.
 - **Dolby MAT was attributed to the wrong device.** 8.6.2 called MAT output
   "unverified" for the G454V and cited the Dolby MS12 reporting at the Streamer
   as "not evidence about the G454V". The reporting says more than that: it says

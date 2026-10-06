@@ -181,8 +181,10 @@ class DocumentedFlagTests(unittest.TestCase):
         "--user", "--quiet",
         # `gh run rerun --failed` is quoted in docs/merge-and-release.md as the
         # repair for a release whose asset job died; it is a gh flag, like
-        # `--no-ff` is a git one, and no tool in this repo defines it.
-        "--failed",
+        # `--no-ff` is a git one, and no tool in this repo defines it. `--merge`
+        # (gh pr merge) and `--clobber` (gh release upload) are cited the same
+        # way: the release doc tells the maintainer which command to type.
+        "--failed", "--merge", "--clobber",
     }
 
     #: Every file that is a tool in its own right. `__main__.py` is the
