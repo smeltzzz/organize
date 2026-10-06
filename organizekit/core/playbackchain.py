@@ -229,40 +229,46 @@ def resolve_wiring(explicit: str | None = None) -> str:
 
 #: Whether base 5.1 DTS core should be left alone, per wiring.
 #:
-#: Base DTS is the one format in this chain that plays for a reason nobody
-#: guarantees. It is NOT on Google's published passthrough list for the G454V
-#: (that list is Dolby Digital / Dolby Digital Plus / Atmos-via-DD+); it works
-#: because the Amlogic Android TV firmware happens to pass core DTS through at
-#: the HDMI layer. That is real and widely reported, but it is a firmware
-#: accident, not a contract, and nothing stops a system update from ending it.
+#: Both wirings answer ``True``: the table is uniform, because on this chain
+#: base DTS is accepted on evidence rather than on faith.
 #:
-#: ``soundbar-hdmi-in`` (the DEFAULT) therefore declines it, for three reasons
-#: that all point the same way on this specific chain:
+#: Base DTS is still not on Google's published passthrough list for the G454V
+#: (that list is Dolby Digital / Dolby Digital Plus / Atmos-via-DD+); it plays
+#: because the Amlogic firmware passes core DTS through at the HDMI layer.
+#: 8.5.0 read that gap as a reason to convert - undocumented means undependable
+#: - and made ``soundbar-hdmi-in`` decline it by default. That was an
+#: assumption, and in 2026-10 it was tested on the actual chain instead: a
+#: base-DTS movie was played through Jellyfin to the G454V and **two
+#: independent indicators agreed**:
 #:
-#: 1. **It is the only unofficial link in an otherwise fully-licensed path.**
-#:    Every other format this toolkit leaves alone is documented at both hops.
-#:    If the firmware ever stops passing DTS, those movies begin transcoding on
-#:    the server on every play, silently - exactly the failure the whole
-#:    toolkit exists to prevent, and the one that is hardest to notice.
-#: 2. **The AX3125H is 3.1.2 and has no surround speakers.** Its seven drivers
-#:    are L/C/R, two up-firing height channels and the sub; a 5.1 mix is folded
-#:    into that array whatever carries it. The audible gap between a 1.5 Mbps
-#:    DTS core and a 640 kbps DD+ bed, after that fold, is not the reason to
-#:    keep the larger file.
-#: 3. **It costs real disk.** DTS core runs ~1.5 Mbps against DD+ at 640 kbps,
-#:    which is roughly 400 MB on a two-hour movie, for audio the bar downmixes
-#:    anyway.
+#: * Jellyfin reported **Direct Play** - no transcode at either end, so the
+#:   server was handed a bitstream it accepted as final; and
+#: * the AX3125H's front panel lit its **DTS** indicator, which it only does
+#:   for a real DTS bitstream arriving at its decoder.
 #:
-#: ``tv-arc`` keeps the historical ``True``. The asymmetry is deliberate and
-#: narrow: that path is the documented-degraded alternative this install does
-#: not run (docs/hardware.md §3-§4), and re-deciding its DTS policy is a
-#: separate question from the default wiring's. Flipping it here would be an
-#: untested change to a path nobody exercises.
+#: Measured fact, then, not an assumption. Given that, converting is
+#: irreversible loss buying nothing: 1509 kbps DTS core becomes a 640 kbps
+#: DD+ bed, a difference of ~870 kbps - about 780 MB on a two-hour movie -
+#: and it spends that to replace a bitstream the bar already decodes. The
+#: 3.1.2 array folds a 5.1 mix whatever carries it, so the trade never had a
+#: quality argument either; 8.5.0's only real argument was availability risk.
 #:
-#: Either way this is only a DEFAULT: ``--dts-passthrough`` and
-#: ``--no-dts-passthrough`` state the policy explicitly and win over the table.
+#: That risk is cheap to self-insure against, which is what settles it. This
+#: decision is reversible *at playback time, from the untouched source*: if a
+#: firmware update ever ends the passthrough, ``audiofit`` converts then, from
+#: the same bytes, to the identical DD+ result it would have written today.
+#: Waiting costs one rerun; converting up front costs the DTS track forever on
+#: a bet that turned out to be wrong on this hardware.
+#:
+#: One further fact made the 8.5.0 default unreachable rather than merely
+#: debatable: ``pipeline.py`` exposes no ``--dts-passthrough`` flag and
+#: forwards nothing to the audiofit step, so ``organize run`` could not opt
+#: out of the conversion at all.
+#:
+#: Either way this is only a DEFAULT: ``--no-dts-passthrough`` and
+#: ``--dts-passthrough`` state the policy explicitly and win over the table.
 DTS_PASSTHROUGH_DEFAULT: dict[str, bool] = {
-    WIRING_SOUNDBAR_HDMI_IN: False,
+    WIRING_SOUNDBAR_HDMI_IN: True,
     WIRING_TV_ARC: True,
 }
 
@@ -270,9 +276,10 @@ DTS_PASSTHROUGH_DEFAULT: dict[str, bool] = {
 def dts_passthrough_default(wiring: str | None = None) -> bool:
     """Whether base DTS core is accepted as-is on ``wiring``, absent a flag.
 
-    See :data:`DTS_PASSTHROUGH_DEFAULT` for why the default wiring declines
-    it. An unrecognized wiring resolves through :func:`resolve_wiring` first,
-    so this can never answer for a chain that does not exist.
+    Both wirings accept it; see :data:`DTS_PASSTHROUGH_DEFAULT` for the
+    measurement that settled that. An unrecognized wiring resolves through
+    :func:`resolve_wiring` first, so this can never answer for a chain that
+    does not exist.
     """
     return DTS_PASSTHROUGH_DEFAULT[resolve_wiring(wiring)]
 

@@ -43,30 +43,33 @@ Facts (Google's own materials and device measurements; sources at the end):
 
 Two subtleties the research surfaced and the code encodes:
 
-1. **Base Dolby Digital 5.1 DTS core is the unofficial extra — and the
-   default wiring declines it.** Google's published passthrough list for
-   this device is DD/DD+ only, but the Amlogic Android TV firmware passes
-   plain 5.1 DTS core through the HDMI layer in practice (widely reported;
-   see sources). That is real, but it is firmware behaviour rather than a
-   contract, so on the default `soundbar-hdmi-in` wiring the toolkit
-   **converts base DTS to Dolby Digital Plus** rather than depend on it.
-   Three reasons, all pointing the same way on this chain:
-   * it is the only unlicensed link in a path that is otherwise documented
-     at every hop, and if a system update ever ends it those movies start
-     transcoding server-side on every play, silently;
-   * the AX3125H is **3.1.2 and has no surround speakers** — L/C/R, two
-     up-firing height drivers and the sub — so a 5.1 mix is folded into that
-     array whatever carries it, and the audible gap between DTS core and a
-     640 kbps DD+ bed after that fold is not worth the risk;
-   * DTS core runs ~1.5 Mbps against DD+ at 640 kbps, roughly **400 MB on a
-     two-hour movie**, for audio the bar downmixes anyway.
+1. **Base 5.1 DTS core plays on this chain — measured on the real hardware,
+   not assumed.** Google's published passthrough list for this device is
+   DD/DD+ only, but the Amlogic Android TV firmware passes plain 5.1 DTS
+   core through the HDMI layer. 8.5.0 read that gap as a risk and converted
+   base DTS to Dolby Digital Plus by default on `soundbar-hdmi-in`; the
+   decision was then tested instead of debated, with a base-DTS movie played
+   through Jellyfin to the G454V. **Two independent indicators agreed**:
+   * the server reported **Direct Play** — no transcode at either end, so
+     Jellyfin was handed a bitstream it treated as final; and
+   * the **AX3125H's front panel lit its DTS indicator**, which it only does
+     for a genuine DTS bitstream arriving at the bar's decoder.
 
-   `--dts-passthrough` opts back into keeping it for anyone who trusts the
-   firmware; `--no-dts-passthrough` states the default explicitly. The
-   `tv-arc` alternative keeps the historical accept-DTS policy — that path
-   is the documented-degraded one this install does not run (§3–§4), and
-   re-deciding its DTS policy is a separate question. The table is
-   `playbackchain.DTS_PASSTHROUGH_DEFAULT`.
+   Given that, converting is irreversible loss buying nothing: 1509 kbps DTS
+   core becomes a 640 kbps DD+ bed, a difference of **~870 kbps — about
+   780 MB on a two-hour movie** — spent to replace audio the bar already
+   decodes (its 3.1.2 array folds a 5.1 mix either way). And the decision is
+   reversible at playback time from the *untouched source*: if firmware ever
+   ends the passthrough, `audio_standardizer.py` converts then, from the same
+   bytes, to the identical DD+ result — waiting costs one rerun, converting
+   early costs the DTS track forever. Both wirings therefore accept base DTS
+   by default, and `playbackchain.DTS_PASSTHROUGH_DEFAULT` is uniformly
+   `True`; 8.5.0's behaviour is still available by asking for it with
+   `--no-dts-passthrough`, which states the conversion policy explicitly.
+   (The 8.5.0 default was also un-overridable where it mattered most:
+   `organize run` exposes no DTS flag and forwards nothing to the audiofit
+   step, so the pipeline could not opt out of the conversion at all.) See
+   §5 for the verdict this feeds into the tools.
 2. **HDR10/HDR10+/HLG "play" here means tone-mapped to SDR.** The panel is a
    1080p SDR display, so the Chromecast outputs SDR after tone-mapping.
    That is a picture-preserving operation done at playback time, with zero
@@ -249,7 +252,7 @@ leaves the player — the server transcodes audio on **every** play.
 | AAC 5.1 / stereo | decode → PCM ✅ | ✅ (multich. PCM) | ⚠️ stereo only on this TV | stereo = fine; 5.1+ native on the **default** HDMI-IN wiring, **AC-3 candidate only under `tv-arc`** |
 | FLAC / PCM / ALAC 7.1 | decode → PCM ✅ | ✅ multich. | ⚠️ stereo only on this TV | native multichannel on the **default** HDMI-IN wiring; **AC-3 candidate (5.1+) only under `tv-arc`** |
 | MP3 / Opus / Vorbis | decode → PCM ✅ | ✅ | ✅ stereo | fine |
-| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | **transcoded to DD+ by default** on `soundbar-hdmi-in` (unofficial, and ~1.5 Mbps for audio a 3.1.2 bar downmixes — §1); `--dts-passthrough` keeps it; still accepted by default under `tv-arc` |
+| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | **kept as-is on both wirings** — measured working on this chain (§1: Jellyfin Direct Play + the AX3125H's DTS indicator); `--no-dts-passthrough` converts it to DD+ instead |
 | **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** from it by audio_standardizer (AC-3 under `tv-arc`) |
 | **DTS-HD MA / HRA, DTS:X** | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** (AC-3 under `tv-arc`) |
 | WMA Pro / WMA Lossless | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** — no ExoPlayer decoder, so `ffmpeg` converts it like any other master |

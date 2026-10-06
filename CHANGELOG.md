@@ -4,6 +4,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.5.1] - 2026-10-06
+
+A one-change patch release: 8.5.0's new DTS default was measured on the actual
+hardware and reverted, plus two text corrections the measurement exposed.
+
+### Changed
+- **Base DTS core is accepted by default again, on both wirings.** 8.5.0 made
+  `soundbar-hdmi-in` convert base DTS to Dolby Digital Plus because the
+  Amlogic DTS passthrough is undocumented and therefore shouldn't be relied
+  on. That was an assumption, and it was then tested on the real chain: a
+  base-DTS movie played through Jellyfin to the Chromecast G454V, the server
+  reports **Direct Play** (no transcode at either end) and the Hisense
+  AX3125H's front panel lights its **DTS** indicator, which it only does for
+  a genuine DTS bitstream. Two independent indicators agree. Given that,
+  converting is irreversible loss buying nothing — 1509 kbps DTS core becomes
+  a 640 kbps DD+ bed, a difference of ~870 kbps, about **780 MB on a
+  two-hour movie** — and the residual firmware risk is self-insured: if
+  passthrough ever ends, `audiofit` converts *then*, from the same untouched
+  source, to the identical DD+ result. `playbackchain.DTS_PASSTHROUGH_DEFAULT`
+  is now uniformly `True`, with the measurement recorded as the rationale;
+  `--no-dts-passthrough` still states the conversion policy explicitly and
+  `--dts-passthrough` still spells out the default, so 8.5.0's behaviour
+  remains reachable by asking for it. One further fact made the old default
+  untenable rather than merely debatable: `pipeline.py` exposes no
+  `--dts-passthrough` flag and forwards nothing to the audiofit step, so
+  `organize run` could not opt out of the conversion at all.
+
+### Fixed
+- **`mkv_track_cleaner.py --help` described a tool it isn't.** The argparse
+  description claimed the keeper is the best *English* audio and that
+  embedded subtitles are stripped "when that sidecar exists". The keeper is
+  the best-scoring track in the movie's **native** language — the file's own
+  markers decide, and an English dub is never preferred — and `plan_cleanup`
+  sets `keep_subtitles = []` **unconditionally**: every embedded subtitle
+  goes, every time, because the validated external `.eng.srt` beside the
+  movie (when one exists) is the library's only subtitle, not a precondition
+  for the strip.
+- **The DTS → DD+ storage figure was understated in the docs.** The real
+  delta is ~870 kbps, about 780 MB on a two-hour movie; the "~400 MB"
+  quoted in `playbackchain.py`, `docs/hardware.md` and `docs/tools.md` was
+  wrong. All three now carry the correct figure, and `docs/hardware.md` §1
+  and §5 plus `docs/tools.md` record the DTS decision as measured evidence
+  rather than an assumption.
+
 ## [8.5.0] - 2026-10-05
 
 ### Changed

@@ -3183,9 +3183,11 @@ def main(argv: list[str] | None = None) -> int:
     enable_utf8_stdio()
     parser = argparse.ArgumentParser(
         description=(
-            "Lossless post-standardizer cleanup: keep one best English audio "
-            "(or best non-commentary audio on foreign films with a validated "
-            f"external {EXTERNAL_SRT_SUFFIX}) and strip embedded subs when that sidecar exists."
+            "Lossless post-standardizer cleanup: keep the best-scoring audio track in the "
+            "movie's own (native) language - never an English preference - and strip every "
+            "embedded subtitle unconditionally. A validated external "
+            f"{EXTERNAL_SRT_SUFFIX} beside the movie is the library's only subtitle; it is not "
+            "a condition for the strip."
         )
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
