@@ -10,8 +10,8 @@ For the order they run in and why that order is load-bearing, see
 | Tool | One line | Needs |
 | :--- | :--- | :--- |
 | [`subtitle_extractor.py`](#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: from the movie's own text track, or an exact-hash OpenSubtitles match when only bitmaps exist | `mkvmerge` + `mkvextract` (an OpenSubtitles API key for image-only movies) |
-| [`audio_standardizer.py`](#2--audio_standardizerpy--chain-native-audio) | Chain-native audio for the G454V: bake one Dolby Digital Plus track @ 640 kbps (default wiring) in from every TrueHD/WMA-Pro master, or report what's already native (DTS-HD/DTS:X play via their extracted DTS core) | `ffprobe` (+ `ffmpeg` when something needs the new track) |
-| [`mkv_track_cleaner.py`](#3--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best chain-playable audio, strip commentary, dubs and embedded subtitles | `mkvmerge` |
+| [`audio_standardizer.py`](#2--audio_standardizerpy--chain-native-audio) | App-neutral audio prep for the G454V: bake a Dolby Digital Plus fallback when TrueHD/WMA Pro/DTS-HD LBR lacks a guaranteed Plex/Jellyfin route (some apps decode TrueHD to PCM, losing TrueHD Atmos metadata); DTS-core policy is enabled under both wiring selectors but measured only on the physical HDMI-IN chain | `ffprobe` (+ `ffmpeg` when something needs the new track) |
+| [`mkv_track_cleaner.py`](#3--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the best audio under the toolkit's app-neutral profile (app-decoded PCM requires a compatible app/route); strip commentary, dubs and embedded subtitles | `mkvmerge` |
 | [`bitdepth.py`](#4--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed, report each file's chain fit | `ffprobe` |
 | [`library_auditor.py`](#5--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
 | [`movie_standardizer.py`](#6--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: hardlink MKV/MP4 into `Title (Year)/`, replacing an older matching movie | nothing |
@@ -175,28 +175,32 @@ read-only mount or a permissions mistake costs no download.
 
 ## 2 · `audio_standardizer.py` — chain-native audio
 
-Every verdict derives from one fact the hardware dossier
-([hardware.md](hardware.md)) establishes: the **Chromecast with Google TV
-(HD) G454V can emit Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3,
-Atmos included), base DTS, decoded PCM — and, out of any DTS-HD MA/HRA or
-DTS:X bitstream, the backward-compatible DTS core it carries. It can never
-emit TrueHD, WMA Pro or DTS Express.** A movie whose best track is one of
-*those* (no backward-compatible core) is *audio-transcoded by the Jellyfin
-server on every single play* — for the whole runtime of the file, forever.
-This tool is the one-time offline answer. For each movie it probes (`ffprobe`) and classifies:
+Every verdict derives from the distinctions in the hardware dossier
+([hardware.md](hardware.md)): **Google officially lists Dolby Digital
+(AC-3), Dolby Digital Plus (E-AC-3) and Atmos via HDMI passthrough for the
+G454V.** Base DTS and the DTS-HD/DTS:X core fallback are accepted only on
+chain-specific measured evidence, not Google certification. PCM/FLAC decoding
+is app- and HDMI-route-dependent; the toolkit uses a conservative 24-bit/48-kHz
+envelope (not a Google-published device limit). The G454V has no supported
+TrueHD bitstream path, but some apps can decode TrueHD to multichannel PCM;
+plain PCM loses TrueHD Atmos object metadata. Plex/Jellyfin may instead request
+server transcoding. This tool keeps an app-neutral compatibility policy for
+that target and prepares Dolby audio without re-encoding video. For each movie
+it probes (`ffprobe`) and classifies:
 
 | Source situation (the pool's **ranked best** track decides — see the invariant below) | Verdict | What happens |
 | :--- | :--- | :--- |
 | AC-3 / E-AC-3 ranked first in the pool | `native-ok` | nothing — the track the cleaner will keep already bitstreams end-to-end |
-| base 5.1 DTS core | `dts-core-ok` (default) / `transcoded-dolby` | **kept as-is on both wirings**, on measured evidence rather than assumption: playing a base-DTS movie through Jellyfin to the G454V reports **Direct Play** and lights the AX3125H's **DTS** indicator, two independent confirmations of the passthrough. Converting would be irreversible loss buying nothing — 1509 kbps DTS core to a 640 kbps DD+ bed is ~870 kbps, about **780 MB on a two-hour movie**, for audio the 3.1.2 bar downmixes anyway — and it is reversible later from the untouched source if firmware ever ends it. `--no-dts-passthrough` states the conversion policy explicitly. See `playbackchain.DTS_PASSTHROUGH_DEFAULT` |
-| AAC / FLAC / PCM / MP3 / Opus / Vorbis / WAV **within 24-bit/96 kHz** | `pcm-decode-ok` | the player decodes to PCM; stereo variants are always fine; with the default wiring (`soundbar-hdmi-in`) multichannel variants are accepted as-is because the bar's HDMI IN takes multichannel LPCM 5.1/7.1, while the explicit `--wiring tv-arc` (this TV offers PCM only for HDMI sources = stereo PCM) makes them transcode candidates |
-| FLAC / PCM **past 24-bit or 96 kHz** | `review-unknown` | **reported, untouched.** The decoder this family depends on is specified to 24-bit/96 kHz on the G454V; whether a wider stream fails or is silently resampled to 48 kHz has not been measured on this chain, so the toolkit neither promises a Direct Play nor spends a lossless master guessing ([hardware.md §1, subtlety 4](hardware.md)) |
-| DTS-HD MA / DTS-HD HRA / DTS:X | `dts-hd-core-ok` (default) / `transcoded-dolby` | **kept as-is on both wirings**: user-confirmed 2026-10 — the player cannot emit the lossless HD layer, but it extracts the DTS core every such bitstream carries and bitstreams that, so the bar decodes surround as DTS 5.1 (panel reads `DTS`), with no server work. A 7.1 master reaches 5.1. `--no-dts-passthrough` converts it anyway, from the lossless layer. See `playbackchain.PLAYER.dts_hd_core_fallback` |
-| TrueHD / DTS-HD LBR (DTS Express) | `transcoded-dolby` | **one chain-native Dolby track is synthesized and appended (Dolby Digital Plus on the default wiring), video untouched**. Neither has a backward-compatible core, which is what separates them from the DTS-HD row above |
-| unknown codec — including **ALAC and WavPack**, which this player has no decoder for at all | `review-unknown` | fail-closed in the report; never auto-touched |
+| base 5.1 DTS core | `dts-core-ok` (default) / `transcoded-dolby` | **kept as-is by toolkit default**; the measurement cited is specifically this G454V → AX3125H HDMI-IN chain: Jellyfin reports **Direct Play** and the bar lights its **DTS** indicator. DTS is not Google-certified, and this does not verify the alternate TV-ARC path. Converting would be irreversible loss buying nothing on the measured route — 1509 kbps DTS to a 640 kbps DD+ bed is ~870 kbps, about **780 MB on a two-hour movie** — and it remains reversible from the untouched source. `--no-dts-passthrough` explicitly converts the family. See `playbackchain.DTS_PASSTHROUGH_DEFAULT` |
+| AAC / FLAC / PCM / MP3 / Opus / Vorbis / WAV **within the toolkit's 24-bit/48-kHz envelope** | `pcm-decode-ok` | a compatible app decodes to PCM; Android's built-in FLAC table is mono/stereo up to 48 kHz, while multichannel decode/output is app- and route-dependent. AX3125H HDMI IN accepts LPCM 5.1/7.1; this TV's ARC return path is PCM-only (§3), so multichannel tracks become AC-3 candidates under `--wiring tv-arc` |
+| App/software-decoded FLAC / PCM **past 24-bit or 48 kHz** | `review-unknown` | **reported, untouched.** This is the toolkit's conservative, chain-specific envelope, not a Google-published G454V maximum. Wider-stream behavior depends on the app/route and is unmeasured; there is no transcode or ranking effect ([hardware.md §1, subtlety 4](hardware.md)) |
+| DTS-HD MA / DTS-HD HRA / DTS:X | `dts-hd-core-ok` (default) / `transcoded-dolby` | **kept by default on the measured HDMI-IN chain**: user-confirmed 2026-10 — the player does not bitstream the HD layer, but extracts and bitstreams the DTS core, so the bar decodes surround as DTS 5.1 (panel reads `DTS`), with no server work. A 7.1 master reaches 5.1. The TV-ARC alternative is not established by this measurement. `--no-dts-passthrough` converts it from the lossless layer. See `playbackchain.PLAYER.dts_hd_core_fallback` |
+| TrueHD / DTS-HD LBR (DTS Express) | `transcoded-dolby` | **one chain-native Dolby track is synthesized and appended (Dolby Digital Plus on the default wiring), video untouched**. TrueHD cannot be bitstreamed, but app-specific software decode to PCM is possible and loses TrueHD Atmos metadata; this is a conservative Plex/Jellyfin policy. DTS-HD LBR has no compatible core. The synthesized E-AC-3 track is not Atmos/JOC |
+| Dolby MAT / MAT-Atmos / MPCM label | `review-unknown` | MAT output from G454V is unverified. Android describes MAT as a distinct HDMI format that can carry PCM with object metadata; the AX3125H manual maps MAT to `MPCM` and MAT-Atmos to `DOLBY ATMOS`, but §1.3's per-port matrix omits MAT. Standalone MAT/MPCM labels remain unknown, not confirmed PCM. No Google TV Streamer/MS12 behavior is assumed for this G454V |
+| unknown codec — including **ALAC and WavPack**, outside the confirmed decoder set | `review-unknown` | fail-closed in the report; never auto-touched |
 | still hardlinked to a seed | `deferred-seeding` | untouched until seeding stops |
 
-The bake-in is exactly one ffmpeg invocation per movie — on the default
+The compatibility bake is exactly one ffmpeg invocation per movie — on the default
 `soundbar-hdmi-in` wiring the codec is Dolby Digital Plus, which both audio
 hops carry natively:
 `ffmpeg -i movie.mkv -map 0 -c copy … -c:a:N eac3 -b:a 640k -ac 6 -ar 48000`
@@ -218,15 +222,16 @@ Japanese film is transcoded from its Japanese TrueHD even when an English
 DTS dub sits next to it. Every verdict — `native-ok` included — is keyed off
 that same ranked-best track, because it is the one the cleaner will *keep*:
 the invariant is that if audiofit calls a file settled, the keeper is a
-track this chain can emit (answering "some Dolby exists" for a track ranked
+track that this app-neutral profile treats as chain-native (answering "some Dolby exists" for a track ranked
 below the keeper was the 8.3.0 bug, fixed in 8.3.1). Video streams are never
 re-encoded.
 
 Publishing is fail-closed: the output is **re-probed** before the swap —
 every original stream identical, the appended Dolby track with the right
 channel count and the chain's 48 kHz sample rate, that track the container's
-*only* default audio (otherwise a player still picks the lossless master and
-the movie keeps transcoding on every play), duration drift ≤ 3 s — and dropped
+*only* default audio (otherwise the intended Plex/Jellyfin profile may not
+select the prepared Dolby fallback, while another app may choose its own decode
+path), duration drift ≤ 3 s — and dropped
 otherwise. Immediately before the swap the source is re-checked against the
 identity it was planned from, because planning and applying are hours apart on
 a large library and the ingest hook can land a better release on that path in
@@ -272,15 +277,17 @@ this order:
    encoder is unaffected and keeps its real width: this is what keeps
    **FLAC 7.1 ahead of AC-3 2.0**, and Hisense's per-port table confirms
    LPCM 5.1/7.1 on the bar's HDMI IN ([hardware.md §2](hardware.md)).
-2. **Band.** *Chain-native* — Dolby Digital Plus (E-AC-3, Atmos included) and
-   Dolby Digital (AC-3) bitstream end-to-end, base DTS is decoded by the
-   soundbar, the DTS core inside DTS-HD/DTS:X is extracted and bitstreamed by
-   the player, and client-decodable formats (AAC, FLAC/PCM, Opus, MP3) arrive
-   as PCM — beats *transcode-bound* (TrueHD, WMA Pro, DTS-HD LBR), which beats
+2. **Band.** *Chain-native under this app-neutral profile* — Dolby Digital
+   Plus (E-AC-3, Atmos passthrough) and Dolby Digital (AC-3) bitstream
+   end-to-end, measured base DTS and the DTS core inside DTS-HD/DTS:X are
+   bitstreamed, and app-decodable formats (AAC, FLAC/PCM, Opus, MP3) may arrive
+   as PCM when the app/route supports it — beats *transcode-bound* (TrueHD,
+   WMA Pro, DTS-HD LBR), which beats
    *unknown*. At an **equal achievable layout** this is the
-   Direct-Play-first rule: a 5.1 AC-3 still beats a 5.1 TrueHD — and since
-   8.4.0 also a 7.1 one, because the encoder cap lands both at 5.1 and only
-   one of them gets there without the server re-encoding anything.
+   Direct-Play-first rule: a 5.1 AC-3 still beats a 5.1 TrueHD in this profile.
+   Some apps decode TrueHD to PCM instead, but that is app-dependent and loses
+   Atmos object metadata; the toolkit does not silently switch its ranking by
+   guessing which client will play a file.
    `audio_standardizer.py` runs *before* this tool in the pipeline and bakes the
    chain-native Dolby track in from exactly those masters, so by the time the
    cleaner looks, the master has usually already become the DD+ track that wins
@@ -290,11 +297,12 @@ this order:
    what DD+ Atmos exists for.
 4. **Codec sub-tier**, refining a settled layout: DD+ (100) > DD (95) > base
    DTS **and the DTS-HD family** (80 — a DTS core is what reaches the bar
-   either way) > FLAC/PCM (66) > Opus (62) > other lossy (60). ALAC and WavPack
+   either way) > app-decoded FLAC/PCM (66) > Opus (62) > other lossy (60).
+   PCM channel support remains app-/route-dependent. ALAC and WavPack
    are not in the 66 rung: they are `unknown` on this chain, so they achieve
    nothing and can only be kept as the sole track in a file. Below the band
-   sit the formats with no native path: a lossless master (TrueHD/MLP, WMA
-   Lossless, 34) > WMA Pro (32) > the rest (30), which is what picks the best
+   sit formats with no guaranteed app-neutral route: a lossless master
+   (TrueHD/MLP, WMA Lossless, 34) > WMA Pro (32) > the rest (30), which picks the best
    *transcode source*. `audio_standardizer.py` ranks its own source pool with
    this same function, so the two tools cannot disagree about which master to
    burn.

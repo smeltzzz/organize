@@ -49,6 +49,18 @@ class DeviceFactTests(unittest.TestCase):
             with self.subTest(blob=blob):
                 self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_TRANSCODE_BOUND)
 
+    def test_truehd_and_mat_have_explicit_app_and_transport_status(self) -> None:
+        # TrueHD cannot be bitstreamed by this model, although some apps can
+        # decode it to PCM; plain PCM does not retain its Atmos object layer.
+        self.assertFalse(pc.PLAYER.truehd_bitstream_passthrough)
+        self.assertTrue(pc.PLAYER.truehd_app_pcm_decode_possible)
+        self.assertFalse(pc.PLAYER.truehd_atmos_survives_plain_pcm)
+        # The bar's manual display map is not evidence that this Chromecast
+        # outputs MAT; the model keeps the output status unverified.
+        self.assertEqual(pc.SINK.dolby_mat_manual_display, "MPCM")
+        self.assertEqual(pc.SINK.dolby_mat_atmos_manual_display, "DOLBY ATMOS")
+        self.assertFalse(pc.PLAYER.dolby_mat_output_verified)
+
     def test_the_player_has_no_dolby_vision_license(self) -> None:
         # The HD model decodes HDR10/HDR10+/HLG only. Calibrated against the
         # 4K model, which does carry Dolby Vision.
@@ -68,18 +80,17 @@ class DeviceFactTests(unittest.TestCase):
     def test_the_per_port_matrix_is_what_makes_the_default_wiring_default(self) -> None:
         """Hisense manual §1.3, read as data: the evidence for `soundbar-hdmi-in`.
 
-        The bar's supported-input table is per PORT, and the two rows that
-        decide the wiring are: multichannel LPCM is accepted on HDMI IN (so a
-        5.1/7.1 AAC/FLAC/PCM track the Chromecast decodes arrives intact) and
-        is NOT accepted on HDMI ARC or optical (so the same track over the
-        `tv-arc` alternative cannot).
+        The bar's supported-input table is per PORT. It confirms HDMI IN
+        accepts multichannel LPCM, but an app must first decode a 5.1/7.1
+        AAC/FLAC/PCM source and the output layout is app/route-dependent. LPCM
+        5.1/7.1 is NOT accepted on HDMI ARC or optical.
         """
         for layout in ("LPCM 5.1ch", "LPCM 7.1ch"):
             with self.subTest(layout=layout):
                 self.assertIn(layout, pc.SINK.hdmi_in_accepts)
                 self.assertIn(layout, pc.SINK.arc_cannot_carry)
-        # DD+ Atmos is the only Atmos variant the G454V can emit, and the bar
-        # takes it on HDMI IN - that is the whole default audio path.
+        # DD+ JOC is the officially listed Atmos passthrough path used by this
+        # toolkit. Dolby MAT output is unverified and is not promoted here.
         self.assertIn("Dolby Atmos - Dolby Digital Plus", pc.SINK.hdmi_in_accepts)
         self.assertNotIn("Dolby Atmos - Dolby Digital Plus", pc.SINK.arc_cannot_carry)
         # Everything the player can actually emit, the bar accepts on HDMI IN.
@@ -216,6 +227,23 @@ class AudioClassificationTests(unittest.TestCase):
         # may not demote a real E-AC-3 into TrueHD.
         self.assertEqual(pc.classify_audio_blob("ALAC - FROM DTS-HD MA 7.1"), pc.AUDIO_UNKNOWN)
         self.assertEqual(pc.classify_audio_blob("WAVPACK A_WAVPACK DTS:X"), pc.AUDIO_UNKNOWN)
+
+    def test_dolby_mat_is_unknown_not_a_native_pcm_codec(self) -> None:
+        """MAT is an HDMI transport; the G454V output path is unverified.
+
+        In particular, the AX3125H manual's plain-MAT display result "MPCM"
+        must not make Dolby MAT look like an ordinary decoded PCM track.
+        """
+        for blob in ("DOLBY MAT", "DOLBY MAT-ATMOS", "DOLBY_MAT", "MAT 2.0",
+                     "MAT 2.1", "MPCM", "MPCM 5.1", "DOLBY MAT MPCM"):
+            with self.subTest(blob=blob):
+                self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_UNKNOWN)
+                note = pc.audio_chain_note(blob, 8)
+                self.assertIn("not verified", note)
+                self.assertIn("unknown", note)
+        self.assertEqual(pc.classify_audio_blob("PCM"), pc.AUDIO_DECODE_PCM)
+        # A title never overrides the real PCM codec name.
+        self.assertEqual(pc.classify_audio_blob("PCM - Dolby MAT"), pc.AUDIO_DECODE_PCM)
 
     def test_titles_never_demote_a_proven_codec(self) -> None:
         """Real tracks narrate history in their titles; the codec fields rule.
@@ -499,25 +527,21 @@ class TargetAudioTests(unittest.TestCase):
 
 
 class PlayerDecodeCeilingTests(unittest.TestCase):
-    """The software decode path is bounded, and being bounded is not the same as broken.
+    """The tool's 24-bit/48-kHz envelope is conservative, not a Google spec.
 
-    The chain's read of the Android TV media framework is that this player
-    decodes AAC / MP3 / FLAC / Opus / Vorbis / WAV up to 24-bit and 96 kHz. The
-    ceiling therefore decides what the toolkit may *promise*; what a wider
-    stream actually does here (a failed decode, or a silent resample to the
-    mixer's 48 kHz) has never been measured on this box - so the answer is a
-    report and no action: nothing is synthesized from it and no ranking key is
-    influenced by it.
+    Android's generic format table sets 48 kHz for built-in FLAC mono/stereo
+    and says support varies by form factor. Multichannel decode is app/route-
+    dependent; this boundary decides only what this toolkit safely promises.
     """
 
     def test_the_ceiling_is_recorded_on_the_player(self) -> None:
-        self.assertEqual(pc.PLAYER.max_decoded_sample_rate, 96000)
+        self.assertEqual(pc.PLAYER.max_decoded_sample_rate, 48000)
         self.assertEqual(pc.PLAYER.max_decoded_bit_depth, 24)
         self.assertIn("ALAC", pc.PLAYER.undecodable_codecs)
         self.assertIn("WAVPACK", pc.PLAYER.undecodable_codecs)
 
     def test_within_the_ceiling_is_silent(self) -> None:
-        for rate in (48000, 96000, "96000", 44100, 0, None, "", "bogus"):
+        for rate in (48000, "48000", 44100, 0, None, "", "bogus"):
             with self.subTest(rate=rate):
                 self.assertEqual(pc.exceeds_decode_ceiling(rate, 24), "")
         # An unreported depth cannot breach a depth ceiling.
@@ -526,6 +550,7 @@ class PlayerDecodeCeilingTests(unittest.TestCase):
                 self.assertEqual(pc.exceeds_decode_ceiling(48000, depth), "")
 
     def test_past_it_names_the_number_that_is_past(self) -> None:
+        self.assertIn("96 kHz", pc.exceeds_decode_ceiling(96000))
         self.assertIn("192 kHz", pc.exceeds_decode_ceiling(192000))
         self.assertIn("32-bit", pc.exceeds_decode_ceiling(48000, 32))
         # A rate is a rate in every shape the probes hand over.
@@ -535,11 +560,11 @@ class PlayerDecodeCeilingTests(unittest.TestCase):
         flac = pc.codec_blob("FLAC", "A_FLAC", "24bit 192kHz")
         over = pc.audio_chain_note(flac, 6, pc.WIRING_SOUNDBAR_HDMI_IN,
                                    sample_rate=192000, bit_depth=24)
-        self.assertIn("decode ceiling", over)
+        self.assertIn("app/software-decode envelope", over)
         self.assertIn("review", over)
         under = pc.audio_chain_note(flac, 6, pc.WIRING_SOUNDBAR_HDMI_IN,
-                                    sample_rate=96000, bit_depth=24)
-        self.assertIn("decoded by the Chromecast to PCM", under)
+                                    sample_rate=48000, bit_depth=24)
+        self.assertIn("decoded by a compatible player app", under)
         # A bitstreamed Dolby track never touches this decoder, so its sample
         # rate is not this question: 192 kHz is not a reason to doubt a DD+ or
         # a DTS core passthrough.
@@ -721,16 +746,17 @@ class WiringTests(unittest.TestCase):
         # backward-compatible core, so it still needs the offline transcode.
         truehd = pc.audio_chain_note("TrueHD", 8)
         self.assertIn("core to fall back to", truehd)
-        self.assertIn("re-encodes", truehd)
+        self.assertIn("app-neutral", truehd)
+        self.assertIn("Atmos", truehd)
+        self.assertNotIn("every play", truehd)
 
     def test_native_dolby_51_carries_the_arc_warning_too(self) -> None:
         # AUDIO_NATIVE used to return before ever consulting `wiring`, so AC-3
         # and E-AC-3 printed the identical "bitstreams end-to-end" sentence on
-        # the tv-arc alternative - where docs/hardware.md §3 says this TV
-        # downmixes *every* HDMI source to stereo PCM before ARC/optical,
-        # "whatever the source sent". A Dolby bitstream is not exempt from
-        # that, so the note has to carry the same caveat its two sibling
-        # branches already carried.
+        # the tv-arc alternative. This TV's PCM-only output for HDMI sources
+        # establishes the stereo return for app-decoded PCM, but whether it
+        # forwards or downmixes a received Dolby bitstream is unmeasured. Keep
+        # the route caveat rather than promising surround over ARC.
         for blob in ("AC-3", "EAC3", "eac3 Dolby Digital Plus", "DOLBY DIGITAL"):
             for ch in (6, 8):
                 tag = f"{blob} {ch}ch"
@@ -738,8 +764,8 @@ class WiringTests(unittest.TestCase):
                 note_arc = pc.audio_chain_note(blob, ch, pc.WIRING_TV_ARC)
                 self.assertNotEqual(note_default, note_arc, tag)
                 self.assertTrue(note_default.startswith("bitstreams end-to-end"), tag)
-                self.assertIn("PCM only", note_arc, tag)
-                self.assertIn("cannot be relied on", note_arc, tag)
+                self.assertIn("PCM-only", note_arc, tag)
+                self.assertIn("unmeasured", note_arc, tag)
 
     def test_stereo_native_dolby_is_not_warned_about_over_arc(self) -> None:
         # The warning is channel-gated exactly like the decode-to-PCM branch:

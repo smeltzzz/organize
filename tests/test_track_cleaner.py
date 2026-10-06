@@ -54,13 +54,13 @@ class AudioQualityTests(unittest.TestCase):
     def test_at_an_equal_layout_the_chain_native_track_wins(self) -> None:
         """The band tiebreak: same destination, but one of them arrives for free.
 
-        The G454V passthroughs AC-3/E-AC-3 and decodes AAC to PCM; TrueHD it can
-        never emit. Among tracks that all reach 5.1, that means the ones needing
-        no server re-encode outrank the master that does - a 5.1 AC-3 beats a 5.1
-        TrueHD, and since 8.4.0 also a 7.1 one (the master folds to 5.1: the
-        widest its encoder can write). It still does NOT mean a 2.0 AC-3 beats
-        a 7.1 TrueHD: layout leads, and audiofit can turn that master into a
-        playable 5.1 DD+ track while the stereo one can never become anything.
+        Under the toolkit's app-neutral profile, Dolby passthrough and the
+        measured DTS route are settled; compatible apps may decode AAC/FLAC/PCM
+        to PCM subject to route support. TrueHD has no supported bitstream path,
+        though some apps decode it to PCM and lose its Atmos objects. At equal
+        achievable layout, a 5.1 AC-3 outranks a 5.1 TrueHD in this profile; a
+        7.1 TrueHD master still beats a narrower track because audiofit can
+        synthesize a 5.1 DD+ bed while stereo cannot become anything wider.
         """
         truehd = {"codec": "TrueHD", "properties": {"codec_id": "A_MLP", "audio_channels": 6, "track_name": "Atmos"}}
         aac = {"codec": "AAC", "properties": {"codec_id": "A_AAC", "audio_channels": 6}}
@@ -108,7 +108,8 @@ class AudioQualityTests(unittest.TestCase):
 
         Release groups title an E-AC-3 track "TrueHD 7.1" (the source it was
         made from); if that title decided the class, the cleaner would rank
-        the playable track below a lossless master the G454V cannot emit — or
+        the playable track below a lossless master with no guaranteed app-neutral
+        path — or
         below the AC-3 audiofit baked in — and could drop the best track.
         """
         eac3_titled = _audio(1, codec="E-AC-3", channels=6, name="TrueHD 7.1")
@@ -385,12 +386,12 @@ class KeeperNeedsAudiofitTests(unittest.TestCase):
     """A convertible master is retained on purpose - and the run must say so.
 
     Ranking by achievable layout means the cleaner can deliberately keep a
-    track the G454V cannot emit yet. That is correct, because the remux is
-    irreversible and `audio_standardizer.py` can still turn the master into a
-    chain-native Dolby track on any later run - but it is only correct if that
-    conversion actually happens. So the movie is counted, listed in the report
-    and warned about on the console, rather than quietly left to transcode its
-    audio on every play.
+    master without a guaranteed path in the app-neutral Plex/Jellyfin profile.
+    That is correct, because the remux is irreversible and
+    `audio_standardizer.py` can still make a Dolby fallback on a later run -
+    but the conversion must be reported. Some apps can decode TrueHD to PCM,
+    losing Atmos objects; Plex/Jellyfin may instead request server audio
+    transcoding. The test keeps that app-dependent distinction in the warning.
     """
 
     MASTER_INFO = {
@@ -475,7 +476,7 @@ class KeeperNeedsAudiofitTests(unittest.TestCase):
         self.assertEqual(stats["cleaned"][0]["removed_audio_count"], 1)
         self.assertEqual(stats["errors"], [])
         self.assertIn("audio_standardizer.py", out)
-        self.assertIn("can never emit", out)
+        self.assertIn("no guaranteed native path", out)
 
     def test_a_chain_native_keeper_is_not_flagged(self) -> None:
         """The bucket must stay empty for the ordinary case, or it means nothing."""
@@ -484,7 +485,7 @@ class KeeperNeedsAudiofitTests(unittest.TestCase):
         self.assertEqual(stats["keeper_needs_audiofit"], [])
         self.assertEqual(len(stats["cleaned"]), 1)
         self.assertIn("E-AC-3", stats["cleaned"][0]["kept_audio"])
-        self.assertNotIn("can never emit", out)
+        self.assertNotIn("no guaranteed native path", out)
 
     def test_the_report_lists_it_and_counts_it_as_attention(self) -> None:
         report_path = self.folder.parent / "report.txt"
@@ -1183,9 +1184,10 @@ class ChainAudioRetentionTests(unittest.TestCase):
     def test_the_decode_ceiling_is_a_report_and_not_a_ranking_key(self) -> None:
         """Nothing about a 24/192 FLAC is settled, and nothing is deleted either.
 
-        The player's software decoders are specified to 24-bit/96 kHz, so audio
-        past that is not promised a Direct Play - but what actually happens to
-        such a stream on this box has never been measured, and a keep-one-track
+        The toolkit's conservative software-decode envelope is 24-bit/48 kHz,
+        not a published Google specification. Audio past it is not promised a
+        Direct Play - but what actually happens in each app/route is unmeasured,
+        and a keep-one-track
         decision cannot be undone. So the ceiling moves the audiofit verdict
         (see ``test_audio_standardizer``) and deliberately NOT this ranking.
         """
@@ -1201,7 +1203,7 @@ class ChainAudioRetentionTests(unittest.TestCase):
                                               wiring=pc.WIRING_SOUNDBAR_HDMI_IN)
 
         # Layout, band and tier are identical: the ceiling is not one of them.
-        self.assertEqual(key(192000)[:3], key(96000)[:3])
+        self.assertEqual(key(192000)[:3], key(48000)[:3])
         # The historical tie-breaks still read the file as it is (a higher rate
         # wins *within* equal keys), which is a preference, not a promise.
         self.assertEqual(key(192000)[0], 8)

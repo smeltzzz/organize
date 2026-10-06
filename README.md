@@ -3,20 +3,20 @@
 # Organize
 
 **A rock-solid, dependency-free set of Python tools that turns finished
-torrents into a perfectly organized, 100% Direct Play Jellyfin &amp; Plex
-movie library — tuned for one exact living-room chain (Chromecast with
-Google&nbsp;TV **HD** G454V → Hisense AX3125H soundbar (HDMI IN) → Samsung
-UN60F6350AF),
+torrents into a perfectly organized Jellyfin &amp; Plex movie library,
+prepared for one exact living-room chain under a conservative app-neutral
+audio profile (Chromecast with Google&nbsp;TV **HD** G454V → Hisense AX3125H
+soundbar (HDMI IN) → Samsung UN60F6350AF),
 with zero duplicate disk usage, subtitles extracted from each
 movie's own tracks, and
 lossless track cleanup.**
 
 [![CI](https://github.com/smeltzzz/organize/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/smeltzzz/organize/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-2355%20passing%20(offline)-2EA44F.svg?style=flat-square)](.github/workflows/ci.yml)
+[![Zero runtime dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-2EA44F.svg?style=flat-square)](https://github.com/smeltzzz/organize/blob/main/pyproject.toml)
+[![Tests](https://img.shields.io/badge/tests-2359%20total-2EA44F.svg?style=flat-square)](https://github.com/smeltzzz/organize/blob/main/.github/workflows/ci.yml)
 [![Jellyfin & Plex](https://img.shields.io/badge/jellyfin%20%7C%20plex-compatible-00A4DC.svg?style=flat-square)](https://jellyfin.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-4B5563.svg?style=flat-square)](https://github.com/smeltzzz/organize/blob/main/LICENSE)
 
 [Quickstart](#-quickstart) ·
 [What's in this repo](#-whats-in-this-repo) ·
@@ -32,13 +32,16 @@ lossless track cleanup.**
 ## 🧭 What is Organize?
 
 Six purpose-built Python 3.11+ tools that maintain a canonical movie
-library for Jellyfin / Plex, with one promise: **every movie Direct Plays on
-the reference playback chain** (Chromecast with Google TV HD `G454V` →
-Hisense `AX3125H` soundbar (HDMI IN) → Samsung `UN60F6350AF`) with
-zero work from the server. Every codec default — which audio the cleaner
-keeps, what the audio standardizer bakes in, what the bit-depth inspector
-flags — derives from that chain's measured capabilities; the dossier with
-every spec and source is [docs/hardware.md](docs/hardware.md), and
+library for Jellyfin / Plex. For recognized formats, the toolkit applies a
+conservative app-neutral audio profile to target Direct Play without server
+audio transcoding on the reference chain (Chromecast with Google TV HD
+`G454V` → Hisense `AX3125H` soundbar (HDMI IN) → Samsung `UN60F6350AF`).
+PCM/FLAC decoding still requires a compatible app and active route; unknown,
+MAT/MPCM, and over-envelope audio remain review-only. TrueHD decode alternatives
+and route limits are documented rather than assumed. Audio defaults combine
+official device specifications, behavior measured on this physical chain, and
+explicitly app-dependent policy; the dossier with every source is
+[docs/hardware.md](https://github.com/smeltzzz/organize/blob/main/docs/hardware.md), and
 `organize.py doctor` prints the chain it is assuming:
 
 ```
@@ -61,8 +64,8 @@ network at all. The only things some tools need are the usual media binaries
 | 🫧 **Zero pip installs** | A tool is a single file. Copy it, run it, done. |
 | 🔗 **Hardlink-only ingest** | Organized movies share disk sectors with your seeds — **0 extra bytes**, seeding never interrupted. |
 | 💬 **Subtitles from the movie itself, first** | Each movie's own **text-based** embedded English track is extracted to a validated `.eng.srt` — via `mkvextract`, MP4s through a temporary MKV bridge. Image-based subtitles are never OCR'd. A movie whose English subtitles exist *only* as bitmaps gets one OpenSubtitles lookup keyed on the file's **exact moviehash**; there is no title search. An existing sidecar is always authoritative and never rewritten. |
-| ✂ **Lossless track cleanup** | `mkvmerge` remux keeps exactly one audio track — the best one *that actually plays on the chain* in the movie's own (native) language: chain-native Dolby Digital/Digital Plus beats TrueHD (which the G454V can never emit), while DTS-HD/DTS:X play as the DTS core the player extracts — a core is the widest the whole DTS family ever gets here, so no DTS-labelled track is credited with more than 5.1 and none can cost an Atmos track its home. Drops every dub and commentary track, and removes every embedded subtitle (the `.eng.srt` beside the movie is the only subtitle). Video untouched. |
-| 🎛 **Chain-native audio, baked in once** | `audio_standardizer.py` scans with `ffprobe` and — for any movie whose best track the G454V can never emit (TrueHD, WMA Pro, DTS Express) — synthesizes one Dolby Digital Plus 5.1 track @ 640 kbps from the lossless master with `ffmpeg` — 5.1 because that is the widest layout ffmpeg's Dolby encoders can write; wider sources fold, they are never promised a bitstream that would fail (video and subtitles copied untouched, verified by a second probe, published atomically). One offline pass replaces a server transcode on every future play. Anything the chain cannot be *trusted* to play — a decoded stream past the player's 24-bit/96 kHz ceiling, a codec it has no decoder for (ALAC, WavPack) — is reported for a human and never touched. |
+| ✂ **Lossless track cleanup** | `mkvmerge` remux keeps exactly one audio track — the best one under the toolkit's app-neutral profile, in the movie's own (native) language: chain-native Dolby Digital/Digital Plus beats a TrueHD master (some apps decode TrueHD to PCM, but plain PCM loses TrueHD Atmos object metadata). DTS-HD/DTS:X use the extracted DTS core measured only on the physical HDMI-IN route (not Google-certified or TV-ARC); 5.1 is the DTS family's widest delivered layout, so no DTS label outranks an Atmos track on a fictitious 7.1. Drops every dub and commentary track, and removes every embedded subtitle (the `.eng.srt` beside the movie is the only subtitle). Video untouched. |
+| 🎛 **Chain-native audio, baked in once** | `audio_standardizer.py` scans with `ffprobe` and — for tracks without a guaranteed app-neutral path (TrueHD, WMA Pro, DTS Express) — synthesizes Dolby Digital Plus 5.1 @ 640 kbps from the master. Some apps decode TrueHD to multichannel PCM, but this loses TrueHD Atmos object metadata; Plex/Jellyfin behavior is app-dependent, so the tool uses a conservative server-friendly profile. E-AC-3 output is not an Atmos/JOC encode. Dolby MAT/MPCM output is unverified and never assumed to be ordinary PCM. The 5.1 target is ffmpeg's Dolby encoder ceiling; wider sources fold, video/subtitles stay untouched, output is verified and atomically published. Decoded streams past the tool's chain-specific 24-bit/48 kHz envelope (not a Google spec), and codecs outside the confirmed set (ALAC, WavPack), are reported for a human and never touched. |
 | 🎨 **Bit-depth & chain-fit intelligence** | A fail-closed inspector queues 8-bit SDR for HandBrake while strictly protecting native HDR10 / HDR10+ / Dolby Vision — and tells you what each file does on this chain: tone-mapped Direct Play vs. "replaces or re-encodes" (Dolby Vision, >1080p). |
 | 🩺 **Read-only health checks** | A 100% read-only auditor validates layout and subtitle integrity with scheduler-friendly exit codes. |
 | 🛡 **Safety invariants** | Advisory locks, atomic staging, and crash recovery — engineered so a power cut can never corrupt your library. |
@@ -105,15 +108,15 @@ One file, one purpose. Nothing else.
 | :--- | :--- |
 | `organize.py` | **The front door.** Unified CLI, system doctor, progress summary, and test runner: `organize.py doctor`, `organize.py status`, `organize.py run`, `organize.py test`, plus one subcommand per tool. |
 | `subtitle_extractor.py` | Tool 1 — one validated English `.eng.srt` per movie: the movie's own **text** track via `mkvextract` (MP4 through a temporary MKV bridge), or an exact-moviehash OpenSubtitles match when only bitmap subtitles exist. An existing sidecar is authoritative. |
-| `audio_standardizer.py` | Tool 2 — **chain-native audio**: `ffprobe` sweep; bakes one Dolby Digital Plus track @ 640 kbps in from any TrueHD/WMA-Pro master the G454V can never emit, via `ffmpeg` (video untouched, output verified, atomic swap). DTS-HD/DTS:X need nothing: the player extracts the DTS core they carry. |
-| `mkv_track_cleaner.py` | Tool 3 — lossless remux: keep the one best **chain-playable** audio (native Dolby over a master the player cannot emit), strip commentary/dubs/embedded subs. |
+| `audio_standardizer.py` | Tool 2 — **chain-native audio**: `ffprobe` sweep; bakes one Dolby Digital Plus track @ 640 kbps for the app-neutral profile when TrueHD/WMA Pro/DTS-HD LBR needs a guaranteed path. Some apps decode TrueHD to PCM (without TrueHD Atmos objects). DTS-HD/DTS:X need nothing here under policy: core extraction was measured only on the physical HDMI-IN route, not Google-certified or TV-ARC. |
+| `mkv_track_cleaner.py` | Tool 3 — lossless remux: keep the one best **chain-playable under the app-neutral profile** audio (native Dolby over a master with no guaranteed path), strip commentary/dubs/embedded subs. |
 | `bitdepth.py` | Tool 4 — ffprobe sweep: queue 8-bit SDR for HandBrake, protect HDR, say what each file does on the G454V chain. |
 | `library_auditor.py` | Tool 5 — read-only health check of layout, naming, and subtitles. |
 | `movie_standardizer.py` | Tool 6 — the torrent-completion hook: parse scene names, hardlink into `Title (Year)/` (movie plus a bundled English sidecar). |
 | `pipeline.py` | **The one runner.** Runs the maintenance tools in the one correct order: extract → audio → clean → 10-bit → audit. |
-| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `playbackchain.py` — **the one hardware-truth table** the toolkit's codec decisions derive from (facts + sources in [docs/hardware.md](docs/hardware.md)) — `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock — and `live.py` is the overwritable status line every sweep draws on a terminal and never anywhere else. |
-| `tests/` | Fully offline unit tests (2,355), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus the stand-ins: `fake_mkvmerge.py` / `fake_ffprobe.py` / `fake_ffmpeg.py` (real executables, enough to drive an end-to-end remux, extraction, transcode and inspection), `fakebin.py` (puts them on a PATH), `fakeprovider.py` (canned OpenSubtitles answers) and `hermetic.py` (pins the host toolchain and the network out). |
-| `docs/` | The long-form documentation this page links to: the [playback-chain dossier](docs/hardware.md), the [tool reference](docs/tools.md), [the pipeline](docs/pipeline.md), [configuration](docs/configuration.md), [testing & development](docs/development.md) and, for maintainers, [merging & releasing](docs/merge-and-release.md). |
+| `organizekit/` | The shared core, defined exactly once: report rendering, atomic + durable writes, cross-platform locking, the subtitle contract, probe caching, library-root resolution, `playbackchain.py` — **the one hardware-truth table** the toolkit's codec decisions derive from (facts + sources in [docs/hardware.md](https://github.com/smeltzzz/organize/blob/main/docs/hardware.md)) — `toolchain.py` — the one table describing what the five steps are and how to call them — `state.py`, the rebuildable SQLite cache of what each tool last decided. `runlog.py` is the run log itself — one timestamped line to the console and the log file, written under one lock — and `live.py` is the overwritable status line every sweep draws on a terminal and never anywhere else. |
+| `tests/` | Fully offline unit tests (2,359), including `tests/selftests/` — each tool's own suite, moved out of the shipped file — plus the stand-ins: `fake_mkvmerge.py` / `fake_ffprobe.py` / `fake_ffmpeg.py` (real executables, enough to drive an end-to-end remux, extraction, transcode and inspection), `fakebin.py` (puts them on a PATH), `fakeprovider.py` (canned OpenSubtitles answers) and `hermetic.py` (pins the host toolchain and the network out). |
+| `docs/` | The long-form documentation this page links to: the [playback-chain dossier](https://github.com/smeltzzz/organize/blob/main/docs/hardware.md), the [tool reference](https://github.com/smeltzzz/organize/blob/main/docs/tools.md), [the pipeline](https://github.com/smeltzzz/organize/blob/main/docs/pipeline.md), [configuration](https://github.com/smeltzzz/organize/blob/main/docs/configuration.md), [testing & development](https://github.com/smeltzzz/organize/blob/main/docs/development.md) and, for maintainers, [merging & releasing](https://github.com/smeltzzz/organize/blob/main/docs/merge-and-release.md). |
 | `benchmarks/` | The scripts behind every speed claim in this repo — stdlib-only, offline, re-runnable. |
 | `.env.example` | Every supported environment variable, annotated. |
 | `pyproject.toml` | Packaging metadata; `pip install -e .[dev]` gives you `pytest`. It is also the single source for what the single-file build ships. The distribution is `organizekit` (`organize` on PyPI has been taken since 2011); the command it installs is still `organize`. |
@@ -170,7 +173,7 @@ simply skips.
 
 For monitoring, `organize.py doctor --json` prints the same verdicts as one
 JSON document and nothing else — see
-[Reading the reports](docs/pipeline.md#-reading-the-reports).
+[Reading the reports](https://github.com/smeltzzz/organize/blob/main/docs/pipeline.md#-reading-the-reports).
 
 ### 2 · Run the maintenance pipeline
 
@@ -211,7 +214,7 @@ Nothing to do for 388 movie(s) - the next pass will touch 24.
 Done — every movie is canonically named, subtitle-complete, audio-chain
 native, and direct-play safe on the reference hardware. For the fully
 automatic flow (torrent finishes → standardized → pipeline on a schedule),
-see [The pipeline](docs/pipeline.md) — the qBittorrent hook, the step order,
+see [The pipeline](https://github.com/smeltzzz/organize/blob/main/docs/pipeline.md) — the qBittorrent hook, the step order,
 and how to read the reports.
 
 > [!TIP]
@@ -263,17 +266,17 @@ this machine is provisioned.
 
 Six tools do the work; one runner runs them in the one correct order.
 Each is a single file next to the shared `organizekit/` core, so you can adopt
-one and ignore the rest. **[Full reference → `docs/tools.md`](docs/tools.md)**
+one and ignore the rest. **[Full reference → `docs/tools.md`](https://github.com/smeltzzz/organize/blob/main/docs/tools.md)**
 
 | Tool | What it does | Needs |
 | :--- | :--- | :--- |
-| [`subtitle_extractor.py`](docs/tools.md#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: the movie's own **text** track via `mkvextract` (MP4s through a temporary MKV bridge), or an exact-moviehash OpenSubtitles match for image-only movies. An existing sidecar is authoritative and never touched; no title search, no OCR. | `mkvmerge` + `mkvextract` |
-| [`audio_standardizer.py`](docs/tools.md#2--audio_standardizerpy--chain-native-audio) | Makes audio native to the G454V chain: `ffprobe` sweep; keeps what's native (AC-3 up to 5.1, E-AC-3 up to 7.1 incl. Atmos), accepts base DTS, the DTS core a DTS-HD/DTS:X player extracts (the family's widest layout is the core's 5.1), and client-decoded PCM within 24-bit/96 kHz, and synthesizes **Dolby Digital Plus 5.1 @ 640 kbps** (the encoder ceiling; wider sources fold) from every TrueHD/WMA-Pro master (video/subs untouched, verified publish). Past the ceiling, or with no decoder at all (ALAC, WavPack): reviewed, not touched. | `ffmpeg` + `ffprobe` |
-| [`mkv_track_cleaner.py`](docs/tools.md#3--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best **chain-playable** audio track (the movie's own language — native Dolby, or DTS played from its extracted core, over a master the player cannot emit), strip every dub, commentary track and embedded subtitle. Video untouched; seeding movies deferred; a broken `.eng.srt` skips the movie. | `mkvmerge` |
-| [`bitdepth.py`](docs/tools.md#4--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect native HDR10 / HDR10+ / Dolby Vision fail-closed, and report what each file does on the chain (tone-mapped Direct Play vs. replace/re-encode). | `ffprobe` |
-| [`library_auditor.py`](docs/tools.md#5--library_auditorpy--read-only-health-check) | Strictly read-only health check of layout, naming and subtitles, with gating exit codes for cron. | nothing |
-| [`movie_standardizer.py`](docs/tools.md#6--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: hardlink one MKV/MP4 per `Title (Year)/` — plus a bundled English sidecar, renamed to `Title (Year).eng.srt`; the latest matching download replaces the older library file. Zero extra bytes. | nothing |
-| [`pipeline.py`](docs/pipeline.md) | The five maintenance steps in the one safe order — subtitles extracted before the remux strips them, the chain-native Dolby track baked in before the cleaner keeps it, and the read-only audit closing the sweep. | — |
+| [`subtitle_extractor.py`](https://github.com/smeltzzz/organize/blob/main/docs/tools.md#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: the movie's own **text** track via `mkvextract` (MP4s through a temporary MKV bridge), or an exact-moviehash OpenSubtitles match for image-only movies. An existing sidecar is authoritative and never touched; no title search, no OCR. | `mkvmerge` + `mkvextract` |
+| [`audio_standardizer.py`](https://github.com/smeltzzz/organize/blob/main/docs/tools.md#2--audio_standardizerpy--chain-native-audio) | Makes audio native to the target profile: keeps official Dolby passthrough, applies the DTS-core policy under both wiring selectors based on measurements from the physical HDMI-IN chain only (not Google-certified and not TV-ARC evidence), uses app-decoded PCM inside the conservative 24-bit/48 kHz envelope (not an official Google maximum), and synthesizes **Dolby Digital Plus 5.1 @ 640 kbps** for TrueHD/WMA Pro/DTS Express where no app-neutral path is guaranteed. Some apps decode TrueHD to PCM, losing TrueHD Atmos objects; MAT/MPCM output is unverified, not assumed to be ordinary PCM. The tool favors predictable Plex/Jellyfin playback. Over-envelope PCM or unknown codecs: reviewed, not touched. | `ffmpeg` + `ffprobe` |
+| [`mkv_track_cleaner.py`](https://github.com/smeltzzz/organize/blob/main/docs/tools.md#3--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the one best audio track in the movie's own language under the app-neutral profile — native Dolby or measured DTS core, ahead of a master with no guaranteed path; app-specific TrueHD-to-PCM playback is documented but not assumed. Strip every dub, commentary and embedded subtitle. Video untouched; seeding movies deferred; a broken `.eng.srt` skips the movie. | `mkvmerge` |
+| [`bitdepth.py`](https://github.com/smeltzzz/organize/blob/main/docs/tools.md#4--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect native HDR10 / HDR10+ / Dolby Vision fail-closed, and report what each file does on the chain (tone-mapped Direct Play vs. replace/re-encode). | `ffprobe` |
+| [`library_auditor.py`](https://github.com/smeltzzz/organize/blob/main/docs/tools.md#5--library_auditorpy--read-only-health-check) | Strictly read-only health check of layout, naming and subtitles, with gating exit codes for cron. | nothing |
+| [`movie_standardizer.py`](https://github.com/smeltzzz/organize/blob/main/docs/tools.md#6--movie_standardizerpy--the-ingest-hook) | The torrent-completion hook: hardlink one MKV/MP4 per `Title (Year)/` — plus a bundled English sidecar, renamed to `Title (Year).eng.srt`; the latest matching download replaces the older library file. Zero extra bytes. | nothing |
+| [`pipeline.py`](https://github.com/smeltzzz/organize/blob/main/docs/pipeline.md) | The five maintenance steps in the one safe order — subtitles extracted before the remux strips them, the chain-native Dolby track baked in before the cleaner keeps it, and the read-only audit closing the sweep. | — |
 
 ---
 
@@ -293,7 +296,7 @@ It is the same toolkit, not a cut-down one: `organize.pyz test` runs every
 field smoke test, `organize.pyz run-tool pipeline.py --source …` runs the full
 four-step pass, and each step is still its own process with its own locks, log,
 report and exit code. Logs and reports land *beside* the archive, never inside
-it. [How it is built and tested →](docs/development.md#one-file-no-install)
+it. [How it is built and tested →](https://github.com/smeltzzz/organize/blob/main/docs/development.md#one-file-no-install)
 
 ---
 
@@ -344,8 +347,9 @@ Non-negotiable rules every tool obeys:
    standardizer re-probes its own output before swapping: every original
    stream must still be there, the appended track must be the requested Dolby
    codec at the promised channel count **and** sample rate, it must be the
-   container's only default audio track (or a player would still pick the
-   lossless master and transcode on every play), the source must be unchanged
+   container's only default audio track; otherwise a Plex/Jellyfin client may
+   select the lossless master and request server transcoding, while another app
+   may decode TrueHD to PCM without Atmos metadata. The source must be unchanged
    since it was planned, and duration drift over ~3 s refuses the publish.
    ffmpeg's command line is never trusted as the definition of success;
    ffprobe of the result is. Unknown codecs are fail-closed: reported, never
@@ -357,18 +361,18 @@ Non-negotiable rules every tool obeys:
 
 | Document | What's in it |
 | :--- | :--- |
-| [The playback-chain dossier](docs/hardware.md) | The exact reference hardware (G454V, AX3125H, UN60F6350AF), the codec matrix, the wiring guide, and every source the toolkit's audio/video defaults derive from. |
-| [Tool reference](docs/tools.md) | Every tool in detail — what it decides, why, and the flags worth knowing. |
-| [The pipeline](docs/pipeline.md) | The qBittorrent hook, the five steps, the order that is load-bearing, and how to read the reports. |
-| [Configuration](docs/configuration.md) | Environment variables, the `.env` file, platform-aware path defaults. |
-| [Testing & development](docs/development.md) | The offline suite, the `organize.pyz` build, the field smoke tests, the crash tests. |
-| [CHANGELOG](CHANGELOG.md) · [OVERHAUL](OVERHAUL.md) | What changed and why; the measured plan the recent work follows. |
+| [The playback-chain dossier](https://github.com/smeltzzz/organize/blob/main/docs/hardware.md) | The exact reference hardware (G454V, AX3125H, UN60F6350AF), the codec matrix, the wiring guide, and every source the toolkit's audio/video defaults derive from. |
+| [Tool reference](https://github.com/smeltzzz/organize/blob/main/docs/tools.md) | Every tool in detail — what it decides, why, and the flags worth knowing. |
+| [The pipeline](https://github.com/smeltzzz/organize/blob/main/docs/pipeline.md) | The qBittorrent hook, the five steps, the order that is load-bearing, and how to read the reports. |
+| [Configuration](https://github.com/smeltzzz/organize/blob/main/docs/configuration.md) | Environment variables, the `.env` file, platform-aware path defaults. |
+| [Testing & development](https://github.com/smeltzzz/organize/blob/main/docs/development.md) | The offline suite, the `organize.pyz` build, the field smoke tests, the crash tests. |
+| [CHANGELOG](https://github.com/smeltzzz/organize/blob/main/CHANGELOG.md) · [OVERHAUL](https://github.com/smeltzzz/organize/blob/main/OVERHAUL.md) | What changed and why; the measured plan the recent work follows. |
 
-Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: see
-[SECURITY.md](SECURITY.md).
+Contributions: see [CONTRIBUTING.md](https://github.com/smeltzzz/organize/blob/main/CONTRIBUTING.md). Security reports: see
+[SECURITY.md](https://github.com/smeltzzz/organize/blob/main/SECURITY.md).
 
 ---
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/smeltzzz/organize/blob/main/LICENSE).

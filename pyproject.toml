@@ -36,7 +36,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/smeltzzz/organize"
-Documentation = "https://github.com/smeltzzz/organize"
+Documentation = "https://github.com/smeltzzz/organize/blob/main/docs/hardware.md"
 "Source Code" = "https://github.com/smeltzzz/organize"
 "Bug Tracker" = "https://github.com/smeltzzz/organize/issues"
 Changelog = "https://github.com/smeltzzz/organize/blob/main/CHANGELOG.md"

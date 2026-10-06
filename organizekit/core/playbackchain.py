@@ -1,7 +1,7 @@
 """The one playback chain this toolkit is tuned for, as data.
 
 Everything the tools decide about codecs, resolutions and audio tracks is
-grounded in exactly one chain of three physical devices, wired like this::
+grounded in exactly one chain of three physical devices::
 
                                  HDMI (video+audio)            HDMI OUT -> TV
     Chromecast with Google TV ───────────────────────► Hisense ─────────────────────────► Samsung
@@ -16,57 +16,23 @@ The alternative (``tv-arc``: Chromecast into the TV, TV --ARC/optical--> bar)
 is still fully supported, and on this display it is the degraded one — see
 ``Display.arc`` and docs/hardware.md §3–§4.
 
-This file is the single source of truth for what that chain can do, so
-``mkv_track_cleaner.py``, ``bitdepth.py`` and ``audio_standardizer.py`` never
-disagree about it. The tables below are not guesses; each row carries the
-source it was checked against (see ``SOURCES``).
+Evidence is deliberately separated. Google's G454V specification lists Dolby
+Digital, Dolby Digital Plus, and Dolby Atmos via HDMI passthrough; it does not
+publish DTS, Dolby MAT, or a PCM sample-rate ceiling. DTS-core playback and the
+24-bit/48-kHz software-decode envelope recorded here are chain-specific
+measurements/conservative policy, not Google certification. Android's generic
+media table documents built-in FLAC only for mono/stereo up to 48 kHz and warns
+that support varies by form factor. Multichannel FLAC/PCM and TrueHD decoding
+depend on the app and active HDMI route. Some apps can decode TrueHD to PCM,
+but plain PCM does not retain TrueHD Atmos object metadata. The toolkit keeps
+its conservative Jellyfin/Plex-oriented transcode policy for TrueHD rather than
+assuming an app-specific path.
 
-The short version of the physics, and why it drives every default:
-
-* The Chromecast with Google TV (HD) is the *only* player. It decodes
-  H.264, HEVC, VP9 and AV1 up to 1080p60, and it can only ever EMIT
-  Dolby Digital (AC-3, up to 5.1), Dolby Digital Plus (E-AC-3, up to 7.1,
-  including DD+ Atmos via HDMI pass-through), base 5.1 DTS (chipset-level,
-  unofficial), the backward-compatible DTS core extracted out of a DTS-HD
-  MA/HRA or DTS:X track, and decoded PCM. The only families it genuinely
-  cannot get any audio out of are TrueHD and WMA (Pro / Lossless), plus DTS
-  Express — so a TrueHD track in a file is not free quality, it is a
-  guaranteed server-side audio transcode on every single play.
-* The PCM it decodes is itself bounded: the Android TV media framework on
-  this box decodes AAC (LC / HE-AAC v1 / v2), MP3, FLAC, Opus, Vorbis and
-  WAV, and it does so up to 24-bit / 96 kHz (``PLAYER.max_decoded_bit_depth``
-  and ``PLAYER.max_decoded_sample_rate``). Two consequences, both modelled:
-  a 24/192 FLAC is not "better audio" but a stream past the ceiling, which
-  :func:`exceeds_decode_ceiling` reports instead of promising; and ALAC and
-  WavPack have no decoder here at all, so they are :data:`AUDIO_UNKNOWN` —
-  fail-closed, like every other codec outside this chain's confirmed set.
-* A DTS-HD track is NOT in that bucket. The player cannot emit the HD
-  layer, but DTS-HD is backward compatible by design: the player extracts
-  the DTS core (5.1, lossy) that every DTS-HD bitstream carries and
-  bitstreams THAT, so the movie Direct Plays as DTS — the AX3125H decodes
-  it and its panel reads DTS, not DTS-HD/DTS:X. What is lost is the HD
-  layer (and any DTS:X object metadata), not the audio. Converting such a
-  track to DD+ would therefore destroy the lossless master to buy nothing
-  (see ``DTS_PASSTHROUGH_DEFAULT``); the recorded device fact is
-  ``PLAYER.dts_hd_core_fallback``, measured on this chain 2026-10. What
-  reaches the bar is a DTS core either way, so the WHOLE DTS family — base
-  DTS included — is width-capped at the core's 5.1
-  (``DTS_CORE_MAX_CHANNELS``): no DTS-labelled track is ever credited with
-  achieving 7.1 on this chain.
-* The AX3125H is fed through its HDMI IN port, which decodes everything
-  the Chromecast can emit — AC-3, DD+ Atmos, DTS, and multichannel PCM —
-  before the video passes through to the TV. That is what makes the
-  default audio rule permissive: a 5.1 AAC/FLAC/PCM track arrives as
-  multichannel PCM at the bar and needs no transcode.
-* The TV is a 2013 panel whose own audio return path is the weak leg: its
-  Digital Audio Out menu offers per-input formats, and on this unit only
-  PCM is selectable for HDMI sources (user-confirmed; see ``Display.arc``),
-  so plain ARC/optical would deliver multichannel content as stereo PCM.
-  The default wiring simply never asks the TV to carry sound.
-* The TV tops out at 1920x1080 SDR. HDR10/HDR10+/HLG files still Direct
-  Play — the Chromecast decodes them and tone-maps to SDR for this
-  display — but Dolby Vision is NOT licensed on the G454V, so any
-  Dolby-Vision-only file is flagged rather than assumed playable.
+This file is the single source of truth for what this chain can safely promise,
+so ``mkv_track_cleaner.py``, ``bitdepth.py`` and ``audio_standardizer.py``
+never disagree about it. Official specifications, chain measurements, and
+app-dependent behavior are labelled separately in ``SOURCES`` and
+``docs/hardware.md``.
 """
 
 from __future__ import annotations
@@ -110,12 +76,13 @@ class Player:
     # display below is SDR, supported HDR is tone-mapped to SDR at output.
     hdr_formats: tuple[str, ...] = ("HDR10", "HDR10+", "HLG")
     dolby_vision: bool = False
-    # What the device can pass through over HDMI. Official Google list is
-    # DD/DD+/Atmos(DD+); base 5.1 DTS passes at the Android/Amlogic firmware
-    # layer (every Amlogic TV build since 8.1) but is NOT on Google's list,
-    # hence "unofficial". No TrueHD and no DTS-HD *HD layer* ever leaves this
-    # box - but the DTS core inside DTS-HD MA/HRA/DTS:X does (see
-    # ``dts_hd_core_fallback`` immediately below).
+    # Google's official G454V list is Dolby Digital, Dolby Digital Plus and
+    # Atmos via HDMI; it does not certify DTS. Base 5.1 DTS and the DTS-HD core
+    # fallback are accepted here only on user-measured evidence from this
+    # G454V -> AX3125H HDMI-IN chain, not a general Amlogic/Android guarantee.
+    # The G454V has no supported TrueHD bitstream path (some apps decode to
+    # PCM); it also does not emit the DTS-HD lossless layer, but the core inside
+    # DTS-HD MA/HRA/DTS:X does (see ``dts_hd_core_fallback`` below).
     passthrough_audio: tuple[str, ...] = ("ac3", "eac3", "eac3-joc")
     passthrough_audio_unofficial: tuple[str, ...] = ("dts-core",)
     #: DTS-HD MA / DTS-HD HRA / DTS:X are not passed through as HD
@@ -131,33 +98,37 @@ class Player:
     #: low-bitrate decoder with no backward-compatible core, so it stays
     #: transcode-bound.
     dts_hd_core_fallback: bool = True
-    #: The ceiling of the software decode path, i.e. what happens to every
-    #: track that is NOT bitstreamed. The Android TV media framework on this
-    #: SoC decodes AAC (AAC-LC, HE-AAC v1/v2), MP3, FLAC, Opus, Vorbis and
-    #: WAV (linear PCM) - and the format table for this chain bounds that
-    #: decode at 24-bit / 96 kHz, for LPCM 2.0 exactly as for FLAC.
-    #:
-    #: The ceiling is modelled because it is a real boundary of the promise
-    #: this toolkit makes: "the player decodes it, so nothing transcodes" is
-    #: only true of a stream the decoder is specified to handle. What a
-    #: 24/192 FLAC actually does here is not documented anywhere (a hard
-    #: decode failure, or a silent resample by AudioFlinger to the mixer's
-    #: rate - which then discards the extra resolution on its way out
-    #: anyway), and the toolkit does not guess about either. So
-    #: :func:`exceeds_decode_ceiling` *reports* such a track and nothing
-    #: else: no synthesized replacement, and above all no irreversible
-    #: keep-one-track decision taken on an unmeasured premise. A dropped
-    #: master cannot be un-dropped; a flagged movie costs one manual look.
-    max_decoded_sample_rate: int = 96000
+    #: TrueHD is not a supported G454V lossless bitstream. An app that ships
+    #: its own decoder (for example, Kodi) may software-decode TrueHD to
+    #: multichannel PCM; that is app/route-dependent, not a platform-wide
+    #: guarantee. Plain channel-based PCM cannot carry TrueHD Atmos objects.
+    #: audio_standardizer intentionally keeps TrueHD transcode-bound for its
+    #: conservative, app-neutral Jellyfin/Plex profile.
+    truehd_bitstream_passthrough: bool = False
+    truehd_app_pcm_decode_possible: bool = True
+    truehd_atmos_survives_plain_pcm: bool = False
+    #: No evidence currently confirms that the G454V emits Dolby MAT. This is
+    #: a verification state, not a claim that MAT is physically impossible;
+    #: the AX3125H manual's MAT input/display table is not proof of source
+    #: output support.
+    dolby_mat_output_verified: bool = False
+    #: Conservative promise boundary for app/software-decoded audio used by
+    #: the toolkit. This 24-bit/48-kHz envelope is chain-specific; it is NOT a
+    #: Google-published G454V capability. Android's generic table lists built-in
+    #: FLAC as mono/stereo up to 48 kHz and says non-handset form factors vary.
+    #: Multichannel FLAC and PCM rely on the media app and active HDMI route.
+    #: Anything beyond the envelope is reported, not declared impossible or
+    #: auto-transcoded: a failure versus resampling has not been measured here.
+    max_decoded_sample_rate: int = 48000
     max_decoded_bit_depth: int = 24
-    #: Codecs a rip can legitimately carry that this player has NO decoder
-    #: for, and that it cannot bitstream either (unlike DTS-HD, there is no
-    #: backward-compatible core to fall back to): ALAC and WavPack. They are
-    #: absent from the chain's confirmed decode set, and Jellyfin's own
-    #: codec table lists ALAC as unsupported on Android TV while the FFmpeg
-    #: decoder ExoPlayer would need is not in the shipped client. They are
-    #: therefore never classed ``decode-to-pcm``; they are
-    #: :data:`AUDIO_UNKNOWN`, which is reported and left alone.
+    #: Codecs this app-neutral profile excludes from its confirmed decoder
+    #: set and cannot bitstream either (unlike DTS-HD, they have no compatible
+    #: core to fall back to): ALAC and WavPack. This is a toolkit/profile
+    #: boundary, not a claim that no third-party app could decode them. Jellyfin
+    #: lists ALAC as unsupported for Android TV; WavPack is likewise outside
+    #: the confirmed set here. They are therefore never classed
+    #: ``decode-to-pcm``; they are :data:`AUDIO_UNKNOWN`, reported and left
+    #: alone. ``undecodable_codecs`` is retained as the existing field name.
     undecodable_codecs: tuple[str, ...] = ("ALAC", "A_ALAC", "WAVPACK", "A_WAVPACK")
 
 @dataclass(frozen=True)
@@ -171,6 +142,11 @@ class Sink:
         "DTS:X", "DTS-HD Master Audio", "DTS (core decoder)", "PCM",
         "Multichannel PCM",
     )
+    # AX3125H manual §8 input/display table: plain Dolby MAT is labelled MPCM;
+    # Dolby MAT-Atmos is labelled DOLBY ATMOS. Its §1.3 per-port table does not
+    # list MAT, so these display mappings do not establish per-port support.
+    dolby_mat_manual_display: str = "MPCM"
+    dolby_mat_atmos_manual_display: str = "DOLBY ATMOS"
     ports: tuple[str, ...] = (
         "1x HDMI IN (4K/3D pass-through)",
         "1x HDMI OUT to TV (eARC/ARC + CEC)",
@@ -188,10 +164,11 @@ class Sink:
     #: Hisense's own PER-PORT input matrix (user manual §1.3, "Supported Input
     #: Audio Formats"), which is the hard evidence the default wiring rests on.
     #: Two rows are load-bearing: multichannel LPCM is accepted on HDMI IN
-    #: (so a 5.1/7.1 AAC/FLAC/PCM track the Chromecast decodes arrives intact),
+    #: (so a compatible app's 5.1/7.1 AAC/FLAC/PCM decode can arrive intact),
     #: and it is NOT accepted on HDMI ARC or optical (so the same track over
-    #: the tv-arc alternative cannot). Verified against the manufacturer PDF
-    #: 2026-10; see SOURCES.
+    #: the tv-arc alternative cannot arrive as multichannel LPCM). The app's
+    #: decode and active route remain separate capability questions. Verified
+    #: against the manufacturer PDF 2026-10; see SOURCES.
     hdmi_in_accepts: tuple[str, ...] = (
         "LPCM 2ch", "LPCM 5.1ch", "LPCM 7.1ch",
         "Dolby Digital", "Dolby Digital Plus",
@@ -223,14 +200,13 @@ class Display:
         "Plain ARC on the HDMI port labelled (ARC); no eARC. Samsung's "
         "F-series e-manual states the available Digital Audio Output (SPDIF) "
         "formats 'may vary depending on the input source', and on this unit "
-        "only PCM is selectable for HDMI sources (user-confirmed, 2026-09): "
-        "with a Chromecast plugged into the TV, multichannel audio is "
-        "downmixed to stereo PCM before it ever reaches an ARC/optical "
-        "soundbar. Samsung's own ARC article lists PCM 2.0 / Dolby Digital "
-        "5.1 / DTS 5.1 as the formats ARC can carry, but what this TV "
-        "actually offers is input-dependent, which is why the toolkit's "
-        "default wiring (soundbar-hdmi-in) does not route audio through the "
-        "TV at all."
+        "only PCM is selectable for HDMI sources (user-confirmed, 2026-09). "
+        "App-decoded multichannel PCM returns as stereo PCM over ARC/optical. "
+        "Whether an HDMI Dolby/DTS bitstream is forwarded or downmixed first "
+        "has not been measured on this unit. Samsung's ARC article lists PCM "
+        "2.0 / Dolby Digital 5.1 / DTS 5.1 as standard ARC capabilities, not "
+        "proof of this TV's HDMI-source behavior; the toolkit's default "
+        "soundbar-hdmi-in wiring does not route audio through the TV."
     )
     optical_out: bool = True
 
@@ -241,20 +217,27 @@ DISPLAY = Display()
 # Sources every table above was checked against (see docs/hardware.md for the
 # full write-up with the same references).
 SOURCES: tuple[str, ...] = (
-    "https://support.google.com/chromecast/answer/3046409 (official CCwGTV HD specs: 1080p60, HDR10/HDR10+/HLG, DD/DD+/Atmos passthrough)",
+    "https://support.google.com/chromecast/answer/3046409?hl=en (official GTV HD specs: Dolby Digital, Dolby Digital Plus, Dolby Atmos via HDMI passthrough; no DTS/PCM/MAT limit is published)",
     "https://www.androidtv-guide.com/streaming-gaming/chromecast-google-tv-hd/ (G454V 'boreal': S805X2, 1.5GB/8GB, AV1/VP9/H.264/HEVC)",
-    "https://www.androidpolice.com/chromecast-with-google-tv-hd-review/ (no Dolby Vision on the HD model; 1.5 GB RAM; audio passthrough list)",
-    "https://www.reddit.com/r/googlehome/comments/j2ggur/ (Amlogic Android TV >= 8.1 passthrough: 5.1 DTS, DD, DD+, DD+/Atmos; NO TrueHD/DTS-HD)",
-    "https://files.hisense-usa.com/download/f25648883914883a (AX3125H official spec sheet: 1x HDMI IN + 1x HDMI OUT eARC, Dolby Atmos/TrueHD/DD+/DD, DTS:X/DTS-HD/DTS decoders, PCM and Multich PCM)",
-    "https://manuals.plus/hisense/ax3125h-3-1-2ch-440w-dolby-atmos-soundbar-with-wireless-subwoofer-manual (AX3125H user manual: HDMI IN socket for HDMI source devices; HDMI OUT (TV eARC/ARC); input-format table PCM / Dolby Digital / DD+ / TrueHD -> MPCM)",
-    "https://files.hisense-usa.com/download/f25642eeb4a386bb (Hisense 3.1.2ch manual, section 1.3 'Supported Input Audio Formats' - the PER-PORT matrix that decides the default wiring: LPCM 5.1ch and LPCM 7.1ch are supported on HDMI IN and HDMI eARC but NOT on HDMI ARC or OPTICAL; 'Dolby Atmos - Dolby Digital Plus' is supported on HDMI ARC, eARC and HDMI IN; 'Dolby Atmos - Dolby TrueHD', Dolby TrueHD, DTS-HD HR/MA/LBR and DTS:X are eARC and HDMI IN only. Verified 2026-10)",
-    "https://www.manualowl.com/m/Samsung/UN60F6350AF/Manual/347300 (UN60F6350AF e-manual: 'ARC is only available through the HDMI (ARC) port'; Digital Audio Output (SPDIF) formats 'may vary depending on the input source')",
+    "https://www.androidpolice.com/chromecast-with-google-tv-hd-review/ (no Dolby Vision on the HD model; hardware review, not official audio certification)",
+    "USER-CONFIRMED on the actual G454V -> AX3125H HDMI IN chain: base DTS core reaches the bar as DTS on its display. This is chain-specific evidence, not Google certification.",
+    "USER-CONFIRMED 2026-10 on the actual G454V -> AX3125H HDMI-IN chain: DTS-HD MA/HRA and DTS:X deliver the backward-compatible DTS core (5.1), not the HD layer or DTS:X object metadata.",
+    "https://files.hisense-usa.com/download/f25648883914883a (AX3125H official spec sheet: HDMI IN/HDMI eARC, Dolby Atmos/TrueHD/DD+/DD, DTS:X/DTS-HD/DTS, PCM and multichannel PCM)",
+    "https://files.hisense-usa.com/download/f25648883921b2fe (official AX3125H user manual: §1.3 per-port HDMI IN matrix lists LPCM 5.1/7.1, DD+, TrueHD and DTS families; §8 labels Dolby MAT as MPCM and Dolby MAT-Atmos as DOLBY ATMOS, without naming MAT in the per-port matrix)",
+    "USER-CONFIRMED for this chain: multichannel LPCM 5.1/7.1 is accepted over the soundbar's HDMI IN; app decoding and active-route behavior are not universal Android guarantees.",
+    "https://developer.android.com/media/platform/supported-formats (Android Developers: built-in FLAC is mono/stereo, up to 48 kHz; 16-bit recommended, no dither for 24-bit; the page explicitly warns that non-handset/tablet support may vary)",
+    "https://developer.android.com/training/tv/playback/audio-capabilities (Android TV app audio varies by active output route, encoding, channels and rate; apps should query route capabilities)",
+    "https://developer.android.com/reference/android/media/AudioFormat (Dolby MAT is a distinct HDMI format that can carry TrueHD, channel PCM, or PCM with object metadata; not evidence of G454V MAT output)",
+    "USER-CONFIRMED chain-specific operating envelope used by the toolkit for app/software-decoded PCM: up to 24-bit/48 kHz. This is not a Google-published G454V maximum; above-envelope behavior is unmeasured and therefore reported for review.",
+    "https://kodi.wiki/view/AudioEngine (Kodi documents its own audio engine and TrueHD decoding; this is app capability, not an Android platform or G454V hardware guarantee)",
+    "https://support.plex.tv/articles/200250387-streaming-media-direct-play-and-direct-stream/ (Plex documents client-capability-dependent audio transcoding)",
+    "https://developer.android.com/media/media3/exoplayer/supported-formats (Media3 can use app-bundled software decoder extensions, illustrating why app behavior may exceed the platform decoder table)",
+    "https://developers.google.com/cast/docs/media (Google Cast's 96-kHz FLAC row is scoped to Chromecast Audio/Google Home products, not this Chromecast with Google TV HD)",
+    "https://www.flatpanelshd.com/news.php?subaction=showfull&id=1739522759 (secondary reporting about the distinct 2024 Google TV Streamer/MS12 behavior; not evidence about the G454V)",
+    "https://www.manualowl.com/m/Samsung/UN60F6350AF/Manual/347300 (UN60F6350AF e-manual: 'ARC is only available through the HDMI (ARC) port'; Digital Audio Output formats vary by input)",
     "https://www.samsung.com/sg/support/tv-audio-video/how-to-use-the-hdmi-arc-port-on-a-samsung-tv/ (Samsung support: HDMI-ARC carries PCM 2ch, Dolby Digital up to 5.1 and DTS Digital Surround up to 5.1; 2013-2014 F/H-series sound-output path)",
-    "USER-CONFIRMED 2026-09 on the actual UN60F6350AF: with HDMI sources connected, the TV offers PCM only as its digital audio output format, so the ARC/optical path delivers multichannel content as stereo PCM",
-    "USER-CONFIRMED 2026-10 on the actual G454V -> AX3125H chain: DTS-HD MA, DTS-HD HRA and DTS:X are never passed through as HD bitstreams, but the player does not drop the audio - it automatically extracts the backward-compatible DTS CORE (5.1) every such bitstream carries and bitstreams that, so the bar still decodes surround and its front panel reads DTS (not DTS-HD/DTS:X). These tracks therefore Direct Play with no server transcode; what is lost is the HD layer and any DTS:X object metadata. DTS-HD LBR / DTS Express is the exception (no backward-compatible core), so it stays transcode-bound",
-    "https://developer.android.com/guide/topics/media/media-formats (Android Developers, *Supported media formats*: the platform decoder set every Android TV device shares - AAC-LC / HE-AAC v1 / v2, MP3, FLAC, Opus, Vorbis and linear PCM, bounded at 24-bit / 96 kHz on this chain's read of the table; TrueHD / DTS-HD / DTS:X absent, which is why the DTS-core fallback above had to be measured rather than read off a spec sheet, and ALAC / WavPack absent too)",
-    "USER-CONFIRMED 2026-10 for this chain (G454V into the AX3125H's HDMI IN): the bitstream set is AC-3 (5.1), E-AC-3 (7.1), E-AC-3 JOC (Atmos, decoded by the bar's 3.1.2 array), DTS core 5.1, and LPCM - stereo up to 24-bit/96 kHz on the PCM path and multichannel LPCM 5.1/7.1 accepted by both the Chromecast HAL and the bar's HDMI IN; the software-decode set is AAC/MP3/FLAC/Opus/Vorbis/WAV up to 24-bit/96 kHz; DTS may additionally need the manual surround selection in the Google TV sound settings or an app with its own bitstreamer (Kodi, VLC, Nova, Plex); TrueHD, DTS-HD MA/HRA (core only) and DTS:X (core only) never bitstream as lossless",
-    "https://jellyfin.org/docs/general/clients/codec-support/ (ALAC listed unsupported for Android and Android TV: the client reports the format, the platform decoder is what is missing - the reason ALAC is fail-closed here rather than 'decoded to PCM')",
+    "USER-CONFIRMED 2026-09 on the actual UN60F6350AF: with HDMI sources connected, the TV offers PCM only as its digital audio output format; app-decoded multichannel PCM returns as stereo. Forwarding/downmixing of a received Dolby/DTS bitstream over ARC has not been measured.",
+    "https://jellyfin.org/docs/general/clients/codec-support (ALAC listed unsupported for Android and Android TV clients; app/platform decoder support can differ)",
 )
 
 # =============================================================================
@@ -267,8 +250,9 @@ SOURCES: tuple[str, ...] = (
 WIRING_SOUNDBAR_HDMI_IN = "soundbar-hdmi-in"
 #: Chromecast -> TV HDMI, TV --ARC/optical--> soundbar. Explicit alternative
 #: only: on this 2013 TV the digital audio output offers PCM for HDMI sources,
-#: so multichannel content arrives at the bar as stereo PCM (docs/hardware.md
-#: §3-§4). Kept supported and tested; never assumed.
+#: so app-decoded multichannel PCM is treated as stereo on the ARC route
+#: (docs/hardware.md §3-§4). Dolby/DTS bitstream forwarding is unmeasured.
+#: Kept supported and tested; never assumed.
 WIRING_TV_ARC = "tv-arc"
 
 WIRING_ENV_VAR = "ORGANIZE_PLAYBACK_WIRING"
@@ -301,11 +285,11 @@ def resolve_wiring(explicit: str | None = None) -> str:
 #: Both wirings answer ``True``: the table is uniform, because on this chain
 #: the whole DTS family is accepted on evidence rather than on faith.
 #:
-#: DTS is still not on Google's published passthrough list for the G454V (that
-#: list is Dolby Digital / Dolby Digital Plus / Atmos-via-DD+); both halves of
-#: the family play because the Amlogic firmware passes DTS bitstreams through
-#: at the HDMI layer, and both were tested on the actual chain rather than
-#: argued about:
+#: DTS is still not on Google's published passthrough list for the G454V
+#: (that list is Dolby Digital / Dolby Digital Plus / Atmos via HDMI). Both
+#: halves of the family are accepted by this toolkit because they were tested
+#: on the actual G454V -> AX3125H HDMI-IN chain, rather than inferred from a
+#: chipset family or generalized Android claim:
 #:
 #: * **base 5.1 DTS core** - a base-DTS movie was played through Jellyfin to
 #:   the G454V and two independent indicators agreed: Jellyfin reported
@@ -321,7 +305,10 @@ def resolve_wiring(explicit: str | None = None) -> str:
 #:   the delivered audio would be the same DTS (or, after conversion, a
 #:   *smaller* 640 kbps DD+ bed).
 #:
-#: Measured facts, then, not assumptions. Given that, converting is
+#: Measured facts on the default physical wiring, then, not assumptions.
+#: The separate tv-arc profile remains a route the TV's HDMI-source PCM-only
+#: behavior can affect; its DTS return behavior is not the measurement cited
+#: above. Given the measured default-chain behavior, converting is
 #: irreversible loss buying nothing: 1509 kbps DTS core becomes a 640 kbps
 #: DD+ bed, a difference of ~870 kbps - about 780 MB on a two-hour movie -
 #: and on a DTS-HD master it would also destroy the lossless layer to replace
@@ -376,20 +363,22 @@ def dts_passthrough_default(wiring: str | None = None) -> bool:
 # Every audio format a movie can carry lands in exactly one of these classes.
 # The string values are the stored vocabulary (reports, JSON, state cache) —
 # treat them as part of the toolkit's on-disk format, not as display text.
-AUDIO_NATIVE = "native-passthrough"       # AC-3 / E-AC-3(+Atmos): bitstreamed end-to-end
-AUDIO_DTS_CORE = "dts-core-passthrough"   # base DTS: works here, but unofficially (chipset, not Google spec)
+AUDIO_NATIVE = "native-passthrough"       # AC-3 / E-AC-3(+Atmos): official HDMI passthrough path
+AUDIO_DTS_CORE = "dts-core-passthrough"   # base DTS: measured on this chain; not Google-certified
 AUDIO_DTS_HD_CORE = "dts-hd-core-passthrough"  # DTS-HD MA/HRA, DTS:X: player extracts the DTS core it carries
-AUDIO_DECODE_PCM = "decode-to-pcm"        # AAC/FLAC/MP3/Opus/Vorbis/PCM: player decodes; PCM into the bar
-AUDIO_TRANSCODE_BOUND = "transcode-bound" # TrueHD/DTS-HD LBR/WMA Pro: the player can never emit these
+AUDIO_DECODE_PCM = "decode-to-pcm"        # app decodes to PCM; supported profiles/routes vary
+AUDIO_TRANSCODE_BOUND = "transcode-bound" # no guaranteed app-neutral native path for this client profile
 AUDIO_UNKNOWN = "unknown"                 # fail-closed: reported, never auto-touched
 
 # Tier an audio class contributes to "which track does the cleaner keep".
-# The ordering IS the rework philosophy: on this chain, the *best* track is
-# the best one that plays natively. Lossless HD formats sit below every
-# chain-native lossy format because the G454V cannot emit them — a TrueHD
-# track here is a promise that Jellyfin re-encodes the audio on every play.
-# A DTS-HD track is tiered with base DTS core because that is precisely what
-# reaches the bar: the extracted core, not the HD layer.
+# The ordering is the toolkit's generic Jellyfin/Plex profile, not a runtime
+# guarantee for every app: app-decoded PCM is accepted only when the app and
+# active route support it. Lossless formats without a modeled no-server-
+# transcode path sit below Dolby/DTS and accepted PCM. TrueHD is not a supported
+# G454V bitstream path; some apps can decode it to PCM, but that path is app-
+# dependent and loses TrueHD Atmos object metadata, so the toolkit conservatively
+# prepares a Dolby track. A DTS-HD track is tiered with base DTS core because
+# the measured HDMI-IN chain delivers that extracted core, not the HD layer.
 CLASS_TIERS: dict[str, int] = {
     AUDIO_NATIVE: 100,
     AUDIO_DTS_CORE: 80,
@@ -476,7 +465,8 @@ def _classify_audio_segment(b: str) -> str | None:
     if dts_hd is not None:
         return dts_hd
     if any(k in b for k in ("WMAPRO", "WMA PRO", "WMA_LOSSLESS", "WMALOSSLESS")):
-        # Android/ExoPlayer has no WMA Pro decoder; server transcodes.
+        # No supported app-neutral G454V decoder path is modeled; this profile
+        # prepares the server-side Dolby fallback instead.
         return AUDIO_TRANSCODE_BOUND
     if is_dolby_digital_plus(b):
         return AUDIO_NATIVE
@@ -488,10 +478,11 @@ def _classify_audio_segment(b: str) -> str | None:
         return AUDIO_DECODE_PCM
     if any(k in b for k in ("FLAC", "A_FLAC")):
         return AUDIO_DECODE_PCM
-    # The decodable PCM family. ALAC and WavPack are deliberately NOT here:
-    # this player has no decoder for either (see
-    # ``Player.undecodable_codecs``), and "WAVPACK" must not be read as "WAV"
-    # - the same substring trap that makes ATRAC3 need its own guard.
+    # The toolkit's app-neutral PCM family. ALAC and WavPack are deliberately
+    # NOT here because they are outside the confirmed decoder set (see
+    # ``Player.undecodable_codecs``); this is a profile boundary, not a claim
+    # that no third-party app can decode them. "WAVPACK" must not be read as
+    # "WAV" - the same substring trap that makes ATRAC3 need its own guard.
     if any(k in b for k in ("PCM", "A_PCM", "WAV")):
         return AUDIO_DECODE_PCM
     if any(k in b for k in ("OPUS", "A_OPUS", "VORBIS", "A_VORBIS",
@@ -537,17 +528,17 @@ _DTS_HD_NO_CORE_MARKERS = ("LBR", "EXPRESS")
 
 
 def has_no_platform_decoder(blob: str) -> bool:
-    """True when this text names a codec the G454V cannot decode or bitstream.
+    """True when this toolkit excludes the named codec from its decode set.
 
-    ALAC and WavPack are the two a movie can plausibly carry: both are lossless,
-    both look like members of the FLAC/PCM family, and neither has a decoder in
-    the Android TV media framework (nor in the client decoders Jellyfin's
-    Android-TV app can use), while DTS-HD - the other "HD" label in this table -
-    does have a backward-compatible core to fall back to. They therefore belong
-    to no class at all, and this predicate exists so that decision is stated
-    once: :func:`classify_audio_blob` fails closed on it, and
-    :func:`mkv_track_cleaner.chain_audio_tier` must not hand these names the
-    lossless sub-tier it gives FLAC.
+    The legacy function name is narrower in practice than it sounds: it means
+    the app-neutral profile does not have a confirmed decode or bitstream path,
+    not that no Android app could ever decode the codec. ALAC and WavPack are
+    lossless and resemble members of the FLAC/PCM family; neither is included
+    in this toolkit's confirmed target-profile set. DTS-HD, by contrast, has a
+    compatible core the measured HDMI-IN chain accepts. Keeping these names out
+    of the decodable class ensures :func:`classify_audio_blob` fails closed and
+    :func:`mkv_track_cleaner.chain_audio_tier` does not give them FLAC's
+    lossless sub-tier.
 
     The check is substring-wide on purpose: ``WAVPACK`` contains ``WAV``, and a
     family that is matched by substring has to be rejected by substring.
@@ -589,6 +580,24 @@ def _dts_hd_class(*segments: str) -> str | None:
     return None
 
 
+def _is_unverified_dolby_mat_label(text: str) -> bool:
+    """Recognize Dolby MAT transport labels without treating them as PCM.
+
+    The soundbar manual maps Dolby MAT to the display label ``MPCM``; neither
+    that mapping nor the bare ``MPCM`` label proves this G454V emits MAT.
+    MAT is an HDMI transport, not a codec path this toolkit can promise. Treat
+    those labels as unknown. Normalize punctuation, but the classifier checks
+    the leading codec fields only, so a genuine PCM track whose title mentions
+    MAT stays PCM.
+    """
+    words = text.upper().replace("_", " ").replace("-", " ").split()
+    if not words:
+        return False
+    if words[0] in {"MAT", "MAT2.0", "MAT2.1", "MPCM"}:
+        return True
+    return words[:2] == ["DOLBY", "MAT"]
+
+
 def classify_audio_blob(blob: str) -> str:
     """Classify one audio track from an upper-cased description blob.
 
@@ -624,13 +633,19 @@ def classify_audio_blob(blob: str) -> str:
     tokens = b.split()
     if not tokens:
         return AUDIO_UNKNOWN
+    if _is_unverified_dolby_mat_label(" ".join(tokens[:2])):
+        # A sink manual describing Dolby MAT -> MPCM does not prove that this
+        # player outputs MAT. Keep the transport unverified rather than
+        # letting the substring "PCM" in "MPCM" make it chain-native.
+        return AUDIO_UNKNOWN
     if "ATRAC" in tokens[0]:
         # Sony ATRAC3 contains "AC3" as a substring; it is none of this chain.
         return AUDIO_UNKNOWN
     if has_no_platform_decoder(tokens[0]):
-        # ALAC and WavPack, decided by the codec-NAME field alone: this player
-        # has no decoder for them and no bitstream path to fall back on, so
-        # they are fail-closed rather than "decoded to PCM". Checked here, and
+        # ALAC and WavPack, decided by the codec-NAME field alone: they are
+        # outside this profile's confirmed decoder set and have no bitstream
+        # fallback modeled here, so they fail closed rather than "decode to PCM".
+        # Checked here, and
         # not inside the segment classifier, for two reasons - "WAVPACK"
         # contains "WAV" (the ATRAC trap again), and a title narrating a source
         # ("DTS-HD MA (from ALAC)") must not reach this rule from the widened
@@ -699,11 +714,12 @@ def tier_for_blob(blob: str) -> int:
 
 
 def is_chain_native(blob: str) -> bool:
-    """True when this track plays without any server-side audio transcode.
+    """Whether the toolkit profile models this track without server audio work.
 
-    Includes :data:`AUDIO_DTS_HD_CORE`: the player emits the DTS core inside
-    the DTS-HD bitstream, so playback needs no server work even though the HD
-    layer never leaves the box.
+    This is a planning classification, not a runtime guarantee for every app.
+    ``AUDIO_DECODE_PCM`` assumes a compatible player app and active route.
+    ``AUDIO_DTS_HD_CORE`` is included because the measured HDMI-IN chain
+    delivers the extracted DTS core without sending the HD layer to the bar.
     """
     return classify_audio_blob(blob) in (
         AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DTS_HD_CORE, AUDIO_DECODE_PCM)
@@ -824,10 +840,10 @@ def exceeds_decode_ceiling(sample_rate: object, bit_depth: object = 0) -> str:
     that decoder, so a 192 kHz sample rate on a Dolby track is not this
     question at all.
 
-    The answer is deliberately a *report*, not a plan: the ceiling says the
-    decoder is not specified beyond 24-bit/96 kHz, not that the file is
-    unplayable, and nothing here has measured which of a decode failure or a
-    silent resample to the mixer's 48 kHz actually happens. So no Dolby track is
+    The answer is deliberately a *report*, not a plan: 24-bit/48 kHz is the
+    toolkit's conservative app/software-decode envelope, not a Google-published
+    G454V maximum. Nothing here establishes what a wider stream does (fails,
+    resamples, or is handled by an app-specific decoder), so no Dolby track is
     synthesized from it and no keep-one-track ranking is influenced by it - see
     :attr:`Player.max_decoded_sample_rate`.
     """
@@ -1001,11 +1017,11 @@ def chain_band_for(cls: str) -> int:
 def atmos_credit_for(cls: str, blob: str) -> int:
     """1 when this blob is a Dolby Digital Plus stream actually claiming Atmos.
 
-    Atmos only exists inside DD+ (as JOC) on anything this player can emit -
-    plain AC-3 has no Atmos variant at all, so an "Atmos" in a track's title is
-    a release-group flourish. Crediting the word alone used to let a stereo
-    AC-3 titled "Dolby Atmos 5.1" outrank genuine surround, so the credit is
-    gated on the classification first and the wording second.
+    The toolkit credits Atmos only to an identified Dolby Digital Plus stream
+    carrying JOC/Atmos markers: that is the officially listed G454V passthrough
+    path. AC-3 has no Atmos variant, and app-decoded PCM or unverified Dolby MAT
+    is not credited by this track-table rule. A title alone is insufficient,
+    so a stereo AC-3 titled "Dolby Atmos 5.1" cannot outrank genuine surround.
 
     Expects a blob from :func:`codec_blob` (upper-cased, positions stable);
     upper-cases again so a hand-built blob cannot silently lose the credit.
@@ -1022,35 +1038,28 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING,
 
     ``sample_rate``/``bit_depth`` are optional and only ever read for the
     software-decoded family, where they decide whether the stream is inside the
-    player's 24-bit/96 kHz decode ceiling (:func:`exceeds_decode_ceiling`).
-    Callers that have a probed stream should pass them: a note that promises
-    "the Chromecast decodes this" about a 24/192 FLAC is a promise this chain
-    has no evidence for.
+    toolkit's conservative 24-bit/48 kHz app/software-decode envelope
+    (:func:`exceeds_decode_ceiling`). This is not an official Google maximum;
+    callers that have a probed stream should pass it so the note does not
+    promise an unmeasured high-resolution decode.
     """
     cls = classify_audio_blob(blob)
     ch = channels or 2
     if cls == AUDIO_NATIVE:
         if ch > 2 and wiring == WIRING_TV_ARC:
-            # The Chromecast does pass a Dolby bitstream out over HDMI, but on
-            # this TV it passes it to the 2013 panel, not to the bar: the TV
-            # offers PCM only for HDMI sources (Display.arc, user-confirmed),
-            # and docs/hardware.md §3 says it downmixes every HDMI source
-            # before ARC/optical, whatever the source sent. Same hedged
-            # register and same `ch > 2` gate as the decode-to-PCM branch
-            # below - a stereo AC-3/DD+ track folded to stereo PCM loses
-            # nothing, so only a 5.1+ track is worth warning about. The limit
-            # is the TV's input-side behaviour, so the ARC path is unreliable
-            # rather than provably dead. Whether that PCM-only limit also
-            # applies to a Dolby bitstream the TV merely *received* (as opposed
-            # to audio it decoded itself) has not been measured on this unit -
-            # it is what §4's AC-3 compensation assumes, and §5 records it as
-            # an open question rather than settling it by assertion.
+            # The Chromecast sends this Dolby bitstream to the TV rather than
+            # directly to the bar. `Display.arc` records the user-confirmed
+            # PCM-only output option for HDMI sources; app-decoded multichannel
+            # PCM returns as stereo. Whether the TV also downmixes a received
+            # Dolby bitstream or forwards it to ARC has not been measured, so
+            # warn rather than promise surround. A stereo AC-3/DD+ track loses
+            # nothing if folded, which is why this is gated on `ch > 2`.
             return ("Dolby bitstream (AC-3 / DD+ Atmos): the Chromecast passes it "
-                    "through, but it passes it to this TV, which offers PCM only "
-                    "for HDMI sources - the ARC/optical path cannot be relied on "
-                    "to carry it and this 5.1+ track may reach the bar as stereo "
-                    "PCM; the default wiring (Chromecast -> soundbar HDMI IN) "
-                    "bitstreams it end-to-end")
+                    "to this TV, whose HDMI-source audio setting is PCM-only; "
+                    "forwarding versus downmixing of a received Dolby bitstream "
+                    "over ARC/optical is unmeasured, so this 5.1+ track may reach "
+                    "the bar as stereo PCM. The default wiring (Chromecast -> "
+                    "soundbar HDMI IN) sends it directly to the bar")
         return ("bitstreams end-to-end: Chromecast HDMI passthrough -> "
                 "AX3125H decodes (Dolby Digital / DD+ Atmos)")
     if cls == AUDIO_DTS_CORE:
@@ -1059,9 +1068,8 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING,
                     "for HDMI sources, so the ARC/optical path cannot be relied on "
                     "to carry it - the default wiring (Chromecast -> soundbar "
                     "HDMI IN) can")
-        return ("DTS core: chipset-level passthrough from the Chromecast "
-                "(works on Amlogic Android TV builds; not on Google's "
-                "official list) -> AX3125H DTS decoder")
+        return ("DTS core: measured passthrough on this G454V -> AX3125H HDMI-IN "
+                "chain (not on Google's official list) -> AX3125H DTS decoder")
     if cls == AUDIO_DTS_HD_CORE:
         if wiring == WIRING_TV_ARC:
             return ("DTS-HD / DTS:X: the player extracts the DTS core it carries and "
@@ -1075,32 +1083,44 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING,
     if cls == AUDIO_DECODE_PCM:
         over = exceeds_decode_ceiling(sample_rate, bit_depth)
         if over:
-            # Reported, never promised: the decoder this family depends on is
-            # specified only up to 24-bit/96 kHz here, so whether a wider stream
-            # fails or is quietly resampled to the mixer's rate is not something
-            # the chain's evidence settles. audio_standardizer.py puts these in
-            # its review bucket and leaves the file alone - see
+            # Reported, never promised: this is the toolkit's conservative
+            # 24-bit/48-kHz envelope, not a published Google device maximum.
+            # The app/route behavior for wider PCM is unmeasured, so
+            # audio_standardizer.py leaves these in review - see
             # Player.max_decoded_sample_rate.
-            return (f"the Chromecast's software decoder has a documented decode ceiling of "
+            return (f"the toolkit's conservative app/software-decode envelope is "
                     f"{PLAYER.max_decoded_bit_depth}-bit/"
                     f"{PLAYER.max_decoded_sample_rate // 1000} kHz, and {over}; whether "
                     "that means a failed decode or a silent resample to 48 kHz has not "
                     "been measured on this chain, so it is reported for review, and no "
                     "Direct Play is promised over it")
         if ch > 2 and wiring == WIRING_TV_ARC:
-            return ("the Chromecast decodes this to PCM, but this TV's digital audio "
-                    "output offers PCM 2.0 for HDMI sources - over ARC/optical this "
-                    "5.1+ track arrives as stereo unless the Chromecast plugs into "
-                    "the soundbar's HDMI IN (the default wiring)")
-        return ("decoded by the Chromecast to PCM " +
-                ("(multichannel; the bar accepts it over HDMI IN)" if ch > 2
-                 else "(stereo)") )
+            return ("a compatible player app decodes this to PCM, but this TV's "
+                    "digital audio output offers PCM 2.0 for HDMI sources - over "
+                    "ARC/optical this 5.1+ track arrives as stereo unless the "
+                    "Chromecast plugs into the soundbar's HDMI IN (the default); "
+                    "app/route capability matters")
+        return ("decoded by a compatible player app on the Chromecast to PCM " +
+                ("(multichannel; the bar accepts it over HDMI IN, subject to app/route support)"
+                 if ch > 2 else "(stereo; app/route support applies)"))
     if cls == AUDIO_TRANSCODE_BOUND:
         target = dolby_name(target_audio_for(ch, wiring).codec)
-        return ("cannot leave the G454V (no TrueHD/WMA-Pro/DTS-Express passthrough "
-                "on Android TV, and unlike DTS-HD there is no backward-compatible "
-                "core to fall back to) - Jellyfin re-encodes this audio on every "
-                f"play; run audio_standardizer.py to bake in native {target}")
+        if "TRUEHD" in blob.upper() or "A_MLP" in blob.upper():
+            return ("TrueHD has no supported G454V bitstream path or compatible "
+                    "core to fall back to; some apps can software-decode "
+                    "it to multichannel PCM, but TrueHD Atmos "
+                    "object metadata is not retained in plain PCM. This toolkit's "
+                    f"app-neutral Jellyfin/Plex profile prepares {target} instead")
+        return ("no guaranteed G454V playback path for this format in the "
+                "toolkit's app-neutral profile (no supported passthrough or "
+                "backward-compatible core) - the server may need to transcode; "
+                f"audio_standardizer.py prepares native {target}")
+    if cls == AUDIO_UNKNOWN:
+        if _is_unverified_dolby_mat_label(blob):
+            return ("Dolby MAT is not verified as G454V output; the AX3125H "
+                    "manual's MAT display mapping does not establish Chromecast "
+                    "support, so this is reported as unknown rather than assumed native")
+        return "unrecognized audio format - reported, never auto-touched"
     return "unrecognized audio format - reported, never auto-touched"
 
 
@@ -1199,12 +1219,13 @@ def chain_summary_lines(wiring: str | None = None) -> list[str]:
         f"         video  <= {PLAYER.max_resolution[0]}x{PLAYER.max_resolution[1]}p{PLAYER.max_fps}: "
         + "/".join(c.upper() for c in PLAYER.video_codecs[:4])
         + f"; HDR {('/'.join(PLAYER.hdr_formats))} tone-mapped to SDR here; Dolby Vision NOT supported",
-        f"         audio  passthrough: {', '.join(PLAYER.passthrough_audio)} "
-        f"(+ {', '.join(PLAYER.passthrough_audio_unofficial)} unofficial, and the DTS core "
-        "inside DTS-HD/DTS:X; the whole DTS family reaches at most 5.1); decodes "
-        f"AAC/MP3/FLAC/Opus/Vorbis/WAV to PCM up to {PLAYER.max_decoded_bit_depth}-bit/"
-        f"{PLAYER.max_decoded_sample_rate // 1000} kHz; NEVER TrueHD / WMA Pro; "
-        "ALAC and WavPack have no decoder here",
+        f"         audio  Google-listed HDMI passthrough: Dolby Digital / DD+ / Atmos; "
+        "DTS core + DTS-HD/DTS:X core fallback are user-measured on this HDMI-IN chain, "
+        "not Google-certified (DTS family max 5.1); software-decoded PCM/FLAC is "
+        f"app/route-dependent, toolkit envelope {PLAYER.max_decoded_bit_depth}-bit/"
+        f"{PLAYER.max_decoded_sample_rate // 1000} kHz (not a Google max); no TrueHD bitstream "
+        "path (some apps decode to PCM); Dolby MAT unverified; WMA Pro/DTS Express use "
+        "the app-neutral Dolby fallback; ALAC/WavPack unknown",
         f"Sink   : {SINK.model} {SINK.description} — decodes "
         "DD/DD+ Atmos/TrueHD/DTS/DTS-HD/multi-PCM",
         f"Display: {DISPLAY.model} ({DISPLAY.resolution[0]}x{DISPLAY.resolution[1]} SDR, "

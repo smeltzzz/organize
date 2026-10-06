@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.6.2] - 2026-10-06
+
+A second review of the Chromecast with Google TV HD (G454V) → Hisense AX3125H
+HDMI IN → Samsung UN60F6350AF chain corrected the audio ceiling and separated
+manufacturer specifications from chain measurements and player-app behavior.
+The PyPI README now points to real GitHub documentation URLs.
+
+### Changed
+- **The software-decoded audio envelope is now 24-bit / 48 kHz, not 96 kHz.**
+  The 48-kHz sample-rate boundary is a conservative, chain-specific tool policy,
+  not a Google-published G454V maximum. Android's generic media table documents
+  built-in FLAC as mono/stereo up to 48 kHz and explicitly says non-handset
+  behavior can vary. Streams above the tool envelope are reported for review,
+  not claimed broken and not auto-transcoded; bitstreamed Dolby/DTS tracks do
+  not use this check. The user-facing PCM/FLAC policy now notes app/HDMI-route
+  dependence and multichannel LPCM on the AX3125H HDMI IN.
+- **DTS stays explicitly unofficial.** Google documents Dolby Digital, Dolby
+  Digital Plus and Atmos via HDMI passthrough for the G454V; base DTS and the
+  DTS-HD/DTS:X core fallback remain supported here only as chain-specific,
+  user-measured behavior, not Google certification.
+- **TrueHD now has an app-dependent description.** The G454V has no supported
+  TrueHD bitstream path, but apps with their own decoder can software-decode
+  TrueHD to multichannel PCM. Plain PCM does not preserve TrueHD Atmos object
+  metadata; Plex/Jellyfin may instead request server-side transcoding depending
+  on the client. The toolkit's app-neutral profile keeps its conservative
+  Dolby-fallback policy, and makes clear that the synthesized E-AC-3 track is
+  not an Atmos/JOC encode.
+- **Dolby MAT is handled as unverified, not native.** The official G454V spec
+  does not list MAT. The AX3125H manual's display table labels MAT as MPCM and
+  MAT-Atmos as DOLBY ATMOS, but its per-port matrix does not establish G454V
+  MAT output. The classifier therefore leaves MAT unknown rather than
+  promoting an `MPCM` label to confirmed PCM. MS12/MAT reporting for the
+  different Google TV Streamer is not transferred to the G454V.
+- Clarified that ALAC and WavPack are outside the toolkit's confirmed decoder
+  set, not a claim that no third-party app can ever decode them.
+- Replaced the stale Hisense manual URL with the manufacturer-hosted AX3125H
+  manual. Updated `pyproject.toml`'s Documentation URL and made every
+  repository-file link in the README absolute so PyPI does not resolve it
+  beneath `/project/organizekit/docs/...`.
+
+### Tests
+- Added boundary regressions for 48 kHz vs 96 kHz, explicit TrueHD app/Atmos
+  facts, Dolby MAT's unknown classification, and PyPI-safe documentation links.
+- Full offline suite: **2,359 tests discovered; 2,354 passed and 5 skipped** (`python -m unittest discover -s tests -p 'test_*.py'`).
+
 ## [8.6.1] - 2026-10-06
 
 A codec-fact audit of the reference chain (Chromecast with Google TV HD

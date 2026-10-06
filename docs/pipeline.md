@@ -1,9 +1,9 @@
 # The pipeline
 
-How a finished torrent becomes a canonical movie that Direct Plays on the
-reference chain ([hardware.md](hardware.md)): the ingest hook, the five
+How a finished torrent is prepared for the reference chain's app-neutral
+playback profile ([hardware.md](hardware.md)): the ingest hook, the five
 maintenance steps and the order they must run in, and how to read what they
-write.
+write. Unknown audio and app-/route-dependent cases are reported, not promised.
 
 ---
 
@@ -45,13 +45,18 @@ Five maintenance tools, one fixed order. Two orderings are load-bearing:
    track is still in the container*; after the remux, a subtitle that was
    already in the file is gone for good.
 2. **Audio-fit before remux.** The audio standardizer bakes a chain-native
-   Dolby track in (Dolby Digital Plus on the default wiring) from any
-   TrueHD/WMA-Pro master the G454V can never emit (DTS-HD/DTS:X need
-   no conversion - the player extracts their DTS core); the cleaner's chain tiers
-   then keep exactly that new track and a remux can retire the lossless
-   master **without ever leaving a movie with no playable audio**. Reversed,
-   the cleaner would keep a playable-but-lossy survivor and discard a 7.1
-   master that could have become chain-native Dolby surround.
+   Dolby track in (Dolby Digital Plus on the default wiring) for TrueHD,
+   WMA Pro and DTS-HD LBR/DTS Express sources without a guaranteed path in the
+   app-neutral Plex/Jellyfin profile.
+   Some apps decode TrueHD to PCM, but plain PCM loses TrueHD Atmos objects;
+   the generated E-AC-3 fallback is not Atmos/JOC. Dolby MAT output remains
+   unverified for G454V. DTS-HD/DTS:X need no conversion on this measured chain:
+   the player extracts their DTS core. The cleaner's tiers then keep the Dolby
+   track where a supported transcode succeeds, so the remux can retire the
+   lossless master without losing the profile's prepared audio path. Unknown
+   codecs remain fail-closed and must be reviewed. Reversed, the cleaner could
+   keep a narrower survivor and discard a 7.1 master that could have become
+   chain-native Dolby surround.
 
 The **audit** closes the sweep on purpose: it is read-only, so it can only
 report the library the other four steps just finished writing. (Subtitles
@@ -78,10 +83,10 @@ wrong.
 │ 2 · subtitles         │   <movie>.eng.srt (MP4 via the bridge); image-only
 └───────────┬───────────┘   movies: exact-moviehash OpenSubtitles match
             ▼
-┌───────────────────────┐   ffprobe sweep; Dolby Digital Plus @ 640k baked in
-│ 3 · audio             │   from any TrueHD/WMA-Pro master the G454V cannot
-└───────────┬───────────┘   emit (video untouched, verified); DTS-HD/DTS:X
-                            and native tracks reported as already playable
+┌───────────────────────┐   ffprobe sweep; Dolby Digital Plus @ 640k
+│ 3 · audio             │   app-neutral TrueHD/WMA-Pro/DTS-HD LBR fallback
+└───────────┬───────────┘   generated E-AC-3 is not Atmos/JOC; DTS-HD/DTS:X
+                            use their measured extracted DTS core
             ▼
 ┌───────────────────────┐   lossless mkvmerge remux: 1 best chain-playable
 │ 4 · clean             │   audio (the Dolby track just created wins), strip
