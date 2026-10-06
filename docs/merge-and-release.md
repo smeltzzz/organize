@@ -1,29 +1,61 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **v8.6.1 was cut and published on 2026-10-06.** [PR #64](https://github.com/smeltzzz/organize/pull/64)
-> merged into `main` as `e3db1c9`; the `v8.6.1` tag points at that merge commit,
-> not at the branch head; and the tag's `release.yml` ran green end to end — the
-> suite gate, the wheel/sdist/zipapp build, the **PyPI publish**
-> ([organizekit 8.6.1](https://pypi.org/project/organizekit/8.6.1/)), and the
-> three assets on the
-> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.1)
-> (`organize.pyz`, the wheel, the sdist). So `pip install --upgrade organizekit`
-> already resolves to it; from a checkout, `python3 -m pip install --upgrade .`.
+> **v8.6.2 was cut and published on 2026-10-06.** [PR #66](https://github.com/smeltzzz/organize/pull/66)
+> merged into `main` as `a61ce4f`; the `v8.6.2` tag points at that merge commit,
+> not at the branch head; and the tag's `release.yml` ran the suite gate, the
+> wheel/sdist/zipapp build and the **PyPI publish**
+> ([organizekit 8.6.2](https://pypi.org/project/organizekit/8.6.2/)) green end
+> to end. So `pip install --upgrade organizekit` already resolves to it; from a
+> checkout, `python3 -m pip install --upgrade .`.
 >
-> What it shipped is in the [changelog](../CHANGELOG.md): a chain-fact audit that
-> found the published facts correct and three of their consequences unmodelled —
-> the DTS family not width-capped as a family (a DTS core tops out at 5.1, and
-> achievable layout is the *first* key of an irreversible keep-one-track
-> decision, so an uncapped `DTS:X` label could delete a file's only Atmos track),
-> ALAC/WavPack credited with a software-decode path and a lossless ranking rung
-> this player does not give them, and the 24-bit/96 kHz decode ceiling absent
-> from the table entirely (it is a *report* — `review-unknown`, never a transcode
-> and never a ranking key, because what a 24/192 stream does on this box has not
-> been measured).
+> **One thing is outstanding, and it is not code.** The run's final job,
+> `github-release`, died inside `softprops/action-gh-release` on a transient
+> `Too many retries.` — a raw GitHub API error, with the suite gate, the build
+> and the PyPI upload all green ahead of it. The
+> [v8.6.2 GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.2)
+> therefore currently carries **no assets**, where every earlier release carries
+> three. The run's `release-artifacts` bundle is still retained (not expired),
+> so the repair is one command, with `actions: write`, and nothing is rebuilt:
 >
-> **Nothing is outstanding.** No workflow file, held patch, tag or secret is
-> waiting on a human, and the suite (2,359 tests, offline) plus `Lint (ruff)`,
-> `Coverage gate`, `Packaging` and the single-file build are green on `main`.
+> ```bash
+> gh run rerun 37521371375 --failed    # re-runs the asset job against the same artifacts
+> ```
+>
+> If GitHub will not re-run that run, attach the three files by hand — and do
+> **not** rebuild the wheel or the sdist: download the exact files PyPI already
+> published (these are the bytes the failed job built, and the digests below are
+> PyPI's own), then build only the zipapp, from the tag:
+>
+> ```bash
+> python3 -m pip download --no-deps organizekit==8.6.2 -d dist
+> git archive v8.6.2 | tar -x -C /tmp/v862
+> (cd /tmp/v862 && python3 scripts/build_pyz.py)
+> gh release upload v8.6.2 dist/organizekit-8.6.2* /tmp/v862/dist/organize.pyz
+> ```
+>
+> Expected content: wheel `2e1ad98d391167b71958905d2a01aa82989e7af4599e217765d753d4b7f3fabd`,
+> sdist `5a0d97048e755a81ffb475709d6eb687c54eed50614e038a5a9c181ee5b363c7`,
+> zipapp rebuilt from the tag with `scripts/build_pyz.py` (deterministic for a
+> given interpreter, 285 KiB, 30 modules, runs and prints the chain). Once the
+> attach succeeds, replace this paragraph with the shipped line the earlier
+> releases have.
+>
+> What it shipped is in the [changelog](../CHANGELOG.md): a second chain review
+> that corrected the software-decode envelope from 96 kHz to **24-bit / 48 kHz**
+> (a toolkit policy, not a Google-published G454V maximum, and a *report* —
+> never a transcode and never a ranking key), kept DTS explicitly unofficial
+> while making the DTS-HD MA/HRA and DTS:X **core fallback** first-class,
+> described TrueHD as app-dependent rather than impossible (no TrueHD bitstream
+> path; plain PCM loses the Atmos objects; the synthesized E-AC-3 is not JOC),
+> demoted Dolby MAT/MS12 to **unverified** for this player rather than
+> transferring the Google TV Streamer's behaviour to it, and made every
+> repository link on the README absolute so PyPI stops resolving them beneath
+> `/project/organizekit/`.
+>
+> **Nothing else is outstanding.** No workflow file, held patch, tag or secret is
+> waiting on a human, and the whole suite (2,359 tests, offline) plus `Lint
+> (ruff)`, `Coverage gate`, `Packaging` and the single-file build are green on
+> `main`.
 >
 > The next release follows the shape recorded below. One rule carries forward
 > every time, because it is the only step that can be done wrong quietly: **tag
@@ -32,11 +64,12 @@
 > leaves the changelog section unreachable from the released commit. A release is
 > a *merge plus a tag*, not a merge.
 >
-> And when a release lands, replace this block. The note this one replaced said
-> "8.0.1 is prepared in PR #45 — what remains is the merge and the tag", written
-> the day before that tag was cut and left standing six releases too long, which
-> is precisely how a release document starts pointing its reader at work already
-> done.
+> And when a release lands, replace this block. The note this one replaced
+> recorded v8.6.1 as shipped, three assets and all, the day that tag was cut;
+> the note *that* one replaced had said "8.0.1 is prepared in PR #45 — what
+> remains is the merge and the tag" and then sat there six releases too long,
+> which is precisely how a release document starts pointing its reader at work
+> already done.
 
 > **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
