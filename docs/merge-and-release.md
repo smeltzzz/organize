@@ -1,36 +1,36 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **v8.6.3 is ready to ship — merge [PR #67](https://github.com/smeltzzz/organize/pull/67)
-> and tag it.** That PR carries the fact-check that made this repository
-> describe the hardware instead of itself — the MS12/Dolby MAT stack belongs to
-> the Google TV Streamer, not the G454V; a current player runs Android 14; DTS
-> and PCM delivery are app-dependent — and it moves `VERSION` to `8.6.3`.
-> Merging it and pushing the tag *is* the release: `release.yml` runs the suite
-> gate, builds the wheel, the sdist and the zipapp, publishes to PyPI, and
-> attaches the three assets. **Until that tag exists PyPI still serves 8.6.2's
-> wording**, and `pip install` reads PyPI — so tagging is the step that updates
-> every install.
+> **v8.6.3 was cut and published on 2026-10-06.** [PR #67](https://github.com/smeltzzz/organize/pull/67)
+> merged the chain fact-check into `main` as `ea20d92`, and
+> [PR #68](https://github.com/smeltzzz/organize/pull/68) merged the release-job
+> fix as `3e00d23` — **the `v8.6.3` tag points at `3e00d23`**, because a tag run
+> uses the workflow file *at the tag*, and the fix had to be inside it. The
+> tag's `release.yml` then ran the whole way green: the suite gate (2,360
+> tests), the wheel/sdist/zipapp build, the **PyPI publish**
+> ([organizekit 8.6.3](https://pypi.org/project/organizekit/8.6.3/)) and the
+> **three assets** on the
+> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.3)
+> (`organize.pyz`, the wheel, the sdist). `pip install --upgrade organizekit`
+> now resolves to the corrected facts — the MS12/Dolby MAT stack attributed to
+> the Google TV Streamer rather than the G454V, a current player running on
+> Android 14, and DTS/PCM delivery documented as app-dependent — and
+> **nothing is outstanding.**
 >
-> ```bash
-> gh pr merge 67 --merge      # a normal merge: the commits carry the story
-> git fetch origin && git checkout main && git pull
-> git tag -a v8.6.3 -m "organizekit 8.6.3" && git push origin v8.6.3
-> ```
+> Two things that run learned, both now load-bearing in `release.yml`:
+>
+> * **the asset job has no `actions/checkout`**, so it must be handed
+>   `GH_REPO: ${{ github.repository }}` or `gh` dies with "fatal: not a git
+>   repository" before it reaches the API — which is exactly how v8.6.3's first
+>   run failed, *after* PyPI had accepted the version;
+> * **`publish` runs with `skip-existing: true`**, so re-running a release to
+>   re-attach its assets is a no-op instead of a duplicate-upload failure. That
+>   is what made re-pointing the tag and re-running safe.
 >
 > This ledger is the owner's, and the owner runs one install: **previous
 > releases are not maintained once a newer one exists.** v8.6.2's GitHub release
-> therefore carries no assets, and that is deliberate rather than pending. Its
-> asset step died on a transient `Too many retries.` from the upload host
-> *after* PyPI had accepted the release; PyPI — the thing `pip install --upgrade
-> organizekit` actually reads — is complete and correct, its tag still points at
-> the merged commit `a61ce4f`, and nothing of value lives in an attach list.
->
-> What did need fixing is the failure itself, so it cannot repeat on the tag
-> that matters: `release.yml`'s final step no longer uses a third-party release
-> action, it retries the attach six times with a growing backoff, and it uploads
-> with `--clobber` so a retry — or a manual re-run of the job — is idempotent
-> instead of an "asset already exists" error. A bad minute on the upload host
-> can no longer leave a published version with an empty release beside it.
+> therefore still carries no assets, and that is deliberate rather than pending
+> — PyPI, which is what `pip install --upgrade organizekit` reads, is complete
+> for it, and the failure that left it that way is fixed above.
 >
 > What 8.6.2 and 8.6.3 changed is in the [changelog](../CHANGELOG.md). One rule
 > carries forward every time, because it is the only step that can be done wrong
