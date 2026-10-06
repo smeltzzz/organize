@@ -17,18 +17,21 @@ room**:
    supported explicitly (`--wiring tv-arc`) and documented in §4.)
 ```
 
-The goal of the whole toolkit is that **every movie in the library Direct
-Plays on this chain, every time** — the Jellyfin/Plex server does zero
-transcoding, zero burn-in, zero remuxing. This document is the evidence that
-led to every rule, link by link, with sources. The machine-readable form of
-these facts is `organizekit/core/playbackchain.py`; if that table and this
-document ever disagree, one of them is a bug.
+The toolkit targets Direct Play on this reference chain using an app-neutral
+Plex/Jellyfin policy for recognized formats. It prepares a compatible audio
+track where the profile does not guarantee a no-transcode route; app-decoded
+PCM/FLAC assumes the selected app and active HDMI route can handle it. Unknown,
+MAT/MPCM, and over-envelope audio remain review-only. This is an operating
+profile, not a runtime guarantee for every app or file. The notes below label
+official specifications, chain measurements, and app-dependent behavior
+separately. The machine-readable form is `organizekit/core/playbackchain.py`; if
+that table and this document ever disagree, one of them is a bug.
 
 ---
 
 ## 1 · The player — Chromecast with Google TV (HD), model G454V
 
-Facts (Google's own materials and device measurements; sources at the end):
+Evidence is labelled as official specification, chain measurement, or app-dependent behavior; sources at the end:
 
 | Property | Value |
 | :--- | :--- |
@@ -37,16 +40,20 @@ Facts (Google's own materials and device measurements; sources at the end):
 | Video ceiling | **1920×1080 @ 60 Hz max**. No 4K output at all. |
 | Video decoders | H.264 (AVC), H.265 (HEVC), VP9, **AV1**, MPEG-2 — up to 1080p60 |
 | HDR | HDR10, HDR10+, HLG — **Dolby Vision is NOT supported on this model** (the 4K model has it; the HD does not) |
-| Audio passthrough | Dolby Digital (**AC-3**, up to 5.1) and Dolby Digital Plus (**E-AC-3**, up to 7.1, incl. JOC/Atmos) — the licensed, documented set; plus **base 5.1 DTS** and, out of any DTS-HD bitstream, **the DTS core it carries**, which is 5.1 at the widest (see the subtleties below) |
-| Audio decode | AAC/AAC-LC/HE-AAC v1/v2, MP3, FLAC, Opus, Vorbis, WAV/PCM — decoded in software to PCM, **up to 24-bit / 96 kHz**; multichannel LPCM 5.1/7.1 is accepted at the bar's HDMI IN. **ALAC and WavPack are not in this set at all** (no platform decoder, and no bitstream path to fall back on) |
-| Audio never emitted | **TrueHD (incl. TrueHD Atmos), WMA Pro, DTS-HD LBR (DTS Express)** — Android TV/ExoPlayer cannot pass these through and refuses to decode them. Note what is *not* on this row: DTS-HD MA/HR and DTS:X arrive as an extracted DTS core (subtlety 2), so the movie still plays |
+| Audio passthrough | **Official Google list:** Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3), and Dolby Atmos via HDMI passthrough (Atmos carried here as DD+ JOC). **Chain-measured, not Google-certified:** base 5.1 DTS and the DTS core extracted from DTS-HD MA/HRA or DTS:X; the core is capped at 5.1 (see subtleties 1–2). |
+| Audio decode | App/software-decoded AAC, MP3, FLAC, Opus, Vorbis and PCM/WAV may reach the HDMI sink as PCM, but support depends on the app and active route. The toolkit uses a conservative **24-bit / 48 kHz** envelope for this chain; it is not a Google-published maximum. The AX3125H manual lists LPCM 5.1/7.1 on HDMI IN, while Android's generic built-in FLAC table is mono/stereo only up to 48 kHz. **ALAC and WavPack are outside the confirmed decoder set.** |
+| TrueHD path | The G454V has no supported TrueHD bitstream path. Some apps with their own decoder can software-decode TrueHD to multichannel PCM; that is app-/route-dependent, and plain PCM loses TrueHD Atmos object metadata. Plex/Jellyfin may instead ask the server to transcode. This toolkit's app-neutral profile conservatively prepares a Dolby track. |
+| Dolby MAT output | **Unverified for the G454V.** Google does not list MAT or MS12 in its G454V audio specification. The AX3125H manual's input/display table lists plain Dolby MAT → MPCM and MAT-Atmos → DOLBY ATMOS, but its per-port support table does not establish that the Chromecast emits MAT. |
+| Other no-guarantee formats | WMA Pro and DTS-HD LBR (DTS Express) have no supported passthrough path or backward-compatible DTS core; the toolkit prepares a server-side Dolby fallback for its app-neutral profile. |
 
-Four subtleties the research surfaced and the code encodes:
+Six distinctions the research surfaced and the code encodes:
 
 1. **Base 5.1 DTS core plays on this chain — measured on the real hardware,
-   not assumed.** Google's published passthrough list for this device is
-   DD/DD+ only, but the Amlogic Android TV firmware passes plain 5.1 DTS
-   core through the HDMI layer. 8.5.0 read that gap as a risk and converted
+   not assumed.** Google's published list is Dolby Digital, Dolby Digital
+   Plus and Atmos via HDMI passthrough; it does not list DTS. On the measured
+   G454V firmware/app path in this physical HDMI-IN chain, plain 5.1 DTS core
+   passes through to the bar. This is chain-specific evidence, not a general
+   Amlogic/Android capability claim. 8.5.0 read that gap as a risk and converted
    base DTS to Dolby Digital Plus by default on `soundbar-hdmi-in`; the
    decision was then tested instead of debated, with a base-DTS movie played
    through Jellyfin to the G454V. **Two independent indicators agreed**:
@@ -62,9 +69,11 @@ Four subtleties the research surfaced and the code encodes:
    reversible at playback time from the *untouched source*: if firmware ever
    ends the passthrough, `audio_standardizer.py` converts then, from the same
    bytes, to the identical DD+ result — waiting costs one rerun, converting
-   early costs the DTS track forever. Both wirings therefore accept base DTS
-   by default, and `playbackchain.DTS_PASSTHROUGH_DEFAULT` is uniformly
-   `True`; 8.5.0's behaviour is still available by asking for it with
+   early costs the DTS track forever. The toolkit currently applies its DTS
+   accept policy under both wiring selectors (`DTS_PASSTHROUGH_DEFAULT` is
+   uniformly `True`), but the cited measurement validates only the physical
+   HDMI-IN route; it does not prove DTS delivery over alternate TV-ARC. 8.5.0's behaviour is
+   still available by asking for it with
    `--no-dts-passthrough`, which states the conversion policy explicitly.
    (The 8.5.0 default was also un-overridable where it mattered most:
    `organize run` exposes no DTS flag and forwards nothing to the audiofit
@@ -103,24 +112,46 @@ Four subtleties the research surfaced and the code encodes:
    That is a picture-preserving operation done at playback time, with zero
    generation loss — unlike a HandBrake re-encode, which is why the
    bit-depth inspector's "protect HDR, never re-encode" stand is unchanged.
-4. **The software-decode path has a ceiling, and it is a *report*, not a plan.**
-   Every track that is not bitstreamed goes through a decoder in the box, and
-   that decoder is specified to **24-bit / 96 kHz** — the same bound for
-   multichannel FLAC as for stereo LPCM. A 24/192 FLAC is therefore not "more
-   resolution that Direct Plays"; it is a stream nobody has promised anything
-   about, and the two things that could happen to it (a failed decode, or a
-   silent resample to the mixer's 48 kHz) have not been measured on this chain.
-   So `playbackchain.exceeds_decode_ceiling()` **reports** such a movie — it
-   lands in `audio_standardizer.py`'s review bucket, untouched — and stops
-   there. Deliberately *not* a transcode, and deliberately not a ranking key:
-   the keep-one-track decision is irreversible, and an unmeasured maybe is not
-   evidence to delete a master over. The codecs the decoder does not have at all
-   (ALAC, WavPack) are not even a maybe — they are `AUDIO_UNKNOWN`, fail-closed
-   like anything else outside this chain's table.
-   The same 24-bit/96 kHz bound is why a 192 kHz *Dolby* or *DTS* track is left
-   completely alone: those never touch this decoder, so the ceiling is not their
-   question (`Player.max_decoded_sample_rate`, `Player.max_decoded_bit_depth`,
-   `Player.undecodable_codecs`).
+4. **The software-decode boundary is a conservative report, not a Google spec.**
+   This repository uses **24-bit / 48 kHz** as its chain-specific operating
+   envelope for app/software-decoded audio. Google's G454V specification does
+   not publish PCM limits. Android's generic media table says built-in FLAC is
+   mono/stereo up to 48 kHz, recommends 16-bit, and says support outside
+   handsets/tablets may vary; it is not a complete G454V HDMI capability table.
+   The actual channel layout and decode path depend on the app and active HDMI
+   route. Hisense's AX3125H manual lists LPCM 5.1/7.1 on HDMI IN (not ARC or
+   optical), and multichannel output from Kodi/VLC/other app decoders is
+   app-dependent. A 24/96 or 24/192 file is outside the toolkit envelope, not
+   proven broken: `playbackchain.exceeds_decode_ceiling()` reports it for review
+   and does not transcode or change track ranking. Whether a wider stream fails,
+   is resampled, or is handled by a particular app has not been established for
+   every route. Bitstreamed Dolby/DTS tracks never touch this check. ALAC and
+   WavPack remain `AUDIO_UNKNOWN` because they are outside the confirmed decoder
+   set. The old 96-kHz claim relied on a generic Google Cast table for
+   Chromecast Audio/Google Home products, not this G454V.
+5. **TrueHD is not the same as “no app can play it.”** The G454V has no supported
+   lossless TrueHD bitstream path and Android's generic platform table does not
+   promise a TrueHD decoder. Apps with their own decoders can nevertheless
+   decode TrueHD to multichannel PCM on supported routes (Kodi documents its
+   own software audio engine). Plain channel-based PCM does not carry the
+   TrueHD Atmos object metadata; the soundbar cannot render those objects from
+   ordinary PCM. Other apps, including Plex in some client paths, may request
+   server-side transcoding instead. The toolkit's app-neutral Plex/Jellyfin
+   policy therefore adds a Dolby Digital Plus compatibility track; FFmpeg's
+   generated E-AC-3 is **not** a JOC/Atmos encode. That policy is a predictable
+   server/client strategy, not a claim that every app fails to produce audio
+   from TrueHD.
+6. **The soundbar's Dolby MAT input table does not prove Chromecast MAT output.**
+   Android's `AudioFormat` reference describes Dolby MAT as an HDMI format that
+   can carry TrueHD, channel-based PCM, or PCM with object-audio metadata; this
+   explains why MAT is not interchangeable with ordinary PCM. Hisense's AX3125H
+   manual §8 maps MAT to `MPCM` and MAT-Atmos to `DOLBY ATMOS`, while its §1.3
+   per-port matrix does not name MAT. Google's official G454V specification says
+   nothing about MAT/MS12. The toolkit therefore marks MAT and standalone MPCM
+   labels unknown, rather than native PCM. This keeps the TrueHD-to-plain-PCM
+   Atmos-metadata loss distinct from a possible MAT route, which remains
+   unverified on G454V. Do not transfer the newer Google TV Streamer/MS12
+   behavior to this device without device-specific evidence.
 
 Practical consequences (all encoded in the code):
 
@@ -143,26 +174,31 @@ Practical consequences (all encoded in the code):
   matching the audio side's `AUDIO_UNKNOWN`.
 * **Dolby Vision video** ⇒ same: the player has no DV license; the server
   re-encodes. DV files are flagged, not kept silently.
-* TrueHD / WMA Pro / DTS Express audio ⇒ the server re-encodes the audio on
-  every play. This is the single most common Direct-Play breaker in real
-  remux libraries, and it is what `audio_standardizer.py` was built to fix
-  once, offline, losslessly-for-video.
+* TrueHD has no supported G454V bitstream path, but some apps can decode it
+  to PCM; that loses TrueHD Atmos object metadata. Plex/Jellyfin may instead
+  request server-side transcoding depending on app capabilities. The toolkit's
+  app-neutral profile prepares a Dolby Digital Plus compatibility track (not
+  Atmos/JOC) once, without re-encoding video. WMA Pro and DTS Express also use
+  that fallback because no guaranteed native route is modeled.
 * DTS-HD MA/HRA and DTS:X audio ⇒ **not** a Direct-Play breaker: the player
   extracts the DTS core such a track carries and bitstreams that (subtlety
   2), so playback needs no server work and the toolkit leaves it alone by
   default. What is lost is the HD layer on the bar's panel (it reads `DTS`)
   and any DTS:X height objects — never the surround itself.
-* AAC/FLAC/PCM audio ⇒ decodes locally to PCM; on the default wiring
-  (soundbar HDMI IN) multichannel PCM arrives intact, while over the explicit
-  ARC alternative this TV delivers it stereo-only (§3).
-* AAC/FLAC/PCM audio **past 24-bit / 96 kHz** ⇒ neither promised nor converted:
-  `audio_standardizer.py` reports it for a human and touches nothing
-  (subtlety 4). Inside the bound, 96 kHz FLAC and 24-bit LPCM are as
-  chain-native as anything else in the family.
-* ALAC / WavPack ⇒ no decoder on this box and no bitstream path to fall back on,
-  so they are `AUDIO_UNKNOWN` — reported, never auto-touched, and credited with
-  **zero** achievable channels in the keeper ranking, which is what stops a
-  format nobody can play from looking lossless enough to delete one that can.
+* AAC/FLAC/PCM audio ⇒ a compatible app may decode it locally to PCM; on the
+  default wiring (soundbar HDMI IN) multichannel LPCM 5.1/7.1 is accepted by
+  the bar. The app and active output route determine whether it is emitted as
+  multichannel; this is not a blanket Android framework guarantee. Over the
+  explicit ARC alternative this TV delivers multichannel content as stereo (§3).
+* App/software-decoded PCM/FLAC **past the toolkit's 24-bit / 48 kHz envelope**
+  ⇒ neither promised nor converted. `audio_standardizer.py` reports it for a
+  human and touches nothing (subtlety 4). That envelope is chain-specific,
+  not an official G454V specification.
+* ALAC / WavPack ⇒ outside the toolkit's confirmed decoder set, with no
+  supported bitstream fallback modeled here. They remain `AUDIO_UNKNOWN` —
+  reported, never auto-touched, and credited with **zero** achievable channels
+  in the keeper ranking, so an unverified path cannot outrank a track the
+  toolkit does understand.
 * Any **DTS**-labelled track reaches at most **5.1** on this chain, whether it is
   a plain core or the core extracted from a DTS-HD/DTS:X master (subtleties 1
   and 2), so `achievable_channels()` caps the whole family at
@@ -182,23 +218,24 @@ From Hisense's product page and spec sheet (sources at the end):
 | Audio decoding | **Dolby Digital, Dolby Digital Plus / Atmos (DD+ JOC), TrueHD, DTS, DTS-HD**, Multichannel PCM |
 | Other inputs | optical (TOSLINK), Bluetooth 5.3, USB, 3.5 mm AUX |
 
-Why this is the load-bearing device: it is the only link in the chain
-licensed to decode **every** format that matters. Dolby Atmos arrives on
-this chain as DD+ JOC — E-AC-3 with embedded Atmos metadata — which is
-exactly what streaming services send for Atmos, and exactly what the G454V
-can pass through. The bar *can* decode TrueHD and DTS-HD MA, but what it
-receives from this player differs by family: TrueHD never leaves the
-Chromecast at all (no core to fall back to), so the toolkit *normalizes* it
-into native-to-every-hop Dolby instead of fantasizing a different player into
-the chain; a DTS-HD MA/HRA or DTS:X stream, however, arrives as the extracted
-DTS core (§1, subtlety 2) — real DTS the bar decodes, with the HD layer the
-only casualty. Both come out of one principle: don't re-encode what the
-player can already deliver, and don't pretend it can deliver what it cannot. **On the default `soundbar-hdmi-in` wiring, Dolby Digital (AC-3)
-and Dolby Digital Plus (E-AC-3) bitstream through the entire chain with zero
-conversions anywhere** — player to bar, bar decodes, nothing in between. Under
-the explicit `tv-arc` alternative that claim does *not* hold: the bitstream
-goes to the 2013 TV first, and this TV offers PCM only for HDMI sources (§3),
-so the ARC path may deliver it as stereo. See §5.
+Why this is the load-bearing device: it lists input decoding for **Dolby
+Digital, DD+/Atmos, TrueHD, DTS/DTS-HD and multichannel PCM**. Dolby Atmos on
+the officially supported G454V path arrives as DD+ JOC — E-AC-3 with embedded
+Atmos metadata — which is the streaming-compatible format the player is
+specified to pass through. TrueHD differs: the bar can decode it, but the
+G454V has no supported TrueHD bitstream path. An app with its own decoder may
+instead send channel-based PCM, losing TrueHD Atmos object metadata; the
+app-neutral Plex/Jellyfin profile prepares DD+ so it does not depend on one
+app's local decode behavior. A DTS-HD MA/HRA or DTS:X stream, however, arrives
+as the extracted DTS core (§1, subtlety 2) — real DTS the bar decodes, with
+the HD layer the only casualty. These distinctions drive the toolkit: keep
+the output that is measured/officially supported, and label app-specific
+alternatives rather than assuming them. **On the default `soundbar-hdmi-in`
+wiring, Dolby Digital (AC-3) and Dolby Digital Plus (E-AC-3) bitstream through
+the entire chain** — player to bar, bar decodes. Under the explicit `tv-arc`
+alternative that claim does *not* hold: the bitstream goes to the 2013 TV
+first, and this TV offers PCM only for HDMI sources (§3), so the ARC path may
+deliver it as stereo. See §5.
 
 ### The per-port input matrix — the evidence the default wiring rests on
 
@@ -224,24 +261,28 @@ Read the two bold rows as the whole wiring decision. **Multichannel LPCM is
 supported on HDMI IN and is *not* supported on HDMI ARC or optical.** That is
 precisely why:
 
-* on the default `soundbar-hdmi-in` wiring a 5.1/7.1 AAC, FLAC, Opus or PCM
-  track is genuinely "playable as-is" — the Chromecast decodes it and the bar
-  takes multichannel PCM on its HDMI IN, with no server work at all; and
+* on the default `soundbar-hdmi-in` wiring the bar accepts multichannel LPCM
+  on HDMI IN. A compatible app may decode a 5.1/7.1 AAC, FLAC, Opus or PCM
+  source to that format, with no server work; whether a specific app emits the
+  required layout is app-/route-dependent (Android's built-in FLAC table alone
+  does not establish multichannel playback); and
 * on the `tv-arc` alternative the same track cannot arrive as surround even in
   principle, independently of what the 2013 Samsung's menu offers (§3). Two
   separate limits point the same way.
 
-Note also that "Dolby Atmos – Dolby Digital Plus" is supported on HDMI IN, so
-DD+ Atmos (the only Atmos variant the G454V can emit) reaches the bar's
-up-firing drivers intact on the default wiring. The bar's TrueHD and DTS-HD /
-DTS:X rows are real, but what *this* player can deliver to them differs: no
-TrueHD bitstream ever leaves the Chromecast (there is no core to fall back
-to, which is why `audio_standardizer.py` normalizes it into DD+), while a
-DTS-HD MA/HRA or DTS:X stream arrives as the extracted **DTS core** — the bar
-decodes genuine DTS, its panel reads `DTS`, and the HD layer is what the
-player cannot pass (§1, subtlety 2). The DTS-HD rows in this table describe
-the bar's own decoders; the player's fallback is why they can be reached at
-all.
+Note also that "Dolby Atmos – Dolby Digital Plus" is supported on HDMI IN.
+The officially listed Atmos passthrough path is DD+ JOC, which reached the
+bar intact on this chain. Dolby MAT output is a separate, unverified question;
+no other Atmos transport is assumed. The bar's TrueHD and DTS-HD/DTS:X rows
+are real, but what *this* player can deliver differs: the G454V has no
+supported TrueHD bitstream path. Some apps can decode TrueHD to channel-based
+PCM, which loses the TrueHD Atmos object metadata; the app-neutral toolkit
+profile instead prepares E-AC-3, and that generated track is not Atmos/JOC.
+A DTS-HD MA/HRA or DTS:X stream arrives as the extracted **DTS core** — the
+bar decodes genuine DTS, its panel reads `DTS`, and the HD layer is what the
+player cannot bitstream (§1, subtlety 2). The DTS-HD rows in this table
+describe the bar's own decoders; the player's measured core fallback is why
+they can be reached at all.
 
 `Sink.hdmi_in_accepts` and `Sink.arc_cannot_carry` in
 `organizekit/core/playbackchain.py` are this table as data, with a test
@@ -273,21 +314,24 @@ Three things decide the whole wiring story:
    Chromecast is the source here), **this UN60F6350AF offers PCM only** —
    Dolby Digital/DTS are not selectable (**confirmed on this unit,
    2026-09**; the greyed-out-for-HDMI-sources behaviour on 2013-era
-   Samsungs is widely reported). The TV therefore downmixes every HDMI
-   source to stereo PCM before ARC/optical, whatever the source sent. This
-   is an *input-side* limit, not a cable or soundbar problem: the same TV
-   will still bitstream Dolby Digital from its own tuner and apps, which is
-   why the menu is content/input dependent in the first place.
-3. **Consequence for the wiring.** On ARC, 5.1+ content sourced from the
-   Chromecast reaches the AX3125H as **stereo PCM** — the one material
-   limit the toolkit used to *compensate* for by baking AC-3 5.1 into
-   multichannel-PCM movies (§5). Cabling the Chromecast through the
-   soundbar's HDMI IN instead removes the limit at the hardware level, and
-   that is the wiring this chain now uses and the toolkit assumes by
+   Samsungs is widely reported). This confirms the TV's PCM-only output
+   setting for HDMI sources, but does not by itself prove whether a Dolby/DTS
+   bitstream received over HDMI is forwarded to ARC or decoded/downmixed first;
+   that bitstream case has not been measured on this unit. App-decoded
+   multichannel PCM returns as stereo PCM. This is an *input-side* limit, not
+   a cable or soundbar problem: the same TV can bitstream Dolby Digital from
+   its own tuner and apps, which is why the menu is content/input dependent.
+3. **Consequence for the wiring.** On ARC, app-decoded 5.1+ PCM sourced
+   from the Chromecast returns to the AX3125H as **stereo PCM** — the
+   material limit the toolkit compensates for by baking AC-3 5.1 into
+   multichannel-PCM movies (§5). Whether this TV forwards or downmixes a
+   Dolby/DTS bitstream received on HDMI has not been measured, so the toolkit
+   does not promise surround over ARC for those formats. Cabling the
+   Chromecast through the soundbar's HDMI IN removes the PCM-return limit,
+   and that is the wiring this chain now uses and the toolkit assumes by
    default. `tv-arc` remains supported (`--wiring tv-arc` /
    `ORGANIZE_PLAYBACK_WIRING=tv-arc`) for anyone who re-cables the old
-   way, and re-enables the AC-3 compensation for multichannel
-   PCM-decoded sources.
+   way, and re-enables AC-3 compensation for multichannel PCM-decoded sources.
 
 **The chain is wired through the soundbar's HDMI IN** (`soundbar-hdmi-in`):
 Chromecast → AX3125H HDMI IN, AX3125H HDMI OUT → TV. Everything in §5
@@ -298,17 +342,18 @@ flips if it is selected.
 
 | Wiring | Video limit | Audio reality on 5.1+ content |
 | :--- | :--- | :--- |
-| **Chromecast → AX3125H HDMI IN → TV (`soundbar-hdmi-in`, DEFAULT — how this chain is cabled)** | 1080p60 chain-wide | the bar decodes DD/DD+/Atmos/DTS/multichannel PCM itself; player passthrough or decode; **no server work** |
-| Chromecast → TV HDMI, TV --**ARC**→ AX3125H (`tv-arc`, explicit alternative) | 1080p60 | the TV offers PCM only for HDMI sources on this unit, so everything arrives as **stereo PCM** at the bar; multichannel PCM-decoded movies become AC-3 transcode candidates, and the toolkit bakes AC-3 for exactly those |
-| Chromecast → TV HDMI, TV --**optical**→ AX3125H | 1080p60 | same limits as ARC (no CEC, slightly worse UX) |
+| **Chromecast → AX3125H HDMI IN → TV (`soundbar-hdmi-in`, DEFAULT — how this chain is cabled)** | 1080p60 chain-wide | the bar accepts official Dolby passthrough, measured DTS core, and LPCM; PCM needs a compatible app/route, while the toolkit prepares its app-neutral Dolby fallbacks |
+| Chromecast → TV HDMI, TV --**ARC**→ AX3125H (`tv-arc`, explicit alternative) | 1080p60 | HDMI sources expose PCM-only output on this unit; app-decoded multichannel PCM returns as stereo PCM. Dolby/DTS bitstream forwarding is unmeasured; multichannel PCM-decoded movies become AC-3 transcode candidates |
+| Chromecast → TV HDMI, TV --**optical**→ AX3125H | 1080p60 | same PCM-return limit as ARC (no CEC, slightly worse UX); Dolby/DTS bitstream forwarding remains unverified |
 
 The toolkit's default is **`soundbar-hdmi-in`**: Chromecast into the
 soundbar's HDMI IN, audio decoded by the bar, video passed through to the TV.
 `tv-arc` is the supported *alternative* (`--wiring tv-arc` or
 `ORGANIZE_PLAYBACK_WIRING=tv-arc`) and changes exactly one rule: a
 multichannel AAC/FLAC/PCM movie that plays natively over HDMI IN becomes an
-AC-3 transcode candidate on the TV's ARC/optical path, because that path
-delivers it as stereo PCM (§3).
+AC-3 transcode candidate on the TV's ARC/optical path, because the TV returns
+app-decoded multichannel PCM as stereo PCM (§3). Dolby/DTS bitstream forwarding
+from HDMI to this TV's ARC output remains unmeasured and is not promised.
 
 Nothing about the *video* side changes between the two: both pass the picture
 through at up to 1080p60, and the G454V's decode ceiling, HDR handling and
@@ -316,45 +361,45 @@ Dolby Vision gap are identical.
 
 ## 5 · The audio codec matrix — what actually plays where
 
-Legend: ✅ native (no server work) · ⚠️ accepted, with a caveat · ❌ never
-leaves the player — the server transcodes audio on **every** play.
+Legend: ✅ documented/confirmed path · ⚠️ app-/route-dependent or measured
+with a caveat · ❌ no supported path in this toolkit's app-neutral profile.
+“Transcode-bound” below is a conservative Plex/Jellyfin policy, not a claim that
+no third-party app can decode the source.
 
 | Source track player | G454V player | over HDMI IN | over ARC/opt | verdict in the toolkit |
 | :--- | :--- | :--- | :--- | :--- |
 | Dolby Digital (AC-3) 5.1 | passthrough ✅ | ✅ decodes | ⚠️ this TV offers PCM only for HDMI sources, so ARC/opt may deliver it as stereo (§3) | kept as-is; the synthesis target only under `tv-arc` |
-| Dolby Digital Plus (E-AC-3, incl. Atmos JOC) | passthrough ✅ | ✅ decodes | ⚠️ same PCM-only limit — DD+ Atmos does not survive this TV's ARC path (§3) | **goal format** — best possible track on this chain; what audio_standardizer synthesizes on the default wiring |
-| AAC 5.1 / stereo | decode → PCM ✅ | ✅ (multich. PCM) | ⚠️ stereo only on this TV | stereo = fine; 5.1+ native on the **default** HDMI-IN wiring, **AC-3 candidate only under `tv-arc`** |
-| FLAC / PCM 7.1 (≤ 24-bit/96 kHz) | decode → PCM ✅ | ✅ multich. | ⚠️ stereo only on this TV | native multichannel on the **default** HDMI-IN wiring; **AC-3 candidate (5.1+) only under `tv-arc`** |
-| FLAC / PCM **past 24-bit / 96 kHz** | ⚠️ outside the decoder's specification (§1, subtlety 4) | (moot — the decoder is the question) | ⚠️ | **reported for review, untouched**: no synthesized replacement and no ranking effect, because what a 24/192 stream does here has not been measured — the toolkit neither promises it nor deletes it |
-| MP3 / Opus / Vorbis / WAV | decode → PCM ✅ | ✅ | ✅ stereo | fine |
-| ALAC / WavPack | ❌ no platform decoder, no bitstream path | (n/a) | ❌ | **`unknown` — fail-closed**: lossless-looking codecs this player cannot decode at all (ExoPlayer needs an FFmpeg extension neither Jellyfin nor the stock player ships). Never classed `decode-to-pcm`, never credited a layout |
-| base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build); **5.1 is the format's ceiling, so nothing in the DTS family is ever credited wider** | ✅ decodes | ⚠️ same PCM-only limit (§3) | **kept as-is on both wirings** — measured working on this chain (§1: Jellyfin Direct Play + the AX3125H's DTS indicator); `--no-dts-passthrough` converts it to DD+ instead |
-| **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** from it by audio_standardizer (AC-3 under `tv-arc`) |
-| **DTS-HD MA / HRA, DTS:X** | ❌ the HD layer is never emitted — but the player **extracts the DTS core** ✅ (§1) | ✅ decodes as DTS 5.1 (panel reads `DTS`) | ⚠️ same PCM-only limit (§3) | **kept as-is on both wirings** — user-confirmed 2026-10: the core Direct Plays, so converting would only spend the lossless layer; `--no-dts-passthrough` converts it from that layer to DD+ instead. A 7.1 master reaches 5.1 (the core's ceiling) |
-| **DTS-HD LBR / DTS Express** | ❌ **cannot be emitted at all** (no backward-compatible core) | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** (AC-3 under `tv-arc`) |
-| WMA Pro / WMA Lossless | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** — no ExoPlayer decoder, so `ffmpeg` converts it like any other master |
+| Dolby Digital Plus (E-AC-3, incl. Atmos JOC) | passthrough ✅ | ✅ decodes | ⚠️ HDMI-source setting is PCM-only; whether DD+ JOC is forwarded or downmixed on ARC is unmeasured, so Atmos is not guaranteed (§3) | **goal format** — best possible track on this chain; what audio_standardizer synthesizes on the default wiring |
+| AAC 5.1 / stereo | app decodes → PCM ⚠️ (depends on app/profile) | ✅ HDMI IN accepts LPCM | ⚠️ this TV's HDMI-source path is PCM-only | toolkit treats app-decoded PCM as usable inside 24-bit/48 kHz; multichannel output is app/route-dependent; stereo is the safe common case |
+| FLAC / LPCM 5.1–7.1 (≤ 24-bit/48 kHz) | app/software decode → PCM ⚠️; Android built-in FLAC is mono/stereo only | ✅ Hisense manual lists 5.1/7.1 LPCM on HDMI IN | ⚠️ stereo-only on this TV | toolkit treats in-envelope app-decoded PCM as usable on default HDMI-IN wiring; the manual confirms sink acceptance, while app/route support must be verified; `tv-arc` uses AC-3 candidate for multichannel |
+| App/software-decoded FLAC / PCM **past 24-bit / 48 kHz** | ⚠️ outside the toolkit's conservative envelope (not Google-published) | (moot — app/decoder behavior is the question) | ⚠️ | **reported for review, untouched**: no replacement or ranking effect; wider-rate behavior depends on app/route and is not established |
+| MP3 / Opus / Vorbis / WAV | app/platform decode → PCM ⚠️ | ✅ HDMI IN accepts LPCM | ⚠️ stereo over this TV's return path | app/profile-dependent; toolkit boundary applies to decoded tracks |
+| ALAC / WavPack | no decoder in the confirmed profile | (n/a) | (n/a) | **`unknown` — fail-closed**; never classed `decode-to-pcm` or credited a layout |
+| base 5.1 **DTS core** | ⚠️ passthrough, chain-measured on this G454V → AX3125H HDMI-IN wiring (unofficial, not Google-certified); **5.1 is the format's ceiling, so nothing in the DTS family is ever credited wider** | ✅ decodes | ⚠️ the TV's PCM-only HDMI input behavior means a DTS return path is not confirmed (§3) | toolkit accepts it by default on the measured physical chain — Jellyfin Direct Play + the AX3125H DTS indicator; do not read this as Google certification or a TV-ARC measurement; `--no-dts-passthrough` converts it to Dolby |
+| **TrueHD / TrueHD Atmos** | ❌ no supported G454V bitstream path; app-specific decode → channel PCM is possible | ✅ bar manual lists TrueHD input on HDMI IN | ❌ on TV path | app-neutral profile synthesizes E-AC-3 @ 640k; plain PCM loses TrueHD Atmos objects; generated E-AC-3 is not Atmos/JOC; any MAT route is unverified |
+| **DTS-HD MA / HRA, DTS:X** | ⚠️ the G454V does not bitstream the HD layer, but **extracts the DTS core** on the measured HDMI-IN chain (§1) | ✅ decodes as DTS 5.1 (panel reads `DTS`) | ⚠️ the TV's PCM-only HDMI input behavior means DTS return is not confirmed (§3) | kept by default on the measured physical HDMI-IN chain — user-confirmed 2026-10; the HD layer is lost but surround reaches the bar as DTS 5.1. `--no-dts-passthrough` converts from the HD source instead. A 7.1 master reaches 5.1 (core ceiling) |
+| **DTS-HD LBR / DTS Express** | ❌ no measured passthrough and no compatible core | (same) | ❌ | **Dolby Digital Plus @ 640k fallback** in this profile (AC-3 under `tv-arc`) |
+| **Dolby MAT / MAT-Atmos / MPCM label** | unverified G454V output; not in Google's G454V spec | AX3125H manual §8 maps MAT to `MPCM` and MAT-Atmos to `DOLBY ATMOS`; §1.3 port matrix omits MAT | unverified | `AUDIO_UNKNOWN`, not treated as native or ordinary PCM; Google TV Streamer/MS12 reports do not establish G454V behavior |
+| WMA Pro / WMA Lossless | ❌ no confirmed decoder or passthrough path in the target profile | (same) | ❌ | **Dolby Digital Plus @ 640k fallback**; `ffmpeg` converts it like any other master |
 | unknown / unclassifiable | ❌ | ❌ | ❌ | **fail-closed: reported for a human, never auto-touched** — and it achieves *zero* channels in the keeper ranking, so it can never outrank a track the toolkit does understand |
 
-**Read the "over ARC/opt" column as one limit, not one per row.** Every ⚠️ in it has
-the same single cause: on this UN60F6350AF the digital audio output offers PCM
-only for HDMI sources (§3, user-confirmed 2026-09), and §3's wording is
-deliberate — the TV downmixes *every* HDMI source before ARC/optical,
-**whatever the source sent**. A Dolby bitstream is not obviously exempt from
-that, which is why AC-3 and DD+ Atmos are ⚠️ here rather than ✅. (ARC as a
-*standard* carries PCM 2.0 / Dolby Digital 5.1 / DTS 5.1 — see the Samsung
-article in Sources; what this TV's menu will offer for an HDMI input is the
-narrower thing.)
+**Read the "over ARC/opt" column as one limit, not one per row.** The TV's
+PCM-only digital-audio setting for HDMI sources is user-confirmed (§3,
+2026-09), and app-decoded multichannel PCM returns as stereo. That does not
+settle whether an HDMI Dolby/DTS bitstream is forwarded or downmixed before
+ARC/optical; this unit's bitstream case has not been measured, so AC-3/DD+
+Atmos and DTS return are ⚠️ rather than ✅. (ARC as a *standard* carries PCM
+2.0 / Dolby Digital 5.1 / DTS 5.1 — see the Samsung article in Sources; what
+this TV does with an HDMI-source bitstream is a narrower, unresolved question.)
 
 One open question this matrix does not settle, stated plainly rather than
-papered over: §4 has the toolkit bake AC-3 into multichannel PCM-decoded
-movies under `tv-arc`, and that compensation only pays off if the TV *will*
-forward a Dolby bitstream it received on HDMI despite its menu offering PCM
-only. Whether the PCM-only limit applies to a received bitstream, or only to
-audio the TV decoded itself, has not been measured on this unit — so the ⚠️
-above is deliberately "cannot be relied on" and not "never works". Until it is
-measured, do not depend on ARC for surround here: the default wiring is the
-fix, because it removes the whole column from the equation by never asking the
-TV to carry sound.
+papered over: under `tv-arc`, the toolkit bakes AC-3 into multichannel
+PCM-decoded movies, but this does not prove that the TV will forward an AC-3
+bitstream it receives on HDMI. Whether the PCM-only setting also downmixes a
+received Dolby/DTS bitstream has not been measured on this unit — so the ⚠️
+above means "cannot be relied on", not "never works". Until measured, do not
+depend on ARC for surround here: the default wiring avoids the question by
+never asking the TV to carry audio.
 
 The keep-one-track ranking (`mkv_track_cleaner.py`) encodes exactly that
 matrix — but it asks **which track can this movie END UP with?**, not "which
@@ -376,18 +421,23 @@ converting that master into a DD+ 5.1 bed can always be done. So:
    *unknown* track achieves nothing, because the toolkit fail-closes and never
    auto-touches one. This is the key that makes **TrueHD Atmos 7.1 worth more
    than an AC-3 2.0 that plays today** (6 beats 2). Tracks needing no encoder
-   are untouched by the cap — FLAC 7.1 really arrives as LPCM 7.1 on the bar's
-   HDMI IN, which is what keeps **FLAC 7.1 ahead of everything Dolby-bound**.
-2. **band** — *plays with no server work* (AC-3 / DD+ / base DTS / the DTS core
-   extracted from DTS-HD/DTS:X / anything decoded to PCM) beats
-   *transcode-bound* (TrueHD / DTS-HD LBR / WMA Pro) beats *unknown*. At an **equal achievable layout** this is the
-   Direct-Play-first rule and it is unchanged: a 5.1 AC-3 still beats a 5.1
-   TrueHD, because both land at 5.1 and only one of them gets there without the
-   server re-encoding anything — and since 8.4.0 a 5.1 AC-3 also beats a 7.1
-   TrueHD, which folds to the same bed (8.2.0 ranked the master above both on
-   the false premise that its replacement would be 7.1). "Highest sample rate
-   wins" is still the wrong metric; "reaches the widest layout, with the least
-   server work" is the right one.
+   are untouched by the cap — a compatible app can emit FLAC 7.1 as LPCM 7.1
+   over the bar's HDMI IN because the soundbar accepts multichannel LPCM; this
+   is the toolkit's app-neutral ranking policy, not proof that every app emits
+   that layout. App and active-route support must be verified, and other
+   apps/routes may differ.
+2. **band** — under the toolkit's app-neutral profile, bitstreamed Dolby,
+   measured DTS/core fallback on the physical HDMI-IN chain, and app-decoded
+   PCM when that app/route supports it are treated as settled; the policy places
+   masters without a guaranteed route (TrueHD / DTS-HD LBR / WMA Pro) below
+   them, and unknown last. At an **equal achievable layout**, a 5.1 AC-3 still
+   beats a 5.1 TrueHD under this profile: some apps decode TrueHD to PCM, but
+   that path is app-dependent and loses TrueHD Atmos objects, while Plex/Jellyfin
+   may request server audio transcoding. A TrueHD 7.1 master can still outrank
+   narrower PCM/AC-3 by achievable layout because its prepared replacement is
+   5.1; this is a keep-the-master-before-remux rule, not a claim that every app
+   transcodes TrueHD. "Highest sample rate wins" is still the wrong metric;
+   the ranking applies the toolkit's stated profile and measured chain facts.
 3. **Atmos** — a real DD+ Atmos track wins among equal layouts, because a 3.1.2
    bar with up-firing drivers is what it exists for. This needs no special case
    against 7.1 masters any more: both reach the same 5.1 bed, so the band above
@@ -416,8 +466,9 @@ logic now covers the DTS-HD family: the bar's DTS decoder (and the player's own
 core extraction) means such a master needs no conversion to play, so keeping it
 is free rather than a promise.
 
-**Keeping a master is only correct if it gets converted.** Because key 1 can
-retain a track the G454V cannot emit yet, the cleaner names every such movie in
+**Keeping a master is only correct if the app-neutral fallback gets converted.**
+Because key 1 can retain a track without a guaranteed route in the toolkit's
+Plex/Jellyfin profile, the cleaner names every such movie in
 its report (`Kept audio needing audiofit`) and warns on the console and in the
 log. In the pipeline `audio_standardizer.py` runs *before* the cleaner, so the
 master has usually already become the DD+ track that wins on key 1 outright; a
@@ -457,25 +508,23 @@ or the cleaner run standalone.
 ## 6 · The settings checklist (the human half of the chain)
 
 * **Chromecast (Google TV):** Settings → Display & Sound →
-  *Surround sound*: **Auto** (passthrough DD/DD+, and DTS on this Amlogic
-  build — including the DTS core it extracts from a DTS-HD/DTS:X track, §1);
+  *Surround sound*: **Auto** (official Dolby passthrough; the tested DTS/core
+  behavior on this G454V HDMI-IN chain is unofficial and described in §1);
   *Audio output format*: Standard; turn *off* "match content frame rate" only
   if you see judder complaints — irrelevant to audio.
-  If a DTS track ever arrives at the bar as stereo, that same menu is the first
-  thing to move: select the surround/bitstream mode **manually** instead of
-  Auto, and check the player app's own audio settings on top of it. Apps that
-  bitstream for themselves (Kodi, VLC, Nova, Plex) can carry the DTS core that
-  Auto declines to pass, and apps that decode internally (Kodi, Plex) hand the
-  bar uncompressed multichannel PCM — which its HDMI IN accepts (§2). Both
-  routes deliver exactly what the table already assumes, and no toolkit decision
-  depends on them: that is why the defaults stay safe with the stock client, and
-  why a per-app toggle is a playback-time lever rather than a library layout.
+  If a DTS track ever arrives at the bar as stereo, check this menu and the
+  player app's own audio settings. App-specific passthrough/decode options can
+  change the route; only the measured behavior described in §1 is evidence for
+  this chain. Apps that decode internally may hand the bar multichannel PCM,
+  which HDMI IN accepts (§2), but app and route capabilities must be checked
+  individually. Do not infer those options for every client from this toolkit's
+  library policy.
 * **AX3125H (default HDMI-IN wiring):** the Chromecast sits on the bar's
   **HDMI IN** socket, and the bar's **HDMI OUT (TV eARC/ARC)** goes to a TV
   HDMI input; source = **HDMI In**; EQ mode Movie; night mode off;
   subwoofer paired (auto). *(If you ever re-cable to the TV's ARC port
   instead: TV's designated HDMI (ARC) lead into the bar's HDMI OUT, source
-  = **ARC**, and expect stereo PCM from HDMI sources — see §3.)*
+  = **ARC**, and expect stereo PCM from app-decoded multichannel sources — see §3.)*
 * **Samsung UN60F6350AF:** with the default wiring it only ever receives
   video, so its audio menu is irrelevant to the chain — leave Anynet+
   (HDMI-CEC) **on** so the TV remote and CEC wake behaviour still work, and
@@ -519,20 +568,40 @@ Player:
   metadata. DTS-HD LBR / DTS Express has no core and is the exception. This is
   the observation that moved the DTS-HD family out of `transcode-bound` in
   `playbackchain` (it is bounded to this chain, like every other row here).
-* **USER-CONFIRMED (2026-10) for this chain, codec by codec:** the bitstream
-  set the G454V hands to the AX3125H's HDMI IN is AC-3 (5.1), E-AC-3 (7.1),
-  E-AC-3 JOC (Atmos, decoded by the bar's 3.1.2 array), DTS Digital Surround
-  (core 5.1) and LPCM — stereo up to 24-bit/96 kHz, and multichannel LPCM
-  5.1/7.1 on both ends; the software-decode set is AAC (LC, HE-AAC v1/v2),
-  MP3, FLAC (to 24-bit/96 kHz), Opus, Vorbis and WAV. ALAC and WavPack are
-  absent from both lists, and no hi-res stream above 24-bit/96 kHz is claimed
-  to decode. This is the reading §1's subtlety 4, §5's two new rows and
+* **USER-CONFIRMED (2026-10) for this chain, codec by codec:** on the
+  physical HDMI-IN route, the G454V passes AC-3 (5.1), E-AC-3 (7.1), E-AC-3
+  JOC (Atmos, decoded by the bar's 3.1.2 array), and measured DTS core (5.1);
+  the AX3125H manual separately confirms HDMI IN accepts LPCM 5.1/7.1. LPCM
+  and FLAC decoding/output still depend on the app and active route. Android's
+  built-in FLAC decoder table is mono/stereo up to 48 kHz; multichannel decode
+  is app-/route-dependent. ALAC and WavPack are absent from the confirmed
+  decoder set. The toolkit's 24-bit/48-kHz envelope is a conservative,
+  chain-specific policy, not a Google-published or user-measured device limit.
+  This is the reading §1's subtlety 4, §5's rows and
   `Player.max_decoded_sample_rate` / `Player.undecodable_codecs` rest on.
-* Android Developers, *Supported media formats* (the passthrough/decode
-  matrix Android TV devices share; TrueHD / DTS-HD / DTS:X absent, which is
-  why the DTS core fallback above had to be measured rather than read off a
-  spec sheet, and ALAC / WavPack absent from the decoder list too).
-  <https://developer.android.com/guide/topics/media/media-formats>
+* Android Developers, *Supported media formats* — built-in FLAC is mono/stereo
+  up to 48 kHz; no Google TV-specific G454V HDMI table is provided, and the page
+  warns that other form factors vary.
+  <https://developer.android.com/media/platform/supported-formats>
+* Android Developers, *Audio capabilities for TV* — apps should query the active
+  route because encoding, channel count and sample-rate support vary by device.
+  <https://developer.android.com/training/tv/playback/audio-capabilities>
+* Android Developers, *AudioFormat* reference — Dolby MAT is an HDMI audio
+  format that can carry TrueHD, channel PCM or PCM with object-audio metadata;
+  this API reference does not establish that G454V emits MAT.
+  <https://developer.android.com/reference/android/media/AudioFormat>
+* Kodi, *AudioEngine* — application-owned support for TrueHD and multichannel
+  PCM; this does not certify every Kodi build or route on G454V.
+  <https://kodi.wiki/view/AudioEngine>
+* Plex, *Direct Play and Direct Stream* — client capability can result in
+  audio-only transcoding while video is copied.
+  <https://support.plex.tv/articles/200250387-streaming-media-direct-play-and-direct-stream/>
+* Google's Cast media page contains 96-kHz FLAC support for Chromecast Audio /
+  Google Home products, not Chromecast with Google TV HD.
+  <https://developers.google.com/cast/docs/media>
+* Google TV Streamer/MS12 article cited only as a distinct-device comparison,
+  not as evidence of G454V Dolby MAT behavior.
+  <https://www.flatpanelshd.com/news.php?subaction=showfull&id=1739522759>
 
 Soundbar:
 
@@ -550,13 +619,14 @@ Soundbar:
   HDMI IN ●, but HDMI ARC — and OPTICAL —; "Dolby Atmos – Dolby Digital Plus":
   ARC/eARC/HDMI IN all ●; TrueHD, DTS-HD HR/MA/LBR and DTS:X: eARC and HDMI IN
   only). This is the evidence the `soundbar-hdmi-in` default rests on.
-  <https://files.hisense-usa.com/download/f25642eeb4a386bb>
+  <https://files.hisense-usa.com/download/f25648883921b2fe>
 * Hisense AX3125H user manual — "HDMI IN Socket: For connecting HDMI source
   devices, such as a DVD player, Blu-ray Disc™ player, or gaming console";
   "HDMI OUT (TV eARC/ARC) Socket: The port for connecting a TV"; input
-  format table (PCM → PCM, Dolby Digital/DD+/TrueHD → Dolby, Dolby MAT →
-  MPCM).
-  <https://manuals.plus/hisense/ax3125h-3-1-2ch-440w-dolby-atmos-soundbar-with-wireless-subwoofer-manual>
+  format/display table (Dolby MAT → MPCM; MAT-Atmos → DOLBY ATMOS). Section
+  1.3's supported-input matrix does not list MAT by port, so neither table
+  establishes that the G454V outputs MAT.
+  <https://files.hisense-usa.com/download/f25648883921b2fe>
 
 Display:
 
@@ -573,7 +643,9 @@ Display:
   <https://www.manualshelf.com/manual/samsung/un60f6350afxza/user-manual-ver10.html>
 * Samsung support, *How to use HDMI ARC on Samsung Smart TV* — the formats
   ARC carries: PCM (2 channel), Dolby Digital (up to 5.1), DTS Digital
-  Surround (up to 5.1); setting path for 2013-2014 F/H series.
+  Surround (up to 5.1); the standard capability list is not proof that this
+  unit forwards those bitstreams from an HDMI input. Setting path for 2013-2014
+  F/H series.
   <https://www.samsung.com/sg/support/tv-audio-video/how-to-use-the-hdmi-arc-port-on-a-samsung-tv/> ·
   <https://www.samsung.com/latin_en/support/tv-audio-video/how-to-use-hdmi-arc-on-samsung-smart-tv/>
 * Samsung support, *Change the audio format on your Samsung TV* — input vs

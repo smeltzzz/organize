@@ -214,7 +214,7 @@ def run_self_tests() -> int:
 
         # The silent-defeat case: everything about the new track is right, but
         # the master kept its default flag, so a player still picks the track
-        # this chain can never emit and the movie keeps transcoding.
+        # with no guaranteed route under the target app-neutral profile.
         globals()["run_ffprobe"] = probe_of(
             superset(added, clear_original_defaults=False))
         ok, why = verify_output(Path("/tmp/out.mkv"), v, Config(), truehd_only)

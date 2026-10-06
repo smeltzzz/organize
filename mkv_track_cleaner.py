@@ -862,13 +862,17 @@ def get_audio_quality_score(
        the key that makes a TrueHD Atmos 7.1 worth more than an AC-3 2.0 that
        plays today: the master becomes a DD+ 5.1 bed, the stereo track can
        never become anything.
-    2. **band** — *plays with no server work* (bitstreamed Dolby, base DTS, the
-       DTS core a DTS-HD/DTS:X player extracts, or decoded to PCM) beats
-       *transcode-bound* beats *unknown*. At an equal achievable layout this is
-       the Direct-Play-first rule, and it is what keeps a 5.1 AC-3 ahead of a
-       5.1 TrueHD: same destination, but one of them gets there without the
-       server ever re-encoding anything. Since the encoder cap both land at
-       5.1, so a 5.1 AC-3 now outranks a *7.1* TrueHD too — a wider master no
+    2. **band** — the toolkit *models as a no-server-audio-transcode path*
+       (official Dolby passthrough, the DTS/core policy measured on the physical
+       HDMI-IN chain but enabled under both selectors, or PCM decoded by a
+       compatible app/route) beats *transcode-bound* beats *unknown*.
+       This is a profile ranking, not a runtime promise for every app. At an
+       equal achievable layout it applies the Direct-Play-first policy and
+       keeps 5.1 AC-3 ahead of 5.1 TrueHD in the Plex/Jellyfin-oriented
+       profile. Some apps can decode TrueHD to PCM instead, but that route is
+       app-dependent and loses TrueHD Atmos objects; the toolkit does not
+       silently assume it. Since the encoder caps a converted TrueHD track at
+       5.1, a 5.1 AC-3 now outranks a *7.1* TrueHD too — a wider master no
        longer reaches further than the Dolby track that already plays; and a
        DTS-HD MA / DTS:X master shares the band with base DTS — it *is* base
        DTS at playback time, the extracted core, so it can neither outrank nor
@@ -883,7 +887,7 @@ def get_audio_quality_score(
     4. **codec sub-tier** — DD+ (100) over DD (95) over base DTS and the
        DTS-HD family (80 — the player bits a DTS core either way) over
        lossless-decodable (66) over Opus (62) over other lossy (60). Below the
-       band sit the formats with no native path at all: a lossless master
+       band sit the formats with no guaranteed app-neutral path: a lossless master
        (TrueHD/MLP, WMA Lossless, 34) over WMA Pro (32) over the rest (30),
        which is also what picks the best transcode SOURCE —
        ``audio_standardizer._pool_rank`` delegates to this very function, so the
@@ -918,11 +922,12 @@ def get_audio_quality_score(
         # zero-channel track with achieving stereo. Fall back to stereo,
         # matching ``audio_standardizer.channels_of``.
         channels = 2
-    # Atmos only exists inside Dolby Digital Plus (as JOC) on anything this
-    # player can emit - plain AC-3 has no Atmos variant, so an "Atmos" in the
-    # track name is a release-group flourish. Crediting it used to make a
-    # stereo AC-3 titled "Dolby Atmos" outrank a real surround track. The rule
-    # is shared core so audiofit's degraded branch credits it identically.
+    # The toolkit credits Atmos only on an identified Dolby Digital Plus
+    # stream carrying JOC/Atmos markers: that is the official passthrough path
+    # it can rank confidently. Plain AC-3 has no Atmos variant; unverified MAT
+    # and app-decoded PCM are not credited by this track-table rule. A title
+    # alone is insufficient, so "Dolby Atmos" on stereo AC-3 cannot outrank
+    # surround. The rule is shared core so audiofit's fallback ranks it alike.
     atmos_flag = pc.atmos_credit_for(cls, blob)
     try:
         bitrate = int(props.get("tag_bps") or props.get("bps") or props.get("tag_bitrate") or props.get("bitrate") or 0)
@@ -946,11 +951,12 @@ def chain_audio_tier(blob: str) -> int:
     """The chain's codec tier, with the sub-class refinements this tool needs.
 
     The shared table (playbackchain.CLASS_TIERS) ranks CLASSES of codec; the
-    cleaner's job is choosing one track among many, so within a class the
-    historical quality order still applies (DD+ above DD, lossless-decodable
-    above lossy-decodable, DTS-HD above DTS core). The two load-bearing
-    changes from the pre-chain table: native Dolby formats rank above EVERY
-    format the player cannot emit, and the DTS-HD family ranks WITH base DTS —
+    cleaner's job is choosing one track among many, so meaningful historical
+    quality ordering remains (DD+ above DD, lossless-decodable above lossy-
+    decodable). DTS-HD and base DTS intentionally share a playback sub-tier:
+    the same core reaches the sink. The two load-bearing changes from the
+    pre-chain table: Dolby formats rank above formats with no guaranteed
+    app-neutral path, and the DTS-HD family ranks WITH base DTS —
     the player extracts the DTS core and bitstreams that, so the extra bits
     buy nothing at playback and a DTS-HD track must not outrank real,
     already-playable Dolby.
@@ -971,24 +977,24 @@ def chain_audio_tier(blob: str) -> int:
         # does not raise the tier.
         return 80
     if cls == pc.AUDIO_DECODE_PCM:
-        # All arrive as PCM after the player decodes them; lossless sources
-        # rank above lossy ones *within* the class. ALAC and WavPack are gone
-        # from this tuple: the player decodes neither, so they are
-        # AUDIO_UNKNOWN now and land on the fail-closed rung below. Keeping
-        # them here would hand a format this chain cannot play the same
-        # lossless credit FLAC has, and this ranking decides which track
-        # survives an irreversible remux.
+        # This profile treats supported app-decodes as PCM; lossless sources
+        # rank above lossy ones *within* the class. ALAC and WavPack are absent
+        # from the confirmed decoder set, so they are AUDIO_UNKNOWN and land on
+        # the fail-closed rung below. Keeping them here would hand an unverified
+        # path the same lossless credit FLAC has, and this ranking decides which
+        # track survives an irreversible remux.
         if any(k in b for k in ("PCM", "FLAC", "A_PCM", "A_FLAC")):
             return 66
         if "OPUS" in b or "A_OPUS" in b:
             return 62
         return 60
     if cls == pc.AUDIO_TRANSCODE_BOUND:
-        # Not playable natively on the G454V, ever — and unlike the DTS-HD
-        # family, no backward-compatible core exists to fall back to (TrueHD,
-        # WMA Pro, DTS Express). If forced to keep one (no chain-native track
-        # exists yet — i.e. audiofit has not run), prefer the better master as
-        # the transcode source: a lossless one over a lossy one.
+        # No guaranteed native path in this app-neutral profile — and unlike
+        # the DTS-HD family, no backward-compatible core exists to fall back to
+        # (TrueHD, WMA Pro, DTS Express). Some apps can decode TrueHD to PCM;
+        # the library policy remains conservative. If forced to keep one (no
+        # Dolby fallback exists yet — i.e. audiofit has not run), prefer the
+        # better master as the transcode source: a lossless one over a lossy one.
         if any(k in b for k in ("TRUEHD", "A_MLP", "MLP", "WMALOSSLESS", "WMA_LOSSLESS")):
             return 34
         if any(k in b for k in ("WMAPRO", "WMA PRO")):
@@ -2573,12 +2579,14 @@ def process_mkv(
         )
 
     # The keeper is the best track this movie can END UP with, and under the
-    # chain's ranking that can be a lossless master the G454V cannot emit yet.
-    # Keeping it is correct - the remux is irreversible, so a master that
+    # chain's ranking that has no guaranteed app-neutral path on the G454V.
+    # TrueHD can be app-decoded to PCM in some players, but this generic
+    # Jellyfin/Plex policy does not assume that route. Keeping it is correct -
+    # the remux is irreversible, so a master that
     # audio_standardizer can still convert beats a narrower track that plays
     # today - but it is only correct if that conversion actually happens. Named
-    # here, loudly, so a library cannot quietly fill up with movies that
-    # transcode their audio on every play.
+    # here, loudly, so the app-neutral library profile cannot quietly fill up
+    # with unconverted masters and no prepared Dolby fallback.
     keeper_props = best_audio.get("properties") or {}
     keeper_blob = pc.codec_blob(best_audio.get("codec"), keeper_props.get("codec_id"),
                                 keeper_props.get("track_name"))
@@ -2586,13 +2594,17 @@ def process_mkv(
         stats.setdefault("keeper_needs_audiofit", []).append(movie_name)
         log(
             f"{tag}The retained audio for '{display_name}' is "
-            f"{describe_track(best_audio)}, which the G454V can never emit and which "
-            "has no backward-compatible core to fall back to (TrueHD, WMA Pro or "
-            "DTS Express). It is kept because a convertible master beats the narrower "
+            f"{describe_track(best_audio)}, which has no guaranteed native path in "
+            "the app-neutral G454V/Jellyfin/Plex profile and has no backward-compatible "
+            "core to fall back to (TrueHD, WMA Pro or DTS Express). Some apps can "
+            "decode TrueHD to PCM, but TrueHD Atmos metadata is lost on that path. "
+            "It is kept because a convertible master beats the narrower "
             "track that would otherwise survive an irreversible remux - but it only "
             "becomes chain-native once audio_standardizer.py converts it. Run "
             "`organize audio` (or `organize run`, which orders the steps for you); "
-            "until then this movie transcodes its audio on every play.",
+            "until then playback remains client-dependent: Plex/Jellyfin may request "
+            "server audio transcoding, while some apps decode TrueHD to PCM without "
+            "preserving its Atmos objects.",
             level="WARNING", to_console=_console is None, log_file_path=log_file_path,
         )
 
@@ -2924,7 +2936,7 @@ def generate_and_save_report(
         (len(already_clean), "Already clean", "no writes needed"),
         (len(errors), "Errors", "unreadable or failed"),
         (len(remux_without_srt), "Cleaned without SRT", "no external .eng.srt; every embedded subtitle removed"),
-        (len(keeper_needs_audiofit), "Kept audio needing audiofit", "the retained master cannot leave the G454V until audio_standardizer converts it"),
+        (len(keeper_needs_audiofit), "Kept audio needing audiofit", "no guaranteed native path in the app-neutral profile until audio_standardizer converts it"),
         (len(deferred), "Deferred (hardlinked)", "still being seeded"),
         (len(skipped_layout), "Skipped (layout)", "folder is not canonical"),
         (len(skipped_sidecar), "Skipped (broken .eng.srt)", "a sidecar exists but is unusable; movie untouched"),
@@ -2987,8 +2999,9 @@ def generate_and_save_report(
             report.subsection("RETAINED AUDIO STILL NEEDS AUDIOFIT", count=len(keeper_needs_audiofit))
             report.paragraph(
                 "The best track these movies could end up with is a lossless master "
-                "(TrueHD / WMA Pro / DTS-HD LBR) that the G454V can never emit and "
-                "that has no backward-compatible core to fall back to. It was "
+                "(TrueHD / WMA Pro / DTS-HD LBR) with no guaranteed native path in "
+                "the app-neutral G454V/Jellyfin/Plex profile. Some apps can decode "
+                "TrueHD to PCM, but that loses TrueHD Atmos object metadata. It was "
                 "kept on purpose: the remux is irreversible, so a master "
                 "audio_standardizer.py can still convert into chain-native Dolby Digital "
                 "Plus beats a narrower track that plays today - deleting a 7.1 Atmos master "
@@ -2996,8 +3009,9 @@ def generate_and_save_report(
                 "any later run. audio_standardizer.py runs BEFORE this tool in the pipeline "
                 "(`organize run` enforces the order), so a movie listed here means audiofit "
                 "did not run or could not: ffmpeg is usually missing, or this tool was run "
-                "standalone. Until it converts, these movies transcode their audio on every "
-                "play."
+                "standalone. Until it converts, playback remains client-dependent: "
+                "Plex/Jellyfin may request server-side audio transcoding, while some "
+                "apps decode TrueHD to PCM without preserving its Atmos objects."
             )
             report.blank()
             report.entries([(str(name), "run audio_standardizer.py to bake in Dolby Digital Plus")

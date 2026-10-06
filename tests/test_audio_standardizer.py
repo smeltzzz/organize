@@ -1,8 +1,9 @@
 """End-to-end runs of ``audio_standardizer.py`` against fake FFmpeg binaries.
 
 The tool's value is in what it *does*: one ffmpeg invocation per movie whose
-best audio cannot leave the G454V, an appended AC-3 track, an atomic publish,
-and an original that is never half-replaced. Fakes run as real child
+best audio has no guaranteed route in the app-neutral profile, an appended
+Dolby track, an atomic publish, and an original that is never half-replaced.
+TrueHD may be app-decoded to PCM, without its Atmos objects. Fakes run as real child
 processes (``tests/fakebin.py``) so quoting, exit codes and the second
 verification probe are all real; only the heavy lifting is simulated.
 """
@@ -431,8 +432,8 @@ class RealTranscodeRunTests(ChainFixture):
         """The point of the appended track is that a player picks IT.
 
         The lossless master must lose its default flag in the same invocation,
-        or the movie keeps transcoding its audio on every play while the report
-        says the bake-in succeeded.
+        or the compatibility bake has not made the intended Dolby track the
+        default that Plex/Jellyfin will select for this app-neutral profile.
         """
         film = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
         self.assertEqual(self._run(), 0)
@@ -457,10 +458,9 @@ class RealTranscodeRunTests(ChainFixture):
     def test_an_appended_track_the_player_would_not_pick_is_refused(self) -> None:
         """An ffmpeg that silently dropped the -disposition options.
 
-        Everything else about the output is perfect - right codec, right
-        channel count, right rate - and the movie would still transcode on
-        every play, because the player picks the default track and the TrueHD
-        master is still the default.
+        Everything else about the output is perfect - right codec, channel
+        count and rate - but the default remains TrueHD, so the prepared Dolby
+        fallback is not the track selected by the intended Plex/Jellyfin profile.
         """
         film = self.movie("TrueHD Film (2001)", TRUEHD_ONLY)
         before = film.read_bytes()
@@ -517,33 +517,37 @@ class PlannerUnitTests(unittest.TestCase):
                     {"codec_name": "dts", "profile": profile, "channels": 6}), self.cfg)
                 self.assertEqual(v.status, wanted)
 
-    def test_a_stream_past_the_decode_ceiling_is_reviewed_not_settled(self) -> None:
-        """The player's software decoders are specified to 24-bit / 96 kHz.
+    def test_a_stream_past_the_decode_envelope_is_reviewed_not_settled(self) -> None:
+        """The tool's 24-bit/48-kHz envelope is conservative, not a Google spec.
 
-        That bound is part of the chain's facts, so a 24/192 FLAC is not "more
-        resolution that Direct Plays" - it is a stream the decoder is not
-        specified to handle. What happens to one here has never been measured
-        (a failed decode, or a silent resample to the mixer's 48 kHz), and
-        neither answer justifies acting: synthesizing a replacement would spend
-        a lossless master on a guess, and calling it ``pcm-decode-ok`` would
-        promise a play nobody checked. So the movie is reviewed and untouched.
+        A 24/96 FLAC is not "more resolution that Direct Plays" under this
+        profile: app and HDMI-route behavior above the envelope is unmeasured.
+        Whether it fails, resamples, or an app-specific decoder handles it is
+        unknown, so the toolkit reports it without transcode or ranking action.
         """
         over = aus.plan_for_payload("m.mkv", _payload(
-            {"codec_name": "flac", "channels": 6, "sample_rate": "192000",
+            {"codec_name": "flac", "channels": 6, "sample_rate": "96000",
              "bits_per_sample": 24}), self.cfg)
         self.assertEqual(over.status, aus.STATUS_REVIEW)
-        self.assertIsNone(over.target, "the ceiling is a report, not a transcode plan")
+        self.assertIsNone(over.target, "the envelope is a report, not a transcode plan")
         self.assertEqual(over.audio_class, aus.AUDIO_DECODE_PCM)
-        self.assertIn("decode ceiling", over.info)
+        self.assertIn("app/software-decode envelope", over.info)
 
     def test_the_ceiling_is_a_bound_and_not_a_climate(self) -> None:
-        """96 kHz is inside it, and an unreported rate is not a breach."""
-        for rate in (96000, "96000", 48000, None, "0", 0, "bogus"):
+        """48 kHz is inside it, and an unreported rate is not a breach."""
+        for rate in (48000, "48000", 44100, None, "0", 0, "bogus"):
             with self.subTest(rate=rate):
                 v = aus.plan_for_payload("m.mkv", _payload(
-                    {"codec_name": "flac", "channels": 6, "sample_rate": rate}), self.cfg)
+                    {"codec_name": "flac", "channels": 6, "sample_rate": rate,
+                     "bits_per_sample": 24}), self.cfg)
                 self.assertEqual(v.status, aus.STATUS_PCM)
-        # 32-bit is a bit-depth breach even at a rate inside the ceiling...
+        for rate in (96000, "96000"):
+            with self.subTest(rate=rate):
+                v = aus.plan_for_payload("m.mkv", _payload(
+                    {"codec_name": "flac", "channels": 6, "sample_rate": rate,
+                     "bits_per_sample": 24}), self.cfg)
+                self.assertEqual(v.status, aus.STATUS_REVIEW)
+        # 32-bit is a bit-depth breach even at a rate inside the envelope...
         deep = aus.plan_for_payload("m.mkv", _payload(
             {"codec_name": "flac", "channels": 2, "sample_rate": 48000,
              "bits_per_sample": 32}), self.cfg)
@@ -563,7 +567,7 @@ class PlannerUnitTests(unittest.TestCase):
         verdict = aus.plan_for_payload("m.mkv", payload, self.cfg)
         self.assertEqual(verdict.status, aus.STATUS_REVIEW)
         self.assertIn("192 kHz", verdict.info)
-        self.assertIn("96 kHz", verdict.info)
+        self.assertIn("48 kHz", verdict.info)
 
     def test_the_default_config_is_the_hdmi_in_wiring(self) -> None:
         # No flag, no environment override: the planner must assume the chain
@@ -627,9 +631,9 @@ class PlannerUnitTests(unittest.TestCase):
         A pool holding a 7.1 lossless master and a narrow AC-3 2.0: the
         master ranks first (it reaches a 5.1 bed, the stereo track can never
         become anything), so the cleanup keeps the master and deletes the
-        AC-3. Answering `native-ok` because "some AC-3 exists" is what left
-        those movies with only audio the chain cannot emit - transcoders on
-        every play. The file is not settled; it is planned, and the appended
+        AC-3. Answering `native-ok` because "some AC-3 exists" would leave
+        those movies without a guaranteed path in the app-neutral profile.
+        The file is not settled; it is planned, and the appended
         DD+ track is what the cleaner keeps afterwards.
         """
         payload = _payload({"codec_name": "truehd", "channels": 8},

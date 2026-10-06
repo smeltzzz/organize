@@ -684,8 +684,8 @@ def chain_fit(payload: dict[str, Any], video_stream: dict[str, Any],
             best_tier, best_audio = tier, cls
     note_bits = [pc.video_chain_note(video)]
     if best_audio == pc.AUDIO_TRANSCODE_BOUND:
-        note_bits.append("audio cannot leave the G454V either — audio_standardizer.py "
-                         "synthesizes a chain-native Dolby track")
+        note_bits.append("audio has no guaranteed path in the app-neutral G454V profile — "
+                         "audio_standardizer.py synthesizes a chain-native Dolby fallback")
     return video, best_audio, " · ".join(note_bits)
 
 # =============================================================================
@@ -978,8 +978,8 @@ def build_report(results: Sequence[ProbeResult], cfg: Config, elapsed: float) ->
         chain_rows = [(n, v, pc.video_chain_note(v)) for v, n in sorted(interesting.items())]
         if audio_bound:
             chain_rows.append((audio_bound, pc.AUDIO_TRANSCODE_BOUND,
-                               "best audio cannot leave the G454V — audio_standardizer.py "
-                               "synthesizes a chain-native Dolby track"))
+                               "best audio has no guaranteed app-neutral G454V path — "
+                               "audio_standardizer.py synthesizes a chain-native Dolby fallback"))
         report.scorecard(chain_rows)
         report.paragraph(
             "These rows change no bit-depth verdict — they say what each file does on "

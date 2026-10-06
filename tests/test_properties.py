@@ -430,7 +430,7 @@ class AudioChainAgreementTests(PropertyTestCase):
         point of the 8.4.0 rebalance. With a tier sitting in the band's slot an
         unknown-codec 7.1 stream ranked ABOVE a chain-native AC-3 mono track:
         ``(8, 10, ...)`` beat ``(1, 100, ...)``. audiofit would then have called
-        a movie settled on the strength of a track this chain can never emit,
+        a movie settled on the strength of a track with no guaranteed app-neutral path,
         and the remux would have kept it because the cleaner was the module that
         failed to import.
 

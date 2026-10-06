@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -31,6 +32,9 @@ README_MAX_LINES = 450
 
 # [text](target) - but not images, and not reference-style definitions.
 LINK_RE = re.compile(r"(?<!\!)\[(?P<text>[^\]]*)\]\((?P<target>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
+BADGE_LINK_RE = re.compile(
+    r"\[!\[[^\]]*\]\([^)]*\)\]\((?P<target>[^)\s]+)(?:\s+\"[^\"]*\")?\)"
+)
 HEADING_RE = re.compile(r"^(?P<hashes>#{1,6})\s+(?P<text>.+?)\s*$", re.MULTILINE)
 FENCE_RE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
 
@@ -135,6 +139,27 @@ def live_documents() -> list[Path]:
         *sorted(DOCS.glob("*.md")),
         REPO / "benchmarks" / "README.md",
     ]
+
+
+class PyPIReadmeLinkTests(unittest.TestCase):
+    """Repository links in the PyPI-rendered README must resolve on GitHub."""
+
+    def test_readme_has_no_repository_relative_links(self) -> None:
+        body = strip_code((REPO / "README.md").read_text(encoding="utf-8"))
+        matches = [match for pattern in (LINK_RE, BADGE_LINK_RE)
+                   for match in pattern.finditer(body)]
+        relative = [match.group("target") for match in matches
+                    if not match.group("target").startswith(
+                        ("http://", "https://", "mailto:", "#"))]
+        self.assertEqual(relative, [], "PyPI does not resolve repository-relative README links")
+
+    def test_project_documentation_url_targets_the_hardware_guide(self) -> None:
+        metadata = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        documentation = metadata["project"]["urls"]["Documentation"]
+        self.assertEqual(
+            documentation,
+            "https://github.com/smeltzzz/organize/blob/main/docs/hardware.md",
+        )
 
 
 class DocumentedFlagTests(unittest.TestCase):
@@ -245,7 +270,7 @@ class DocumentedTestCountTests(unittest.TestCase):
     """
 
     PLACES = {
-        "README.md": (r"badge/tests-(\d+)%20passing", r"offline unit tests \(([\d,]+)\)"),
+        "README.md": (r"badge/tests-(\d+)%20total", r"offline unit tests \(([\d,]+)\)"),
         "docs/development.md": (r"# ([\d,]+) unit tests",),
         "docs/merge-and-release.md": (r"whole suite \(([\d,]+)",),
     }
