@@ -78,12 +78,17 @@ a library its only Atmos track.
   `Single-file build (organize.pyz)`, `Coverage gate`, the
   `CLI smoke test (doctor + dashboard)`, and `Lint (ruff)`, whose one request
   was to sort the new core import into alphabetical place. No workflow or CI
-  file needed a change for this release, so the release is the merge and the
-  tag: `git tag -a v8.6.1 -m "8.6.1" && git push origin v8.6.1`, which publishes
-  [organizekit 8.6.1](https://pypi.org/project/organizekit/) for the
-  `pip install --upgrade organizekit` upgrade path. **Tag it from the merged
-  commit on `main`** — a tag on the unmerged head would publish a wheel while
-  `main` still says 8.6.0.
+  file needed a change for this release, so the release was the merge and the
+  tag: [PR #64](https://github.com/smeltzzz/organize/pull/64) merged into `main`
+  as `e3db1c9`, and `v8.6.1` was tagged **from that merge commit** — which ran
+  `release.yml` to completion: PyPI published
+  [organizekit 8.6.1](https://pypi.org/project/organizekit/8.6.1/), and the
+  GitHub release carries `organize.pyz`, the wheel and the sdist.
+  `pip install --upgrade organizekit` resolves to it; installing the wheel in a
+  clean venv reports `organize 8.6.1` and its self-tests pass. The tag waits for
+  the merge every time: a tag on an unmerged head would publish a wheel while
+  `main` still said 8.6.0, unreachable from the changelog section that explains
+  it.
 
 ## [8.6.0] - 2026-10-06
 
