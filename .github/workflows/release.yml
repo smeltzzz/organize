@@ -102,6 +102,12 @@ jobs:
       - name: The zipapp is a GitHub asset, not a PyPI one
         run: rm -f dist/organize.pyz
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A re-run of this workflow — to re-attach a release's assets, say —
+          # must not fail because PyPI already holds the files. The only build
+          # this tag can produce is the one already published, so re-publishing
+          # the same version is a no-op, not a second release.
+          skip-existing: true
 
   github-release:
     name: Attach the artifacts to the GitHub release
@@ -119,8 +125,15 @@ jobs:
         # `gh` ships with the runners, so this step needs no third-party action
         # pinned for a job that only publishes files. `--generate-notes` is the
         # same release text action-gh-release produced.
+        #
+        # GH_REPO is load-bearing, not decoration: this job has no checkout (the
+        # artifacts arrive via download-artifact), so without it gh has no
+        # repository to talk to and dies with "fatal: not a git repository"
+        # before it reaches the API. That is exactly how v8.6.3's first run
+        # failed, with PyPI already accepting the release.
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" \
@@ -137,6 +150,7 @@ jobs:
         # manual re-run) idempotent rather than an "asset already exists" error.
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           for attempt in 1 2 3 4 5 6; do
             if gh release upload "$GITHUB_REF_NAME" dist/* --clobber; then
