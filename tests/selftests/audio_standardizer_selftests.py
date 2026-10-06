@@ -62,21 +62,21 @@ def run_self_tests() -> int:
     v = plan_for_payload("m.mkv", both, base_cfg)
     _assert(v.status == STATUS_NATIVE, f"an existing AC-3 settles a TrueHD file, got {v.status}", errors)
 
-    # Base DTS is DECLINED by default on the soundbar-hdmi-in wiring: it is
-    # not on Google's published passthrough list for the G454V, so the
-    # toolkit converts it to the wiring's Dolby target rather than rely on
-    # Amlogic firmware behaviour no update promises to keep.
+    # Base DTS is ACCEPTED by default on the default wiring: passthrough was
+    # measured on the real chain (Jellyfin reports Direct Play to the G454V
+    # and the AX3125H's panel lights its DTS indicator), so the toolkit leaves
+    # it alone unless a caller explicitly asks for the conversion.
     dts = _payload({"codec_name": "dts", "channels": 6})
     v = plan_for_payload("m.mkv", dts, base_cfg)
-    _assert(v.status == STATUS_PLANNED,
-            f"base DTS is transcoded by default on soundbar-hdmi-in, got {v.status}", errors)
+    _assert(v.status == STATUS_DTS,
+            f"base DTS is accepted by default on soundbar-hdmi-in, got {v.status}", errors)
     v = plan_for_payload("m.mkv", dts, Config(dry_run=True, dts_passthrough_ok=True))
     _assert(v.status == STATUS_DTS, "--dts-passthrough accepts base DTS", errors)
     v = plan_for_payload("m.mkv", dts, Config(dry_run=True, dts_passthrough_ok=False))
     _assert(v.status == STATUS_PLANNED, "--no-dts-passthrough transcodes base DTS", errors)
-    # tv-arc keeps the historical accept-DTS policy.
+    # The tv-arc alternative carries the same accept policy.
     v = plan_for_payload("m.mkv", dts, Config(dry_run=True, wiring=WIRING_TV_ARC))
-    _assert(v.status == STATUS_DTS, f"tv-arc still accepts base DTS, got {v.status}", errors)
+    _assert(v.status == STATUS_DTS, f"tv-arc accepts base DTS too, got {v.status}", errors)
 
     flac = _payload({"codec_name": "flac", "channels": 6})
     v = plan_for_payload("m.mkv", flac, base_cfg)

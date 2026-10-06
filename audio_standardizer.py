@@ -215,12 +215,11 @@ class Config:
     state_db: Path | None = None
     wiring: str = DEFAULT_WIRING
     #: ``None`` means "take the wiring's default" (``playbackchain``'s
-    #: :data:`DTS_PASSTHROUGH_DEFAULT`: declined on soundbar-hdmi-in, accepted
-    #: on tv-arc). ``__post_init__`` resolves it, so every reader downstream
-    #: sees a plain ``bool`` and no caller has to know the table exists. The
-    #: field stays three-valued rather than defaulting to ``False`` so that
-    #: ``Config(wiring=WIRING_TV_ARC)`` is self-consistent instead of silently
-    #: carrying the other wiring's policy.
+    #: :data:`DTS_PASSTHROUGH_DEFAULT`: accept, on every wiring). The field
+    #: stays three-valued rather than defaulting to ``True`` so that "the
+    #: table says so" and "a flag says so" remain distinguishable - the run
+    #: banner reports which one applied, and ``Config(wiring=...)`` stays
+    #: self-consistent if a wiring's policy ever diverges again.
     dts_passthrough_ok: bool | None = None
     limit: int = 0
 
@@ -469,8 +468,9 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
        The invariant: if audiofit calls a file settled, the keeper is a
        track this chain can emit.
     3. Otherwise the pool's best track decides: base DTS is accepted (the
-       AX3125H has a DTS decoder and the G454V's firmware passes core DTS)
-       unless ``--no-dts-passthrough`` distrusts the unofficial passthrough;
+       AX3125H has a DTS decoder and the G454V's firmware passes core DTS -
+       measured on this chain, so it is the default on both wirings) unless
+       ``--no-dts-passthrough`` asks for the conversion anyway;
        client-decodable tracks are fine — multichannel included, on the
        default wiring, because the soundbar's HDMI IN accepts multichannel
        PCM. Only under the explicit ``--wiring tv-arc`` alternative do the
@@ -976,8 +976,8 @@ def scan(cfg: Config) -> int:
         + (" (recommended)" if cfg.wiring == WIRING_SOUNDBAR_HDMI_IN
            else " (degraded: plain ARC/optical — see docs/hardware.md)"))
     # Say whether this is the wiring's own policy or a flag overriding it:
-    # "no" is now the default on soundbar-hdmi-in, and a reader of the log
-    # should not have to guess whether somebody passed a flag to get it.
+    # "yes" is the default on every wiring now, and a reader of the log should
+    # not have to guess whether somebody passed a flag to get it.
     dts_default = dts_passthrough_default(cfg.wiring)
     dts_origin = "wiring default" if cfg.dts_passthrough_ok == dts_default else "overridden by flag"
     log(f"DTS core accepted      : "
@@ -1178,9 +1178,10 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         STATUS_DEFERRED: "Action: nothing — rerun once seeding stops and these transcode normally.",
         STATUS_ERROR: "Action: read the error lines; no listed file was modified.",
         STATUS_NATIVE: "Action: none. Dolby Digital / Digital Plus already bitstreams end-to-end.",
-        STATUS_DTS: "Action: none - these are kept only because --dts-passthrough (or the "
-                    "tv-arc wiring) asked for it. The default declines the unofficial DTS "
-                    "passthrough and converts these to the chain-native Dolby codec.",
+        STATUS_DTS: "Action: none. Base 5.1 DTS is kept as-is on this chain: verified on the real "
+                    "hardware (Jellyfin reports Direct Play, and the AX3125H lights its DTS "
+                    "indicator), so no flag is needed. Only --no-dts-passthrough converts these "
+                    "to the chain-native Dolby codec.",
         STATUS_PCM: "Action: none. The Chromecast decodes these to PCM; over the soundbar's "
                     "HDMI IN even multichannel PCM plays.",
     }
@@ -1209,7 +1210,8 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
 
     footer = [
         "native-ok = AC-3/E-AC-3 on board: Dolby licenses every hop of this chain (official G454V passthrough).",
-        "dts-core-ok = base 5.1 DTS: Amlogic firmware passes it, the AX3125H decodes it; unofficial but real.",
+        "dts-core-ok = base 5.1 DTS: official list or not, it is measured working here (Jellyfin "
+        "Direct Play + the AX3125H's DTS indicator); Amlogic firmware passes it, the bar decodes it.",
         "pcm-decode-ok = AAC/FLAC/MP3/Opus/PCM: the Chromecast decodes; HDMI IN accepts multichannel PCM.",
         f"transcoded-dolby = TrueHD/DTS-HD/DTS:X/WMA Pro can never leave the G454V, so {synth} was synthesized (@ 640 kbps surround).",
         "review-unknown = unrecognized audio; fail-closed, untouched. deferred-seeding = still hardlinked to a seed.",
@@ -1338,26 +1340,24 @@ def build_parser() -> argparse.ArgumentParser:
                               f"decode-to-pcm movies are transcoded too. Env: "
                               f"{WIRING_ENV_VAR}."))
     # Three-valued on purpose: neither flag given means "use the wiring's
-    # default" (playbackchain.DTS_PASSTHROUGH_DEFAULT), which is *decline* on
-    # the default soundbar-hdmi-in wiring and *accept* on tv-arc. Giving
-    # either flag states the policy explicitly and wins over the table, so a
-    # scheduler that already passes --no-dts-passthrough keeps working
-    # unchanged and anyone who wants the old accept-DTS behaviour on the
-    # default wiring has --dts-passthrough to say so.
+    # default" (playbackchain.DTS_PASSTHROUGH_DEFAULT), which accepts base
+    # DTS on both wirings - measured on this chain (Jellyfin Direct Plays it
+    # and the AX3125H panel lights DTS), so no flag is needed. Giving either
+    # flag states the policy explicitly and wins over the table: a scheduler
+    # that wants the conversion anyway can still pass --no-dts-passthrough,
+    # and --dts-passthrough spells out the default.
     dts = parser.add_mutually_exclusive_group()
     dts.add_argument("--no-dts-passthrough", dest="dts_passthrough_ok",
                      action="store_false", default=None,
                      help="Treat base DTS as transcode-bound: convert it to the wiring's "
-                          f"Dolby target. The DEFAULT on {WIRING_SOUNDBAR_HDMI_IN}, because "
-                          "core DTS is not on Google's published passthrough list for the "
-                          "G454V - it rides on Amlogic firmware behaviour that no update "
-                          "promises to keep - and at ~1.5 Mbps it costs real disk for audio "
-                          "a 3.1.2 bar downmixes anyway")
+                          "Dolby target. NOT the default on any wiring - passthrough is "
+                          "verified working on this chain (the G454V passes core DTS "
+                          "through and the AX3125H decodes it) - so this flag states the "
+                          "conversion policy explicitly for a scheduler that wants it")
     dts.add_argument("--dts-passthrough", dest="dts_passthrough_ok",
                      action="store_true", default=None,
-                     help="Leave base DTS alone, trusting the unofficial passthrough. The "
-                          f"default on {WIRING_TV_ARC}; opt in here to restore it on "
-                          f"{WIRING_SOUNDBAR_HDMI_IN}")
+                     help="Leave base DTS alone, the default on every wiring; spelling it "
+                          "out states the accept policy explicitly")
     parser.add_argument("--dry-run", action="store_true",
                         help="Probe and show the plan; never modify any file")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N movies (testing)")

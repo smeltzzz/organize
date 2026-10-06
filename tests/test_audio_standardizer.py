@@ -225,27 +225,31 @@ class RealTranscodeRunTests(ChainFixture):
         streams = self.payload_of(film)["streams"]
         self.assertEqual(streams[-1]["tags"]["language"], "jpn")
 
-    def test_dts_core_is_transcoded_by_default_and_kept_on_request(self) -> None:
-        # The default wiring (soundbar-hdmi-in) DECLINES base DTS: it is not
-        # on Google's published passthrough list for the G454V, it rides on
-        # Amlogic firmware behaviour, and at ~1.5 Mbps it costs real disk for
-        # audio a 3.1.2 bar downmixes anyway. So a plain DTS file is
-        # converted to the wiring's Dolby Digital Plus target with no flag.
+    def test_dts_core_is_kept_by_default_on_the_default_wiring(self) -> None:
+        # The default wiring (soundbar-hdmi-in) ACCEPTS base DTS, because that
+        # was measured on the real chain rather than assumed: Jellyfin reports
+        # Direct Play and the AX3125H's panel lights its DTS indicator. With no
+        # flag a plain DTS file is therefore left exactly as it was found - no
+        # ffmpeg run, no new track.
         film = self.movie("DTS Film (2004)", DTS_CORE)
         before = film.read_bytes()
         code = self._run(env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
         self.assertEqual(code, 0)
-        self.assertNotEqual(film.read_bytes(), before)
-        self.assertEqual(self.payload_of(film)["streams"][-1]["codec_name"], "eac3")
-
-    def test_dts_passthrough_opts_back_into_keeping_base_dts(self) -> None:
-        # The escape hatch for anyone who trusts the unofficial passthrough:
-        # the file is left exactly as it was found.
-        film = self.movie("DTS Film (2004)", DTS_CORE)
-        before = film.read_bytes()
-        self.assertEqual(self._run("--dts-passthrough"), 0)
         self.assertEqual(film.read_bytes(), before, "the original is untouched")
         self.assertEqual(self.payload_of(film)["streams"][1]["codec_name"], "dts")
+        self.assertEqual(self.ffmpeg_invocations(), [])
+
+    def test_no_dts_passthrough_converts_base_dts_to_dolby(self) -> None:
+        # The explicit override for anyone who distrusts the passthrough: base
+        # DTS is converted to the wiring's Dolby Digital Plus target, and the
+        # 8.5.0 behaviour is still reachable by asking for it.
+        film = self.movie("DTS Film (2004)", DTS_CORE)
+        before = film.read_bytes()
+        code = self._run("--no-dts-passthrough",
+                         env={"FAKE_FFMPEG_LOG": str(self.tmp / "ffmpeg_invocations.jsonl")})
+        self.assertEqual(code, 0)
+        self.assertNotEqual(film.read_bytes(), before)
+        self.assertEqual(self.payload_of(film)["streams"][-1]["codec_name"], "eac3")
 
     def test_the_two_dts_flags_are_mutually_exclusive(self) -> None:
         with self.assertRaises(SystemExit):
@@ -457,11 +461,12 @@ class PlannerUnitTests(unittest.TestCase):
     def test_every_real_world_codec_family_has_a_verdict(self) -> None:
         # self.cfg uses the DEFAULT wiring, soundbar-hdmi-in: the soundbar's
         # HDMI IN carries multichannel PCM, so multichannel PCM-decodes are
-        # accepted as-is; the lossless-HD masters AND base DTS need work
-        # (DTS because this wiring declines the unofficial passthrough).
+        # accepted as-is, and base DTS is accepted too (measured on the real
+        # chain: Jellyfin Direct Plays it and the AX3125H lights its DTS
+        # indicator). Only the lossless-HD masters need work.
         cases = {
             "eac3": aus.STATUS_NATIVE, "ac3": aus.STATUS_NATIVE,
-            "dts": aus.STATUS_PLANNED, "aac": aus.STATUS_PCM, "flac": aus.STATUS_PCM,
+            "dts": aus.STATUS_DTS, "aac": aus.STATUS_PCM, "flac": aus.STATUS_PCM,
             "truehd": aus.STATUS_PLANNED, "gsm_ms": aus.STATUS_REVIEW,
         }
         for codec, wanted in cases.items():
