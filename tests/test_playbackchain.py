@@ -33,6 +33,22 @@ class DeviceFactTests(unittest.TestCase):
         self.assertIn("ac3", pc.PLAYER.passthrough_audio)
         self.assertIn("eac3", pc.PLAYER.passthrough_audio)
 
+    def test_the_player_extracts_the_dts_core_from_dts_hd(self) -> None:
+        """User-confirmed 2026-10 on the actual chain: the HD layer is lost,
+        the audio is not. The player falls back to the backward-compatible
+        DTS core inside DTS-HD MA/HRA and DTS:X and bitstreams THAT, so these
+        tracks Direct Play (the bar reads DTS) while TrueHD stays bound."""
+        self.assertTrue(pc.PLAYER.dts_hd_core_fallback)
+        self.assertTrue(any("G454V" in source and "DTS-HD" in source
+                            for source in pc.SOURCES if source.startswith("USER-CONFIRMED")))
+        for blob in ("DTS-HD MA", "DTS-HD HRA", "DTS:X", "A_DTS/HD_MA", "A_DTS/LOSSLESS"):
+            with self.subTest(blob=blob):
+                self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_DTS_HD_CORE)
+        # ... and the variants with no core stay bound.
+        for blob in ("DTS-HD LBR", "DTS Express", "A_DTS/EXPRESS"):
+            with self.subTest(blob=blob):
+                self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_TRANSCODE_BOUND)
+
     def test_the_player_has_no_dolby_vision_license(self) -> None:
         # The HD model decodes HDR10/HDR10+/HLG only. Calibrated against the
         # 4K model, which does carry Dolby Vision.
@@ -107,10 +123,13 @@ class AudioClassificationTests(unittest.TestCase):
         "AAC", "A_AAC", "aac", "FLAC", "A_FLAC", "MP3", "Opus", "Vorbis",
         "PCM", "A_PCM/INT/BIG", "ALAC", "WAV",
     )
+    DTS_HD_CORE = (
+        "DTS-HD MA", "DTS-HD Master Audio", "DTS-HD High Resolution Audio",
+        "DTS-HD HRA", "DTS:X", "DTS-X", "A_DTS/LOSSLESS", "DTS DTS-HD MA 7.1",
+    )
     BOUND = (
         "TrueHD", "A_TRUEHD", "TRUEHD A_MLP", "TrueHD Atmos",
-        "DTS-HD MA", "DTS-HD Master Audio", "DTS-HD High Resolution Audio",
-        "DTS-HD HRA", "DTS:X", "DTS-X", "A_DTS/LOSSLESS", "WMAPRO", "WMA Pro",
+        "DTS-HD LBR", "DTS Express", "A_DTS/EXPRESS", "WMAPRO", "WMA Pro",
     )
 
     def test_native_family(self) -> None:
@@ -131,6 +150,18 @@ class AudioClassificationTests(unittest.TestCase):
                 self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_DECODE_PCM)
                 self.assertTrue(pc.is_chain_native(blob))
 
+    def test_dts_hd_family_plays_via_the_extracted_core(self) -> None:
+        for blob in self.DTS_HD_CORE:
+            with self.subTest(blob=blob):
+                self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_DTS_HD_CORE)
+                self.assertTrue(pc.is_chain_native(blob))
+                # Delivered audio is a DTS core either way, so it shares base
+                # DTS's band and tier.
+                self.assertEqual(pc.chain_band_for(pc.AUDIO_DTS_HD_CORE),
+                                 pc.chain_band_for(pc.AUDIO_DTS_CORE))
+                self.assertEqual(pc.CLASS_TIERS[pc.AUDIO_DTS_HD_CORE],
+                                 pc.CLASS_TIERS[pc.AUDIO_DTS_CORE])
+
     def test_transcode_bound_family(self) -> None:
         for blob in self.BOUND:
             with self.subTest(blob=blob):
@@ -139,10 +170,13 @@ class AudioClassificationTests(unittest.TestCase):
 
     def test_dts_hd_is_never_confused_with_dts_core(self) -> None:
         # Substring traps: "DTS-HD MA" contains "DTS"; the HD family must
-        # match first, every time.
+        # match first, every time - it is its own class, not core DTS (which
+        # would hide that the HD layer is lost) and not transcode-bound
+        # (which would schedule a pointless conversion).
         for blob in ("DTS-HD MA", "DTS-HD HRA", "DTS:X", "DTS-HD Master Audio 7.1"):
             with self.subTest(blob=blob):
                 self.assertNotEqual(pc.classify_audio_blob(blob), pc.AUDIO_DTS_CORE)
+                self.assertNotEqual(pc.classify_audio_blob(blob), pc.AUDIO_TRANSCODE_BOUND)
 
     def test_unknown_is_fail_closed(self) -> None:
         for blob in ("", "   ", "gsm_ms", "atrac3", "musepack"):
@@ -162,7 +196,7 @@ class AudioClassificationTests(unittest.TestCase):
             ("E-AC-3 A_EAC3 DD+ ATMOS 7.1 TRUEHD MASTER EDITION", pc.AUDIO_NATIVE),
             ("DTS A_DTS DTS-HD MA 7.1 LOSSLESS SURROUND", pc.AUDIO_DTS_CORE),
             ("AAC A_AAC/LC RESYNC FROM TRUEHD 7.1", pc.AUDIO_DECODE_PCM),
-            ("DTS-HD MA", pc.AUDIO_TRANSCODE_BOUND),  # human codec label, no ID: title rules
+            ("DTS-HD MA", pc.AUDIO_DTS_HD_CORE),  # human codec label, no ID: title rules
             ("TrueHD Atmos", pc.AUDIO_TRANSCODE_BOUND),
         )
         for blob, wanted in cases:
@@ -192,7 +226,7 @@ class AudioClassificationTests(unittest.TestCase):
             # A DTS core track whose title narrates a TrueHD source stays core.
             ("dts", "", "TrueHD 7.1", pc.AUDIO_DTS_CORE),
             # ... and a DTS profile that really IS HD still wins.
-            ("dts", "DTS-HD MA", "Dolby Digital 5.1 (from DTS-HD MA)", pc.AUDIO_TRANSCODE_BOUND),
+            ("dts", "DTS-HD MA", "Dolby Digital 5.1 (from DTS-HD MA)", pc.AUDIO_DTS_HD_CORE),
         )
         for codec, profile, title, wanted in cases:
             with self.subTest(codec=codec, profile=profile, title=title):
@@ -208,27 +242,41 @@ class AudioClassificationTests(unittest.TestCase):
         # ignored, while a blob whose field 2 IS the HD profile is upgraded.
         self.assertEqual(pc.classify_audio_blob("DTS - DTS-HD MA 7.1"), pc.AUDIO_DTS_CORE)
         self.assertEqual(pc.classify_audio_blob("DTS DTS-HD MA 7.1"),
-                         pc.AUDIO_TRANSCODE_BOUND)
+                         pc.AUDIO_DTS_HD_CORE)
 
     def test_dts_hd_profiles_still_upgrade_a_bare_dts_core(self) -> None:
         for profile in ("DTS-HD MA", "DTS-HD HRA", "DTS:X", "DTS 96/24 "):
-            wanted = (pc.AUDIO_TRANSCODE_BOUND if "DTS-HD" in profile or "DTS:X" in profile
+            wanted = (pc.AUDIO_DTS_HD_CORE if "DTS-HD" in profile or "DTS:X" in profile
                       else pc.AUDIO_DTS_CORE)
             with self.subTest(profile=profile):
                 self.assertEqual(pc.classify_audio_ffprobe("dts", profile), wanted)
+        # The no-core members of the family are spoken as two words, and the
+        # marker is in the second one: the pair has to be read.
+        for profile in ("DTS Express", "DTS-HD LBR", "LBR"):
+            with self.subTest(profile=profile):
+                self.assertEqual(pc.classify_audio_ffprobe("dts", profile),
+                                 pc.AUDIO_TRANSCODE_BOUND)
         # A codec ID carries the answer itself; the title cannot refine it.
-        self.assertEqual(pc.classify_audio_blob("A_DTS/HD_MA DTS-HD"), pc.AUDIO_TRANSCODE_BOUND)
+        self.assertEqual(pc.classify_audio_blob("A_DTS/HD_MA DTS-HD"), pc.AUDIO_DTS_HD_CORE)
+        self.assertEqual(pc.classify_audio_blob("A_DTS/HD_HRA HRA"), pc.AUDIO_DTS_HD_CORE)
         self.assertEqual(pc.classify_audio_blob("DTS A_DTS DTS-HD MA"), pc.AUDIO_DTS_CORE)
 
-    def test_tiers_implement_the_philosophy_native_above_lossless(self) -> None:
+    def test_tiers_implement_the_philosophy_native_above_emittable(self) -> None:
         self.assertGreater(pc.tier_for_blob("E-AC-3"), pc.tier_for_blob("TrueHD"))
-        self.assertGreater(pc.tier_for_blob("AC-3"), pc.tier_for_blob("DTS-HD MA"))
-        self.assertGreater(pc.tier_for_blob("DTS"), pc.tier_for_blob("DTS:X"))
+        self.assertGreater(pc.tier_for_blob("AC-3"), pc.tier_for_blob("TrueHD"))
+        # The DTS-HD family is not "lossless-HD" in the ranking any more: the
+        # player bits a DTS core out of it, so it ranks exactly with base DTS
+        # and still above every format that needs a server transcode.
+        self.assertEqual(pc.tier_for_blob("DTS"), pc.tier_for_blob("DTS:X"))
+        self.assertEqual(pc.tier_for_blob("DTS"), pc.tier_for_blob("DTS-HD MA"))
+        self.assertGreater(pc.tier_for_blob("DTS-HD MA"), pc.tier_for_blob("TrueHD"))
         self.assertGreater(pc.tier_for_blob("AAC"), pc.tier_for_blob("TRUEHD"))
 
     def test_ffprobe_fields_classify_identically(self) -> None:
         self.assertEqual(pc.classify_audio_ffprobe("truehd"), pc.AUDIO_TRANSCODE_BOUND)
-        self.assertEqual(pc.classify_audio_ffprobe("dts", "DTS-HD MA"), pc.AUDIO_TRANSCODE_BOUND)
+        self.assertEqual(pc.classify_audio_ffprobe("dts", "DTS-HD MA"), pc.AUDIO_DTS_HD_CORE)
+        self.assertEqual(pc.classify_audio_ffprobe("dts", "DTS-HD HRA"), pc.AUDIO_DTS_HD_CORE)
+        self.assertEqual(pc.classify_audio_ffprobe("dts", "DTS Express"), pc.AUDIO_TRANSCODE_BOUND)
         self.assertEqual(pc.classify_audio_ffprobe("dts", ""), pc.AUDIO_DTS_CORE)
         self.assertEqual(pc.classify_audio_ffprobe("eac3"), pc.AUDIO_NATIVE)
         self.assertEqual(pc.classify_audio_ffprobe("aac", "HE-AAC"), pc.AUDIO_DECODE_PCM)
@@ -351,6 +399,25 @@ class TargetAudioTests(unittest.TestCase):
                     pc.achievable_channels(pc.AUDIO_TRANSCODE_BOUND, zero), 0,
                     "zero-channel transcode source must achieve zero",
                 )
+                self.assertEqual(
+                    pc.achievable_channels(pc.AUDIO_DTS_HD_CORE, zero), 0,
+                    "zero-channel DTS-HD must achieve zero, not credit a core",
+                )
+
+    def test_a_dts_hd_master_reaches_its_cores_layout_not_its_own(self) -> None:
+        """The HD layer never leaves the box; the extracted DTS core tops at 5.1.
+
+        A DTS-HD MA 7.1 track therefore achieves 6 channels on this chain -
+        exactly like the DTS core it becomes - while a plain 5.1 track of the
+        family achieves its own 6 and a 2.0 one stays 2. Nothing is lost
+        against the old transcode-bound reading (which also promised 6), but
+        the track no longer needs the server to get there.
+        """
+        self.assertEqual(pc.DTS_CORE_MAX_CHANNELS, 6)
+        for channels, wanted in ((8, 6), (7, 6), (6, 6), (2, 2), (1, 1)):
+            with self.subTest(channels=channels):
+                self.assertEqual(
+                    pc.achievable_channels(pc.AUDIO_DTS_HD_CORE, channels), wanted)
 
 
 class VideoClassificationTests(unittest.TestCase):
@@ -508,6 +575,25 @@ class WiringTests(unittest.TestCase):
         # On the default wiring DTS core is simply accepted.
         self.assertNotIn("cannot be relied on", pc.audio_chain_note("DTS", 6))
 
+    def test_dts_hd_note_says_core_extraction_not_transcode(self) -> None:
+        """The note must not promise an HD bitstream, nor a re-encode."""
+        for blob in ("DTS-HD MA", "DTS:X", "DTS-HD HRA 7.1"):
+            with self.subTest(blob=blob):
+                note = pc.audio_chain_note(blob, 8)
+                self.assertIn("DTS core", note)
+                self.assertNotIn("cannot be relied on", note)
+                self.assertNotIn("re-encodes", note)
+                # The panel reads DTS; the HD name is what does NOT appear.
+                self.assertIn("reads", note)
+        arc = pc.audio_chain_note("DTS-HD MA", 8, pc.WIRING_TV_ARC)
+        self.assertIn("cannot be relied on", arc)
+        self.assertIn("DTS core", arc)
+        # TrueHD must never gain the core-fallback promise: it has no
+        # backward-compatible core, so it still needs the offline transcode.
+        truehd = pc.audio_chain_note("TrueHD", 8)
+        self.assertIn("core to fall back to", truehd)
+        self.assertIn("re-encodes", truehd)
+
     def test_native_dolby_51_carries_the_arc_warning_too(self) -> None:
         # AUDIO_NATIVE used to return before ever consulting `wiring`, so AC-3
         # and E-AC-3 printed the identical "bitstreams end-to-end" sentence on
@@ -576,9 +662,9 @@ class BlobFieldTests(unittest.TestCase):
 
     def test_a_real_profile_field_still_upgrades_a_bare_dts_name(self) -> None:
         self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "DTS-HD MA", "")),
-                         pc.AUDIO_TRANSCODE_BOUND)
+                         pc.AUDIO_DTS_HD_CORE)
         self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "A_DTS/HD_MA", "")),
-                         pc.AUDIO_TRANSCODE_BOUND)
+                         pc.AUDIO_DTS_HD_CORE)
         self.assertEqual(pc.classify_audio_blob(pc.codec_blob("DTS", "A_DTS", "")),
                          pc.AUDIO_DTS_CORE)
 

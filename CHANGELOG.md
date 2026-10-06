@@ -4,6 +4,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.6.0] - 2026-10-06
+
+The DTS-HD family was re-measured on the real chain, and it is not what the
+toolkit assumed: **the player extracts the backward-compatible DTS core out of
+DTS-HD MA/HRA and DTS:X and bitstreams that**, so those tracks Direct Play as
+DTS 5.1 with no server work. They were `transcode-bound` — the same class as
+TrueHD — and every tool derived a pointless (and irreversible) conversion from
+that. This release moves them into their own native-band class; TrueHD, WMA Pro
+and DTS Express (no backward-compatible core) stay exactly where they were.
+
+### Changed
+- **DTS-HD MA / DTS-HD HRA / DTS:X are no longer transcode-bound.** The G454V
+  still cannot emit the lossless HD layer, and DTS:X's object metadata still
+  never survives, but the audio does: the player automatically extracts the
+  plain DTS core (5.1, lossy) every such bitstream carries and bitstreams that,
+  so the AX3125H decodes real DTS — its front panel reads **DTS**, not
+  `DTS-HD`/`DTS:X` — and nothing is re-encoded. `playbackchain` gains
+  `AUDIO_DTS_HD_CORE` (`dts-hd-core-passthrough`), plus the device fact
+  `PLAYER.dts_hd_core_fallback` and the layout cap
+  `DTS_CORE_MAX_CHANNELS = 6` (a 7.1 master reaches 5.1, the core's ceiling).
+  The class is native-band, tiered exactly with base DTS core, and counts as
+  chain-native everywhere the question "does this need server work?" is asked,
+  including `audio_standardizer.SETTLED_AUDIOFIT` and the new stored verdict
+  `dts-hd-core-ok`. The evidence is recorded as a `USER-CONFIRMED 2026-10`
+  entry in `playbackchain.SOURCES` and in `docs/hardware.md` §1, the same way
+  the 2026-09 PCM-only TV observation and the 2026-10 base-DTS measurement
+  already are.
+- **`audio_standardizer.py` leaves DTS-HD movies alone by default**, as a new
+  `dts-hd-core-ok` report section, and `--no-dts-passthrough` is the one way
+  to spend such a master (it converts from the *lossless* layer, so it is a
+  bigger decision there than on base DTS — the flag now covers the whole DTS
+  family, and both of its help strings say so). This is the 8.5.1 argument for
+  base DTS applied one level up: converting is irreversible loss buying
+  nothing, the conversion stays available on any later run from the untouched
+  source, and what plays without server work beats what a conversion could
+  produce (1509 kbps DTS core against a 640 kbps DD+ bed; on a DTS-HD master
+  the lossless layer is spent as well).
+- **`mkv_track_cleaner.py` ranks the DTS-HD family with base DTS.** Same band,
+  same tier (80) — the delivered audio is a DTS core either way — so a DTS-HD
+  master can neither outrank nor be outranked by a plain core track on codec
+  grounds, and it still loses to chain-native Dolby (95/100) that bitstreams
+  as-is. The transcode-bound sub-tiers were re-pointed at what is actually
+  left in that class: a lossless master (TrueHD/MLP, WMA Lossless; 34) over
+  WMA Pro (32) over the rest (30).
+- **The docs follow the table**, as they must: `docs/hardware.md` (§1 gains
+  subtlety 2 with the core-extraction evidence, §2's decoder note, the §5
+  matrix and its ranking prose, the settings checklist), `docs/tools.md`
+  (both verdict tables and the ranking section), `docs/pipeline.md`,
+  `README.md`, `.env.example`, and the front-door strings in `organize.py`.
+
+### Fixed
+- **DTS-HD LBR / DTS Express is no longer indistinguishable from DTS-HD MA.**
+  The `transcode-bound` class used to swallow the whole DTS-HD family, which
+  happened to be right for LBR and wrong for everything else. LBR is a separate
+  low-bitrate decoder used for secondary audio, with **no** backward-compatible
+  core, so it now has its own no-core branch (`DTS-HD LBR`, `DTS Express`,
+  `A_DTS/EXPRESS`, including the two-word spellings where the marker sits in
+  the *second* field) and stays transcode-bound with TrueHD and WMA Pro. A
+  later word may only conclude transcode-bound here — a title can never promote
+  a core track into the HD family (`DTS A_DTS DTS-HD MA 7.1` is still core).
+- **`bitdepth.py`'s chain-fit note no longer tells you to run audiofit on a
+  DTS-HD movie.** It reads `CLASS_TIERS`, so the class move fixed it: the
+  "audio cannot leave the G454V" row and note now fire only for TrueHD /
+  WMA Pro / DTS Express.
+
 ## [8.5.1] - 2026-10-06
 
 A one-change patch release: 8.5.0's new DTS default was measured on the actual

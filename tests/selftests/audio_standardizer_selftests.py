@@ -98,9 +98,25 @@ def run_self_tests() -> int:
             f"an E-AC-3 stream titled 'TrueHD 7.1' must stay native, got {v.status}", errors)
     _assert(v.target is None, "a chain-native E-AC-3 stream gets no AC-3 target", errors)
 
+    # DTS-HD is NOT transcode-bound: the player cannot emit the lossless HD
+    # layer, but it extracts the backward-compatible DTS core such a track
+    # carries and bitstreams that (user-confirmed 2026-10), so the movie is
+    # settled - no ffmpeg run, no track appended, the master left intact.
     dtshd = _payload({"codec_name": "dts", "profile": "DTS-HD MA", "channels": 8})
     v = plan_for_payload("m.mkv", dtshd, base_cfg)
-    _assert(v.status == STATUS_PLANNED, "DTS-HD MA plans a transcode", errors)
+    _assert(v.status == STATUS_DTS_HD and v.target is None and v.audio_class == AUDIO_DTS_HD_CORE,
+            f"DTS-HD MA plays via the core the player extracts, got {v.status}", errors)
+    # --no-dts-passthrough is the one way to spend the master deliberately:
+    # ffmpeg decodes the lossless layer and re-encodes it to the Dolby target.
+    v = plan_for_payload("m.mkv", dtshd, Config(dry_run=True, dts_passthrough_ok=False))
+    _assert(v.status == STATUS_PLANNED and v.target is not None
+            and v.target.codec == "eac3" and v.source_stream == 1,
+            "--no-dts-passthrough converts a DTS-HD master from its lossless layer", errors)
+    # DTS Express has no core to fall back to and stays transcode-bound.
+    express = _payload({"codec_name": "dts", "profile": "DTS Express", "channels": 6})
+    v = plan_for_payload("m.mkv", express, base_cfg)
+    _assert(v.status == STATUS_PLANNED,
+            f"DTS Express (no backward-compatible core) still transcodes, got {v.status}", errors)
 
     unknown = _payload({"codec_name": "gsm_ms", "channels": 2})
     v = plan_for_payload("m.mkv", unknown, base_cfg)

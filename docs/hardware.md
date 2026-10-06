@@ -37,11 +37,11 @@ Facts (Google's own materials and device measurements; sources at the end):
 | Video ceiling | **1920×1080 @ 60 Hz max**. No 4K output at all. |
 | Video decoders | H.264 (AVC), H.265 (HEVC), VP9, **AV1**, MPEG-2 — up to 1080p60 |
 | HDR | HDR10, HDR10+, HLG — **Dolby Vision is NOT supported on this model** (the 4K model has it; the HD does not) |
-| Audio passthrough | Dolby Digital (**AC-3**) and Dolby Digital Plus (**E-AC-3**, incl. JOC/Atmos) — the licensed, documented set |
+| Audio passthrough | Dolby Digital (**AC-3**) and Dolby Digital Plus (**E-AC-3**, incl. JOC/Atmos) — the licensed, documented set; plus **base 5.1 DTS** and, out of any DTS-HD bitstream, **the DTS core it carries** (see the subtleties below) |
 | Audio decode | AAC/AAC-LC/HE-AAC, MP3, FLAC, Opus, Vorbis, PCM — decoded in software to PCM |
-| Audio never emitted | **TrueHD (incl. TrueHD Atmos), DTS-HD MA/HR, DTS:X, WMA Pro** — Android TV/ExoPlayer cannot pass these through and refuses to decode them |
+| Audio never emitted | **TrueHD (incl. TrueHD Atmos), WMA Pro, DTS-HD LBR (DTS Express)** — Android TV/ExoPlayer cannot pass these through and refuses to decode them. Note what is *not* on this row: DTS-HD MA/HR and DTS:X arrive as an extracted DTS core (subtlety 2), so the movie still plays |
 
-Two subtleties the research surfaced and the code encodes:
+Three subtleties the research surfaced and the code encodes:
 
 1. **Base 5.1 DTS core plays on this chain — measured on the real hardware,
    not assumed.** Google's published passthrough list for this device is
@@ -70,7 +70,35 @@ Two subtleties the research surfaced and the code encodes:
    `organize run` exposes no DTS flag and forwards nothing to the audiofit
    step, so the pipeline could not opt out of the conversion at all.) See
    §5 for the verdict this feeds into the tools.
-2. **HDR10/HDR10+/HLG "play" here means tone-mapped to SDR.** The panel is a
+2. **DTS-HD MA / DTS-HD HRA / DTS:X play as their DTS core — confirmed on
+   the real chain, 2026-10.** The G454V cannot emit the lossless HD layer:
+   no DTS-HD bitstream ever leaves the box as such, and DTS:X's object
+   metadata never survives at all. But DTS-HD is backward compatible *by
+   design*, and the player does not drop the audio when it meets one — it
+   automatically extracts the plain **DTS core** (5.1, lossy) every such
+   bitstream carries and bitstreams **that**. The result, in the reporter's
+   words: *the soundbar still produces surround sound, but its display reads
+   `DTS` instead of `DTS:X` or `DTS-HD`*. No server transcode happens, so
+   these tracks **Direct Play**, and the toolkit treats them accordingly:
+
+   * the class is `dts-hd-core-passthrough`, native-band and tiered exactly
+     with base DTS core — the delivered audio is a DTS core either way;
+   * a 7.1 DTS-HD MA track therefore reaches **5.1** on this chain (the
+     core's ceiling, `playbackchain.DTS_CORE_MAX_CHANNELS`), not 8;
+   * `audio_standardizer.py` leaves such movies alone by default, and
+     `--no-dts-passthrough` is the one way to spend the master deliberately
+     (it burns the DD+/AC-3 target from the *lossless* layer, which is also
+     why that flag is a bigger decision on DTS-HD than on base DTS);
+   * **DTS-HD LBR / DTS Express is the exception**, and it is why the label
+     must be read carefully: LBR is a separate low-bitrate decoder used for
+     secondary audio, with no backward-compatible core to fall back to, so it
+     stays transcode-bound like TrueHD.
+
+   This is the same argument that reverted 8.5.0's base-DTS conversion,
+   applied one level up: playing without server work beats converting, the
+   master is only spent when asked, and the conversion stays available on
+   any later run from the untouched source.
+3. **HDR10/HDR10+/HLG "play" here means tone-mapped to SDR.** The panel is a
    1080p SDR display, so the Chromecast outputs SDR after tone-mapping.
    That is a picture-preserving operation done at playback time, with zero
    generation loss — unlike a HandBrake re-encode, which is why the
@@ -97,10 +125,15 @@ Practical consequences (all encoded in the code):
   matching the audio side's `AUDIO_UNKNOWN`.
 * **Dolby Vision video** ⇒ same: the player has no DV license; the server
   re-encodes. DV files are flagged, not kept silently.
-* TrueHD/DTS-HD/DTS:X audio ⇒ the server re-encodes the audio on every
-  play. This is the single most common Direct-Play breaker in real remux
-  libraries, and it is what `audio_standardizer.py` was built to fix once,
-  offline, losslessly-for-video.
+* TrueHD / WMA Pro / DTS Express audio ⇒ the server re-encodes the audio on
+  every play. This is the single most common Direct-Play breaker in real
+  remux libraries, and it is what `audio_standardizer.py` was built to fix
+  once, offline, losslessly-for-video.
+* DTS-HD MA/HRA and DTS:X audio ⇒ **not** a Direct-Play breaker: the player
+  extracts the DTS core such a track carries and bitstreams that (subtlety
+  2), so playback needs no server work and the toolkit leaves it alone by
+  default. What is lost is the HD layer on the bar's panel (it reads `DTS`)
+  and any DTS:X height objects — never the surround itself.
 * AAC/FLAC/PCM audio ⇒ decodes locally to PCM; on the default wiring
   (soundbar HDMI IN) multichannel PCM arrives intact, while over the explicit
   ARC alternative this TV delivers it stereo-only (§3).
@@ -120,11 +153,14 @@ Why this is the load-bearing device: it is the only link in the chain
 licensed to decode **every** format that matters. Dolby Atmos arrives on
 this chain as DD+ JOC — E-AC-3 with embedded Atmos metadata — which is
 exactly what streaming services send for Atmos, and exactly what the G454V
-can pass through. The bar *can* decode TrueHD and DTS-HD MA, but it never
-gets the chance from this player: the Chromecast cannot emit them (see
-above), and the toolkit therefore *normalizes* lossless-HD into the
-native-to-every-hop formats instead of fantasizing a different player into
-the chain. **On the default `soundbar-hdmi-in` wiring, Dolby Digital (AC-3)
+can pass through. The bar *can* decode TrueHD and DTS-HD MA, but what it
+receives from this player differs by family: TrueHD never leaves the
+Chromecast at all (no core to fall back to), so the toolkit *normalizes* it
+into native-to-every-hop Dolby instead of fantasizing a different player into
+the chain; a DTS-HD MA/HRA or DTS:X stream, however, arrives as the extracted
+DTS core (§1, subtlety 2) — real DTS the bar decodes, with the HD layer the
+only casualty. Both come out of one principle: don't re-encode what the
+player can already deliver, and don't pretend it can deliver what it cannot. **On the default `soundbar-hdmi-in` wiring, Dolby Digital (AC-3)
 and Dolby Digital Plus (E-AC-3) bitstream through the entire chain with zero
 conversions anywhere** — player to bar, bar decodes, nothing in between. Under
 the explicit `tv-arc` alternative that claim does *not* hold: the bitstream
@@ -164,10 +200,15 @@ precisely why:
 
 Note also that "Dolby Atmos – Dolby Digital Plus" is supported on HDMI IN, so
 DD+ Atmos (the only Atmos variant the G454V can emit) reaches the bar's
-up-firing drivers intact on the default wiring. The bar's TrueHD / DTS-HD /
-DTS:X rows are real but unreachable from *this* player — the Chromecast can
-never emit those formats, which is why `audio_standardizer.py` normalizes them
-into DD+ rather than pretending a different player is in the chain.
+up-firing drivers intact on the default wiring. The bar's TrueHD and DTS-HD /
+DTS:X rows are real, but what *this* player can deliver to them differs: no
+TrueHD bitstream ever leaves the Chromecast (there is no core to fall back
+to, which is why `audio_standardizer.py` normalizes it into DD+), while a
+DTS-HD MA/HRA or DTS:X stream arrives as the extracted **DTS core** — the bar
+decodes genuine DTS, its panel reads `DTS`, and the HD layer is what the
+player cannot pass (§1, subtlety 2). The DTS-HD rows in this table describe
+the bar's own decoders; the player's fallback is why they can be reached at
+all.
 
 `Sink.hdmi_in_accepts` and `Sink.arc_cannot_carry` in
 `organizekit/core/playbackchain.py` are this table as data, with a test
@@ -254,11 +295,12 @@ leaves the player — the server transcodes audio on **every** play.
 | MP3 / Opus / Vorbis | decode → PCM ✅ | ✅ | ✅ stereo | fine |
 | base 5.1 **DTS core** | ⚠️ passthrough (unofficial, works on this AMLogic build) | ✅ decodes | ⚠️ same PCM-only limit (§3) | **kept as-is on both wirings** — measured working on this chain (§1: Jellyfin Direct Play + the AX3125H's DTS indicator); `--no-dts-passthrough` converts it to DD+ instead |
 | **TrueHD / TrueHD Atmos** | ❌ **cannot be emitted at all** | (bar could decode — player can't send) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** from it by audio_standardizer (AC-3 under `tv-arc`) |
-| **DTS-HD MA / HRA, DTS:X** | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** (AC-3 under `tv-arc`) |
+| **DTS-HD MA / HRA, DTS:X** | ❌ the HD layer is never emitted — but the player **extracts the DTS core** ✅ (§1) | ✅ decodes as DTS 5.1 (panel reads `DTS`) | ⚠️ same PCM-only limit (§3) | **kept as-is on both wirings** — user-confirmed 2026-10: the core Direct Plays, so converting would only spend the lossless layer; `--no-dts-passthrough` converts it from that layer to DD+ instead. A 7.1 master reaches 5.1 (the core's ceiling) |
+| **DTS-HD LBR / DTS Express** | ❌ **cannot be emitted at all** (no backward-compatible core) | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** (AC-3 under `tv-arc`) |
 | WMA Pro / WMA Lossless | ❌ **cannot be emitted at all** | (same) | ❌ | **Dolby Digital Plus (E-AC-3) @ 640k synthesized** — no ExoPlayer decoder, so `ffmpeg` converts it like any other master |
 | unknown / unclassifiable | ❌ | ❌ | ❌ | **fail-closed: reported for a human, never auto-touched** — and it achieves *zero* channels in the keeper ranking, so it can never outrank a track the toolkit does understand |
 
-**Read the "over ARC/opt" column as one limit, not nine.** Every ⚠️ in it has
+**Read the "over ARC/opt" column as one limit, not one per row.** Every ⚠️ in it has
 the same single cause: on this UN60F6350AF the digital audio output offers PCM
 only for HDMI sources (§3, user-confirmed 2026-09), and §3's wording is
 deliberate — the TV downmixes *every* HDMI source before ARC/optical,
@@ -289,7 +331,9 @@ converting that master into a DD+ 5.1 bed can always be done. So:
 
 1. **achievable layout** — how many channels the track reaches *on this chain*,
    via `playbackchain.achievable_channels()`. A chain-native track achieves the
-   channels it carries; a transcode-bound master achieves the channels
+   channels it carries — except the DTS-HD family, which is native *by core
+   fallback* and therefore achieves its core's layout, at most 5.1
+   (`playbackchain.DTS_CORE_MAX_CHANNELS`); a transcode-bound master achieves the channels
    `audio_standardizer.py` would bake into its replacement, which is **at most
    5.1 on either wiring** — the ceiling is ffmpeg's Dolby encoders, not the
    format (`playbackchain.FFMPEG_DOLBY_ENCODE_MAX_CHANNELS`); a wider master
@@ -299,9 +343,9 @@ converting that master into a DD+ 5.1 bed can always be done. So:
    than an AC-3 2.0 that plays today** (6 beats 2). Tracks needing no encoder
    are untouched by the cap — FLAC 7.1 really arrives as LPCM 7.1 on the bar's
    HDMI IN, which is what keeps **FLAC 7.1 ahead of everything Dolby-bound**.
-2. **band** — *plays with no server work* (AC-3 / DD+ / base DTS / anything
-   decoded to PCM) beats *transcode-bound* (TrueHD / DTS-HD / DTS:X / WMA Pro)
-   beats *unknown*. At an **equal achievable layout** this is the
+2. **band** — *plays with no server work* (AC-3 / DD+ / base DTS / the DTS core
+   extracted from DTS-HD/DTS:X / anything decoded to PCM) beats
+   *transcode-bound* (TrueHD / DTS-HD LBR / WMA Pro) beats *unknown*. At an **equal achievable layout** this is the
    Direct-Play-first rule and it is unchanged: a 5.1 AC-3 still beats a 5.1
    TrueHD, because both land at 5.1 and only one of them gets there without the
    server re-encoding anything — and since 8.4.0 a 5.1 AC-3 also beats a 7.1
@@ -317,19 +361,25 @@ converting that master into a DD+ 5.1 bed can always be done. So:
    signature), so a real DD+ Atmos stream is irreplaceable, while 7.1's two
    extra channels drive nothing on a bar with no rear speakers.
 4. **codec sub-tier** — the historical quality order refines the rest:
-   DD+ (100) > DD (95) > base DTS core (80) > lossless-decodable (66) >
-   Opus (62) > other lossy (60), and below the band DTS-HD MA / DTS:X (34) >
-   DTS-HD HRA (32) > the rest (30). That lower half is also what picks the best
-   *transcode source*: `audio_standardizer.py` ranks its own pool with this same
-   function, so the two tools cannot disagree about which master to burn — and
-   because the encoder cap makes every surround master land on the same 5.1
-   bed, the source is the **highest-tier** master again rather than the widest:
-   a DTS-HD MA 5.1 outranks a TrueHD 7.1 as *input* (it did not before 8.4.0,
-   when the target table wrongly preserved 7.1).
+   DD+ (100) > DD (95) > base DTS core **and the DTS-HD family** (80 — the
+   player bits a DTS core out of those either way) > lossless-decodable (66) >
+   Opus (62) > other lossy (60), and below the band the formats with no native
+   path: a lossless master (TrueHD/MLP, WMA Lossless, 34) > WMA Pro (32) > the
+   rest (30). That lower half is also what picks the best *transcode source*:
+   `audio_standardizer.py` ranks its own pool with this same function, so the
+   two tools cannot disagree about which master to burn — and because the
+   encoder cap makes every surround master land on the same 5.1 bed, the
+   source is the **highest-tier** master rather than the widest: a lossless
+   TrueHD outranks WMA Pro as *input*. (A DTS-HD master is no longer a burn
+   candidate at all: it plays as its DTS core, and only
+   `--no-dts-passthrough` spends it.)
 
 The per-port table in §2 is what makes multichannel decoded audio first-class on
 this wiring — LPCM 5.1/7.1 are supported on the bar's HDMI IN — which is why a
-convertible master is worth keeping rather than merely tolerating.
+convertible master is worth keeping rather than merely tolerating. The same
+logic now covers the DTS-HD family: the bar's DTS decoder (and the player's own
+core extraction) means such a master needs no conversion to play, so keeping it
+is free rather than a promise.
 
 **Keeping a master is only correct if it gets converted.** Because key 1 can
 retain a track the G454V cannot emit yet, the cleaner names every such movie in
@@ -372,9 +422,10 @@ or the cleaner run standalone.
 ## 6 · The settings checklist (the human half of the chain)
 
 * **Chromecast (Google TV):** Settings → Display & Sound →
-  *Surround sound*: **Auto** (passthrough DD/DD+); *Audio output format*:
-  Standard; turn *off* "match content frame rate" only if you see judder
-  complaints — irrelevant to audio.
+  *Surround sound*: **Auto** (passthrough DD/DD+, and DTS on this Amlogic
+  build — including the DTS core it extracts from a DTS-HD/DTS:X track, §1);
+  *Audio output format*: Standard; turn *off* "match content frame rate" only
+  if you see judder complaints — irrelevant to audio.
 * **AX3125H (default HDMI-IN wiring):** the Chromecast sits on the bar's
   **HDMI IN** socket, and the bar's **HDMI OUT (TV eARC/ARC)** goes to a TV
   HDMI input; source = **HDMI In**; EQ mode Movie; night mode off;
@@ -415,8 +466,19 @@ Player:
 * Rtings senior review of the HD model: measured HDR behavior, no Dolby
   Vision, audio passthrough limits.
   <https://www.rtings.com/streaming/reviews/google/chromecast-with-google-tv-hd>
+* **USER-CONFIRMED (2026-10) on the actual G454V in this chain:** DTS-HD MA,
+  DTS-HD HRA and DTS:X are never passed through as HD bitstreams — the player
+  *automatically extracts the backward-compatible DTS core* (5.1) every such
+  bitstream carries and bitstreams that instead, so the AX3125H still decodes
+  surround and its display reads **DTS**, not `DTS-HD`/`DTS:X`. No server
+  transcode is involved; what is lost is the HD layer and any DTS:X object
+  metadata. DTS-HD LBR / DTS Express has no core and is the exception. This is
+  the observation that moved the DTS-HD family out of `transcode-bound` in
+  `playbackchain` (it is bounded to this chain, like every other row here).
 * Android Developers, *Supported media formats* (the passthrough/decode
-  matrix Android TV devices share; TrueHD/DTS-HD absent).
+  matrix Android TV devices share; TrueHD / DTS-HD / DTS:X absent, which is
+  why the DTS core fallback above had to be measured rather than read off a
+  spec sheet).
   <https://developer.android.com/guide/topics/media/media-formats>
 
 Soundbar:

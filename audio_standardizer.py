@@ -21,10 +21,20 @@ stereo.
 
 The chain's hard rule about audio: the G454V can only ever EMIT Dolby Digital
 (AC-3), Dolby Digital Plus (E-AC-3, Atmos included), base 5.1 DTS
-(chipset-level, unofficial), or decoded PCM. TrueHD, DTS-HD MA/HRA, DTS:X and
-WMA Pro cannot leave the box — so a movie whose only good track is lossless-HD
+(chipset-level, unofficial), the DTS core it extracts from a DTS-HD MA/HRA or
+DTS:X track, or decoded PCM. Only TrueHD, DTS-HD LBR (DTS Express) and WMA Pro
+cannot leave the box at all — so a movie whose only good track is one of THOSE
 gets its audio re-encoded by the Jellyfin server on EVERY single play. That is
 the one audio problem worth fixing offline, once, forever.
+
+Note what is NOT in that bucket: the DTS-HD family. The player cannot emit the
+lossless HD layer, but DTS-HD is backward compatible by design, so it
+automatically extracts the DTS core (5.1, lossy) every DTS-HD MA/HRA and DTS:X
+bitstream carries and bitstreams THAT — the bar still decodes surround, the
+panel reads DTS, and nothing is transcoded. Converting such a track would
+destroy the lossless master to buy nothing, so the DTS family is accepted by
+default on both wirings (``--no-dts-passthrough`` states the opposite policy
+explicitly).
 
 What this tool does, per movie:
 
@@ -32,9 +42,11 @@ What this tool does, per movie:
   2. Classify the audio with the chain table:
 
        native-passthrough   AC-3 / E-AC-3            -> done, bitstreams as-is
-       dts-core             base 5.1 DTS             -> FIX by default (see --dts-passthrough)
+       dts-core             base 5.1 DTS             -> done by default (see --dts-passthrough)
+       dts-hd-core          DTS-HD MA/HRA, DTS:X     -> done by default: the player extracts
+                                                       the DTS core and bitstreams that
        decode-to-pcm        AAC/FLAC/MP3/Opus/PCM... -> done (see --wiring note)
-       transcode-bound      TrueHD/DTS-HD/DTS:X/WMA  -> FIX, offline, now
+       transcode-bound      TrueHD/WMA Pro/DTS-HD LBR-> FIX, offline, now
 
   3. The fix: ffmpeg copies EVERY stream losslessly and appends one track,
      transcoded from the best source, to the wiring's chain-native Dolby
@@ -90,6 +102,7 @@ from typing import Any
 from organizekit.core import (
     AUDIO_DECODE_PCM,
     AUDIO_DTS_CORE,
+    AUDIO_DTS_HD_CORE,
     AUDIO_NATIVE,
     AUDIO_TRANSCODE_BOUND,
     AUDIO_UNKNOWN,
@@ -167,6 +180,7 @@ SKIP_DIR_NAMES = frozenset({
 # Stored verdict vocabulary (state cache + report; do not re-case).
 STATUS_NATIVE = "native-ok"
 STATUS_DTS = "dts-core-ok"
+STATUS_DTS_HD = "dts-hd-core-ok"
 STATUS_PCM = "pcm-decode-ok"
 STATUS_TRANSCODED = "transcoded-dolby"
 STATUS_PLANNED = "would-transcode-dolby"   # dry-run only
@@ -176,17 +190,19 @@ STATUS_ERROR = "error"
 
 # The verdicts that mean "nothing further to do for this movie": what
 # `organize status` counts as settled work.
-SETTLED_AUDIOFIT = frozenset({STATUS_NATIVE, STATUS_DTS, STATUS_PCM, STATUS_TRANSCODED})
+SETTLED_AUDIOFIT = frozenset({STATUS_NATIVE, STATUS_DTS, STATUS_DTS_HD, STATUS_PCM,
+                              STATUS_TRANSCODED})
 
 CATEGORY_LABELS = {
     STATUS_NATIVE: "1. CHAIN-NATIVE  —  AC-3 / E-AC-3 already present",
     STATUS_DTS: "2. DTS CORE  —  OK (bar decodes; chipset passthrough)",
-    STATUS_PCM: "3. DECODE-TO-PCM  —  OK (Chromecast decodes to PCM)",
-    STATUS_TRANSCODED: "4. TRANSCODED  —  chain-native Dolby baked in from a lossless track",
-    STATUS_PLANNED: "4. WOULD TRANSCODE  —  dry-run plan only",
-    STATUS_REVIEW: "5. REVIEW  —  unknown audio, fail-closed, untouched",
-    STATUS_DEFERRED: "6. DEFERRED  —  still seeding, untouched",
-    STATUS_ERROR: "7. ERRORS",
+    STATUS_DTS_HD: "3. DTS-HD / DTS:X  —  OK (player extracts the DTS core it carries)",
+    STATUS_PCM: "4. DECODE-TO-PCM  —  OK (Chromecast decodes to PCM)",
+    STATUS_TRANSCODED: "5. TRANSCODED  —  chain-native Dolby baked in from a lossless track",
+    STATUS_PLANNED: "5. WOULD TRANSCODE  —  dry-run plan only",
+    STATUS_REVIEW: "6. REVIEW  —  unknown audio, fail-closed, untouched",
+    STATUS_DEFERRED: "7. DEFERRED  —  still seeding, untouched",
+    STATUS_ERROR: "8. ERRORS",
 }
 
 log = RunLog()
@@ -467,9 +483,11 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
        would settle a movie while stripping its only playable audio (8.3.0).
        The invariant: if audiofit calls a file settled, the keeper is a
        track this chain can emit.
-    3. Otherwise the pool's best track decides: base DTS is accepted (the
-       AX3125H has a DTS decoder and the G454V's firmware passes core DTS -
-       measured on this chain, so it is the default on both wirings) unless
+    3. Otherwise the pool's best track decides: the DTS family is accepted
+       (the AX3125H has a DTS decoder and the G454V's firmware passes core DTS
+       - measured on this chain - and for DTS-HD MA/HRA/DTS:X the player
+       extracts the backward-compatible DTS core it carries, user-confirmed
+       2026-10, so it is the default on both wirings) unless
        ``--no-dts-passthrough`` asks for the conversion anyway;
        client-decodable tracks are fine — multichannel included, on the
        default wiring, because the soundbar's HDMI IN accepts multichannel
@@ -477,10 +495,11 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
        multichannel ones become transcode candidates (this TV's digital
        audio output offers PCM 2.0 for HDMI sources, so ARC/optical would
        deliver them as stereo);
-    4. lossless-HD / WMA-Pro tracks get the wiring's chain-native Dolby
-       codec synthesized from the pool's best track (Dolby Digital Plus on
-       the default soundbar-hdmi-in wiring, AC-3 under tv-arc), preferring
-       a lossless source over a lossy one;
+    4. the formats the player genuinely cannot emit (TrueHD, WMA Pro, DTS-HD
+       LBR/DTS Express - no backward-compatible core) get the wiring's
+       chain-native Dolby codec synthesized from the pool's best track (Dolby
+       Digital Plus on the default soundbar-hdmi-in wiring, AC-3 under
+       tv-arc), preferring a lossless source over a lossy one;
     5. unknown codecs are reported, never touched (fail-closed).
     """
     is_commentary, is_named_dub, native_lang_fn, lang_token = _cleaner_helpers()
@@ -534,6 +553,16 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
                   f"{describe_stream(best_stream)} — {audio_chain_note(best_blob, best_channels, cfg.wiring)}",
                   AUDIO_DTS_CORE)
 
+    if best_cls == AUDIO_DTS_HD_CORE and cfg.dts_passthrough_ok:
+        # The lossless HD layer never leaves the box, but the player extracts
+        # the backward-compatible DTS core it carries and bitstreams that, so
+        # this movie needs no server work and no synthesized replacement
+        # (user-confirmed 2026-10; see playbackchain.PLAYER.dts_hd_core_fallback).
+        # `--no-dts-passthrough` is the one way to spend the master instead.
+        return _v(STATUS_DTS_HD,
+                  f"{describe_stream(best_stream)} — {audio_chain_note(best_blob, best_channels, cfg.wiring)}",
+                  AUDIO_DTS_HD_CORE)
+
     pcm_acceptable = not (cfg.wiring == WIRING_TV_ARC and best_channels > 2)
     if best_cls == AUDIO_DECODE_PCM and pcm_acceptable:
         return _v(STATUS_PCM,
@@ -545,10 +574,13 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
                   f"{describe_stream(best_stream)} — {audio_chain_note(best_blob, best_channels, cfg.wiring)}",
                   AUDIO_UNKNOWN)
 
-    # Transcode candidates: transcode-bound, plus DTS/decode-to-pcm when the
-    # configuration declined them above. Prefer a lossless source track: the
-    # pool is quality-ranked, and a DTS-HD MA source transcodes to better
-    # Dolby than the fallback to a lossy core would.
+    # Transcode candidates: the formats the player cannot emit at all
+    # (transcode-bound — TrueHD, WMA Pro, DTS Express), plus whatever the
+    # configuration declined above (the DTS family under
+    # --no-dts-passthrough, multichannel PCM under tv-arc). A transcode-bound
+    # source is preferred when the pool has one: it is the master that
+    # genuinely needs the conversion, and it is lossless where the declined
+    # alternatives are not.
     src_stream, _src_track, src_cls = classified[0]
     for s, t, cls in classified:
         if cls == AUDIO_TRANSCODE_BOUND:
@@ -980,8 +1012,8 @@ def scan(cfg: Config) -> int:
     # not have to guess whether somebody passed a flag to get it.
     dts_default = dts_passthrough_default(cfg.wiring)
     dts_origin = "wiring default" if cfg.dts_passthrough_ok == dts_default else "overridden by flag"
-    log(f"DTS core accepted      : "
-        f"{'yes' if cfg.dts_passthrough_ok else 'no (transcoded to the Dolby target)'}"
+    log(f"DTS family accepted     : "
+        f"{'yes (core, and the core inside DTS-HD/DTS:X)' if cfg.dts_passthrough_ok else 'no (transcoded to the Dolby target)'}"
         f" [{dts_origin}]")
     log(f"Dry run                : {cfg.dry_run}")
     log(f"ffprobe                : {cfg.ffprobe}")
@@ -1098,6 +1130,7 @@ def scan(cfg: Config) -> int:
     log("=" * 79)
     log(f"  Chain-native already     : {by[STATUS_NATIVE]}")
     log(f"  DTS core (OK here)       : {by[STATUS_DTS]}")
+    log(f"  DTS-HD/DTS:X via core    : {by[STATUS_DTS_HD]}")
     log(f"  Decode-to-PCM (OK here)  : {by[STATUS_PCM]}")
     dolby_label = dolby_name(target_audio_for(6, cfg.wiring).codec)
     if cfg.dry_run:
@@ -1149,7 +1182,8 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         ((by[STATUS_PLANNED] if cfg.dry_run else sum(1 for r in applied if not r.error)),
          f"{synth} transcodes", "planned (dry-run)" if cfg.dry_run else "completed this run"),
         (by[STATUS_NATIVE], "Already chain-native", "AC-3/E-AC-3: bitstreams as-is"),
-        (by[STATUS_DTS] + by[STATUS_PCM], "Native via decode/DTS", "no action on this chain"),
+        (by[STATUS_DTS] + by[STATUS_DTS_HD] + by[STATUS_PCM], "Native via decode/DTS",
+         "no action on this chain"),
         (by[STATUS_REVIEW], "Human review", "unknown audio — fail-closed, untouched"),
         (by[STATUS_DEFERRED], "Deferred (seeding)", "still hardlinked to a seed"),
         (by[STATUS_ERROR], "Errors", "not modified"),
@@ -1158,18 +1192,21 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
     report.paragraph(
         "The chain's hard rule: the Chromecast with Google TV (HD) G454V can emit "
         "Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3, Atmos included), base "
-        "5.1 DTS (unofficial) and decoded PCM — never TrueHD, DTS-HD, DTS:X or "
-        "WMA Pro. A movie whose best track is lossless-HD is audio-transcoded by "
-        "the Jellyfin server on every play, which is why one "
+        "5.1 DTS (unofficial), the DTS core it extracts from a DTS-HD/DTS:X track, "
+        "and decoded PCM — but never TrueHD, WMA Pro or DTS Express. A movie whose "
+        "best track is one of those is audio-transcoded by the Jellyfin server on "
+        "every play, which is why one "
         f"{synth} track is synthesized here, once, from the best lossless "
         "source (video copied untouched, subtitles untouched). mkv_track_cleaner.py "
-        "runs next and keeps exactly that chain-native track; the foreign-language "
-        "dubs, commentary and the lossless master leave the file there."
+        "runs next and keeps exactly one chain-native track; the foreign-language "
+        "dubs, commentary and the master leave the file there. DTS-HD is NOT in "
+        "that bucket: the player extracts the DTS core such a track carries and "
+        "the bar decodes it, so those movies are reported, not converted."
     )
 
     ordered = [STATUS_PLANNED if cfg.dry_run else STATUS_TRANSCODED,
                STATUS_REVIEW, STATUS_DEFERRED, STATUS_ERROR,
-               STATUS_NATIVE, STATUS_DTS, STATUS_PCM]
+               STATUS_NATIVE, STATUS_DTS, STATUS_DTS_HD, STATUS_PCM]
     intros = {
         STATUS_TRANSCODED: "Action: none left — the chain-native Dolby track is in the file now; "
                            "the cleaner will keep it and drop the lossless master.",
@@ -1182,6 +1219,11 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
                     "hardware (Jellyfin reports Direct Play, and the AX3125H lights its DTS "
                     "indicator), so no flag is needed. Only --no-dts-passthrough converts these "
                     "to the chain-native Dolby codec.",
+        STATUS_DTS_HD: "Action: none. The player cannot emit the lossless DTS-HD/DTS:X layer, but it "
+                       "extracts the backward-compatible DTS core such a track carries and "
+                       "bitstreams that - the AX3125H decodes it as DTS 5.1 and its panel reads "
+                       "DTS, not DTS-HD/DTS:X, with no server work. Only --no-dts-passthrough "
+                       "converts these (from the lossless layer) to the chain-native Dolby codec.",
         STATUS_PCM: "Action: none. The Chromecast decodes these to PCM; over the soundbar's "
                     "HDMI IN even multichannel PCM plays.",
     }
@@ -1212,8 +1254,11 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         "native-ok = AC-3/E-AC-3 on board: Dolby licenses every hop of this chain (official G454V passthrough).",
         "dts-core-ok = base 5.1 DTS: official list or not, it is measured working here (Jellyfin "
         "Direct Play + the AX3125H's DTS indicator); Amlogic firmware passes it, the bar decodes it.",
+        "dts-hd-core-ok = DTS-HD MA/HRA, DTS:X: the player cannot emit the lossless HD layer, but it "
+        "extracts the backward-compatible DTS core and bitstreams that (user-confirmed 2026-10) - "
+        "the bar decodes DTS 5.1, no server work.",
         "pcm-decode-ok = AAC/FLAC/MP3/Opus/PCM: the Chromecast decodes; HDMI IN accepts multichannel PCM.",
-        f"transcoded-dolby = TrueHD/DTS-HD/DTS:X/WMA Pro can never leave the G454V, so {synth} was synthesized (@ 640 kbps surround).",
+        f"transcoded-dolby = TrueHD/WMA Pro/DTS Express can never leave the G454V, so {synth} was synthesized (@ 640 kbps surround).",
         "review-unknown = unrecognized audio; fail-closed, untouched. deferred-seeding = still hardlinked to a seed.",
         "Facts and wiring: organizekit/core/playbackchain.py · full write-up: docs/hardware.md.",
     ]
@@ -1296,8 +1341,10 @@ def build_parser() -> argparse.ArgumentParser:
             "Make every movie's audio playable end-to-end on the Chromecast with "
             "Google TV (HD) G454V -> Hisense AX3125H chain: synthesize a native "
             "Dolby track (Dolby Digital Plus on the default soundbar-hdmi-in "
-            "wiring, AC-3 under tv-arc) from the TrueHD/DTS-HD sources the "
-            "player can never emit."
+            "wiring, AC-3 under tv-arc) from the TrueHD / WMA Pro / DTS Express "
+            "sources the player can never emit. The DTS-HD family needs no "
+            "transcode: the player extracts the DTS core those tracks carry and "
+            "the bar decodes it (--no-dts-passthrough converts them anyway)."
         ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
@@ -1340,24 +1387,28 @@ def build_parser() -> argparse.ArgumentParser:
                               f"decode-to-pcm movies are transcoded too. Env: "
                               f"{WIRING_ENV_VAR}."))
     # Three-valued on purpose: neither flag given means "use the wiring's
-    # default" (playbackchain.DTS_PASSTHROUGH_DEFAULT), which accepts base
-    # DTS on both wirings - measured on this chain (Jellyfin Direct Plays it
-    # and the AX3125H panel lights DTS), so no flag is needed. Giving either
-    # flag states the policy explicitly and wins over the table: a scheduler
-    # that wants the conversion anyway can still pass --no-dts-passthrough,
-    # and --dts-passthrough spells out the default.
+    # default" (playbackchain.DTS_PASSTHROUGH_DEFAULT), which accepts the
+    # whole DTS family on both wirings - base DTS measured on this chain
+    # (Jellyfin Direct Plays it and the AX3125H panel lights DTS), DTS-HD by
+    # the core the player extracts from it (user-confirmed 2026-10) - so no
+    # flag is needed. Giving either flag states the policy explicitly and wins
+    # over the table: a scheduler that wants the conversion anyway can still
+    # pass --no-dts-passthrough, and --dts-passthrough spells out the default.
     dts = parser.add_mutually_exclusive_group()
     dts.add_argument("--no-dts-passthrough", dest="dts_passthrough_ok",
                      action="store_false", default=None,
-                     help="Treat base DTS as transcode-bound: convert it to the wiring's "
-                          "Dolby target. NOT the default on any wiring - passthrough is "
-                          "verified working on this chain (the G454V passes core DTS "
-                          "through and the AX3125H decodes it) - so this flag states the "
-                          "conversion policy explicitly for a scheduler that wants it")
+                     help="Treat the whole DTS family as transcode-bound: convert it to the "
+                          "wiring's Dolby target. NOT the default on any wiring - passthrough "
+                          "is verified working on this chain (the G454V passes core DTS "
+                          "through, and extracts the DTS core out of DTS-HD/DTS:X, while the "
+                          "AX3125H decodes it) - so this flag states the conversion policy "
+                          "explicitly for a scheduler that wants it. A DTS-HD master is burned "
+                          "from its lossless layer, so this is the one way to spend it")
     dts.add_argument("--dts-passthrough", dest="dts_passthrough_ok",
                      action="store_true", default=None,
-                     help="Leave base DTS alone, the default on every wiring; spelling it "
-                          "out states the accept policy explicitly")
+                     help="Leave the DTS family alone (base DTS, and the DTS core inside "
+                          "DTS-HD MA/HRA and DTS:X), the default on every wiring; spelling "
+                          "it out states the accept policy explicitly")
     parser.add_argument("--dry-run", action="store_true",
                         help="Probe and show the plan; never modify any file")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N movies (testing)")
@@ -1473,9 +1524,13 @@ def run_self_tests() -> int:
          lambda: classify_audio_blob("E-AC-3 A_EAC3") == AUDIO_NATIVE),
         ("AC-3 is chain-native",
          lambda: classify_audio_blob("AC-3 A_AC3") == AUDIO_NATIVE),
-        ("DTS-HD MA is transcode-bound while base DTS is not",
-         lambda: classify_audio_blob("DTS-HD MA") == AUDIO_TRANSCODE_BOUND
-         and classify_audio_blob("DTS A_DTS") == AUDIO_DTS_CORE),
+        ("DTS-HD MA plays via the DTS core the player extracts, base DTS via its own core",
+         lambda: (PLAYER.dts_hd_core_fallback
+                  and classify_audio_blob("DTS-HD MA") == AUDIO_DTS_HD_CORE
+                  and classify_audio_blob("DTS A_DTS") == AUDIO_DTS_CORE
+                  and classify_audio_blob("DTS-HD LBR") == AUDIO_TRANSCODE_BOUND)),
+        ("a 7.1 DTS-HD master reaches 5.1 on this chain (its core's layout)",
+         lambda: achievable_channels(AUDIO_DTS_HD_CORE, 8) == 6),
         ("AAC/FLAC decode to PCM (still native on this chain)",
          lambda: classify_audio_blob("AAC") == AUDIO_DECODE_PCM
          and classify_audio_blob("FLAC") == AUDIO_DECODE_PCM),
@@ -1487,6 +1542,10 @@ def run_self_tests() -> int:
                   and t.bitrate == "640k")(target_audio_for(8, WIRING_TV_ARC))),
         ("a TrueHD movie plans a chain-native Dolby transcode",
          _smoke_truehd_plans_transcode),
+        ("a DTS-HD MA movie needs nothing (the player extracts its DTS core)",
+         _smoke_dts_hd_is_settled),
+        ("--no-dts-passthrough converts the same DTS-HD master anyway",
+         _smoke_dts_hd_converts_on_flag),
         ("unknown audio is reviewed, never touched",
          _smoke_unknown_is_reviewed),
         ("a chain-native movie needs nothing",
@@ -1514,6 +1573,41 @@ def _smoke_truehd_plans_transcode() -> bool:
             and verdict.target.codec == "eac3"
             and verdict.target.channels == FFMPEG_DOLBY_ENCODE_MAX_CHANNELS
             and verdict.source_stream == 1)
+
+
+def _smoke_dts_hd_is_settled() -> bool:
+    """DTS-HD MA alone: settled as dts-hd-core-ok, with no Dolby target.
+
+    User-confirmed 2026-10 on the real chain: the G454V cannot emit the HD
+    layer, but it extracts the DTS core such a track carries and bitstreams
+    that, so converting would spend the lossless master for nothing.
+    """
+    verdict = _smoke_plan({
+        "streams": [
+            {"index": 0, "codec_type": "video", "codec_name": "h264"},
+            {"index": 1, "codec_type": "audio", "codec_name": "dts",
+             "profile": "DTS-HD MA", "channels": 8,
+             "tags": {"language": "eng"}, "disposition": {"default": 1}},
+        ],
+        "format": {"duration": "7200.0"},
+    }, STATUS_DTS_HD)
+    return (verdict.status == STATUS_DTS_HD and verdict.target is None
+            and verdict.audio_class == AUDIO_DTS_HD_CORE)
+
+
+def _smoke_dts_hd_converts_on_flag() -> bool:
+    """--no-dts-passthrough is the one way to spend the DTS-HD master."""
+    verdict = plan_for_payload("x.mkv", {
+        "streams": [
+            {"index": 0, "codec_type": "video", "codec_name": "h264"},
+            {"index": 1, "codec_type": "audio", "codec_name": "dts",
+             "profile": "DTS-HD MA", "channels": 8,
+             "tags": {"language": "eng"}, "disposition": {"default": 1}},
+        ],
+        "format": {"duration": "7200.0"},
+    }, Config(dry_run=True, dts_passthrough_ok=False))
+    return (verdict.status == STATUS_PLANNED and verdict.target is not None
+            and verdict.target.codec == "eac3" and verdict.source_stream == 1)
 
 
 def _smoke_unknown_is_reviewed() -> bool:

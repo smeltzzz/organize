@@ -26,10 +26,21 @@ The short version of the physics, and why it drives every default:
 * The Chromecast with Google TV (HD) is the *only* player. It decodes
   H.264, HEVC, VP9 and AV1 up to 1080p60, and it can only ever EMIT
   Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3, including DD+ Atmos
-  via HDMI pass-through), base 5.1 DTS (chipset-level, unofficial), and
-  decoded PCM. It cannot pass through TrueHD, DTS-HD or DTS:X — so a
-  "better" lossless track in a file is not free quality, it is a
+  via HDMI pass-through), base 5.1 DTS (chipset-level, unofficial),
+  the backward-compatible DTS core extracted out of a DTS-HD MA/HRA or
+  DTS:X track, and decoded PCM. The only families it genuinely cannot
+  get any audio out of are TrueHD and WMA (Pro / Lossless), plus DTS
+  Express — so a TrueHD track in a file is not free quality, it is a
   guaranteed server-side audio transcode on every single play.
+* A DTS-HD track is NOT in that bucket. The player cannot emit the HD
+  layer, but DTS-HD is backward compatible by design: the player extracts
+  the DTS core (5.1, lossy) that every DTS-HD bitstream carries and
+  bitstreams THAT, so the movie Direct Plays as DTS — the AX3125H decodes
+  it and its panel reads DTS, not DTS-HD/DTS:X. What is lost is the HD
+  layer (and any DTS:X object metadata), not the audio. Converting such a
+  track to DD+ would therefore destroy the lossless master to buy nothing
+  (see ``DTS_PASSTHROUGH_DEFAULT``); the recorded device fact is
+  ``PLAYER.dts_hd_core_fallback``, measured on this chain 2026-10.
 * The AX3125H is fed through its HDMI IN port, which decodes everything
   the Chromecast can emit — AC-3, DD+ Atmos, DTS, and multichannel PCM —
   before the video passes through to the TV. That is what makes the
@@ -90,9 +101,24 @@ class Player:
     # What the device can pass through over HDMI. Official Google list is
     # DD/DD+/Atmos(DD+); base 5.1 DTS passes at the Android/Amlogic firmware
     # layer (every Amlogic TV build since 8.1) but is NOT on Google's list,
-    # hence "unofficial". No TrueHD / DTS-HD / DTS:X ever leaves this box.
+    # hence "unofficial". No TrueHD and no DTS-HD *HD layer* ever leaves this
+    # box - but the DTS core inside DTS-HD MA/HRA/DTS:X does (see
+    # ``dts_hd_core_fallback`` immediately below).
     passthrough_audio: tuple[str, ...] = ("ac3", "eac3", "eac3-joc")
     passthrough_audio_unofficial: tuple[str, ...] = ("dts-core",)
+    #: DTS-HD MA / DTS-HD HRA / DTS:X are not passed through as HD
+    #: bitstreams - the G454V cannot emit the lossless layer - but unlike
+    #: TrueHD the audio survives: DTS-HD is backward compatible by design,
+    #: and the player extracts the DTS core (up to 5.1, lossy) that every
+    #: such bitstream carries and bitstreams THAT. The bar decodes it as
+    #: DTS - its front panel reads DTS, never DTS-HD/DTS:X - and the movie
+    #: Direct Plays with no server transcode. What is lost is the HD layer
+    #: and any DTS:X object metadata, not the playback. USER-CONFIRMED
+    #: 2026-10 on the actual G454V; drives :data:`AUDIO_DTS_HD_CORE`.
+    #: DTS-HD LBR (DTS Express) is the exception: it is a separate
+    #: low-bitrate decoder with no backward-compatible core, so it stays
+    #: transcode-bound.
+    dts_hd_core_fallback: bool = True
 
 @dataclass(frozen=True)
 class Sink:
@@ -185,6 +211,7 @@ SOURCES: tuple[str, ...] = (
     "https://www.manualowl.com/m/Samsung/UN60F6350AF/Manual/347300 (UN60F6350AF e-manual: 'ARC is only available through the HDMI (ARC) port'; Digital Audio Output (SPDIF) formats 'may vary depending on the input source')",
     "https://www.samsung.com/sg/support/tv-audio-video/how-to-use-the-hdmi-arc-port-on-a-samsung-tv/ (Samsung support: HDMI-ARC carries PCM 2ch, Dolby Digital up to 5.1 and DTS Digital Surround up to 5.1; 2013-2014 F/H-series sound-output path)",
     "USER-CONFIRMED 2026-09 on the actual UN60F6350AF: with HDMI sources connected, the TV offers PCM only as its digital audio output format, so the ARC/optical path delivers multichannel content as stereo PCM",
+    "USER-CONFIRMED 2026-10 on the actual G454V -> AX3125H chain: DTS-HD MA, DTS-HD HRA and DTS:X are never passed through as HD bitstreams, but the player does not drop the audio - it automatically extracts the backward-compatible DTS CORE (5.1) every such bitstream carries and bitstreams that, so the bar still decodes surround and its front panel reads DTS (not DTS-HD/DTS:X). These tracks therefore Direct Play with no server transcode; what is lost is the HD layer and any DTS:X object metadata. DTS-HD LBR / DTS Express is the exception (no backward-compatible core), so it stays transcode-bound",
     "https://jellyfin.org/docs/general/clients/codec-support/ (Jellyfin Android-TV codec support matrix: AAC/AC3/EAC3 direct)",
 )
 
@@ -227,57 +254,69 @@ def resolve_wiring(explicit: str | None = None) -> str:
 # BASE DTS: accepted, or treated as transcode-bound?
 # =============================================================================
 
-#: Whether base 5.1 DTS core should be left alone, per wiring.
+#: Whether DTS-family tracks should be left alone, per wiring.
 #:
 #: Both wirings answer ``True``: the table is uniform, because on this chain
-#: base DTS is accepted on evidence rather than on faith.
+#: the whole DTS family is accepted on evidence rather than on faith.
 #:
-#: Base DTS is still not on Google's published passthrough list for the G454V
-#: (that list is Dolby Digital / Dolby Digital Plus / Atmos-via-DD+); it plays
-#: because the Amlogic firmware passes core DTS through at the HDMI layer.
-#: 8.5.0 read that gap as a reason to convert - undocumented means undependable
-#: - and made ``soundbar-hdmi-in`` decline it by default. That was an
-#: assumption, and in 2026-10 it was tested on the actual chain instead: a
-#: base-DTS movie was played through Jellyfin to the G454V and **two
-#: independent indicators agreed**:
+#: DTS is still not on Google's published passthrough list for the G454V (that
+#: list is Dolby Digital / Dolby Digital Plus / Atmos-via-DD+); both halves of
+#: the family play because the Amlogic firmware passes DTS bitstreams through
+#: at the HDMI layer, and both were tested on the actual chain rather than
+#: argued about:
 #:
-#: * Jellyfin reported **Direct Play** - no transcode at either end, so the
-#:   server was handed a bitstream it accepted as final; and
-#: * the AX3125H's front panel lit its **DTS** indicator, which it only does
-#:   for a real DTS bitstream arriving at its decoder.
+#: * **base 5.1 DTS core** - a base-DTS movie was played through Jellyfin to
+#:   the G454V and two independent indicators agreed: Jellyfin reported
+#:   **Direct Play** (no transcode at either end), and the AX3125H's front
+#:   panel lit its **DTS** indicator, which it only does for a real DTS
+#:   bitstream arriving at its decoder.
+#: * **DTS-HD MA / DTS-HD HRA / DTS:X** - user-confirmed 2026-10 on the same
+#:   chain: the G454V cannot emit the lossless HD layer, but it does not drop
+#:   the audio either. It automatically extracts the backward-compatible DTS
+#:   core (5.1, lossy) and passes THAT through, so the bar still decodes
+#:   surround and its panel reads **DTS** instead of DTS-HD/DTS:X. No server
+#:   transcode happens, which is exactly what makes converting pointless:
+#:   the delivered audio would be the same DTS (or, after conversion, a
+#:   *smaller* 640 kbps DD+ bed).
 #:
-#: Measured fact, then, not an assumption. Given that, converting is
+#: Measured facts, then, not assumptions. Given that, converting is
 #: irreversible loss buying nothing: 1509 kbps DTS core becomes a 640 kbps
 #: DD+ bed, a difference of ~870 kbps - about 780 MB on a two-hour movie -
-#: and it spends that to replace a bitstream the bar already decodes. The
-#: 3.1.2 array folds a 5.1 mix whatever carries it, so the trade never had a
-#: quality argument either; 8.5.0's only real argument was availability risk.
-#:
-#: That risk is cheap to self-insure against, which is what settles it. This
-#: decision is reversible *at playback time, from the untouched source*: if a
-#: firmware update ever ends the passthrough, ``audiofit`` converts then, from
-#: the same bytes, to the identical DD+ result it would have written today.
-#: Waiting costs one rerun; converting up front costs the DTS track forever on
-#: a bet that turned out to be wrong on this hardware.
-#:
-#: One further fact made the 8.5.0 default unreachable rather than merely
-#: debatable: ``pipeline.py`` exposes no ``--dts-passthrough`` flag and
-#: forwards nothing to the audiofit step, so ``organize run`` could not opt
-#: out of the conversion at all.
+#: and on a DTS-HD master it would also destroy the lossless layer to replace
+#: audio the bar already decodes; in both cases the 3.1.2 array folds the mix
+#: whatever carries it, so the trade never had a quality argument either.
+#: 8.5.0's only real argument was availability risk, and that risk is cheap to
+#: self-insure against: this decision is reversible *at playback time, from
+#: the untouched source* - if a firmware update ever ends the passthrough,
+#: ``audiofit`` converts then, from the same bytes, to the identical DD+ result
+#: it would have written today. Waiting costs one rerun; converting up front
+#: costs the DTS track forever on a bet that turned out to be wrong on this
+#: hardware.
 #:
 #: Either way this is only a DEFAULT: ``--no-dts-passthrough`` and
 #: ``--dts-passthrough`` state the policy explicitly and win over the table.
+#: ``--no-dts-passthrough`` covers the WHOLE family - a DTS-HD master it is
+#: asked to convert is decoded from its lossless layer and re-encoded, which
+#: is the one way to spend the master deliberately.
 DTS_PASSTHROUGH_DEFAULT: dict[str, bool] = {
     WIRING_SOUNDBAR_HDMI_IN: True,
     WIRING_TV_ARC: True,
 }
 
 
-def dts_passthrough_default(wiring: str | None = None) -> bool:
-    """Whether base DTS core is accepted as-is on ``wiring``, absent a flag.
+#: Widest layout the backward-compatible DTS core can carry: 5.1 (6
+#: channels). DTS-ES extends the core family to 6.1 on some discs, but 5.1 is
+#: the layout a DTS-HD MA/HRA or DTS:X stream carries as its core, and it is
+#: the cap :func:`achievable_channels` credits such a track with.
+DTS_CORE_MAX_CHANNELS = 6
 
-    Both wirings accept it; see :data:`DTS_PASSTHROUGH_DEFAULT` for the
-    measurement that settled that. An unrecognized wiring resolves through
+
+def dts_passthrough_default(wiring: str | None = None) -> bool:
+    """Whether DTS-family tracks are accepted as-is on ``wiring``, absent a flag.
+
+    Covers base DTS core AND the DTS core the player extracts from a DTS-HD
+    MA/HRA/DTS:X track (see :data:`DTS_PASSTHROUGH_DEFAULT` for the evidence
+    that settled both). An unrecognized wiring resolves through
     :func:`resolve_wiring` first, so this can never answer for a chain that
     does not exist.
     """
@@ -293,8 +332,9 @@ def dts_passthrough_default(wiring: str | None = None) -> bool:
 # treat them as part of the toolkit's on-disk format, not as display text.
 AUDIO_NATIVE = "native-passthrough"       # AC-3 / E-AC-3(+Atmos): bitstreamed end-to-end
 AUDIO_DTS_CORE = "dts-core-passthrough"   # base DTS: works here, but unofficially (chipset, not Google spec)
+AUDIO_DTS_HD_CORE = "dts-hd-core-passthrough"  # DTS-HD MA/HRA, DTS:X: player extracts the DTS core it carries
 AUDIO_DECODE_PCM = "decode-to-pcm"        # AAC/FLAC/MP3/Opus/Vorbis/PCM: player decodes; PCM into the bar
-AUDIO_TRANSCODE_BOUND = "transcode-bound" # TrueHD/DTS-HD/DTS:X/WMA Pro: the player can never emit these
+AUDIO_TRANSCODE_BOUND = "transcode-bound" # TrueHD/DTS-HD LBR/WMA Pro: the player can never emit these
 AUDIO_UNKNOWN = "unknown"                 # fail-closed: reported, never auto-touched
 
 # Tier an audio class contributes to "which track does the cleaner keep".
@@ -302,9 +342,12 @@ AUDIO_UNKNOWN = "unknown"                 # fail-closed: reported, never auto-to
 # the best one that plays natively. Lossless HD formats sit below every
 # chain-native lossy format because the G454V cannot emit them — a TrueHD
 # track here is a promise that Jellyfin re-encodes the audio on every play.
+# A DTS-HD track is tiered with base DTS core because that is precisely what
+# reaches the bar: the extracted core, not the HD layer.
 CLASS_TIERS: dict[str, int] = {
     AUDIO_NATIVE: 100,
     AUDIO_DTS_CORE: 80,
+    AUDIO_DTS_HD_CORE: 80,
     AUDIO_DECODE_PCM: 65,
     AUDIO_TRANSCODE_BOUND: 30,
     AUDIO_UNKNOWN: 10,
@@ -372,14 +415,20 @@ def _classify_audio_segment(b: str) -> str | None:
     label contains "DTS" and a TrueHD Atmos track contains "ATMOS", so HD must
     be proven before any core), the chain-native Dolby family next, base DTS,
     then the client-decodable PCM family.
+
+    The DTS-HD family splits in two here, and the split is the whole point:
+    DTS-HD MA/HRA and DTS:X are backward compatible, so the player extracts
+    the DTS core they carry and bitstreams that (:data:`AUDIO_DTS_HD_CORE`),
+    while DTS-HD LBR / DTS Express is a separate low-bitrate decoder with no
+    core to fall back to (:data:`AUDIO_TRANSCODE_BOUND`).
     """
     if not b.strip():
         return None
     if "TRUEHD" in b or "A_MLP" in b or b.strip() == "MLP":
         return AUDIO_TRANSCODE_BOUND
-    if any(k in b for k in ("DTS-HD", "DTS/HD", "DTS:X", "DTS-X", "DTS_X",
-                            "DTS HD", "DTSHD", "A_DTS/LOSSLESS")):
-        return AUDIO_TRANSCODE_BOUND
+    dts_hd = _dts_hd_class(b)
+    if dts_hd is not None:
+        return dts_hd
     if any(k in b for k in ("WMAPRO", "WMA PRO", "WMA_LOSSLESS", "WMALOSSLESS")):
         # Android/ExoPlayer has no WMA Pro decoder; server transcodes.
         return AUDIO_TRANSCODE_BOUND
@@ -403,25 +452,59 @@ def _classify_audio_segment(b: str) -> str | None:
 
 #: Codec-NAME tokens a profile field may legitimately refine. Only a bare
 #: DTS codec name (mkvmerge's "DTS", ffprobe's "DTS"/"DCA") needs the second
-#: field: "DTS" + profile "DTS-HD MA" is an HD master, "DTS" + "A_DTS" is a
-#: core track. A codec ID ("A_DTS/HD_MA") or a full name ("DTS-HD") already
+#: field: "DTS" + profile "DTS-HD MA" is a core-fallback HD track, "DTS" +
+#: "A_DTS" is a plain core, and "DTS" + "A_DTS/EXPRESS" is transcode-bound
+#: (no core). A codec ID ("A_DTS/HD_MA") or a full name ("DTS-HD") already
 #: carries the answer, so the field after it is never consulted.
 _DTS_CODEC_NAME_TOKENS = frozenset({"DTS", "DCA"})
 
-#: Substrings that make a DTS *profile* field an HD/DTS:X variant rather than
-#: a plain core. Deliberately DTS-specific: "DTS TRUEHD 7.1" is a core track
-#: whose title narrates a source, and must not be promoted to an HD master.
-_DTS_HD_PROFILE_MARKERS = (
+#: Substrings that make a DTS *profile* field a DTS-HD-family variant rather
+#: than a plain core. Deliberately DTS-specific: "DTS TRUEHD 7.1" is a core
+#: track whose title narrates a source, and must not be promoted to an HD
+#: master.
+_DTS_HD_CORE_MARKERS = (
     "DTS-HD", "DTS/HD", "DTS:X", "DTS-X", "DTS_X",
     "DTS HD", "DTSHD", "A_DTS/LOSSLESS", "DTS LOSSLESS",
 )
 
+#: DTS-HD spellings with NO backward-compatible core. DTS-HD LBR (DTS
+#: Express) is a separate low-bitrate decoder - used for secondary audio -
+#: and a plain DTS decoder cannot play it, so these stay transcode-bound.
+_DTS_HD_NO_CORE_MARKERS = ("LBR", "EXPRESS")
 
-def _dts_profile_is_hd(*segments: str) -> bool:
-    """True when any DTS profile segment names an HD / DTS:X format."""
-    return any(marker in segment
-               for segment in segments if segment
-               for marker in _DTS_HD_PROFILE_MARKERS)
+#: Bare DTS spellings that can *start* a two-word DTS name, so the word after
+#: them may still belong to the codec rather than to a title ("DTS Express",
+#: "DTS-HD LBR"). Only these may be read through one more token: a codec ID
+#: such as "A_DTS" already carries its own answer, and everything after it is
+#: a title (the pinned case: "DTS A_DTS DTS-HD MA 7.1" stays core DTS).
+_DTS_NAME_LEAD_WORDS = frozenset({"DTS", "DTS-HD", "DTSHD", "DTS:X", "DTS-X", "DTS_X"})
+
+
+def _dts_hd_class(*segments: str) -> str | None:
+    """Classify DTS-HD vocabulary in profile/codec-ID text, or None.
+
+    Both halves of the DTS-HD family must be proven before the plain-DTS
+    branch can see them (every one of these labels contains "DTS"), and they
+    land in different classes:
+
+    * ``DTS-HD MA`` / ``DTS-HD HRA`` / ``DTS:X`` / ``A_DTS/HD_MA`` ->
+      :data:`AUDIO_DTS_HD_CORE`: not emittable as HD, but the player extracts
+      the backward-compatible DTS core and bitstreams that instead;
+    * ``DTS-HD LBR`` / ``DTS Express`` -> :data:`AUDIO_TRANSCODE_BOUND`:
+      DTS Express is its own decoder with no core, so there is nothing to
+      fall back to and the server must re-encode.
+
+    Never called on a free-form title: only on codec-name/profile fields,
+    which is why the shorter markers cannot collide with release-group prose.
+    """
+    text = " ".join(segment for segment in segments if segment).upper()
+    if not text:
+        return None
+    if "DTS" in text and any(k in text for k in _DTS_HD_NO_CORE_MARKERS):
+        return AUDIO_TRANSCODE_BOUND
+    if any(k in text for k in _DTS_HD_CORE_MARKERS):
+        return AUDIO_DTS_HD_CORE
+    return None
 
 
 def classify_audio_blob(blob: str) -> str:
@@ -436,8 +519,9 @@ def classify_audio_blob(blob: str) -> str:
     1. the **codec name** (``ffprobe``'s ``codec_name``, mkvmerge's codec
        column) decides on its own — so a real E-AC-3 stream is native even
        when its profile is empty/unknown and its title says "TrueHD 7.1";
-    2. the **second field** may only *refine* a bare DTS codec name into an
-       HD/DTS:X master (ffprobe's ``profile``, mkvmerge's codec ID);
+    2. the **second field** may only *refine* a bare DTS codec name into a
+       DTS-HD/DTS:X variant — the core-fallback class, or transcode-bound for
+       DTS Express (ffprobe's ``profile``, mkvmerge's codec ID);
     3. everything after that is a **title**, and titles are consulted only
        when the codec fields say nothing at all.
 
@@ -467,13 +551,34 @@ def classify_audio_blob(blob: str) -> str:
     #    next to the codec and let "TrueHD 7.1" turn an E-AC-3 stream into a
     #    transcode candidate.
     codec_class = _classify_audio_segment(tokens[0])
+    if (codec_class == AUDIO_DTS_HD_CORE and len(tokens) > 1
+            and tokens[1] in _DTS_HD_NO_CORE_MARKERS):
+        # mkvmerge prints the no-core variant as two words - "DTS-HD LBR" -
+        # and the codec-NAME field alone is just "DTS-HD", which reads as the
+        # core-fallback family. The marker is in field 2, so the pair is what
+        # says DTS Express; a title cannot slide in here, because a blob built
+        # by :func:`codec_blob` always has the profile in that slot.
+        return AUDIO_TRANSCODE_BOUND
     if codec_class == AUDIO_DTS_CORE and tokens[0] in _DTS_CODEC_NAME_TOKENS:
         # Only a bare DTS codec name is refined by the second field, and only
         # by DTS-specific HD vocabulary (never "TRUEHD", so a DTS core track
-        # titled "TrueHD 7.1 (source)" stays core).
+        # titled "TrueHD 7.1 (source)" stays core). The refinement can land in
+        # either DTS-HD class: the core-fallback one, or transcode-bound for
+        # DTS Express (no backward-compatible core).
         second = tokens[1] if len(tokens) > 1 else ""
-        if _dts_profile_is_hd(second, f"{tokens[0]} {second}".strip()):
-            return AUDIO_TRANSCODE_BOUND
+        third = tokens[2] if len(tokens) > 2 else ""
+        hd_class = _dts_hd_class(second, f"{tokens[0]} {second}".strip())
+        if (hd_class is None or hd_class == AUDIO_DTS_HD_CORE) \
+                and second in _DTS_NAME_LEAD_WORDS:
+            # The no-core markers trail a name instead of leading it ("DTS
+            # Express", "DTS-HD LBR"), and a profile is not one word wide, so
+            # one more token is read - but only while the field still holds a
+            # DTS name, and it may only conclude transcode-bound: a later word
+            # can never promote a core track into the HD family.
+            if _dts_hd_class(f"{second} {third}") == AUDIO_TRANSCODE_BOUND:
+                return AUDIO_TRANSCODE_BOUND
+        if hd_class is not None:
+            return hd_class
     if codec_class is not None:
         return codec_class
     # 2. The codec-name field is not a name this table knows (mkvmerge's
@@ -503,8 +608,14 @@ def tier_for_blob(blob: str) -> int:
 
 
 def is_chain_native(blob: str) -> bool:
-    """True when this track plays without any server-side audio transcode."""
-    return classify_audio_blob(blob) in (AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DECODE_PCM)
+    """True when this track plays without any server-side audio transcode.
+
+    Includes :data:`AUDIO_DTS_HD_CORE`: the player emits the DTS core inside
+    the DTS-HD bitstream, so playback needs no server work even though the HD
+    layer never leaves the box.
+    """
+    return classify_audio_blob(blob) in (
+        AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DTS_HD_CORE, AUDIO_DECODE_PCM)
 
 
 # =============================================================================
@@ -677,7 +788,10 @@ def achievable_channels(cls: str, channels: int,
     merely needs converting can still be converted later.
 
     * A **chain-native** track is already at its final layout. Nothing converts
-      it and nothing improves it, so it achieves exactly what it carries.
+      it and nothing improves it, so it achieves exactly what it carries — with
+      one exception: a DTS-HD MA/HRA or DTS:X track is native *by core
+      fallback*, and the core it falls back to tops out at 5.1
+      (:data:`DTS_CORE_MAX_CHANNELS`), so a 7.1 master achieves 6, not 8.
     * A **transcode-bound** track is not a dead end - it is precisely the input
       ``audio_standardizer.py`` synthesizes a chain-native Dolby track from - so
       it achieves that target's layout, which is at most 5.1 on EITHER wiring:
@@ -695,6 +809,13 @@ def achievable_channels(cls: str, channels: int,
         ch = 0
     if ch <= 0:
         return 0
+    if cls == AUDIO_DTS_HD_CORE:
+        # The backward-compatible DTS core is what reaches the bar, and the
+        # core layout tops out at 5.1 (DTS-ES 6.1 at the very widest) - a
+        # DTS-HD MA 7.1 track therefore achieves 6 channels, not 8. It is
+        # still native-band: nothing has to encode anything, the player
+        # extracts the core on the fly.
+        return min(ch, DTS_CORE_MAX_CHANNELS)
     if cls in (AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DECODE_PCM):
         return ch
     if cls == AUDIO_TRANSCODE_BOUND:
@@ -706,8 +827,8 @@ def achievable_channels(cls: str, channels: int,
 # thing every ranking decision compares. Three bands, not a continuum: either
 # it plays with no server work at all, or it can be converted into something
 # that does, or the toolkit does not recognise it and refuses to choose it.
-CHAIN_BAND_NATIVE = 2            # AC-3 / DD+ / base DTS / anything decoded to PCM
-CHAIN_BAND_TRANSCODE_BOUND = 1   # TrueHD / DTS-HD / DTS:X / WMA Pro: convertible by audiofit
+CHAIN_BAND_NATIVE = 2            # AC-3 / DD+ / DTS (core or extracted from DTS-HD) / decoded PCM
+CHAIN_BAND_TRANSCODE_BOUND = 1   # TrueHD / DTS-HD LBR / WMA Pro: convertible by audiofit
 CHAIN_BAND_UNKNOWN = 0           # fail closed: reported, never chosen if anything else exists
 
 _ATMOS_MARKERS = ("ATMOS", "JOC")
@@ -731,7 +852,7 @@ def chain_band_for(cls: str) -> int:
     and another band for the other is how a movie gets settled by a track the
     remux is about to delete.
     """
-    if cls in (AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DECODE_PCM):
+    if cls in (AUDIO_NATIVE, AUDIO_DTS_CORE, AUDIO_DTS_HD_CORE, AUDIO_DECODE_PCM):
         return CHAIN_BAND_NATIVE
     if cls == AUDIO_TRANSCODE_BOUND:
         return CHAIN_BAND_TRANSCODE_BOUND
@@ -793,6 +914,16 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> 
         return ("DTS core: chipset-level passthrough from the Chromecast "
                 "(works on Amlogic Android TV builds; not on Google's "
                 "official list) -> AX3125H DTS decoder")
+    if cls == AUDIO_DTS_HD_CORE:
+        if wiring == WIRING_TV_ARC:
+            return ("DTS-HD / DTS:X: the player extracts the DTS core it carries and "
+                    "the bar decodes it, but this TV offers PCM only for HDMI "
+                    "sources, so the ARC/optical path cannot be relied on to carry "
+                    "it - the default wiring (Chromecast -> soundbar HDMI IN) can")
+        return ("DTS-HD MA/HRA or DTS:X: the Chromecast cannot pass the lossless HD "
+                "layer, so it extracts the backward-compatible DTS core it carries "
+                "and bitstreams that - the bar decodes DTS 5.1 and its panel reads "
+                "DTS, not DTS-HD/DTS:X; no server transcode")
     if cls == AUDIO_DECODE_PCM:
         if ch > 2 and wiring == WIRING_TV_ARC:
             return ("the Chromecast decodes this to PCM, but this TV's digital audio "
@@ -804,8 +935,9 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING) -> 
                  else "(stereo)") )
     if cls == AUDIO_TRANSCODE_BOUND:
         target = dolby_name(target_audio_for(ch, wiring).codec)
-        return ("cannot leave the G454V (no TrueHD/DTS-HD/WMA-Pro passthrough "
-                "on Android TV) - Jellyfin re-encodes this audio on every "
+        return ("cannot leave the G454V (no TrueHD/WMA-Pro/DTS-Express passthrough "
+                "on Android TV, and unlike DTS-HD there is no backward-compatible "
+                "core to fall back to) - Jellyfin re-encodes this audio on every "
                 f"play; run audio_standardizer.py to bake in native {target}")
     return "unrecognized audio format - reported, never auto-touched"
 
@@ -906,8 +1038,8 @@ def chain_summary_lines(wiring: str | None = None) -> list[str]:
         + "/".join(c.upper() for c in PLAYER.video_codecs[:4])
         + f"; HDR {('/'.join(PLAYER.hdr_formats))} tone-mapped to SDR here; Dolby Vision NOT supported",
         f"         audio  passthrough: {', '.join(PLAYER.passthrough_audio)} "
-        f"(+ {', '.join(PLAYER.passthrough_audio_unofficial)} unofficial); "
-        "decodes AAC/FLAC/Opus/MP3 to PCM; NEVER TrueHD / DTS-HD / DTS:X",
+        f"(+ {', '.join(PLAYER.passthrough_audio_unofficial)} unofficial, and the DTS core "
+        "inside DTS-HD/DTS:X); decodes AAC/FLAC/Opus/MP3 to PCM; NEVER TrueHD / WMA Pro",
         f"Sink   : {SINK.model} {SINK.description} — decodes "
         "DD/DD+ Atmos/TrueHD/DTS/DTS-HD/multi-PCM",
         f"Display: {DISPLAY.model} ({DISPLAY.resolution[0]}x{DISPLAY.resolution[1]} SDR, "

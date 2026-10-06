@@ -862,14 +862,17 @@ def get_audio_quality_score(
        the key that makes a TrueHD Atmos 7.1 worth more than an AC-3 2.0 that
        plays today: the master becomes a DD+ 5.1 bed, the stereo track can
        never become anything.
-    2. **band** — *plays with no server work* (bitstreamed Dolby, base DTS, or
-       decoded to PCM) beats *transcode-bound* beats *unknown*. At an equal
-       achievable layout this is the Direct-Play-first rule, and it is what
-       keeps a 5.1 AC-3 ahead of a 5.1 TrueHD: same destination, but one of
-       them gets there without the server ever re-encoding anything. Since the
-       encoder cap both land at 5.1, so a 5.1 AC-3 now outranks a *7.1*
-       TrueHD too — a wider master no longer reaches further than the Dolby
-       track that already plays. ``audio_standardizer.py`` runs before this
+    2. **band** — *plays with no server work* (bitstreamed Dolby, base DTS, the
+       DTS core a DTS-HD/DTS:X player extracts, or decoded to PCM) beats
+       *transcode-bound* beats *unknown*. At an equal achievable layout this is
+       the Direct-Play-first rule, and it is what keeps a 5.1 AC-3 ahead of a
+       5.1 TrueHD: same destination, but one of them gets there without the
+       server ever re-encoding anything. Since the encoder cap both land at
+       5.1, so a 5.1 AC-3 now outranks a *7.1* TrueHD too — a wider master no
+       longer reaches further than the Dolby track that already plays; and a
+       DTS-HD MA / DTS:X master shares the band with base DTS — it *is* base
+       DTS at playback time, the extracted core, so it can neither outrank nor
+       be outranked on that ground. ``audio_standardizer.py`` runs before this
        tool in the pipeline and bakes the chain-native Dolby track in from
        exactly those masters, so by the time the cleaner looks, the master
        has usually already become the DD+ track that wins on key 1 outright.
@@ -877,9 +880,11 @@ def get_audio_quality_score(
        drivers exists for, so it wins among equal layouts. Credited only to
        Dolby Digital Plus: AC-3 has no Atmos variant, so a title cannot claim
        one.
-    4. **codec sub-tier** — DD+ (100) over DD (95) over base DTS (80) over
-       lossless-decodable (66) over Opus (62) over other lossy (60); below the
-       band, DTS-HD MA / DTS:X (34) over DTS-HD HRA (32) over the rest (30),
+    4. **codec sub-tier** — DD+ (100) over DD (95) over base DTS and the
+       DTS-HD family (80 — the player bits a DTS core either way) over
+       lossless-decodable (66) over Opus (62) over other lossy (60). Below the
+       band sit the formats with no native path at all: a lossless master
+       (TrueHD/MLP, WMA Lossless, 34) over WMA Pro (32) over the rest (30),
        which is also what picks the best transcode SOURCE —
        ``audio_standardizer._pool_rank`` delegates to this very function, so the
        two tools cannot disagree about which master to burn.
@@ -943,9 +948,12 @@ def chain_audio_tier(blob: str) -> int:
     The shared table (playbackchain.CLASS_TIERS) ranks CLASSES of codec; the
     cleaner's job is choosing one track among many, so within a class the
     historical quality order still applies (DD+ above DD, lossless-decodable
-    above lossy-decodable, DTS-HD above DTS core). The one load-bearing
-    change from the pre-chain table: native Dolby formats rank above EVERY
-    lossless-HD format.
+    above lossy-decodable, DTS-HD above DTS core). The two load-bearing
+    changes from the pre-chain table: native Dolby formats rank above EVERY
+    format the player cannot emit, and the DTS-HD family ranks WITH base DTS —
+    the player extracts the DTS core and bitstreams that, so the extra bits
+    buy nothing at playback and a DTS-HD track must not outrank real,
+    already-playable Dolby.
     """
     b = blob.upper()
     cls = playbackchain_classify(b)
@@ -954,7 +962,13 @@ def chain_audio_tier(blob: str) -> int:
         # edges out plain AC-3 inside the class. The marker list lives in
         # playbackchain so this and the Atmos gate cannot drift apart.
         return 100 if pc.is_dolby_digital_plus(b) else 95
-    if cls == pc.AUDIO_DTS_CORE:
+    if cls in (pc.AUDIO_DTS_CORE, pc.AUDIO_DTS_HD_CORE):
+        # Identical delivered audio: the bar decodes a DTS core either way
+        # (passed through as-is, or extracted from the DTS-HD bitstream by the
+        # player - user-confirmed 2026-10, see pc.PLAYER.dts_hd_core_fallback).
+        # The lossless layer the file keeps is what makes the track a valuable
+        # transcode SOURCE later; it is not something the bar can hear, so it
+        # does not raise the tier.
         return 80
     if cls == pc.AUDIO_DECODE_PCM:
         # All arrive as PCM after the player decodes them; lossless sources
@@ -965,12 +979,14 @@ def chain_audio_tier(blob: str) -> int:
             return 62
         return 60
     if cls == pc.AUDIO_TRANSCODE_BOUND:
-        # Not playable natively on the G454V, ever. If forced to keep one
-        # (no chain-native track exists yet — i.e. audiofit has not run),
-        # prefer the better master as the transcode source.
-        if any(k in b for k in ("DTS-HD MA", "DTS-HD MASTER", "DTS/HD_MA", "DTS:X", "DTS-X")):
+        # Not playable natively on the G454V, ever — and unlike the DTS-HD
+        # family, no backward-compatible core exists to fall back to (TrueHD,
+        # WMA Pro, DTS Express). If forced to keep one (no chain-native track
+        # exists yet — i.e. audiofit has not run), prefer the better master as
+        # the transcode source: a lossless one over a lossy one.
+        if any(k in b for k in ("TRUEHD", "A_MLP", "MLP", "WMALOSSLESS", "WMA_LOSSLESS")):
             return 34
-        if any(k in b for k in ("DTS-HD HRA", "DTS-HD HR", "DTS/HD_HRA", "DTS-HD HIGH RESOLUTION")):
+        if any(k in b for k in ("WMAPRO", "WMA PRO")):
             return 32
         return 30
     return 10
@@ -2565,12 +2581,13 @@ def process_mkv(
         stats.setdefault("keeper_needs_audiofit", []).append(movie_name)
         log(
             f"{tag}The retained audio for '{display_name}' is "
-            f"{describe_track(best_audio)}, which the G454V can never emit. It is kept "
-            "because a convertible master beats the narrower track that would otherwise "
-            "survive an irreversible remux - but it only becomes chain-native once "
-            "audio_standardizer.py converts it. Run `organize audio` (or `organize run`, "
-            "which orders the steps for you); until then this movie transcodes its audio "
-            "on every play.",
+            f"{describe_track(best_audio)}, which the G454V can never emit and which "
+            "has no backward-compatible core to fall back to (TrueHD, WMA Pro or "
+            "DTS Express). It is kept because a convertible master beats the narrower "
+            "track that would otherwise survive an irreversible remux - but it only "
+            "becomes chain-native once audio_standardizer.py converts it. Run "
+            "`organize audio` (or `organize run`, which orders the steps for you); "
+            "until then this movie transcodes its audio on every play.",
             level="WARNING", to_console=_console is None, log_file_path=log_file_path,
         )
 
@@ -2965,7 +2982,8 @@ def generate_and_save_report(
             report.subsection("RETAINED AUDIO STILL NEEDS AUDIOFIT", count=len(keeper_needs_audiofit))
             report.paragraph(
                 "The best track these movies could end up with is a lossless master "
-                "(TrueHD / DTS-HD / DTS:X / WMA Pro) that the G454V can never emit. It was "
+                "(TrueHD / WMA Pro / DTS-HD LBR) that the G454V can never emit and "
+                "that has no backward-compatible core to fall back to. It was "
                 "kept on purpose: the remux is irreversible, so a master "
                 "audio_standardizer.py can still convert into chain-native Dolby Digital "
                 "Plus beats a narrower track that plays today - deleting a 7.1 Atmos master "
