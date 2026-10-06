@@ -568,15 +568,15 @@ def classify_audio_blob(blob: str) -> str:
         second = tokens[1] if len(tokens) > 1 else ""
         third = tokens[2] if len(tokens) > 2 else ""
         hd_class = _dts_hd_class(second, f"{tokens[0]} {second}".strip())
-        if (hd_class is None or hd_class == AUDIO_DTS_HD_CORE) \
-                and second in _DTS_NAME_LEAD_WORDS:
-            # The no-core markers trail a name instead of leading it ("DTS
-            # Express", "DTS-HD LBR"), and a profile is not one word wide, so
-            # one more token is read - but only while the field still holds a
-            # DTS name, and it may only conclude transcode-bound: a later word
-            # can never promote a core track into the HD family.
-            if _dts_hd_class(f"{second} {third}") == AUDIO_TRANSCODE_BOUND:
-                return AUDIO_TRANSCODE_BOUND
+        # The no-core markers trail a name instead of leading it ("DTS
+        # Express", "DTS-HD LBR"), and a profile is not one word wide, so one
+        # more token is read - but only while the field still holds a DTS name,
+        # and it may only conclude transcode-bound: a later word can never
+        # promote a core track into the HD family.
+        if ((hd_class is None or hd_class == AUDIO_DTS_HD_CORE)
+                and second in _DTS_NAME_LEAD_WORDS
+                and _dts_hd_class(f"{second} {third}") == AUDIO_TRANSCODE_BOUND):
+            return AUDIO_TRANSCODE_BOUND
         if hd_class is not None:
             return hd_class
     if codec_class is not None:
