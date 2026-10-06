@@ -51,7 +51,8 @@ What this tool does, per movie:
        dts-core             base 5.1 DTS             -> done by default (see --dts-passthrough)
        dts-hd-core          DTS-HD MA/HRA, DTS:X     -> done by default: the player extracts
                                                        the DTS core and bitstreams that
-       decode-to-pcm        AAC/FLAC/MP3/Opus/PCM... -> app decodes to PCM where supported;
+       decode-to-pcm        AAC/FLAC/MPEG-audio/Opus/PCM... -> app decodes to PCM
+                                                       where supported;
                                                        toolkit envelope 24-bit/48 kHz, past it
                                                        REVIEW (app/route dependent, not Google spec)
        transcode-bound      TrueHD/WMA Pro/DTS-HD LBR-> conservative app-neutral Dolby fallback
@@ -389,7 +390,8 @@ def to_cleaner_track(stream: dict[str, Any], audio_ordinal: int) -> dict[str, An
     friendly = {
         "ac3": "AC-3", "eac3": "E-AC-3", "truehd": "TrueHD",
         "dts": f"DTS ({profile})" if profile else "DTS",
-        "aac": "AAC", "flac": "FLAC", "mp3": "MP3", "opus": "Opus",
+        "aac": "AAC", "flac": "FLAC", "mp1": "MP1", "mp2": "MP2",
+        "mp3": "MP3", "opus": "Opus",
         "vorbis": "Vorbis", "alac": "ALAC",
     }.get(codec_name) or codec_name or "unknown"
     # Field 1 of the classification blob is the codec NAME and it is the only
@@ -1234,9 +1236,10 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         f"{synth} fallback for TrueHD/WMA Pro/DTS Express without re-encoding video, "
         "and the generated E-AC-3 is not Atmos/JOC. DTS-HD/DTS:X are not in that "
         "bucket: the measured player extracts the DTS core and the bar decodes it. "
-        "The DTS family is credited at most 5.1. Dolby MAT is not a G454V output "
-        "(it is the Google TV Streamer's MS12 transport), so MAT/MPCM labels are "
-        "reported as unknown, not assumed PCM. ALAC/WavPack "
+        "The DTS family is credited at most 5.1. Dolby MAT is not an output of "
+        "this player (its Dolby MS12 stack bitstreams DD/DD+/Atmos JOC rather "
+        "than emitting uncompressed MAT, the Apple TV 4K / Xbox transport), so "
+        "MAT/MPCM labels are reported as unknown, not assumed PCM. ALAC/WavPack "
         "and decoded audio past the toolkit envelope are also reported for review."
     )
 
@@ -1300,7 +1303,7 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         "dts-hd-core-ok = DTS-HD MA/HRA, DTS:X: the player cannot bitstream the lossless HD layer, but it "
         "extracts the backward-compatible DTS core and bitstreams that (user-confirmed 2026-10 "
         "on the physical HDMI-IN chain only) - the bar decodes DTS 5.1, no server work.",
-        "pcm-decode-ok = app/software-decoded AAC/FLAC/MP3/Opus/Vorbis/WAV/PCM within the toolkit's conservative 24-bit/48 kHz envelope; multichannel output depends on the app/route, and HDMI IN accepts LPCM.",
+        "pcm-decode-ok = app/software-decoded AAC/FLAC/MPEG-audio/Opus/Vorbis/WAV/PCM within the toolkit's conservative 24-bit/48 kHz envelope; multichannel output depends on the app/route, and HDMI IN accepts LPCM.",
         f"transcoded-dolby = app-neutral fallback for TrueHD/WMA Pro/DTS Express; some apps decode TrueHD to PCM (without TrueHD Atmos metadata), so {synth} was synthesized (@ 640 kbps surround).",
         "review-unknown = fail-closed, untouched: an unrecognized codec (ALAC and WavPack are outside "
         "the confirmed decoder set), or decoded audio past the toolkit's conservative 24-bit/48 kHz envelope. "

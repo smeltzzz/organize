@@ -56,13 +56,16 @@ class DeviceFactTests(unittest.TestCase):
         self.assertTrue(pc.PLAYER.truehd_app_pcm_decode_possible)
         self.assertFalse(pc.PLAYER.truehd_atmos_survives_plain_pcm)
         # The bar's manual display map names a transport this player does not
-        # emit: the G454V documents HDMI pass-through, and Dolby MAT 2.1 is
-        # the Google TV Streamer's MS12 output (a different device). The
-        # display rows stay in the table as documentation of the sink, and the
-        # player's field says plainly that MAT is not an output path here.
+        # emit: the G454V's Dolby path is its Dolby MS12 stack running as
+        # bitstreaming, and uncompressed Dolby MAT (LPCM + Atmos objects) is
+        # the Apple TV 4K / Xbox on-box-decode transport, never this player's
+        # output. The display rows stay in the table as documentation of the
+        # sink, and the player's fields say plainly that MAT is not an output
+        # path here.
         self.assertEqual(pc.SINK.dolby_mat_manual_display, "MPCM")
         self.assertEqual(pc.SINK.dolby_mat_atmos_manual_display, "DOLBY ATMOS")
         self.assertFalse(pc.PLAYER.dolby_mat_output)
+        self.assertTrue(pc.PLAYER.dolby_ms12_bitstream_stack)
 
     def test_the_os_is_the_android_version_this_device_actually_runs(self) -> None:
         # The HD model shipped on Android TV 12 and received Android 14 (the
@@ -73,6 +76,9 @@ class DeviceFactTests(unittest.TestCase):
         summary = "\n".join(pc.chain_summary_lines())
         self.assertNotIn("unverified", summary.lower())
         self.assertIn("no Dolby MAT output", summary)
+        # The MAT fact only reads correctly with the stack that produces the
+        # bitstreams: MS12 in bitstream mode, not an on-box decode-and-MAT path.
+        self.assertIn("MS12", summary)
 
     def test_the_player_has_no_dolby_vision_license(self) -> None:
         # The HD model decodes HDR10/HDR10+/HLG only. Calibrated against the
@@ -103,8 +109,8 @@ class DeviceFactTests(unittest.TestCase):
                 self.assertIn(layout, pc.SINK.hdmi_in_accepts)
                 self.assertIn(layout, pc.SINK.arc_cannot_carry)
         # DD+ JOC is the officially listed Atmos passthrough path used by this
-        # toolkit. Dolby MAT is not an output path of this player and is not
-        # promoted here (it is the Google TV Streamer's transport).
+        # toolkit. Dolby MAT is not an output of this player — its MS12 stack
+        # bitstreams instead — so it is not promoted here.
         self.assertIn("Dolby Atmos - Dolby Digital Plus", pc.SINK.hdmi_in_accepts)
         self.assertNotIn("Dolby Atmos - Dolby Digital Plus", pc.SINK.arc_cannot_carry)
         # Everything the player can actually emit, the bar accepts on HDMI IN.
@@ -208,6 +214,24 @@ class AudioClassificationTests(unittest.TestCase):
                 self.assertNotEqual(pc.classify_audio_blob(blob), pc.AUDIO_DTS_CORE)
                 self.assertNotEqual(pc.classify_audio_blob(blob), pc.AUDIO_TRANSCODE_BOUND)
 
+    def test_the_mpeg_audio_family_decodes_to_pcm(self) -> None:
+        """MP1/MP2/MP3 are one family for this chain: app/platform-decoded PCM.
+
+        MP3 was already here; MP1 and MP2 (MPEG-1/2 Audio Layers I and II) are
+        the same software-decoded family the chain treats as playable inside
+        the 24-bit/48-kHz envelope, so ffprobe's ``mp1``/``mp2`` and
+        mkvmerge's ``A_MPEG/L1``/``A_MPEG/L2`` spellings must not fall
+        through to the fail-closed ``unknown`` class.
+        """
+        for blob in ("MP1", "MP2", "MP3", "MPEG AUDIO", "MPEG-1", "MPEG-2",
+                     "A_MPEG/L1", "A_MPEG/L2", "A_MPEG/L3",
+                     "MPEG-1/2 AUDIO LAYER 2", "MPEG-1/2 Audio Layer 3"):
+            with self.subTest(blob=blob):
+                self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_DECODE_PCM)
+                self.assertTrue(pc.is_chain_native(blob))
+        # Musepack is NOT MPEG audio, and the substring lens must not catch it.
+        self.assertEqual(pc.classify_audio_blob("MUSEPACK"), pc.AUDIO_UNKNOWN)
+
     def test_unknown_is_fail_closed(self) -> None:
         for blob in ("", "   ", "gsm_ms", "atrac3", "musepack"):
             with self.subTest(blob=blob):
@@ -243,11 +267,14 @@ class AudioClassificationTests(unittest.TestCase):
         self.assertEqual(pc.classify_audio_blob("WAVPACK A_WAVPACK DTS:X"), pc.AUDIO_UNKNOWN)
 
     def test_dolby_mat_is_unknown_not_a_native_pcm_codec(self) -> None:
-        """MAT is the Streamer's transport, not this player's — so a MAT or
-        MPCM label is not a track this chain can promise to play.
+        """MAT is not this player's output — so a MAT or MPCM label is not a
+        track this chain can promise to play.
 
-        In particular, the AX3125H manual's plain-MAT display result "MPCM"
-        must not make Dolby MAT look like an ordinary decoded PCM track.
+        The player's Dolby path is its Dolby MS12 stack running as
+        bitstreaming; uncompressed Dolby MAT is the Apple TV 4K / Xbox
+        on-box-decode transport. In particular, the AX3125H manual's
+        plain-MAT display result "MPCM" must not make Dolby MAT look like
+        an ordinary decoded PCM track.
         """
         for blob in ("DOLBY MAT", "DOLBY MAT-ATMOS", "DOLBY_MAT", "MAT 2.0",
                      "MAT 2.1", "MPCM", "MPCM 5.1", "DOLBY MAT MPCM"):
@@ -255,7 +282,7 @@ class AudioClassificationTests(unittest.TestCase):
                 self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_UNKNOWN)
                 note = pc.audio_chain_note(blob, 8)
                 self.assertIn("not an output path", note)
-                self.assertIn("Streamer", note)
+                self.assertIn("MS12", note)
                 self.assertIn("unknown", note)
         self.assertEqual(pc.classify_audio_blob("PCM"), pc.AUDIO_DECODE_PCM)
         # A title never overrides the real PCM codec name.
