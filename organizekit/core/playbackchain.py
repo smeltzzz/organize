@@ -18,15 +18,23 @@ is still fully supported, and on this display it is the degraded one — see
 
 Evidence is deliberately separated. Google's G454V specification lists Dolby
 Digital, Dolby Digital Plus, and Dolby Atmos via HDMI passthrough; it does not
-publish DTS, Dolby MAT, or a PCM sample-rate ceiling. DTS-core playback and the
-24-bit/48-kHz software-decode envelope recorded here are chain-specific
-measurements/conservative policy, not Google certification. Android's generic
-media table documents built-in FLAC only for mono/stereo up to 48 kHz and warns
-that support varies by form factor. Multichannel FLAC/PCM and TrueHD decoding
-depend on the app and active HDMI route. Some apps can decode TrueHD to PCM,
-but plain PCM does not retain TrueHD Atmos object metadata. The toolkit keeps
-its conservative Jellyfin/Plex-oriented transcode policy for TrueHD rather than
-assuming an app-specific path.
+publish DTS or a PCM sample-rate ceiling. The device's documented output is
+HDMI bitstream pass-through plus LPCM from its software decoders — Dolby MAT
+is not one of its transports. The Dolby MAT 2.1 / Dolby MS12 on-box decoding
+that 2024 reporting described belongs to the **Google TV Streamer**, a
+different device (FlatpanelsHD's review says so explicitly, and current Google
+documentation lists Dolby Atmos with no pass-through for the Streamer while
+the Chromecast entry stays "HDMI passthrough"). The bar's MAT -> MPCM display
+row is therefore unreachable from this player, and MAT/MPCM file labels remain
+fail-closed below. DTS-core playback and the 24-bit/48-kHz software-decode
+envelope recorded here are chain-specific measurements/conservative policy,
+not Google certification. Android's generic media table documents built-in
+FLAC only for mono/stereo up to 48 kHz and warns that support varies by form
+factor. Multichannel FLAC/PCM and TrueHD decoding depend on the app and active
+HDMI route. Some apps can decode TrueHD to PCM, but plain PCM does not retain
+TrueHD Atmos object metadata. The toolkit keeps its conservative
+Jellyfin/Plex-oriented transcode policy for TrueHD rather than assuming an
+app-specific path.
 
 This file is the single source of truth for what this chain can safely promise,
 so ``mkv_track_cleaner.py``, ``bitdepth.py`` and ``audio_standardizer.py``
@@ -52,7 +60,10 @@ class Player:
     soc: str = "Amlogic S805X2 (quad Cortex-A35 @ 1.8 GHz, Mali-G31 MP2)"
     ram: str = "1.5 GB"
     storage: str = "8 GB"
-    os: str = "Google TV (Android 12, upgradeable to 14)"
+    #: Launched on Android TV 12 (the HD model's first OS); the Android 14
+    #: rollout for Chromecast with Google TV resumed in 2025 after the March
+    #: 2025 OTA was pulled, so a current G454V runs Google TV on Android 14.
+    os: str = "Google TV (Android TV 14; launched on Android TV 12)"
     max_resolution: tuple[int, int] = (1920, 1080)
     # The CODED ceiling, which is what a resolution check has to compare
     # against. 1080 is not a multiple of 16, so a 1080p H.264 stream is
@@ -80,6 +91,13 @@ class Player:
     # Atmos via HDMI; it does not certify DTS. Base 5.1 DTS and the DTS-HD core
     # fallback are accepted here only on user-measured evidence from this
     # G454V -> AX3125H HDMI-IN chain, not a general Amlogic/Android guarantee.
+    # The device's settings menu has offered a DTS toggle that Google's own
+    # support answer says is not a supported format, and delivery is
+    # app-dependent: Kodi/VLC bitstream DTS, while Plex has decoded DTS-HD to
+    # multichannel PCM in some app versions. What the bar receives in that case
+    # is still LPCM it accepts on HDMI IN - but the "DTS" on its panel is the
+    # direct-passthrough case the user measured, not a promise about every
+    # player app.
     # The G454V has no supported TrueHD bitstream path (some apps decode to
     # PCM); it also does not emit the DTS-HD lossless layer, but the core inside
     # DTS-HD MA/HRA/DTS:X does (see ``dts_hd_core_fallback`` below).
@@ -107,11 +125,19 @@ class Player:
     truehd_bitstream_passthrough: bool = False
     truehd_app_pcm_decode_possible: bool = True
     truehd_atmos_survives_plain_pcm: bool = False
-    #: No evidence currently confirms that the G454V emits Dolby MAT. This is
-    #: a verification state, not a claim that MAT is physically impossible;
-    #: the AX3125H manual's MAT input/display table is not proof of source
-    #: output support.
-    dolby_mat_output_verified: bool = False
+    #: Dolby MAT is NOT an output path of this player. Google documents the
+    #: G454V's audio as Dolby-encoded HDMI pass-through (AC-3 / E-AC-3 /
+    #: Atmos via DD+ JOC) — its Atmos never leaves as MAT, and its decoded
+    #: audio is plain LPCM. The Dolby MAT 2.1 output and the Dolby MS12
+    #: decoder that produces it belong to the 2024 **Google TV Streamer**:
+    #: FlatpanelsHD's review says that device is built on MS12, and tech
+    #: coverage of the Streamer contrasts it with "the Chromecast with Google
+    #: TV (4K or HD), which simply passes audio untouched via HDMI". The
+    #: AX3125H manual's MAT -> MPCM display row is therefore unreachable from
+    #: this chain. MAT/MPCM *file* labels stay AUDIO_UNKNOWN (fail-closed) —
+    #: not because the player is in doubt, but because a label naming a
+    #: transport this chain cannot receive is not evidence of a playable track.
+    dolby_mat_output: bool = False
     #: Conservative promise boundary for app/software-decoded audio used by
     #: the toolkit. This 24-bit/48-kHz envelope is chain-specific; it is NOT a
     #: Google-published G454V capability. Android's generic table lists built-in
@@ -217,8 +243,9 @@ DISPLAY = Display()
 # Sources every table above was checked against (see docs/hardware.md for the
 # full write-up with the same references).
 SOURCES: tuple[str, ...] = (
-    "https://support.google.com/chromecast/answer/3046409?hl=en (official GTV HD specs: Dolby Digital, Dolby Digital Plus, Dolby Atmos via HDMI passthrough; no DTS/PCM/MAT limit is published)",
-    "https://www.androidtv-guide.com/streaming-gaming/chromecast-google-tv-hd/ (G454V 'boreal': S805X2, 1.5GB/8GB, AV1/VP9/H.264/HEVC)",
+    "https://support.google.com/chromecast/answer/3046409?hl=en (official GTV HD specs: Dolby Digital, Dolby Digital Plus, Dolby Atmos via HDMI passthrough; no DTS or PCM limit is published, and MAT appears nowhere)",
+    "https://support.google.com/googletv/answer/15273676?hl=en (Google's own device-comparison table: both Chromecast with Google TV models = 'Dolby-encoded audio (HDMI passthrough)'; Google TV Streamer = 'Dolby Atmos' with no passthrough — the MS12/MAT device is the Streamer, not this player)",
+    "https://www.androidtv-guide.com/streaming-gaming/chromecast-google-tv-hd/ (G454V 'boreal': S805X2, 1.5GB/8GB, AV1/VP9/H.264/HEVC; Android TV 12 -> 14)",
     "https://www.androidpolice.com/chromecast-with-google-tv-hd-review/ (no Dolby Vision on the HD model; hardware review, not official audio certification)",
     "USER-CONFIRMED on the actual G454V -> AX3125H HDMI IN chain: base DTS core reaches the bar as DTS on its display. This is chain-specific evidence, not Google certification.",
     "USER-CONFIRMED 2026-10 on the actual G454V -> AX3125H HDMI-IN chain: DTS-HD MA/HRA and DTS:X deliver the backward-compatible DTS core (5.1), not the HD layer or DTS:X object metadata.",
@@ -227,13 +254,18 @@ SOURCES: tuple[str, ...] = (
     "USER-CONFIRMED for this chain: multichannel LPCM 5.1/7.1 is accepted over the soundbar's HDMI IN; app decoding and active-route behavior are not universal Android guarantees.",
     "https://developer.android.com/media/platform/supported-formats (Android Developers: built-in FLAC is mono/stereo, up to 48 kHz; 16-bit recommended, no dither for 24-bit; the page explicitly warns that non-handset/tablet support may vary)",
     "https://developer.android.com/training/tv/playback/audio-capabilities (Android TV app audio varies by active output route, encoding, channels and rate; apps should query route capabilities)",
-    "https://developer.android.com/reference/android/media/AudioFormat (Dolby MAT is a distinct HDMI format that can carry TrueHD, channel PCM, or PCM with object metadata; not evidence of G454V MAT output)",
+    "https://developer.android.com/reference/android/media/AudioFormat (Dolby MAT is a distinct HDMI format that can carry TrueHD, channel PCM, or PCM with object metadata — a transport for devices that decode on-box; the G454V documents pass-through instead)",
     "USER-CONFIRMED chain-specific operating envelope used by the toolkit for app/software-decoded PCM: up to 24-bit/48 kHz. This is not a Google-published G454V maximum; above-envelope behavior is unmeasured and therefore reported for review.",
+    "https://forum.kodi.tv/showthread.php?tid=372416 (Kodi 2023: on a Chromecast with Google TV the PCM path is fixed at 48 kHz and multichannel PCM can be downmixed to stereo by Android before it reaches the sink — Android owns the mixer; this is the real basis for treating multichannel PCM output as app/route-dependent and 48 kHz as the envelope it was observed at)",
+    "https://forum.kodi.tv/showthread.php?tid=357396&page=21 (CCwGTV owner measurements: multichannel PCM needed the sampling rate limited to 48 kHz to make sound; hi-res multichannel over this HDMI path does not work)",
     "https://kodi.wiki/view/AudioEngine (Kodi documents its own audio engine and TrueHD decoding; this is app capability, not an Android platform or G454V hardware guarantee)",
     "https://support.plex.tv/articles/200250387-streaming-media-direct-play-and-direct-stream/ (Plex documents client-capability-dependent audio transcoding)",
+    "https://forums.plex.tv/t/only-pcm-output-to-av-receiver-on-chromecast-tv/888018 (Plex on Chromecast with Google TV, 2024/2026: DTS-HD MA and TrueHD arrive at the receiver as PCM with no server transcode in some app versions, while DTS works in Jellyfin — the app, not the device, decides how a DTS-HD bitstream is delivered)",
+    "https://www.googlenestcommunity.com/t5/Chromecast/Chromecast-4K-with-DTS/m-p/329119 (Google's community answer: Chromecast with Google TV devices officially support only Dolby Digital, Dolby Digital Plus and Atmos passthrough, with DTS unsupported even where the settings menu offers it — the settings menu has been reported to advertise formats the device does not deliver)",
     "https://developer.android.com/media/media3/exoplayer/supported-formats (Media3 can use app-bundled software decoder extensions, illustrating why app behavior may exceed the platform decoder table)",
     "https://developers.google.com/cast/docs/media (Google Cast's 96-kHz FLAC row is scoped to Chromecast Audio/Google Home products, not this Chromecast with Google TV HD)",
-    "https://www.flatpanelshd.com/news.php?subaction=showfull&id=1739522759 (secondary reporting about the distinct 2024 Google TV Streamer/MS12 behavior; not evidence about the G454V)",
+    "https://www.flatpanelshd.com/news.php?subaction=showfull&id=1739522759 (FlatpanelsHD: 'The Google TV Streamer does not support Dolby TrueHD, DTS-HD, DTS-HD MA or DTS:X audio... the device is built on the Dolby MS12 decoder, which supports up to Dolby Digital Plus (E-AC-3), with or without Dolby Atmos.' MS12 is the STREAMER's decoder; this is the evidence that the MS12/Dolby MAT 2.1 behaviour reported in 2024 belongs to a different device than the G454V)",
+    "https://techissuestoday.com/google-tv-streamer-dolby-truehd-dts-hd-and-dts-passthrough/ (contrasts the two devices explicitly: 'Unlike the Chromecast with Google TV (4K or HD), which simply passes audio untouched via HDMI to your AV setup, the Google TV Streamer reportedly pre-processes it internally using... Dolby MS12', whose 'Dolby MAT 2.1' output is what re-encodes audio on the Streamer)",
     "https://www.manualowl.com/m/Samsung/UN60F6350AF/Manual/347300 (UN60F6350AF e-manual: 'ARC is only available through the HDMI (ARC) port'; Digital Audio Output formats vary by input)",
     "https://www.samsung.com/sg/support/tv-audio-video/how-to-use-the-hdmi-arc-port-on-a-samsung-tv/ (Samsung support: HDMI-ARC carries PCM 2ch, Dolby Digital up to 5.1 and DTS Digital Surround up to 5.1; 2013-2014 F/H-series sound-output path)",
     "USER-CONFIRMED 2026-09 on the actual UN60F6350AF: with HDMI sources connected, the TV offers PCM only as its digital audio output format; app-decoded multichannel PCM returns as stereo. Forwarding/downmixing of a received Dolby/DTS bitstream over ARC has not been measured.",
@@ -580,15 +612,16 @@ def _dts_hd_class(*segments: str) -> str | None:
     return None
 
 
-def _is_unverified_dolby_mat_label(text: str) -> bool:
+def _is_dolby_mat_label(text: str) -> bool:
     """Recognize Dolby MAT transport labels without treating them as PCM.
 
-    The soundbar manual maps Dolby MAT to the display label ``MPCM``; neither
-    that mapping nor the bare ``MPCM`` label proves this G454V emits MAT.
-    MAT is an HDMI transport, not a codec path this toolkit can promise. Treat
-    those labels as unknown. Normalize punctuation, but the classifier checks
-    the leading codec fields only, so a genuine PCM track whose title mentions
-    MAT stays PCM.
+    The soundbar manual maps Dolby MAT to the display label ``MPCM``; that
+    mapping names a transport this player does not emit (MAT 2.1 is the Google
+    TV Streamer's on-box MS12 output, and this Chromecast is a pass-through
+    device), so neither the label nor its display mapping is a codec path this
+    toolkit can promise. Treat those labels as unknown. Normalize punctuation,
+    but the classifier checks the leading codec fields only, so a genuine PCM
+    track whose title mentions MAT stays PCM.
     """
     words = text.upper().replace("_", " ").replace("-", " ").split()
     if not words:
@@ -633,10 +666,10 @@ def classify_audio_blob(blob: str) -> str:
     tokens = b.split()
     if not tokens:
         return AUDIO_UNKNOWN
-    if _is_unverified_dolby_mat_label(" ".join(tokens[:2])):
-        # A sink manual describing Dolby MAT -> MPCM does not prove that this
-        # player outputs MAT. Keep the transport unverified rather than
-        # letting the substring "PCM" in "MPCM" make it chain-native.
+    if _is_dolby_mat_label(" ".join(tokens[:2])):
+        # MAT is the Streamer's transport, not this player's; it is not an
+        # output path here. Keep it unknown rather than letting the substring
+        # "PCM" in "MPCM" make it chain-native.
         return AUDIO_UNKNOWN
     if "ATRAC" in tokens[0]:
         # Sony ATRAC3 contains "AC3" as a substring; it is none of this chain.
@@ -1019,8 +1052,9 @@ def atmos_credit_for(cls: str, blob: str) -> int:
 
     The toolkit credits Atmos only to an identified Dolby Digital Plus stream
     carrying JOC/Atmos markers: that is the officially listed G454V passthrough
-    path. AC-3 has no Atmos variant, and app-decoded PCM or unverified Dolby MAT
-    is not credited by this track-table rule. A title alone is insufficient,
+    path. AC-3 has no Atmos variant, and app-decoded PCM or MAT (the Google TV
+    Streamer's transport, not this player's) is not credited by this
+    track-table rule. A title alone is insufficient,
     so a stereo AC-3 titled "Dolby Atmos 5.1" cannot outrank genuine surround.
 
     Expects a blob from :func:`codec_blob` (upper-cased, positions stable);
@@ -1116,10 +1150,11 @@ def audio_chain_note(blob: str, channels: int, wiring: str = DEFAULT_WIRING,
                 "backward-compatible core) - the server may need to transcode; "
                 f"audio_standardizer.py prepares native {target}")
     if cls == AUDIO_UNKNOWN:
-        if _is_unverified_dolby_mat_label(blob):
-            return ("Dolby MAT is not verified as G454V output; the AX3125H "
-                    "manual's MAT display mapping does not establish Chromecast "
-                    "support, so this is reported as unknown rather than assumed native")
+        if _is_dolby_mat_label(blob):
+            return ("Dolby MAT is not an output path of this player (it is the "
+                    "Google TV Streamer's MS12 transport); the AX3125H's MAT -> MPCM "
+                    "display row cannot be reached from this Chromecast, so this "
+                    "label is reported as unknown rather than assumed native")
         return "unrecognized audio format - reported, never auto-touched"
     return "unrecognized audio format - reported, never auto-touched"
 
@@ -1224,7 +1259,8 @@ def chain_summary_lines(wiring: str | None = None) -> list[str]:
         "not Google-certified (DTS family max 5.1); software-decoded PCM/FLAC is "
         f"app/route-dependent, toolkit envelope {PLAYER.max_decoded_bit_depth}-bit/"
         f"{PLAYER.max_decoded_sample_rate // 1000} kHz (not a Google max); no TrueHD bitstream "
-        "path (some apps decode to PCM); Dolby MAT unverified; WMA Pro/DTS Express use "
+        "path (some apps decode to PCM); no Dolby MAT output (MAT/MS12 is the "
+        "Google TV Streamer's, not this player's); WMA Pro/DTS Express use "
         "the app-neutral Dolby fallback; ALAC/WavPack unknown",
         f"Sink   : {SINK.model} {SINK.description} — decodes "
         "DD/DD+ Atmos/TrueHD/DTS/DTS-HD/multi-PCM",

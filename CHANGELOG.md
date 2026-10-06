@@ -4,6 +4,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.6.3] - 2026-10-06
+
+A fact-check of the reference chain against primary sources, not against the
+repository's own prose. One attribution the 8.6.2 review had left standing was
+wrong, two device facts were stale, and the app-dependence of DTS and PCM
+delivery was under-told. **No classification policy changed** — MAT/MPCM labels
+stay fail-closed `unknown`, the DTS family keeps its measured accept policy and
+its 5.1 cap — so no library decision flips on this release.
+
+### Fixed
+- **The release cannot go red after publishing any more.** v8.6.2's final job
+  died in `softprops/action-gh-release` on a transient `Too many retries.` from
+  the asset upload host — after the suite, the build and the PyPI upload had all
+  gone green, which is the worst possible moment to stop. The job now creates
+  the release with `gh` (preinstalled on the runners, one less third-party
+  action for work that is nothing but API calls), retries the attach six times
+  with a growing backoff, and uses `--clobber` so a retry — or a manual re-run
+  of the job — is idempotent instead of an "asset already exists" error. The
+  owner maintains one install and does not archive superseded releases, so
+  v8.6.2's missing assets are deliberately not re-attached: PyPI, which is what
+  `pip install` reads, is complete and correct.
+- **Dolby MAT was attributed to the wrong device.** 8.6.2 called MAT output
+  "unverified" for the G454V and cited the Dolby MS12 reporting at the Streamer
+  as "not evidence about the G454V". The reporting says more than that: it says
+  the **Google TV Streamer is built on the Dolby MS12 decoder**, and contrasts
+  it with "the Chromecast with Google TV (4K or HD), which simply passes audio
+  untouched via HDMI". Google's own device-comparison table agrees — both
+  Chromecasts are "Dolby-encoded audio (HDMI passthrough)", the Streamer is
+  "Dolby Atmos" with no passthrough entry. So the G454V has no Dolby MAT output
+  path at all: its Atmos travels as DD+ JOC bitstream, its decoded audio is
+  plain LPCM, and the AX3125H's MAT → `MPCM` / MAT-Atmos → `DOLBY ATMOS` display
+  rows cannot be reached from this chain. `PLAYER.dolby_mat_output` replaces the
+  old "verified" flag (naming it a verification state implied an open question
+  that the sources settle), and every MAT note now says the Streamer owns that
+  transport. Classifier behavior is deliberately unchanged: a file whose label
+  names a transport this player cannot emit is still not a track this toolkit
+  will promise, so MAT/MPCM stays `unknown`.
+- **The player's OS was two versions stale.** `PLAYER.os` said "Android 12,
+  upgradeable to 14"; the HD model shipped on Android TV 12 and the Android 14
+  rollout resumed in 2025 after the March 2025 OTA was pulled (Android TV Guide
+  lists G454V as 12 → 14). The chain summary now says what a current unit runs.
+
+### Documentation
+- **DTS delivery is app-dependent on this device, and now says so.** Google's
+  community answer is explicit that Chromecast with Google TV devices support
+  Dolby Digital / DD+ / Atmos passthrough and not DTS, and that the settings
+  menu has advertised formats the device does not deliver; Kodi drops a
+  developer note that Android owns the mixer. Measured on this chain, the
+  passthrough path works (Jellyfin Direct Play + the bar's `DTS` indicator) and
+  the policy keeps accepting it — but Plex has delivered DTS-HD MA as
+  multichannel PCM in some app versions, so the docs no longer read as if every
+  player app must produce the DTS core.
+- **The 24-bit/48 kHz envelope now cites why 48 kHz.** Kodi's 2023 report on a
+  Chromecast with Google TV documents the fixed 48 kHz PCM path and Android
+  downmixing multichannel PCM to stereo before it reaches the sink, and a 2021
+  owner thread shows multichannel PCM needing the rate limited to 48 kHz. The
+  envelope is still toolkit policy, not a Google-published maximum — but its
+  sample-rate half is now grounded in measured behaviour rather than only in
+  caution. `AudioFormat`'s MAT entry is re-read as what it is: the transport a
+  device uses for audio it decoded itself, which is exactly what the Streamer
+  does and the Chromecast does not.
+- `docs/hardware.md` gains a Sources entry per corrected claim (Google's
+  device-comparison table, FlatpanelsHD's MS12 sentence, the Kodi and Plex
+  threads, the Android 14 rollout), and `docs/tools.md`, `docs/pipeline.md`,
+  `.env.example` and the front page follow the MAT wording.
+
+### Tests
+- 2,359 → **2,360 tests**: the MAT/TrueHD test now asserts the field and the
+  transport attribution, and a new test pins the OS string and requires the
+  chain summary to carry the corrected MAT sentence instead of the word
+  "unverified". Full offline suite: **2,360 discovered, 2,355 passed, 5
+  skipped** (`python -m unittest discover -s tests -p 'test_*.py'`).
+
 ## [8.6.2] - 2026-10-06
 
 A second review of the Chromecast with Google TV HD (G454V) → Hisense AX3125H

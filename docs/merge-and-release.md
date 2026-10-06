@@ -1,42 +1,50 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **v8.6.1 was cut and published on 2026-10-06.** [PR #64](https://github.com/smeltzzz/organize/pull/64)
-> merged into `main` as `e3db1c9`; the `v8.6.1` tag points at that merge commit,
-> not at the branch head; and the tag's `release.yml` ran green end to end — the
-> suite gate, the wheel/sdist/zipapp build, the **PyPI publish**
-> ([organizekit 8.6.1](https://pypi.org/project/organizekit/8.6.1/)), and the
-> three assets on the
-> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.1)
-> (`organize.pyz`, the wheel, the sdist). So `pip install --upgrade organizekit`
-> already resolves to it; from a checkout, `python3 -m pip install --upgrade .`.
+> **v8.6.3 is ready to ship — merge [PR #67](https://github.com/smeltzzz/organize/pull/67)
+> and tag it.** That PR carries the fact-check that made this repository
+> describe the hardware instead of itself — the MS12/Dolby MAT stack belongs to
+> the Google TV Streamer, not the G454V; a current player runs Android 14; DTS
+> and PCM delivery are app-dependent — and it moves `VERSION` to `8.6.3`.
+> Merging it and pushing the tag *is* the release: `release.yml` runs the suite
+> gate, builds the wheel, the sdist and the zipapp, publishes to PyPI, and
+> attaches the three assets. **Until that tag exists PyPI still serves 8.6.2's
+> wording**, and `pip install` reads PyPI — so tagging is the step that updates
+> every install.
 >
-> What it shipped is in the [changelog](../CHANGELOG.md): a chain-fact audit that
-> found the published facts correct and three of their consequences unmodelled —
-> the DTS family not width-capped as a family (a DTS core tops out at 5.1, and
-> achievable layout is the *first* key of an irreversible keep-one-track
-> decision, so an uncapped `DTS:X` label could delete a file's only Atmos track),
-> ALAC/WavPack credited with a software-decode path and a lossless ranking rung
-> this player does not give them, and the 24-bit/96 kHz decode ceiling absent
-> from the table entirely (it is a *report* — `review-unknown`, never a transcode
-> and never a ranking key, because what a 24/192 stream does on this box has not
-> been measured).
+> ```bash
+> gh pr merge 67 --merge      # a normal merge: the commits carry the story
+> git fetch origin && git checkout main && git pull
+> git tag -a v8.6.3 -m "organizekit 8.6.3" && git push origin v8.6.3
+> ```
 >
-> **Nothing is outstanding.** No workflow file, held patch, tag or secret is
-> waiting on a human, and the suite (2,359 tests, offline) plus `Lint (ruff)`,
-> `Coverage gate`, `Packaging` and the single-file build are green on `main`.
+> This ledger is the owner's, and the owner runs one install: **previous
+> releases are not maintained once a newer one exists.** v8.6.2's GitHub release
+> therefore carries no assets, and that is deliberate rather than pending. Its
+> asset step died on a transient `Too many retries.` from the upload host
+> *after* PyPI had accepted the release; PyPI — the thing `pip install --upgrade
+> organizekit` actually reads — is complete and correct, its tag still points at
+> the merged commit `a61ce4f`, and nothing of value lives in an attach list.
 >
-> The next release follows the shape recorded below. One rule carries forward
-> every time, because it is the only step that can be done wrong quietly: **tag
-> the merged commit on `main`, never the open branch** — a tag on an unmerged
-> head publishes a wheel while `main` still reports a different version, and
-> leaves the changelog section unreachable from the released commit. A release is
-> a *merge plus a tag*, not a merge.
+> What did need fixing is the failure itself, so it cannot repeat on the tag
+> that matters: `release.yml`'s final step no longer uses a third-party release
+> action, it retries the attach six times with a growing backoff, and it uploads
+> with `--clobber` so a retry — or a manual re-run of the job — is idempotent
+> instead of an "asset already exists" error. A bad minute on the upload host
+> can no longer leave a published version with an empty release beside it.
 >
-> And when a release lands, replace this block. The note this one replaced said
-> "8.0.1 is prepared in PR #45 — what remains is the merge and the tag", written
-> the day before that tag was cut and left standing six releases too long, which
-> is precisely how a release document starts pointing its reader at work already
-> done.
+> What 8.6.2 and 8.6.3 changed is in the [changelog](../CHANGELOG.md). One rule
+> carries forward every time, because it is the only step that can be done wrong
+> quietly: **tag the merged commit on `main`, never the open branch** — a tag on
+> an unmerged head publishes a wheel while `main` still reports a different
+> version, and leaves the changelog section unreachable from the released
+> commit. A release is a *merge plus a tag*, not a merge.
+>
+> And when a release lands, replace this block. The note this one replaced
+> recorded v8.6.1 as shipped, three assets and all, the day that tag was cut;
+> the note *that* one replaced had said "8.0.1 is prepared in PR #45 — what
+> remains is the merge and the tag" and then sat there six releases too long,
+> which is precisely how a release document starts pointing its reader at work
+> already done.
 
 > **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
@@ -98,7 +106,7 @@ syntax gate, a file the merge deleted, and the `provisioned` job still did
 `pip install ffsubsync` then `import sync_subtitles`. The bot cannot fix a
 workflow file, so that was step 2's patch. **This is history: PR #40 applied
 the patch, and CI on `main` has been green since.** Everything else in that
-run was green on the same merge: the whole suite (2,359 tests) on Linux, macOS
+run was green on the same merge: the whole suite (2,360 tests) on Linux, macOS
 and Windows across Python 3.11–3.13, packaging, the single-file build, the lint
 job, the coverage floor and the doctor smoke test.
 

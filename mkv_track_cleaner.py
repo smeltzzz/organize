@@ -924,8 +924,9 @@ def get_audio_quality_score(
         channels = 2
     # The toolkit credits Atmos only on an identified Dolby Digital Plus
     # stream carrying JOC/Atmos markers: that is the official passthrough path
-    # it can rank confidently. Plain AC-3 has no Atmos variant; unverified MAT
-    # and app-decoded PCM are not credited by this track-table rule. A title
+    # it can rank confidently. Plain AC-3 has no Atmos variant; MAT (the Google
+    # TV Streamer's transport, never this player's) and app-decoded PCM are not
+    # credited by this track-table rule. A title
     # alone is insufficient, so "Dolby Atmos" on stereo AC-3 cannot outrank
     # surround. The rule is shared core so audiofit's fallback ranks it alike.
     atmos_flag = pc.atmos_credit_for(cls, blob)
