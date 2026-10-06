@@ -114,7 +114,37 @@ jobs:
         with:
           name: release-artifacts
           path: dist
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+
+      - name: Create the release
+        # `gh` ships with the runners, so this step needs no third-party action
+        # pinned for a job that only publishes files. `--generate-notes` is the
+        # same release text action-gh-release produced.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" \
+              --title "organizekit ${GITHUB_REF_NAME#v}" \
+              --generate-notes
+
+      - name: Attach the three artifacts, retrying the upload host
+        # v8.6.2 died in exactly this place: the asset upload answered "Too many
+        # retries." *after* PyPI had already accepted the release, leaving a
+        # published version with an empty GitHub release beside it. The upload
+        # host is flaky in a way that has nothing to do with this repository, so
+        # the step retries with a growing backoff instead of failing the run on
+        # the first bad minute — and `--clobber` makes every retry (and any
+        # manual re-run) idempotent rather than an "asset already exists" error.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if gh release upload "$GITHUB_REF_NAME" dist/* --clobber; then
+              echo "assets attached on attempt $attempt"
+              exit 0
+            fi
+            echo "attempt $attempt failed; backing off"
+            sleep $((attempt * 15))
+          done
+          echo "::error::the release exists, but its assets could not be attached"
+          exit 1
