@@ -1,29 +1,53 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **8.0.1 is prepared in [PR #45](https://github.com/smeltzzz/organize/pull/45),
-> on top of the published 8.0.0.** v8.0.0 was tagged on 2026-09-29 and the
-> tag ran `release.yml` to completion: the wheel, sdist and zipapp were
-> built, PyPI published
-> [organizekit 8.0.0](https://pypi.org/project/organizekit/8.0.0/), and the
+> **8.6.1 is prepared in [PR #64](https://github.com/smeltzzz/organize/pull/64),**
+> on top of the published 8.6.0. v8.6.0 was tagged on 2026-10-06 and the tag
+> ran `release.yml` to completion: the wheel, sdist and zipapp were built, PyPI
+> published
+> [organizekit 8.6.0](https://pypi.org/project/organizekit/8.6.0/), and the
 > artifacts were attached to the
-> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.0.0).
-> (7.0.0's PR (#43) merged but its tag was never cut, so its release notes
-> live in the [changelog](../CHANGELOG.md) and on merged PR #43.)
+> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.0).
+> (8.0.1 through 8.5.1 shipped the same way; each is a tag on `main`. The note
+> that sat in this block — "8.0.1 is prepared in PR #45", written the day
+> before that release was tagged — had simply never been carried forward. The
+> authoritative sequence of what shipped is the
+> [changelog](../CHANGELOG.md), and every entry after 8.0.1 confirms the tag
+> was cut and published.)
 >
-> 8.0.1 is the patch release for two defects found on the reference chain
-> hours after that tag: the code still resolved `tv-arc` as the default
-> wiring while the notes and docs described `soundbar-hdmi-in`, and the audio
-> classifier let a track *title* schedule an already-native E-AC-3 stream for
-> transcode. The workflow changes earlier branches held back as patch files
-> are applied on their branches — the token has the `workflows` scope — so
-> PR #45 carries only code, docs and tests. What remains is the merge and the
-> tag. Confirm the version, then tag the merged commit from an up-to-date
-> `main`:
+> 8.6.1 is a patch release for three consequences of the reference chain's codec
+> facts that the table stated but did not model, found while auditing the
+> published facts against `organizekit/core/playbackchain.py`:
+>
+> * the **DTS family was not width-capped as a family** — only the DTS-HD class
+>   was capped at its core's 5.1, and achievable layout is the *first* key of an
+>   irreversible keep-one-track ranking, so a 7.1 `DTS:X` whose HD-ness lives in
+>   the track name (which the classifier must not read) could out-rank the only
+>   `DD+ 5.1 Atmos` track in a file and have it deleted by the remux;
+> * **ALAC and WavPack were credited with a software-decode path and the lossless
+>   ranking rung** they do not have on this player — no platform decoder, no
+>   bitstream fallback, and Jellyfin's own codec table marks ALAC unsupported on
+>   Android TV;
+> * the **24-bit / 96 kHz decode ceiling** this chain has was absent from the
+>   table, so a 24/192 FLAC read as "direct play, nothing to do". It is data now
+>   (`Player.max_decoded_sample_rate`, `max_decoded_bit_depth`,
+>   `undecodable_codecs`, `exceeds_decode_ceiling()`), and deliberately a
+>   *report*: such a stream moves from `pcm-decode-ok` to `review-unknown` —
+>   untouched, no synthesized Dolby replacement, and never a ranking key,
+>   because what it does on this box (fail, or be silently resampled to the
+>   mixer's 48 kHz) has not been measured.
+>
+> What remains is the merge and the tag. The suite is 2,355 tests — 14 of them
+> new, including the DTS:X-vs-Atmos regression run through the real scorer and
+> the ceiling's boundary at exactly 96 kHz — green fully offline, and
+> `python organize.py test` passes with five new checks in the audio
+> standardizer's own self-test. PR #64 touches no workflow file, so nothing is
+> held back in `docs/` for it. Confirm the version, then tag the merged commit
+> from an up-to-date `main`:
 >
 > ```bash
 > git checkout main && git pull origin main
-> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 8.0.1
-> git tag -a v8.0.1 -m "8.0.1" && git push origin v8.0.1
+> python3 -c "import organizekit; print(organizekit.VERSION)"   # must print 8.6.1
+> git tag -a v8.6.1 -m "8.6.1" && git push origin v8.6.1
 > ```
 >
 > The pushed tag triggers `release.yml`, which checks that the tag matches
@@ -32,7 +56,12 @@
 > the release workflow to succeed** before moving an existing install onto it:
 > `python3 -m pip install --upgrade organizekit` (or `pipx upgrade
 > organizekit`); from a checkout, `python3 -m pip install --upgrade .`.
-> Details are in the [8.0.1 changelog entry](../CHANGELOG.md).
+> Details are in the [8.6.1 changelog entry](../CHANGELOG.md).
+>
+> **Tag the merged commit on `main`, never the open branch.** A tag pointing at
+> an unmerged head publishes a wheel while `main` still reports a different
+> version, and it leaves the changelog section unreachable from the released
+> commit. A release is a *merge plus a tag*, not a merge.
 
 > **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
