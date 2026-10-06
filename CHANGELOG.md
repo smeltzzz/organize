@@ -68,6 +68,22 @@ a library its only Atmos track.
   matrix splits `FLAC/PCM` by ceiling and gives ALAC/WavPack their own row.
   `docs/tools.md`'s verdict and ranking tables follow. `.env.example` and the
   front page say the same thing in fewer words.
+- **The suite follows the change:** 2,341 → **2,355 tests** (14 new — the
+  DTS:X-vs-Atmos regression run through the live scorer rather than a restated
+  tuple, the fail-closed no-decoder family, and the ceiling pinned at its
+  boundary: exactly 96 kHz stays `pcm-decode-ok`), green fully offline on
+  `Python 3.11.2 | Linux`, and `organize.py test` passes with five new
+  audio-standardizer checks. CI on the PR (`#64`) is green end to end — the
+  Linux/macOS/Windows × 3.11–3.13 matrix, `Packaging`,
+  `Single-file build (organize.pyz)`, `Coverage gate`, the
+  `CLI smoke test (doctor + dashboard)`, and `Lint (ruff)`, whose one request
+  was to sort the new core import into alphabetical place. No workflow or CI
+  file needed a change for this release, so the release is the merge and the
+  tag: `git tag -a v8.6.1 -m "8.6.1" && git push origin v8.6.1`, which publishes
+  [organizekit 8.6.1](https://pypi.org/project/organizekit/) for the
+  `pip install --upgrade organizekit` upgrade path. **Tag it from the merged
+  commit on `main`** — a tag on the unmerged head would publish a wheel while
+  `main` still says 8.6.0.
 
 ## [8.6.0] - 2026-10-06
 
