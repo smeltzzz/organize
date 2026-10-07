@@ -863,9 +863,10 @@ def get_audio_quality_score(
        plays today: the master becomes a DD+ 5.1 bed, the stereo track can
        never become anything.
     2. **band** — the toolkit *models as a no-server-audio-transcode path*
-       (official Dolby passthrough, the DTS/core policy measured on the physical
-       HDMI-IN chain but enabled under both selectors, or PCM decoded by a
-       compatible app/route) beats *transcode-bound* beats *unknown*.
+       (the published Dolby passthrough, DTS passthrough from the player's
+       Android TV 12 sound setting - the switch this chain enables - plus the
+       core it extracts from DTS-HD/DTS:X, or PCM decoded by a compatible
+       app/route) beats *transcode-bound* beats *unknown*.
        This is a profile ranking, not a runtime promise for every app. At an
        equal achievable layout it applies the Direct-Play-first policy and
        keeps 5.1 AC-3 ahead of 5.1 TrueHD in the Plex/Jellyfin-oriented

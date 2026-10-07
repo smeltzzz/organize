@@ -52,7 +52,8 @@ Five maintenance tools, one fixed order. Two orderings are load-bearing:
    the generated E-AC-3 fallback is not Atmos/JOC. The player's Dolby MS12
    stack bitstreams, so Dolby MAT (LPCM + Atmos objects, the Apple TV 4K /
    Xbox transport) is not an output of this chain at all.
-   DTS-HD/DTS:X need no conversion on this measured chain:
+   DTS-HD/DTS:X need no conversion on this chain (DTS passthrough is an
+   Android TV 12 sound setting, enabled here):
    the player extracts their DTS core. The cleaner's tiers then keep the Dolby
    track where a supported transcode succeeds, so the remux can retire the
    lossless master without losing the profile's prepared audio path. Unknown
@@ -88,7 +89,7 @@ wrong.
 ┌───────────────────────┐   ffprobe sweep; Dolby Digital Plus @ 640k
 │ 3 · audio             │   app-neutral TrueHD/WMA-Pro/DTS-HD LBR fallback
 └───────────┬───────────┘   generated E-AC-3 is not Atmos/JOC; DTS-HD/DTS:X
-                            use their measured extracted DTS core
+                            use their extracted DTS core
             ▼
 ┌───────────────────────┐   lossless mkvmerge remux: 1 best chain-playable
 │ 4 · clean             │   audio (the Dolby track just created wins), strip

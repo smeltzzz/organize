@@ -417,7 +417,7 @@ def check_ffmpeg(_ctx: DoctorContext) -> DiagnosticCheck:
         detail="The 'audio' step will be skipped; this app-neutral Plex/Jellyfin profile "
                "expects a prepared Dolby track for TrueHD/WMA Pro/DTS Express. Some apps "
                "decode TrueHD to PCM (without TrueHD Atmos metadata), while others request "
-               "server transcoding. DTS-HD/DTS:X play via the measured DTS-core fallback. "
+               "server transcoding. DTS-HD/DTS:X play via the DTS-core fallback (DTS passthrough is an Android TV 12 sound setting, enabled here). "
                "--dry-run still produces the plan with ffprobe alone.",
         remedy=(
             "Windows: winget install Gyan.FFmpeg or drop ffmpeg.exe in C:\\ffmpeg\\bin\\\n"
@@ -1315,7 +1315,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("extract", aliases=["extract-subs"], help="Extract embedded English tracks into validated <movie>.eng.srt sidecars", add_help=False)
 
     # audio
-    subparsers.add_parser("audio", aliases=["audiofit", "ac3"], help="Prepare chain-native Dolby fallback for TrueHD/WMA Pro/DTS-HD LBR (app-specific TrueHD-to-PCM is possible; DTS-HD/DTS:X use their measured extracted DTS core)", add_help=False)
+    subparsers.add_parser("audio", aliases=["audiofit", "ac3"], help="Prepare chain-native Dolby fallback for TrueHD/WMA Pro/DTS-HD LBR (app-specific TrueHD-to-PCM is possible; DTS-HD/DTS:X use their extracted DTS core)", add_help=False)
 
     # clean
     subparsers.add_parser("clean", aliases=["remux"], help="Lossless remux MKV: keep the best audio the chain can end up with (surround before stereo), strip subs; MP4 converted to MKV", add_help=False)

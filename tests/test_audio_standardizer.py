@@ -488,10 +488,10 @@ class PlannerUnitTests(unittest.TestCase):
     def test_every_real_world_codec_family_has_a_verdict(self) -> None:
         # self.cfg uses the DEFAULT wiring, soundbar-hdmi-in: the soundbar's
         # HDMI IN carries multichannel PCM, so multichannel PCM-decodes are
-        # accepted as-is, and the DTS family is accepted too (measured on the
-        # real chain: Jellyfin Direct Plays base DTS and the AX3125H lights
-        # its DTS indicator; for DTS-HD/DTS:X the player extracts the core
-        # such a track carries - user-confirmed 2026-10). Only the masters
+        # accepted as-is, and the DTS family is accepted too (Android TV 12's
+        # DTS passthrough, enabled here: Jellyfin Direct Plays base DTS and the
+        # AX3125H lights its DTS indicator; for DTS-HD/DTS:X the player
+        # extracts the core such a track carries - verified 2026-10). Only the masters
         # with no backward-compatible core need work: TrueHD, WMA Pro,
         # DTS Express.
         cases = {

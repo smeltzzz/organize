@@ -4,6 +4,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.6.5] - 2026-10-07
+
+The chain table now states the reference hardware exactly as this install runs
+it. Three facts were corrected — **the G454V runs Android TV 12**, **DTS
+passthrough is a supported Android TV 12 sound setting** rather than an
+unofficial measurement, and **the AX3125H's `MPCM` reading is not MAT-only**
+(it is also what multichannel LPCM on HDMI IN shows) — and no audio
+classification moved: the DTS family keeps its accept-by-default policy and
+its 5.1 cap, TrueHD stays transcode-bound, and MAT/MPCM *file* labels stay
+fail-closed `unknown`.
+
+### Changed
+- **The player runs Android TV 12.** `PLAYER.os` said "Google TV (Android TV
+  14; launched on Android TV 12)" after 8.6.3 read the 2025 rollout reporting;
+  the chain this toolkit is built for runs **Android TV 12**, whose sound
+  settings are what expose DTS passthrough. `docs/hardware.md` (diagram, §1
+  table, sources block) and the chain summary follow, and the Android-14
+  rollout citation is gone.
+- **DTS is stated as supported, not as an unofficial measurement.**
+  `PLAYER.passthrough_audio_unofficial` was a hedge, not a policy: DTS
+  passthrough is an Android TV 12 sound setting, enabled on this chain and
+  verified end-to-end (Jellyfin reports Direct Play; the AX3125H panel lights
+  `DTS`). The field is now
+  `PLAYER.passthrough_audio_settings_gated` and every "unofficial" / "not
+  Google-certified" phrase is gone from `playbackchain.py`,
+  `audio_standardizer.py`, the README, `docs/hardware.md`, `docs/tools.md`,
+  `docs/pipeline.md`, `docs/configuration.md` and `.env.example`. The
+  behaviour is unchanged: both wirings still accept the family by default,
+  5.1 is still the core's ceiling, and `--no-dts-passthrough` still converts
+  deliberately. Google's *published specification* page still lists only the
+  Dolby formats, and the docs now say so in those words — the playable claim
+  comes from the OS setting plus this chain's own verification.
+- **The soundbar's panel readings are part of the table now.**
+  `Sink.front_panel` records what the bar displays for what this chain sends
+  it: `DOLBY AUDIO` for DD and DD+, `DOLBY ATMOS` for DD+ JOC (driving the
+  3.1.2 up-firing array), `DTS` for the DTS core, `PCM` or `MPCM` for LPCM.
+  With that, the claim that `MPCM` could only come from a MAT signal is gone:
+  no MAT can reach the bar (this player's MS12 stack bitstreams), and `MPCM`
+  is also the reading for multichannel LPCM over HDMI IN — which is why MAT
+  and bare-MPCM *file* labels stay fail-closed for that reason instead.
+  `SOURCES` drops the Google-community "DTS is unsupported" answer and the
+  Android 14 rollout entry; the DTS setting and the panel readings are
+  recorded as the owner's own chain facts.
+
+### Tests
+- 2,361 → **2,363 tests**: `test_dts_passthrough_is_an_android_tv_12_sound_setting`
+  pins the settings-gated field, the two-wiring default and the wording
+  (no "unofficial", no "not Google-certified" anywhere user-facing), and
+  `test_the_bar_panel_labels_the_signals_this_chain_sends` pins the panel
+  labels. The OS test now requires Android TV 12 and rejects Android TV 14,
+  and the DTS-core-extraction test pins the Android TV 12 source. The counts
+  quoted in `README.md`, `docs/development.md` and `docs/merge-and-release.md`
+  move with them.
+
 ## [8.6.4] - 2026-10-06
 
 The owner's own statement of the reference chain's behaviour now supersedes the

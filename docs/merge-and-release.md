@@ -3,7 +3,7 @@
 > **v8.6.4 was cut and published on 2026-10-07.** [PR #70](https://github.com/smeltzzz/organize/pull/70)
 > merged the chain-facts release into `main` as `099472f` — **the `v8.6.4` tag
 > points at `099472f`** — and the tag's `release.yml` ran the whole way green:
-> the suite gate (**2,361 tests**), the wheel/sdist/zipapp build with its
+> the suite gate (**2,363 tests**), the wheel/sdist/zipapp build with its
 > tag-equals-VERSION gate, the **PyPI publish**
 > ([organizekit 8.6.4](https://pypi.org/project/organizekit/8.6.4/)) and the
 > **three assets** on the
@@ -104,7 +104,7 @@ syntax gate, a file the merge deleted, and the `provisioned` job still did
 `pip install ffsubsync` then `import sync_subtitles`. The bot cannot fix a
 workflow file, so that was step 2's patch. **This is history: PR #40 applied
 the patch, and CI on `main` has been green since.** Everything else in that
-run was green on the same merge: the whole suite (2,361 tests) on Linux, macOS
+run was green on the same merge: the whole suite (2,363 tests) on Linux, macOS
 and Windows across Python 3.11–3.13, packaging, the single-file build, the lint
 job, the coverage floor and the doctor smoke test.
 

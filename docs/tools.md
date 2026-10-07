@@ -10,7 +10,7 @@ For the order they run in and why that order is load-bearing, see
 | Tool | One line | Needs |
 | :--- | :--- | :--- |
 | [`subtitle_extractor.py`](#1--subtitle_extractorpy--validated-english-subtitles) | One validated English `.eng.srt` per movie: from the movie's own text track, or an exact-hash OpenSubtitles match when only bitmaps exist | `mkvmerge` + `mkvextract` (an OpenSubtitles API key for image-only movies) |
-| [`audio_standardizer.py`](#2--audio_standardizerpy--chain-native-audio) | App-neutral audio prep for the G454V: bake a Dolby Digital Plus fallback when TrueHD/WMA Pro/DTS-HD LBR lacks a guaranteed Plex/Jellyfin route (some apps decode TrueHD to PCM, losing TrueHD Atmos metadata); DTS-core policy is enabled under both wiring selectors but measured only on the physical HDMI-IN chain | `ffprobe` (+ `ffmpeg` when something needs the new track) |
+| [`audio_standardizer.py`](#2--audio_standardizerpy--chain-native-audio) | App-neutral audio prep for the G454V: bake a Dolby Digital Plus fallback when TrueHD/WMA Pro/DTS-HD LBR lacks a guaranteed Plex/Jellyfin route (some apps decode TrueHD to PCM, losing TrueHD Atmos metadata); DTS-core policy is enabled under both wiring selectors (Android TV 12 DTS passthrough, verified on the physical HDMI-IN chain) | `ffprobe` (+ `ffmpeg` when something needs the new track) |
 | [`mkv_track_cleaner.py`](#3--mkv_track_cleanerpy--lossless-remux) | Lossless remux: keep the best audio under the toolkit's app-neutral profile (app-decoded PCM requires a compatible app/route); strip commentary, dubs and embedded subtitles | `mkvmerge` |
 | [`bitdepth.py`](#4--bitdepthpy--bit-depth--hdr-inspector) | Queue 8-bit SDR for HandBrake, protect HDR fail-closed, report each file's chain fit | `ffprobe` |
 | [`library_auditor.py`](#5--library_auditorpy--read-only-health-check) | Read-only health check of layout, naming and subtitles | nothing |
@@ -176,10 +176,11 @@ read-only mount or a permissions mistake costs no download.
 ## 2 · `audio_standardizer.py` — chain-native audio
 
 Every verdict derives from the distinctions in the hardware dossier
-([hardware.md](hardware.md)): **Google officially lists Dolby Digital
-(AC-3), Dolby Digital Plus (E-AC-3) and Atmos via HDMI passthrough for the
-G454V.** Base DTS and the DTS-HD/DTS:X core fallback are accepted only on
-chain-specific measured evidence, not Google certification. PCM/FLAC decoding
+([hardware.md](hardware.md)): **Google's published list for the G454V is Dolby Digital
+(AC-3), Dolby Digital Plus (E-AC-3) and Atmos via HDMI passthrough.** DTS is
+supported by the same player as an **Android TV 12 sound setting** — the DTS
+passthrough switch, enabled on this chain — so base DTS and the DTS-HD/DTS:X
+core fallback play with no server work, verified end-to-end here. PCM/FLAC decoding
 is app- and HDMI-route-dependent; the toolkit uses a conservative 24-bit/48-kHz
 envelope (not a Google-published device limit). The G454V has no supported
 TrueHD bitstream path, but some apps can decode TrueHD to multichannel PCM;
@@ -191,12 +192,12 @@ it probes (`ffprobe`) and classifies:
 | Source situation (the pool's **ranked best** track decides — see the invariant below) | Verdict | What happens |
 | :--- | :--- | :--- |
 | AC-3 / E-AC-3 ranked first in the pool | `native-ok` | nothing — the track the cleaner will keep already bitstreams end-to-end |
-| base 5.1 DTS core | `dts-core-ok` (default) / `transcoded-dolby` | **kept as-is by toolkit default**; the measurement cited is specifically this G454V → AX3125H HDMI-IN chain: Jellyfin reports **Direct Play** and the bar lights its **DTS** indicator. DTS is not Google-certified, and this does not verify the alternate TV-ARC path. Converting would be irreversible loss buying nothing on the measured route — 1509 kbps DTS to a 640 kbps DD+ bed is ~870 kbps, about **780 MB on a two-hour movie** — and it remains reversible from the untouched source. `--no-dts-passthrough` explicitly converts the family. See `playbackchain.DTS_PASSTHROUGH_DEFAULT` |
+| base 5.1 DTS core | `dts-core-ok` (default) / `transcoded-dolby` | **kept as-is by toolkit default**: DTS passthrough is an Android TV 12 sound setting, enabled here, and the check cited is this G454V → AX3125H HDMI-IN chain — Jellyfin reports **Direct Play** and the bar lights its **DTS** indicator. The alternate TV-ARC path is not covered by that check. Converting would be irreversible loss buying nothing on this route — 1509 kbps DTS to a 640 kbps DD+ bed is ~870 kbps, about **780 MB on a two-hour movie** — and it remains reversible from the untouched source. `--no-dts-passthrough` explicitly converts the family. See `playbackchain.DTS_PASSTHROUGH_DEFAULT` |
 | AAC / FLAC / PCM / MP3 / Opus / Vorbis / WAV **within the toolkit's 24-bit/48-kHz envelope** | `pcm-decode-ok` | a compatible app decodes to PCM; Android's built-in FLAC table is mono/stereo up to 48 kHz, while multichannel decode/output is app- and route-dependent. AX3125H HDMI IN accepts LPCM 5.1/7.1; this TV's ARC return path is PCM-only (§3), so multichannel tracks become AC-3 candidates under `--wiring tv-arc` |
 | App/software-decoded FLAC / PCM **past 24-bit or 48 kHz** | `review-unknown` | **reported, untouched.** This is the toolkit's conservative, chain-specific envelope, not a Google-published G454V maximum. Wider-stream behavior depends on the app/route and is unmeasured; there is no transcode or ranking effect ([hardware.md §1, subtlety 4](hardware.md)) |
-| DTS-HD MA / DTS-HD HRA / DTS:X | `dts-hd-core-ok` (default) / `transcoded-dolby` | **kept by default on the measured HDMI-IN chain**: user-confirmed 2026-10 — the player does not bitstream the HD layer, but extracts and bitstreams the DTS core, so the bar decodes surround as DTS 5.1 (panel reads `DTS`), with no server work. A 7.1 master reaches 5.1. The TV-ARC alternative is not established by this measurement. `--no-dts-passthrough` converts it from the lossless layer. See `playbackchain.PLAYER.dts_hd_core_fallback` |
+| DTS-HD MA / DTS-HD HRA / DTS:X | `dts-hd-core-ok` (default) / `transcoded-dolby` | **kept by default on the HDMI-IN chain**: verified 2026-10 — the player does not bitstream the HD layer, but extracts and bitstreams the DTS core, so the bar decodes surround as DTS 5.1 (panel reads `DTS`), with no server work. A 7.1 master reaches 5.1. The TV-ARC alternative is not covered by this check. `--no-dts-passthrough` converts it from the lossless layer. See `playbackchain.PLAYER.dts_hd_core_fallback` |
 | TrueHD / DTS-HD LBR (DTS Express) | `transcoded-dolby` | **one chain-native Dolby track is synthesized and appended (Dolby Digital Plus on the default wiring), video untouched**. TrueHD cannot be bitstreamed, but app-specific software decode to PCM is possible and loses TrueHD Atmos metadata; this is a conservative Plex/Jellyfin policy. DTS-HD LBR has no compatible core. The synthesized E-AC-3 track is not Atmos/JOC |
-| Dolby MAT / MAT-Atmos / MPCM label | `review-unknown` | Not a G454V output. The player's Dolby audio path is its **Dolby MS12** stack, and it runs as bitstreaming: DD / DD+ / Atmos-JOC leave as encoded bitstreams (Google documents the capability as Dolby-encoded HDMI **passthrough**). Uncompressed Dolby MAT — LPCM with Atmos objects — is what an Apple TV 4K / Xbox emits after decoding on-box, and this player never sends it, which is why the AX3125H's MAT → `MPCM` display row cannot be reached from this chain. Standalone MAT/MPCM file labels therefore stay unknown, not confirmed PCM (fail-closed) |
+| Dolby MAT / MAT-Atmos / MPCM label | `review-unknown` | Not a G454V output. The player's Dolby audio path is its **Dolby MS12** stack, and it runs as bitstreaming: DD / DD+ / Atmos-JOC leave as encoded bitstreams (Google documents the capability as Dolby-encoded HDMI **passthrough**). Uncompressed Dolby MAT — LPCM with Atmos objects — is what an Apple TV 4K / Xbox emits after decoding on-box, and this player never sends it, so the MAT half of the AX3125H's MAT → `MPCM` display row cannot be reached from this chain. `MPCM` itself is not MAT-only — it is also what the bar shows for multichannel LPCM over HDMI IN — so standalone MAT and bare-MPCM file labels stay unknown, not confirmed PCM (fail-closed) |
 | unknown codec — including **ALAC and WavPack**, outside the confirmed decoder set | `review-unknown` | fail-closed in the report; never auto-touched |
 | still hardlinked to a seed | `deferred-seeding` | untouched until seeding stops |
 
@@ -279,8 +280,8 @@ this order:
    LPCM 5.1/7.1 on the bar's HDMI IN ([hardware.md §2](hardware.md)).
 2. **Band.** *Chain-native under this app-neutral profile* — Dolby Digital
    Plus (E-AC-3, Atmos passthrough) and Dolby Digital (AC-3) bitstream
-   end-to-end, measured base DTS and the DTS core inside DTS-HD/DTS:X are
-   bitstreamed, and app-decodable formats (AAC, FLAC/PCM, Opus, MP3) may arrive
+   end-to-end, base DTS and the DTS core inside DTS-HD/DTS:X (Android TV 12
+   DTS passthrough, enabled here) are bitstreamed, and app-decodable formats (AAC, FLAC/PCM, Opus, MP3) may arrive
    as PCM when the app/route supports it — beats *transcode-bound* (TrueHD,
    WMA Pro, DTS-HD LBR), which beats
    *unknown*. At an **equal achievable layout** this is the

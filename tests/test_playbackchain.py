@@ -34,13 +34,13 @@ class DeviceFactTests(unittest.TestCase):
         self.assertIn("eac3", pc.PLAYER.passthrough_audio)
 
     def test_the_player_extracts_the_dts_core_from_dts_hd(self) -> None:
-        """User-confirmed 2026-10 on the actual chain: the HD layer is lost,
-        the audio is not. The player falls back to the backward-compatible
-        DTS core inside DTS-HD MA/HRA and DTS:X and bitstreams THAT, so these
-        tracks Direct Play (the bar reads DTS) while TrueHD stays bound."""
+        """The HD layer is lost, the audio is not. The player falls back to
+        the backward-compatible DTS core inside DTS-HD MA/HRA and DTS:X and
+        bitstreams THAT, so these tracks Direct Play (the bar reads DTS)
+        while TrueHD stays bound."""
         self.assertTrue(pc.PLAYER.dts_hd_core_fallback)
-        self.assertTrue(any("G454V" in source and "DTS-HD" in source
-                            for source in pc.SOURCES if source.startswith("USER-CONFIRMED")))
+        self.assertTrue(any("Android TV 12" in source and "DTS-HD" in source
+                            for source in pc.SOURCES))
         for blob in ("DTS-HD MA", "DTS-HD HRA", "DTS:X", "A_DTS/HD_MA", "A_DTS/LOSSLESS"):
             with self.subTest(blob=blob):
                 self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_DTS_HD_CORE)
@@ -48,6 +48,42 @@ class DeviceFactTests(unittest.TestCase):
         for blob in ("DTS-HD LBR", "DTS Express", "A_DTS/EXPRESS"):
             with self.subTest(blob=blob):
                 self.assertEqual(pc.classify_audio_blob(blob), pc.AUDIO_TRANSCODE_BOUND)
+
+    def test_dts_passthrough_is_an_android_tv_12_sound_setting(self) -> None:
+        """DTS is supported by this player, not merely tolerated by this file.
+
+        Android TV 12's sound settings expose DTS passthrough, and this chain
+        runs with it enabled, so the whole DTS family - base core, and the
+        core extracted from DTS-HD MA/HRA and DTS:X - is accepted by default
+        on both wirings, and nothing user-facing calls it unofficial or
+        uncertified.
+        """
+        self.assertIn("dts-core", pc.PLAYER.passthrough_audio_settings_gated)
+        self.assertNotIn("dts-core", pc.PLAYER.passthrough_audio)
+        for wiring in (pc.WIRING_SOUNDBAR_HDMI_IN, pc.WIRING_TV_ARC, None):
+            with self.subTest(wiring=wiring):
+                self.assertTrue(pc.dts_passthrough_default(wiring))
+        prose = "\n".join([
+            "\n".join(pc.chain_summary_lines()),
+            pc.audio_chain_note("DTS", 6),
+            pc.audio_chain_note("DTS-HD MA", 8),
+            *pc.SOURCES,
+        ]).lower()
+        self.assertNotIn("unofficial", prose)
+        self.assertNotIn("not google-certified", prose)
+        self.assertIn("android tv 12", pc.audio_chain_note("DTS", 6).lower())
+
+    def test_the_bar_panel_labels_the_signals_this_chain_sends(self) -> None:
+        """The panel is the chain's own ground truth, so it lives as data."""
+        labels = dict(pc.SINK.front_panel)
+        self.assertEqual(labels["eac3-joc"], "DOLBY ATMOS")
+        self.assertEqual(labels["ac3"], "DOLBY AUDIO")
+        self.assertEqual(labels["eac3"], "DOLBY AUDIO")
+        # The DTS family's reading is DTS - never an HD layer name.
+        self.assertEqual(labels["dts-core"], "DTS")
+        # LPCM reads PCM or MPCM: MPCM is not a MAT-only label.
+        self.assertIn("PCM", labels["lpcm"])
+        self.assertIn("MPCM", labels["lpcm"])
 
     def test_truehd_and_mat_have_explicit_app_and_transport_status(self) -> None:
         # TrueHD cannot be bitstreamed by this model, although some apps can
@@ -68,11 +104,11 @@ class DeviceFactTests(unittest.TestCase):
         self.assertTrue(pc.PLAYER.dolby_ms12_bitstream_stack)
 
     def test_the_os_is_the_android_version_this_device_actually_runs(self) -> None:
-        # The HD model shipped on Android TV 12 and received Android 14 (the
-        # 2025 rollout, after the March 2025 OTA was pulled); a current G454V
-        # is an Android 14 device, which is what the chain summary should say.
-        self.assertIn("Android TV 14", pc.PLAYER.os)
+        # The G454V runs Android TV 12: it is the OS whose sound settings
+        # expose DTS passthrough, which is what this chain's DTS accept
+        # policy rests on. No newer OS is assumed.
         self.assertIn("Android TV 12", pc.PLAYER.os)
+        self.assertNotIn("Android TV 14", pc.PLAYER.os)
         summary = "\n".join(pc.chain_summary_lines())
         self.assertNotIn("unverified", summary.lower())
         self.assertIn("no Dolby MAT output", summary)
@@ -272,9 +308,10 @@ class AudioClassificationTests(unittest.TestCase):
 
         The player's Dolby path is its Dolby MS12 stack running as
         bitstreaming; uncompressed Dolby MAT is the Apple TV 4K / Xbox
-        on-box-decode transport. In particular, the AX3125H manual's
-        plain-MAT display result "MPCM" must not make Dolby MAT look like
-        an ordinary decoded PCM track.
+        on-box-decode transport, so no MAT signal reaches the bar. The bar's
+        MPCM reading is not MAT-only — it is also what multichannel LPCM on
+        the soundbar's HDMI IN shows — so a bare MPCM label cannot name a
+        codec and stays fail-closed rather than being read as ordinary PCM.
         """
         for blob in ("DOLBY MAT", "DOLBY MAT-ATMOS", "DOLBY_MAT", "MAT 2.0",
                      "MAT 2.1", "MPCM", "MPCM 5.1", "DOLBY MAT MPCM"):
