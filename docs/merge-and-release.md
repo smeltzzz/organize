@@ -1,22 +1,20 @@
 # Cutting a release, and the recorded 5.0.0 run
 
-> **v8.6.3 was cut and published on 2026-10-06.** [PR #67](https://github.com/smeltzzz/organize/pull/67)
-> merged the chain fact-check into `main` as `ea20d92`, and
-> [PR #68](https://github.com/smeltzzz/organize/pull/68) merged the release-job
-> fix as `3e00d23` — **the `v8.6.3` tag points at `3e00d23`**, because a tag run
-> uses the workflow file *at the tag*, and the fix had to be inside it. The
-> tag's `release.yml` then ran the whole way green: the suite gate (2,360
-> tests), the wheel/sdist/zipapp build, the **PyPI publish**
-> ([organizekit 8.6.3](https://pypi.org/project/organizekit/8.6.3/)) and the
+> **v8.6.4 was cut and published on 2026-10-07.** [PR #70](https://github.com/smeltzzz/organize/pull/70)
+> merged the chain-facts release into `main` as `099472f` — **the `v8.6.4` tag
+> points at `099472f`** — and the tag's `release.yml` ran the whole way green:
+> the suite gate (**2,361 tests**), the wheel/sdist/zipapp build with its
+> tag-equals-VERSION gate, the **PyPI publish**
+> ([organizekit 8.6.4](https://pypi.org/project/organizekit/8.6.4/)) and the
 > **three assets** on the
-> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.3)
+> [GitHub release](https://github.com/smeltzzz/organize/releases/tag/v8.6.4)
 > (`organize.pyz`, the wheel, the sdist). `pip install --upgrade organizekit`
-> now resolves to the corrected facts — the MS12/Dolby MAT stack attributed to
-> the Google TV Streamer rather than the G454V, a current player running on
-> Android 14, and DTS/PCM delivery documented as app-dependent — and
-> **nothing is outstanding.**
+> now resolves to the owner's chain facts — the G454V's Dolby path is its
+> **Dolby MS12** stack running as bitstreaming (it never emits uncompressed
+> Dolby MAT, the Apple TV 4K / Xbox transport), and the whole MPEG-audio
+> family (MP1/MP2/MP3) is app-decoded PCM — and **nothing is outstanding.**
 >
-> Two things that run learned, both now load-bearing in `release.yml`:
+> Two things the 8.6.3 run learned, both still load-bearing in `release.yml`:
 >
 > * **the asset job has no `actions/checkout`**, so it must be handed
 >   `GH_REPO: ${{ github.repository }}` or `gh` dies with "fatal: not a git
@@ -32,7 +30,7 @@
 > — PyPI, which is what `pip install --upgrade organizekit` reads, is complete
 > for it, and the failure that left it that way is fixed above.
 >
-> What 8.6.2 and 8.6.3 changed is in the [changelog](../CHANGELOG.md). One rule
+> What 8.6.3 and 8.6.4 changed is in the [changelog](../CHANGELOG.md). One rule
 > carries forward every time, because it is the only step that can be done wrong
 > quietly: **tag the merged commit on `main`, never the open branch** — a tag on
 > an unmerged head publishes a wheel while `main` still reports a different
@@ -40,11 +38,11 @@
 > commit. A release is a *merge plus a tag*, not a merge.
 >
 > And when a release lands, replace this block. The note this one replaced
-> recorded v8.6.1 as shipped, three assets and all, the day that tag was cut;
-> the note *that* one replaced had said "8.0.1 is prepared in PR #45 — what
-> remains is the merge and the tag" and then sat there six releases too long,
-> which is precisely how a release document starts pointing its reader at work
-> already done.
+> recorded v8.6.3 as shipped, three assets and all, the day that tag was cut;
+> before it, the note for 8.6.1 — and, before *that*, the "8.0.1 is prepared in
+> PR #45 — what remains is the merge and the tag" line, which sat there six
+> releases too long — which is precisely how a release document starts pointing
+> its reader at work already done.
 
 > **The rest of this file is the record of the 5.0.0 release.** v5.0.0 was tagged and published on
 > 2026-09-12, and the CI patches it held were applied and committed afterwards
