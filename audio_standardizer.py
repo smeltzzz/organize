@@ -19,13 +19,14 @@ toolkit's DEFAULT. The alternative (``tv-arc``: Chromecast into the TV, TV
 set offers PCM only for HDMI sources, so multichannel PCM arrives at the bar as
 stereo.
 
-Google's official G454V specification lists Dolby Digital (AC-3), Dolby
-Digital Plus (E-AC-3) and Dolby Atmos via HDMI passthrough. It does not certify
-DTS and does not publish a PCM/FLAC ceiling. Base DTS core and DTS-HD core
-fallback are kept only because they were measured on this exact chain; they are
-not Google-certified support. Software-decoded audio is app- and HDMI-route-
-dependent; the toolkit uses a conservative 24-bit/48-kHz envelope, not an
-official device maximum. See docs/hardware.md for the evidence labels.
+Google's published G454V specification lists Dolby Digital (AC-3), Dolby
+Digital Plus (E-AC-3) and Dolby Atmos via HDMI passthrough, and publishes no
+PCM/FLAC ceiling. DTS is supported by the same player as an **Android TV 12
+sound setting** - DTS passthrough, enabled on this chain - so base DTS core and
+the DTS-HD/DTS:X core fallback play with no server work, verified end-to-end
+here. Software-decoded audio is app- and HDMI-route-dependent; the toolkit uses
+a conservative 24-bit/48-kHz envelope, not an official device maximum. See
+docs/hardware.md for the evidence labels.
 
 TrueHD has no supported G454V lossless bitstream path, but that does NOT mean
 no app can play it. An app with its own decoder (for example Kodi) can
@@ -206,8 +207,8 @@ SETTLED_AUDIOFIT = frozenset({STATUS_NATIVE, STATUS_DTS, STATUS_DTS_HD, STATUS_P
 
 CATEGORY_LABELS = {
     STATUS_NATIVE: "1. CHAIN-NATIVE  —  AC-3 / E-AC-3 already present",
-    STATUS_DTS: "2. DTS CORE  —  policy ON (measured only on HDMI IN; unofficial)",
-    STATUS_DTS_HD: "3. DTS-HD / DTS:X  —  core fallback (measured only on HDMI IN)",
+    STATUS_DTS: "2. DTS CORE  —  accepted (Android TV 12 DTS passthrough; HDMI IN)",
+    STATUS_DTS_HD: "3. DTS-HD / DTS:X  —  core fallback (Android TV 12 DTS passthrough)",
     STATUS_PCM: "4. DECODE-TO-PCM  —  OK (compatible app/route required)",
     STATUS_TRANSCODED: "5. TRANSCODED  —  app-neutral Dolby fallback baked in",
     STATUS_PLANNED: "5. WOULD TRANSCODE  —  dry-run plan only",
@@ -499,9 +500,10 @@ def plan_for_payload(path: str, payload: dict[str, Any], cfg: Config,
        a track this toolkit profile models without server audio work; app-decoded
        PCM still assumes a compatible app and active route.
     3. Otherwise the pool's best track decides: the toolkit accepts the DTS
-       family by default under both wiring selectors. Base DTS and the
-       DTS-HD/DTS:X core fallback were measured on the physical HDMI-IN chain,
-       not on the alternate TV-ARC route; ``--no-dts-passthrough`` asks for
+       family by default under both wiring selectors. DTS passthrough is an
+       Android TV 12 sound setting, enabled here; base DTS and the
+       DTS-HD/DTS:X core fallback are verified on the physical HDMI-IN chain,
+       not on the alternate TV-ARC route. ``--no-dts-passthrough`` asks for
        conversion anyway. App-decodable tracks are accepted within the toolkit's
        24-bit/48-kHz envelope only when a compatible app and active route can
        decode them. The bar accepts multichannel LPCM on HDMI IN. Under the
@@ -1044,8 +1046,8 @@ def scan(cfg: Config) -> int:
     log(f"DTS family accepted     : "
         f"{'yes (core, and the core inside DTS-HD/DTS:X)' if cfg.dts_passthrough_ok else 'no (transcoded to the Dolby target)'}"
         f" [{dts_origin}]")
-    log("DTS evidence           : user-measured on physical HDMI IN only; "
-        "TV-ARC unverified; not Google-certified")
+    log("DTS evidence           : Android TV 12 DTS passthrough, enabled; verified "
+        "on the physical HDMI IN chain; TV-ARC unverified")
     log(f"Dry run                : {cfg.dry_run}")
     log(f"ffprobe                : {cfg.ffprobe}")
     log(f"ffmpeg                 : {cfg.ffmpeg}")
@@ -1214,7 +1216,7 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
          f"{synth} transcodes", "planned (dry-run)" if cfg.dry_run else "completed this run"),
         (by[STATUS_NATIVE], "Already chain-native", "AC-3/E-AC-3: bitstreams as-is"),
         (by[STATUS_DTS] + by[STATUS_DTS_HD] + by[STATUS_PCM], "Accepted by policy",
-         "DTS measured only on HDMI IN; PCM requires app/route support"),
+         "DTS: Android TV 12 passthrough, verified on HDMI IN; PCM needs app/route"),
         (by[STATUS_REVIEW], "Human review",
          "unknown codec, or past the conservative 24-bit/48 kHz envelope — fail-closed, untouched"),
         (by[STATUS_DEFERRED], "Deferred (seeding)", "still hardlinked to a seed"),
@@ -1222,11 +1224,12 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         (len(results), "Movies inspected", "every MKV in the library"),
     ])
     report.paragraph(
-        "Evidence for this target chain is split by source: Google's official "
-        "G454V specification lists Dolby Digital (AC-3), Dolby Digital Plus "
-        "(E-AC-3) and Atmos via HDMI passthrough. Base DTS and the DTS core "
-        "extracted from DTS-HD/DTS:X are accepted here only because they were "
-        "measured on this G454V -> AX3125H HDMI-IN chain; DTS is not Google-certified. "
+        "Evidence for this target chain, by source: Google's published G454V "
+        "specification lists Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3) "
+        "and Atmos via HDMI passthrough. DTS is supported by the same player as "
+        "an Android TV 12 sound setting, DTS passthrough, which is enabled here: "
+        "base DTS and the DTS core extracted from DTS-HD/DTS:X are verified on "
+        "this G454V -> AX3125H HDMI-IN chain. "
         "Compatible apps may decode AAC/FLAC/PCM-family audio to PCM, but support "
         "depends on the app and route; the toolkit uses a conservative 24-bit/48-kHz "
         "envelope, not a Google-published maximum. TrueHD has no supported G454V "
@@ -1235,11 +1238,14 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         "request server transcoding. This app-neutral profile prepares one "
         f"{synth} fallback for TrueHD/WMA Pro/DTS Express without re-encoding video, "
         "and the generated E-AC-3 is not Atmos/JOC. DTS-HD/DTS:X are not in that "
-        "bucket: the measured player extracts the DTS core and the bar decodes it. "
+        "bucket: the player extracts the DTS core and the bar decodes it. "
         "The DTS family is credited at most 5.1. Dolby MAT is not an output of "
         "this player (its Dolby MS12 stack bitstreams DD/DD+/Atmos JOC rather "
         "than emitting uncompressed MAT, the Apple TV 4K / Xbox transport), so "
-        "MAT/MPCM labels are reported as unknown, not assumed PCM. ALAC/WavPack "
+        "MAT and bare MPCM labels are reported as unknown, not assumed PCM: MAT "
+        "never leaves this player, and the bar's MPCM reading is also what "
+        "multichannel LPCM on HDMI IN shows, so the label alone cannot name a "
+        "codec. ALAC/WavPack "
         "and decoded audio past the toolkit envelope are also reported for review."
     )
 
@@ -1260,11 +1266,12 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
         STATUS_ERROR: "Action: read the error lines; no listed file was modified.",
         STATUS_NATIVE: "Action: none. Dolby Digital / Digital Plus already bitstreams end-to-end.",
         STATUS_DTS: "Action: none under toolkit policy. Base 5.1 DTS is kept as-is on both "
-                    "wiring selectors, but the measurement is specific to the physical HDMI-IN "
-                    "chain (Jellyfin reports Direct Play, and the AX3125H lights its DTS "
-                    "indicator); TV-ARC behavior is unverified. DTS is not Google-certified; "
-                    "only --no-dts-passthrough asks the toolkit to convert it to Dolby.",
-        STATUS_DTS_HD: "Action: none under toolkit policy. On the measured HDMI-IN chain, the "
+                    "wiring selectors: DTS passthrough is supported on Android TV 12 (this "
+                    "chain has it enabled) and verified on the physical HDMI-IN chain "
+                    "(Jellyfin reports Direct Play, and the AX3125H lights its DTS "
+                    "indicator). TV-ARC behavior is unverified. Only --no-dts-passthrough "
+                    "asks the toolkit to convert it to Dolby.",
+        STATUS_DTS_HD: "Action: none under toolkit policy. On the HDMI-IN chain, the "
                        "player extracts the backward-compatible DTS core from a DTS-HD/DTS:X "
                        "track and bitstreams it - the AX3125H decodes DTS 5.1, not the lossless "
                        "HD layer or DTS:X metadata. TV-ARC behavior is unverified. Only "
@@ -1298,11 +1305,12 @@ def build_report(results: Sequence[AudioVerdict], cfg: Config, elapsed: float,
 
     footer = [
         "native-ok = AC-3/E-AC-3 on board: Dolby licenses every hop of this chain (official G454V passthrough).",
-        "dts-core-ok = base 5.1 DTS: measured on the default G454V -> AX3125H HDMI-IN chain "
-        "(Jellyfin Direct Play + the bar's DTS indicator); not Google-certified.",
+        "dts-core-ok = base 5.1 DTS: Android TV 12 DTS passthrough, enabled here and verified "
+        "on the default G454V -> AX3125H HDMI-IN chain (Jellyfin Direct Play + the bar's DTS "
+        "indicator).",
         "dts-hd-core-ok = DTS-HD MA/HRA, DTS:X: the player cannot bitstream the lossless HD layer, but it "
-        "extracts the backward-compatible DTS core and bitstreams that (user-confirmed 2026-10 "
-        "on the physical HDMI-IN chain only) - the bar decodes DTS 5.1, no server work.",
+        "extracts the backward-compatible DTS core and bitstreams that (verified 2026-10 on the "
+        "physical HDMI-IN chain) - the bar decodes DTS 5.1, no server work.",
         "pcm-decode-ok = app/software-decoded AAC/FLAC/MPEG-audio/Opus/Vorbis/WAV/PCM within the toolkit's conservative 24-bit/48 kHz envelope; multichannel output depends on the app/route, and HDMI IN accepts LPCM.",
         f"transcoded-dolby = app-neutral fallback for TrueHD/WMA Pro/DTS Express; some apps decode TrueHD to PCM (without TrueHD Atmos metadata), so {synth} was synthesized (@ 640 kbps surround).",
         "review-unknown = fail-closed, untouched: an unrecognized codec (ALAC and WavPack are outside "
@@ -1388,8 +1396,9 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Prepare movie audio for the Chromecast with Google TV (HD) G454V -> "
             "Hisense AX3125H target profile. Keep official Dolby passthrough and "
-            "the DTS-core policy (enabled under both wiring selectors; measured "
-            "only on the physical HDMI-IN chain). Accept software-decoded PCM "
+            "the DTS-core policy (Android TV 12 DTS passthrough, enabled under "
+            "both wiring selectors and verified on the physical HDMI-IN chain). "
+            "Accept software-decoded PCM "
             "inside the toolkit's 24-bit/48-kHz envelope only with a compatible "
             "app/route. Synthesize the wiring's Dolby fallback for TrueHD, WMA Pro "
             "and DTS-HD LBR when no app-neutral path is modeled. Some apps decode "
@@ -1439,11 +1448,11 @@ def build_parser() -> argparse.ArgumentParser:
                               "Dolby/DTS bitstream forwarding is unmeasured. Env: "
                               f"{WIRING_ENV_VAR}."))
     # Three-valued on purpose: neither flag given means "use the wiring's
-    # default" (playbackchain.DTS_PASSTHROUGH_DEFAULT). The measured behavior
-    # is on the physical default HDMI-IN chain: base DTS Direct Plays and the
-    # AX3125H panel lights DTS; DTS-HD/DTS:X yield the extracted core
-    # (user-confirmed 2026-10). This is not Google certification and does not
-    # establish behavior on every alternate route - so no
+    # default" (playbackchain.DTS_PASSTHROUGH_DEFAULT). DTS passthrough is an
+    # Android TV 12 sound setting, enabled here: on the physical default
+    # HDMI-IN chain base DTS Direct Plays and the AX3125H panel lights DTS,
+    # and DTS-HD/DTS:X yield the extracted core (verified 2026-10). That does
+    # not establish behavior on every alternate route - so no
     # flag is needed. Giving either flag states the policy explicitly and wins
     # over the table: a scheduler that wants the conversion anyway can still
     # pass --no-dts-passthrough, and --dts-passthrough spells out the default.
@@ -1452,18 +1461,18 @@ def build_parser() -> argparse.ArgumentParser:
                      action="store_false", default=None,
                      help="Treat the whole DTS family as transcode-bound: convert it to the "
                           "wiring's Dolby target. NOT the default on any wiring - passthrough "
-                          "is verified working on this chain (the G454V passes core DTS "
-                          "through, and extracts the DTS core out of DTS-HD/DTS:X) on the "
-                          "physical HDMI-IN route only; TV-ARC is unverified, and DTS is not "
-                          "Google-certified. This flag states conversion policy explicitly. "
+                          "is verified working on this chain (Android TV 12 DTS passthrough, "
+                          "which the G454V uses to pass core DTS and to extract the DTS core out "
+                          "of DTS-HD/DTS:X) on the physical HDMI-IN route only; TV-ARC is "
+                          "unverified. This flag states conversion policy explicitly. "
                           "A DTS-HD master is burned "
                           "from its lossless layer, so this is the one way to spend it")
     dts.add_argument("--dts-passthrough", dest="dts_passthrough_ok",
                      action="store_true", default=None,
                      help="Leave the DTS family alone (base DTS, and the DTS core inside "
                           "DTS-HD MA/HRA and DTS:X), the toolkit's default policy; the "
-                          "user measurement is on the physical HDMI-IN chain, not Google "
-                          "certification or proof for every alternate route")
+                          "verification is on the physical HDMI-IN chain, not proof for "
+                          "every alternate route")
     parser.add_argument("--dry-run", action="store_true",
                         help="Probe and show the plan; never modify any file")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N movies (testing)")

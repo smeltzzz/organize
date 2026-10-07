@@ -55,7 +55,7 @@ class AudioQualityTests(unittest.TestCase):
         """The band tiebreak: same destination, but one of them arrives for free.
 
         Under the toolkit's app-neutral profile, Dolby passthrough and the
-        measured DTS route are settled; compatible apps may decode AAC/FLAC/PCM
+        DTS route (Android TV 12 passthrough, enabled here) are settled; compatible apps may decode AAC/FLAC/PCM
         to PCM subject to route support. TrueHD has no supported bitstream path,
         though some apps decode it to PCM and lose its Atmos objects. At equal
         achievable layout, a 5.1 AC-3 outranks a 5.1 TrueHD in this profile; a
